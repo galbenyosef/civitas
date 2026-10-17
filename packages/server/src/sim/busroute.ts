@@ -1,4 +1,4 @@
-import { isRoad, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS, terrainOf, zoneOf, Terrain } from '@msimcity/shared';
+import { isRoad, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS, isRingAux, terrainOf, zoneOf, Terrain } from '@msimcity/shared';
 import { DIRS, tkey, type World } from '../world';
 
 /**
@@ -16,7 +16,7 @@ import { DIRS, tkey, type World } from '../world';
  * the depot door D. The traffic model drives the reversal as a three-point turn (sim/traffic.ts pathPoint).
  */
 
-const OPP = [1, 0, 3, 2];
+const OPP = [1, 0, 3, 2], LEFT = [3, 2, 0, 1], RIGHT = [2, 3, 1, 0];
 /** a flyover's road beneath is its own node (pathfinding.ts LAYER) */
 const LAYER = 2 ** 32;
 /** heading code for "not known yet": a start on a road with no way in, or out of a building door */
@@ -25,6 +25,12 @@ const ANY = 4;
 export type TurnKind = 'dead end' | 'junction' | 'depot';
 /** What a turn round costs a route, in tiles of driving (a bus covers a tile in about 2.5 ticks). */
 export const TURN_COST: Record<TurnKind, number> = { 'dead end': 14, junction: 22, depot: 60 };
+/**
+ * What two turns the same way on neighbouring tiles cost a route on top of the turns themselves: that is going round a
+ * corner with no block inside it (a 2×2 square of road), a turn round squeezed through two junction boxes, which a bus
+ * would not do while there is a block to go round. Round a roundabout's ring it is free (its corners are the ring).
+ */
+export const DOUBLE_TURN = 20;
 /** Ticks a three-point turn adds to the running time (traffic.ts drives it at UTURN_SLOW), for the first timing estimate. */
 export const TURN_TICKS = 6;
 
@@ -154,6 +160,10 @@ export function busLegs(
     }
     if (!goalRoad && x === gx && y === gy) continue;
     const here = w.auxAt(x, y);
+    // the turn made on the tile before this one, if this tile was reached by driving on (sense: LEFT or RIGHT table)
+    const pk = parent.get(k);
+    const ph = pk !== undefined && pk !== -1 && pk !== start && via.get(k) === 0 ? pk % 8 : ANY;
+    const prevTurn = ph === ANY || ph === head || isRingAux(here) || isRingAux(w.auxAt(xs.get(pk!)!, ys.get(pk!)!)) ? null : head === LEFT[ph] ? LEFT : head === RIGHT[ph] ? RIGHT : null;
     // forward: any way but straight back
     for (let d = 0; d < 4; d++) {
       if (head !== ANY && d === OPP[head]) continue;
@@ -162,7 +172,7 @@ export function busLegs(
       const isGoal = nx === gx && ny === gy;
       if (!isGoal && (!roadAt(nx, ny) || sideways(nx, ny, DIRS[d][0]))) continue;
       if (!isGoal && opts.avoid?.(nx, ny)) continue;
-      const ng = gk + (roadAt(nx, ny) ? net.cost(nx, ny) : 1) + (head !== ANY && d !== head ? 0.4 : 0);
+      const ng = gk + (roadAt(nx, ny) ? net.cost(nx, ny) : 1) + (head !== ANY && d !== head ? 0.4 : 0) + (prevTurn && d === prevTurn[head] ? DOUBLE_TURN : 0);
       reach(keyOf(nx, ny, DIRS[d][0], d), nx, ny, ng, k, 0);
     }
     if (head === ANY) continue;

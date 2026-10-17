@@ -474,12 +474,21 @@ held at its stop line before a junction instead of overshooting it on entering t
 (`loadtest/busroutes.ts`) gridlocked a stub with a turn at each end: a bus coming out of its three-point turn in a
 junction mouth was held by the body guard against a bus waiting in the side road whose nose was 0.13 into the box
 (a 0.6-tile bus enters a lane up to 0.3 in, past its 0.17 stop line), and that one waited for the box. With the cap,
-no bus is withdrawn there. A/B on the Commons, `ab.ts --hour 8 --ticks 600 --set bus=4`, six seeds, HEAD against HEAD
-with only this change: with `busTiles=1` (no lines) the runs are identical, so nothing else moves; with buses, speed
-32.3% against 30.9% (paired −1.4 ± 0.8 points, 4 of 6 seeds lower), give-ups 80.5 against 84.7, buses withdrawn 18
-against 15, tick time the same within noise. No bus turns round in that run: the there-and-back line now turns at its
-south end round a 2×2 square of road (4 tiles) rather than a block (planned with fixed costs, it is 6 tiles shorter),
-so the buses meet the morning jam in different places.
+no bus is withdrawn there.
+
+A/B on the Commons, `ab.ts --ticks 1500 --set bus=3`, six seeds at 08:00 and at 17:00, the build before 49fd1fb against
+this work (with `busTiles=1`, no lines, the two ran identically in a first, shorter A/B). A first version planned
+the there-and-back line round a 2×2 square of road at its south end (4 tiles, 6 shorter than round the block), a turn
+round squeezed through two junction boxes, and cost about 1.4 speed points; two turns the same way on neighbouring tiles
+now cost a lap 20 more (`DOUBLE_TURN`, sim/busroute.ts), so it goes round the block again (110 tiles, as before).
+No bus turns round in these runs. Paired differences, mean ± standard error over six seeds:
+
+| | speed points | give-ups | trip mean (ticks) | buses withdrawn | ms/tick |
+| --- | --- | --- | --- | --- | --- |
+| 08:00 | +0.1 ± 0.4 (28.8 → 28.9%) | +6 ± 20 | −0.9 ± 1.3 | −0.7 ± 1.5 | +0.18 ± 0.17 |
+| 17:00 | +0.9 ± 0.9 (32.6 → 33.4%) | −19 ± 15 | −3.5 ± 3.9 | +0.2 ± 0.9 | −0.09 ± 0.07 |
+
+No loss against the build before: every difference is within its noise.
 
 ## Roundabouts and flyovers
 

@@ -91,6 +91,12 @@ const STOP_MARGIN = 0.03;
 const XING_SHORT = 0.5 - STOP_MARGIN - 0.105 - 0.02;
 /** Lane progress past the stop's road-tile centre where a bus halts at a stop (sim/transit.ts HALT_PROG). */
 const HALT_AT = 0.04;
+/**
+ * Where a bus halts when the stop's road tile is where it turns round (a stop at a dead end): not in the middle of the
+ * three-point turn, across the road, but once it has turned, straight in the other lane (KTURN's last straight), so it
+ * serves the stop as it finishes the turn.
+ */
+const HALT_TURNED = 0.46;
 
 /**
  * Turning round inside one tile (a bus at the end of its line, sim/busroute.ts): a three-point turn in the lane's
@@ -883,12 +889,25 @@ export class Traffic {
   }
   /** Is the mover in the backing-up part of a three-point turn (the client draws it facing against its motion)? */
   reversing(m: Mover): boolean {
-    if (m.lane < 0 || m.pi < 1 || m.pi * 2 + 1 >= m.path.length) return false;
+    const s = this.turnProgress(m);
+    return s >= KTURN.rev0 && s <= KTURN.rev1;
+  }
+  /** Does a bus turn round on the tile of its halt (a stop at a dead end: it halts once it has turned)? */
+  private turnsAtHalt(m: Mover): boolean {
+    const h = m.halt ?? -1, p = m.path;
+    return h >= 1 && (h + 1) * 2 + 1 < p.length && p[(h - 1) * 2] === p[(h + 1) * 2] && p[(h - 1) * 2 + 1] === p[(h + 1) * 2 + 1];
+  }
+  /** Has a bus come to its halt (sim/transit.ts): into the lane after the stop's road tile, and turned round if it turns there? */
+  atHalt(m: Mover): boolean {
+    const h = m.halt ?? -1;
+    return h >= 0 && m.pi === h + 1 && m.lane >= 0 && (!this.turnsAtHalt(m) || m.prog >= HALT_TURNED - 0.02);
+  }
+  /** How far through a turn round the mover is (0..1 through the three-point turn), -1 when it is not turning round. */
+  turnProgress(m: Mover): number {
+    if (m.lane < 0 || m.pi < 1 || m.pi * 2 + 1 >= m.path.length) return -1;
     const d = m.lane % 4;
     const back = m.prog >= 0.5 ? this.nextDirOf(m) === OPP[d] : m.inDir === OPP[d];
-    if (!back) return false;
-    const s = m.prog >= 0.5 ? m.prog - 0.5 : m.prog + 0.5;
-    return s >= KTURN.rev0 && s <= KTURN.rev1;
+    return back ? (m.prog >= 0.5 ? m.prog - 0.5 : m.prog + 0.5) : -1;
   }
   /** Unit heading of a car on the road from its lane geometry (body-overlap checks); false when it is not on a lane. */
   headingOf(m: Mover, out: [number, number]): boolean {
@@ -1105,7 +1124,8 @@ export class Traffic {
     // a bus pulling in at a stop (sim/transit.ts): never past the centre of the stop's road tile, path node m.halt
     const halt = m.halt ?? -1;
     if (halt >= 0) {
-      const lim = halt === m.pi ? 1 - m.prog + HALT_AT : halt === m.pi - 1 ? HALT_AT - m.prog : Infinity;
+      const at = this.turnsAtHalt(m) ? HALT_TURNED : HALT_AT;
+      const lim = halt === m.pi ? 1 - m.prog + at : halt === m.pi - 1 ? at - m.prog : Infinity;
       if (lim < allowed) allowed = Math.max(0, lim);
     }
 

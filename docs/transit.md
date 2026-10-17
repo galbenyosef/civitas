@@ -25,7 +25,7 @@ family 15 (`shared/src/buildings/transport.ts`, docs/sub-kinds.md). Technology: 
    draft exactly as a save would (a `line` `preview` request, answered with `linePreview`, at most one per 100 ms per
    client) and the editor draws it: the lap in the line's colour on the lanes the bus will use (a U where it turns
    round, with a small white ring), each stop under a numbered badge, and in the panel the lap's length in tiles, a
-   rough round trip in game minutes (the first timing estimate below, the turns, and a dwell at every call) and how
+   rough round trip in game minutes (the first timing estimate under "Buses on the road", a dwell at every call) and how
    many times it turns round (hover for where). When it cannot be driven the panel says which stop pair failed and why,
    with a fix, and the map shows it: the failing leg as a straight red line between the two stops, the land a road
    would join them over in red squares, a free tile to move a stop to in a green ring. Save is greyed out until it is
@@ -57,6 +57,9 @@ preference, by what each costs a route in tiles of driving (`TURN_COST`):
 4. **via the depot** (60): in at the line's depot door and out again, where the depot is beside the road.
 
 So a loop round a block up to about 14-22 tiles longer beats a three-point turn, and the depot is the last resort.
+Two turns the same way on neighbouring tiles cost 20 more (`DOUBLE_TURN`): that is going round a corner with no block
+inside it, a 2×2 square of road, which squeezes a turn round through two junction boxes; round a block is preferred
+(round a roundabout's ring it is free).
 For each heading the bus could arrive at the first call in, the planner searches from every call and arrival heading
 to the next call (each search going on past its first arrival for the other headings), picks the cheapest way round
 over them, and requires the lap to arrive back at the first call in the heading it left in, so lap after lap joins up.
@@ -92,8 +95,15 @@ apply as to cars, at 0.8 of car speed like a truck. Its path is the lap, kept a 
 
 - **Pulling in.** `Mover.halt` is the path node of the next call's road tile; `Traffic.step` never lets the bus's centre
   past just beyond that tile's centre, so it stops inside the tile, in its lane, clear of both neighbours (a stop never
-  faces a junction). While it stands there `Mover.dwell` keeps the stuck clock still; cars behind queue as behind any
-  stopped vehicle.
+  faces a junction). Where it turns round on that tile (a stop at a dead end) it halts once it has turned instead, on
+  the last straight of the three-point turn in the other lane (`HALT_TURNED`), and the call starts only then
+  (`Traffic.atHalt`): it never stands across the road. While it stands there `Mover.dwell` keeps the stuck clock still;
+  cars behind queue as behind any stopped vehicle.
+- **Timing.** Before a line's buses have driven it, a segment is expected to take its route cost (`Traffic.cost`: 1 a
+  tile, more at junctions, crossings and where congested) at a bus's cruising speed, plus 6 ticks for each turn round,
+  with no margin; the editor's round trip adds a dwell of 6 ticks at every call. On the free-flowing streets of
+  `loadtest/busroutes.ts` that comes within 0-14% of the laps the buses drive (until 2026-10-17 it carried a ×1.4
+  margin and read about 40% long). Lights and jams make real laps longer; each line then learns its own segment times.
 - **Dwell.** People bound for this stop get off, people waiting here for this line in this direction get on (up to 40 on
   board), each paying the fare to the line's owner. They step aboard one a tick, so the crowd at the stop thins while
   the bus stands there. The bus dwells `dwellBase` (4) ticks plus `dwellPerRider` (0.34) per rider on or off, at least
@@ -159,10 +169,11 @@ street with dead ends at both ends and no junction at all; a ring with a one-til
 streets, the onboarding bot's layout, with two stops next to each other on one tooth; a street with a roundabout at one
 end), saves nine lines over them, and drives two buses per line under the real traffic model with every stop served.
 It asserts the laps are continuous and turn only where they may, the editor's preview has no problem, every bus runs
-at least two whole laps and none is withdrawn, and (`--hours 23`) every bus is back in the depot after service; and that
-a line between two unjoined streets and one with a stop facing a junction are refused with a fix and tiles to mark.
-On 2026-10-17: all nine lines run (3 to 36 laps per bus in 23 hours), 706 calls, none withdrawn, all 18 buses home,
-about 0.14 ms a tick for the 18 buses. The three lines the onboarding bot could not save on its comb of dead ends
+at least two whole laps and none is withdrawn, no bus ever stands at a stop in the middle of turning round, the
+round-trip estimate is within -20%/+25% of the laps measured, and (`--hours 23`) every bus is back in the depot after
+service; and that a line between two unjoined streets and one with a stop facing a junction are refused with a fix and
+tiles to mark. On 2026-10-17: all nine lines run (6 to 36 laps per bus in 23 hours), 710 calls, none withdrawn, all 18
+buses home, estimates 0.99-1.14 of the measured laps, about 0.2 ms a tick for the 18 buses. The three lines the onboarding bot could not save on its comb of dead ends
 (docs/early-game-audit.md) save in a copy of its world, and its "First bus line" goal completes.
 
 `ab.ts --set bus=N` lays a depot and twelve stops on two lines over the Commons (a six-stop loop round the inner ring of

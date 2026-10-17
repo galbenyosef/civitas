@@ -113,7 +113,7 @@ w.tick = 6 * TICKS_PER_HOUR;
 
 let fails = 0;
 const check = (ok: boolean, what: string) => { if (!ok) { fails++; console.log(`  FAIL ${what}`); } };
-const lineOf = new Map<number, Case>();
+const lineOf = new Map<number, Case>(), estimate = new Map<number, number>();
 let n = 0;
 for (const c of cases) {
   if (ONLY.length && !ONLY.some((o) => c.name.includes(o))) continue;
@@ -142,6 +142,7 @@ for (const c of cases) {
   check(sim.buses.lapValid(route), `${c.name}: lap not valid against the map`);
   check(!pv.problem, `${c.name}: preview problem ${pv.problem ? problemText(pv.problem) : ''}`);
   if (c.turns) check(kinds.includes(c.turns), `${c.name}: expected a turn at a ${c.turns}, got ${kinds.join(', ') || 'none'}`);
+  estimate.set(r.id, pv.lapTicks);
   console.log(`${c.name}: ${L} tiles a lap, ~${Math.round((pv.lapTicks * 60) / TICKS_PER_HOUR)} min round, turns: ${kinds.join(', ') || 'none (drives round)'}`);
 }
 
@@ -162,6 +163,9 @@ if (argv.includes('--why')) {
   };
 }
 const laps = new Map<number, number>(), lastCall = new Map<number, number>(), seen = new Set<number>(), busLine = new Map<number, number>();
+/** per bus, the tick it last came round to call 0; per line, the lap times seen */
+const lapAt = new Map<number, number>(), lapTimes = new Map<number, number[]>();
+let midTurnDwell = 0;
 const t0 = performance.now();
 const end = w.tick + HOURS * TICKS_PER_HOUR;
 let revTicks = 0;
@@ -171,7 +175,15 @@ while (w.tick < end) {
     seen.add(b.v.id); busLine.set(b.v.id, b.line);
     if (b.phase !== 'service') continue;
     const prev = lastCall.get(b.v.id);
-    if (prev !== undefined && b.call === 0 && prev !== 0) laps.set(b.v.id, (laps.get(b.v.id) ?? 0) + 1);
+    if (prev !== undefined && b.call === 0 && prev !== 0) {
+      laps.set(b.v.id, (laps.get(b.v.id) ?? 0) + 1);
+      const t0 = lapAt.get(b.v.id);
+      if (t0 !== undefined) { const a = lapTimes.get(b.line) ?? []; a.push(w.tick - t0); lapTimes.set(b.line, a); }
+      lapAt.set(b.v.id, w.tick);
+    }
+    // a bus serving a stop where it turns round stands in its lane once it has turned, never across the road mid-turn
+    const tp = sim.traffic.turnProgress(b.v as never);
+    if ((b as unknown as { atCall: boolean }).atCall && tp >= 0 && tp < 0.9) midTurnDwell++;
     lastCall.set(b.v.id, b.call);
     if (sim.traffic.reversing(b.v as never)) revTicks++;
   }
@@ -182,8 +194,11 @@ for (const [id, k] of laps) { const l = busLine.get(id)!; const a = byLine.get(l
 for (const [id, c] of lineOf) {
   const k = byLine.get(id) ?? [];
   check(k.length >= 2 && Math.min(...k) >= 2, `${c.name}: buses ran laps ${JSON.stringify(k)} (want two buses, two laps each)`);
-  console.log(`${c.name}: laps per bus ${JSON.stringify(k)}`);
+  const lt = lapTimes.get(id) ?? [], mean = lt.reduce((a, b) => a + b, 0) / Math.max(1, lt.length), est = estimate.get(id) ?? 0;
+  console.log(`${c.name}: laps per bus ${JSON.stringify(k)}, lap ${mean.toFixed(0)} ticks measured against ${est} estimated (${(est / mean).toFixed(2)})`);
+  if (lt.length) check(est > 0.8 * mean && est < 1.25 * mean, `${c.name}: round-trip estimate ${est} ticks against ${mean.toFixed(0)} measured`);
 }
+check(midTurnDwell === 0, `ticks a bus stood at a stop in the middle of turning round: ${midTurnDwell}`);
 check(svc.stats.withdrawn === 0, `buses withdrawn (stuck or no way on): ${svc.stats.withdrawn}`);
 if (HOURS >= 23) check(svc.stats.returned === svc.stats.spawned, `buses back in the depot after service: ${svc.stats.returned} of ${svc.stats.spawned}`);
 console.log(`buses ${seen.size}, stats ${JSON.stringify(svc.stats)}, ticks backing up ${revTicks}, ${HOURS} h in ${ms.toFixed(0)} ms (${(ms / (HOURS * TICKS_PER_HOUR)).toFixed(2)} ms/tick)`);

@@ -853,15 +853,16 @@ export class BusService implements ModeService {
 
   /**
    * First estimate of a segment's running time, before any bus has driven it: the route cost of its tiles (1 per tile,
-   * more where congested, junctions dearer: Traffic.cost) at a bus's cruising speed, with a margin for lights and
-   * crossings. The buses' own times replace it as they run (arrive()).
+   * more where congested, junctions dearer: Traffic.cost) at a bus's cruising speed, plus TURN_TICKS for each turn round.
+   * No margin: on the free-flowing streets of loadtest/busroutes.ts it comes within 0-14% of the laps buses drive (a
+   * dwell guess per call added). Lights and jams make real laps longer; the buses' own times replace it as they run (arrive()).
    */
   private segEstimate(r: LineRoute, k: number): number {
     const L = r.path.length / 2, K = r.calls.length;
     const a = r.callNodes[k], b = k + 1 < K ? r.callNodes[k + 1] : L;
     let cost = 0, turns = 0;
     for (let i = a + 1; i <= b; i++) { const n = i % L; cost += this.traffic.cost(r.path[n * 2], r.path[n * 2 + 1]); if (isReversal(r.path, n)) turns++; }
-    return (cost * 1.4) / (DRIVE_SPEED * 0.8) + turns * TURN_TICKS;
+    return cost / (DRIVE_SPEED * 0.8) + turns * TURN_TICKS;
   }
   private segs(line: TransitLine, r: LineRoute): number[] {
     let s = this.seg.get(line.id);
@@ -1124,7 +1125,7 @@ export class BusService implements ModeService {
       if (v.stuck === TT.stuckLimit + 1 && !v.committed && v.prog < 0.5 && b.phase !== 'toDepot') this.rejoin(b, b.call, false, true);
     }
     const halt = v.halt ?? -1;
-    if (b.phase !== 'toDepot' && halt >= 0 && v.pi === halt + 1 && v.lane >= 0) this.arrive(b, line);
+    if (b.phase !== 'toDepot' && halt >= 0 && this.traffic.atHalt(v)) this.arrive(b, line);
     if (b.phase !== 'toDepot') this.keepPath(b);
   }
 
