@@ -91,7 +91,10 @@ function offlinePwa(outDir: string): Plugin {
 export default defineConfig(({ mode }) => ({
   plugins: [buildingCatalogue(), ...(mode === 'offline' ? [offlinePwa('dist-local')] : [])],
   publicDir: mode === 'offline' ? 'public-local' : false, // manifest and icons, for the static build only
-  server: { host: '0.0.0.0', port: 5173, strictPort: true },
+  // every interface, under any host name or address (LAN IP, Xetatron.local, other clients): Vite's DNS-rebinding guard
+  // would otherwise answer 403 to anything but localhost and raw IPs
+  server: { host: '0.0.0.0', port: 5173, strictPort: true, allowedHosts: true as const },
+  preview: { host: '0.0.0.0', allowedHosts: true as const },
   define: { __LOCAL_ONLY__: JSON.stringify(mode === 'offline') },
   base: mode === 'offline' ? './' : '/',
   worker: { format: 'es' as const },

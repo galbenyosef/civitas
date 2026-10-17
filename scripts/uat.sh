@@ -13,7 +13,10 @@ UAT_DIR="${UAT_DIR:-$HOME/code/msimcity-uat}"
 UAT_PORT="${UAT_PORT:-9080}"
 PIDFILE="$UAT_DIR/uat.pid"
 LOG="$UAT_DIR/uat.log"
-LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo localhost)"
+# the address other machines reach this one on: the default route's interface (Wi-Fi or Ethernet, whichever is up)
+LAN_IP="$(ipconfig getifaddr "$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')" 2>/dev/null || true)"
+[[ -n "$LAN_IP" ]] || LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[[ -n "$LAN_IP" ]] || LAN_IP="$(hostname)"
 
 running() { [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
 
