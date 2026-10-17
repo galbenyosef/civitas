@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # UAT: a stable copy of Civitas on its own port, so dev reloads (tsx watch, Vite HMR) never restart what Rich plays.
 #
-#   scripts/uat.sh promote   check the dev tree, copy it to $UAT_DIR, build, restart UAT (its world is kept)
+#   scripts/uat.sh promote [ref]   copy a commit (default HEAD; uncommitted work in the dev tree is left out) to
+#                                   $UAT_DIR, check it, build, restart UAT (its world is kept)
 #   scripts/uat.sh restart   restart UAT as it is
 #   scripts/uat.sh stop | status | log
 #
@@ -45,17 +46,19 @@ start() {
 }
 
 promote() {
+  local ref="${1:-HEAD}"
   cd "$DEV_DIR"
-  echo "== checking dev tree"
-  npm run -s typecheck
-  npm run -s buildings:check >/dev/null || { echo "buildings:check failed; not promoting"; exit 1; }
-  echo "== copying to $UAT_DIR"
+  local sha; sha="$(git rev-parse --short "$ref^{commit}")"
+  echo "== exporting $ref ($sha) to $UAT_DIR"
   mkdir -p "$UAT_DIR/data"
   local lock_before=""; [[ -f "$UAT_DIR/package-lock.json" ]] && lock_before="$(shasum "$UAT_DIR/package-lock.json" | cut -d' ' -f1)"
+  local stage; stage="$(mktemp -d)"
+  git archive "$sha" | tar -x -C "$stage"
   rsync -a --delete \
     --exclude node_modules --exclude /data --exclude .git --exclude .idea --exclude dist \
     --exclude '*.log' --exclude uat.pid --exclude UAT_VERSION \
-    "$DEV_DIR/" "$UAT_DIR/"
+    "$stage/" "$UAT_DIR/"
+  rm -rf "$stage"
   # first promote: start UAT from a copy of the dev world
   if [[ ! -f "$UAT_DIR/data/world.json" && -f "$DEV_DIR/data/world.json" ]]; then
     cp "$DEV_DIR/data/world.json" "$UAT_DIR/data/world.json"
@@ -68,15 +71,19 @@ promote() {
   if [[ ! -d node_modules || "$lock_before" != "$(shasum package-lock.json | cut -d' ' -f1)" ]]; then
     echo "== installing dependencies"; npm ci --no-audit --no-fund >/dev/null
   fi
+  # checked here, on exactly what UAT will run; a failure leaves the running UAT alone
+  echo "== checking $sha"
+  npm run -s typecheck || { echo "typecheck failed; UAT not restarted"; exit 1; }
+  npm run -s buildings:check >/dev/null || { echo "buildings:check failed; UAT not restarted"; exit 1; }
   echo "== building client"
   npm run -s build >/dev/null
-  echo "promoted $(date '+%Y-%m-%d %H:%M')" >"$UAT_DIR/UAT_VERSION"
+  echo "promoted $sha $(date '+%Y-%m-%d %H:%M')" >"$UAT_DIR/UAT_VERSION"
   stop
   start
 }
 
 case "${1:-status}" in
-  promote) promote ;;
+  promote) promote "${2:-HEAD}" ;;
   restart) stop; start ;;
   stop) stop ;;
   status) if running; then echo "UAT running (pid $(cat "$PIDFILE")) at http://$LAN_IP:$UAT_PORT/  $(cat "$UAT_DIR/UAT_VERSION" 2>/dev/null)"; else echo "UAT not running"; fi ;;
