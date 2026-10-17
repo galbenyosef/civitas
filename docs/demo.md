@@ -309,8 +309,9 @@ Rail riders are few. Everyone takes the nearest job, so nobody commutes 30 tiles
 
 ## UAT
 
-A stable copy of the game runs apart from dev so dev reloads never restart it: `scripts/uat.sh promote` checks the dev
-tree (typecheck, buildings:check), copies it to `~/code/msimcity-uat`, builds the client and restarts UAT on
+A stable copy of the game runs apart from dev so dev reloads never restart it: `scripts/uat.sh promote [ref]` exports a
+commit (default HEAD, so uncommitted work never ships) to `~/code/msimcity-uat`, checks it there (typecheck,
+buildings:check; a failure leaves the running UAT alone), builds the client and restarts UAT on
 **http://<lan-ip>:9080/** (or http://Xetatron.local:9080/; `scripts/uat.sh status` prints the current address) (game and client on one port; its test cities on 9100+n; its own world in
 `~/code/msimcity-uat/data`, first seeded from dev's). `scripts/uat.sh status | restart | stop | log`. UAT runs with
 `NODE_ENV=uat`, so `?dev` tools and the test-city picker work there too. Promote when cards land in Playtest.
