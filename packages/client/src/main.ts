@@ -331,6 +331,7 @@ const input = new Input(canvas, rig, {
   },
   onBuy: (r: Rect) => { net.send({ t: 'buy', ...r }); rectMesh.visible = false; },
   onContext: (px, py, cx, cy) => {
+    if (lines.undoStop()) return; // editing a bus line: a right-click takes the last stop off
     // right-click (not a drag): the menu of whatever is under the cursor, agents first like a left click
     const w = canvas.clientWidth, h = canvas.clientHeight;
     const id = citizens.pick(px, py, rig.camera, w, h);

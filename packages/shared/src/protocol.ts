@@ -1,5 +1,5 @@
 import type { KindToolId } from './buildings/compiled';
-import type { StopInfo, BusInfo, LineInfo, LineStats, TransitLine } from './transit';
+import type { StopInfo, BusInfo, LineInfo, LineStats, LinePreview, TransitLine } from './transit';
 import type { RailLineDef, RailRoute } from './rail';
 import type { GatewayInfo } from './gateways';
 import type { GoalsDTO } from './goals';
@@ -73,11 +73,12 @@ export const LIFE_STAGE_NAMES = ['adult', 'child', 'retired'] as const;
 /**
  * citizens wire flags: bits 0-2 state, bit 3 mode (1 = in a vehicle), bits 4-7
  * occupation (the workplace's family code, so 4 bits stay enough past 16 kinds) / vehicle kind, bits 8-9 vehicle class, bit 10 queued, bit 11 emergency,
- * bits 12-13 life stage (LifeStage; vehicles 0), bit 14 moving in or leaving town (a suitcase on foot, a packed car; server sim/gateways.ts).
+ * bits 12-13 life stage (LifeStage; vehicles 0), bit 14 moving in or leaving town (a suitcase on foot, a packed car; server sim/gateways.ts),
+ * bit 15 backing up (a bus in the reverse of a three-point turn, server sim/traffic.ts: drawn facing against its motion).
  * A quad with state Home tells the client to drop that agent.
  */
-export const packCitizenFlags = (state: number, mode: number, kind: number, cls = 0, queued = false, emergency = false, stage = 0, bag = false) =>
-  (state & 7) | ((mode & 1) << 3) | ((kind & 15) << 4) | ((cls & 3) << 8) | (queued ? 1 << 10 : 0) | (emergency ? 1 << 11 : 0) | ((stage & 3) << 12) | (bag ? 1 << 14 : 0);
+export const packCitizenFlags = (state: number, mode: number, kind: number, cls = 0, queued = false, emergency = false, stage = 0, bag = false, rev = false) =>
+  (state & 7) | ((mode & 1) << 3) | ((kind & 15) << 4) | ((cls & 3) << 8) | (queued ? 1 << 10 : 0) | (emergency ? 1 << 11 : 0) | ((stage & 3) << 12) | (bag ? 1 << 14 : 0) | (rev ? 1 << 15 : 0);
 export const citizenState = (f: number) => f & 7;
 export const citizenMode = (f: number) => (f >> 3) & 1;
 export const citizenKind = (f: number) => (f >> 4) & 15;
@@ -87,6 +88,8 @@ export const citizenEmergency = (f: number) => ((f >> 11) & 1) === 1;
 export const citizenStage = (f: number) => (f >> 12) & 3;
 /** moving in or leaving town with their luggage (bit 14) */
 export const citizenBag = (f: number) => ((f >> 14) & 1) === 1;
+/** backing up: draw it facing against its motion (bit 15) */
+export const citizenReversing = (f: number) => ((f >> 15) & 1) === 1;
 
 /** One person (or dwelling vehicle) listed in a building's people panel. */
 export interface PersonRow {
@@ -352,6 +355,8 @@ export type ClientMsg =
   | { t: 'lines' }
   | { t: 'line'; op: 'save'; line: Partial<TransitLine> }
   | { t: 'line'; op: 'delete'; id: number }
+  /** route a draft line without saving it: answered with 'linePreview' (docs/transit.md) */
+  | { t: 'line'; op: 'preview'; line: Partial<TransitLine>; seq: number }
   /** onboarding (shared/src/goals.ts): skip or resume the goal chain; dismiss a hint for good */
   | { t: 'goals'; op: 'skip' | 'resume' }
   | { t: 'hint'; id: string };
@@ -385,6 +390,7 @@ export type ServerMsg =
   | { t: 'lines'; lines: LineInfo[]; buses: number[]; saved?: number }
   /** between full 'lines' messages (sent when a line changes): what changes as the buses run, and the livery map */
   | { t: 'lineStats'; lines: LineStats[]; buses: number[] }
+  | { t: 'linePreview'; preview: LinePreview }
   /** your onboarding goals (shared/src/goals.ts), to you only, whenever they change; `completed` names a goal just finished and its reward */
   | { t: 'goals'; goals: GoalsDTO; completed?: { id: string; reward: string } }
   /** an advisor hint (shared/src/goals.ts HINTS); `msg` replaces the stock wording when the server has numbers to put in it */

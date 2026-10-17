@@ -1,18 +1,25 @@
-import { Group, Mesh, MeshBasicMaterial, RingGeometry, DoubleSide } from 'three';
-import { isFreightYardKind, stopName, stopModeOf, hasFeature, techFor, TRANSIT, TICKS_PER_DAY, TICKS_PER_HOUR, type LineInfo, type StopInfo, type BusInfo, type StopRef, type ServerMsg, type TransitMode } from '@msimcity/shared';
+import { Group, Mesh, MeshBasicMaterial, RingGeometry, PlaneGeometry, DoubleSide, Sprite, SpriteMaterial, CanvasTexture, SRGBColorSpace } from 'three';
+import { isFreightYardKind, stopName, stopModeOf, hasFeature, techFor, TRANSIT, TICKS_PER_DAY, TICKS_PER_HOUR, type LineInfo, type StopInfo, type BusInfo, type StopRef, type ServerMsg, type TransitMode, type LinePreview } from '@msimcity/shared';
 import { Ribbon } from './render/route';
 import type { NetClient } from './net';
 import type { ClientWorld } from './world';
 
 /**
  * Transit lines (docs/transit.md): the top-bar **lines** chip opens a panel of your lines. A line is stops clicked in
- * order on the map (while a line is being edited, a click on a bus stop adds it), a number, a colour, loop or there
- * and back, and the buses you want on it; the server routes it over the roads (sim/transit.ts) and answers with the
- * road path, drawn here as a ribbon in the line's colour while the panel is open. The same 'lines' message carries
- * which line each bus on the road runs, for its livery (render/citizens.ts).
+ * order on the map (while a line is being edited, a click on a bus stop adds it; Backspace or a right-click takes the
+ * last one off), a number, a colour, loop or there and back, and the buses you want on it. As stops are clicked the
+ * server routes the draft (a 'linePreview': sim/transit.ts plan, sim/busroute.ts) and the editor draws the road the
+ * bus will take, the stops numbered in order, where it turns round, the lap's length and round trip, and anything
+ * that stops it running: the leg that fails in red, the land a road would join it over, a better tile for a stop.
+ * Saved lines are drawn as ribbons in their colours while the panel is open. The 'lines' message also carries which
+ * line each bus on the road runs, for its livery (render/citizens.ts).
  */
 
 const PALETTE = [0xd94f4f, 0x2f8fd6, 0x3fa34d, 0xe6a23c, 0x8e5bd6, 0x1fb5a8, 0xd65bab, 0x5c6270];
+const FAIL = 0xff3b30, WARN = 0xffb020, SUGGEST = 0x34c759;
+const TURN_KIND = ['dead end', 'junction', 'depot'];
+/** game minutes for a number of ticks */
+const minutes = (t: number) => Math.max(1, Math.round((t * 60) / TICKS_PER_HOUR));
 const RIBBON_Y = 0.075, RIBBON_W = 0.12, EDIT_W = 0.07;
 const hex = (c: number) => '#' + (c >>> 0).toString(16).padStart(6, '0').slice(-6);
 const esc = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
@@ -58,6 +65,14 @@ export class LinesPanel {
   private ribbons: Ribbon[] = [];
   private marks: Mesh[] = [];
   private editRibbon = new Ribbon(new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthWrite: false, side: DoubleSide, toneMapped: false }), RIBBON_Y + 0.004);
+  /** the failing leg of the draft, straight from stop to stop */
+  private failRibbon = new Ribbon(new MeshBasicMaterial({ color: FAIL, transparent: true, opacity: 0.85, depthWrite: false, side: DoubleSide, toneMapped: false }), RIBBON_Y + 0.006);
+  /** numbered stop badges over the draft's stops */
+  private badges: Sprite[] = [];
+  /** the draft's change counter, and the server's route for the draft (it may be one change behind while it answers) */
+  private seq = 0;
+  private preview: LinePreview | null = null;
+  private previewTimer: ReturnType<typeof setTimeout> | undefined;
   private el: HTMLDivElement;
   private chip: HTMLButtonElement;
   private dirty = true;
@@ -81,6 +96,16 @@ export class LinesPanel {
     document.head.appendChild(style);
     this.editRibbon.mesh.renderOrder = 6;
     this.group.add(this.editRibbon.mesh);
+    this.failRibbon.mesh.renderOrder = 7;
+    this.group.add(this.failRibbon.mesh);
+    this.net.on('linePreview', (m) => this.applyPreview(m.preview));
+    // Backspace takes the last stop off the draft (unless typing in a field)
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Backspace' || !this.open || !this.draft) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (this.undoStop()) e.preventDefault();
+    });
     this.el.addEventListener('click', (e) => this.click(e));
     this.el.addEventListener('input', (e) => this.input(e));
     this.el.addEventListener('change', (e) => this.input(e));
@@ -103,7 +128,7 @@ export class LinesPanel {
     this.lines = m.lines;
     const colours = new Map(m.lines.map((l) => [l.id, l.colour]));
     this.onLivery(m.buses, colours);
-    if (m.saved && this.draft && (this.draft.id === undefined || this.draft.id === m.saved)) this.draft = null; // saved: back to the list
+    if (m.saved && this.draft && (this.draft.id === undefined || this.draft.id === m.saved)) { this.draft = null; this.preview = null; } // saved: back to the list
     this.dirty = true;
     if (this.open && !this.draft) this.render();
   }
@@ -130,8 +155,35 @@ export class LinesPanel {
     if (st.length >= TRANSIT.maxStops) { this.toast('error', `A line has at most ${TRANSIT.maxStops} stops`); return true; }
     st.push({ x, y });
     this.draft.mode = mode;
-    this.render(); this.dirty = true;
+    this.changed();
     return true;
+  }
+  /** Take the last stop off the line being edited (Backspace, or a right-click on the map); false when there is none. */
+  undoStop(): boolean {
+    const d = this.draft;
+    if (!this.open || !d || !d.stops.length) return false;
+    d.stops.pop();
+    if (!d.stops.length && !d.id) d.mode = undefined;
+    this.changed();
+    return true;
+  }
+  /** The draft's stops or shape changed: redraw, and ask the server to route it (shortly, so quick clicks ask once). */
+  private changed() {
+    this.seq++;
+    this.render(); this.dirty = true;
+    clearTimeout(this.previewTimer);
+    const d = this.draft;
+    if (!d || d.stops.length < 2) { this.preview = null; return; }
+    const seq = this.seq;
+    this.previewTimer = setTimeout(() => {
+      if (this.draft === d && this.seq === seq) this.net.send({ t: 'line', op: 'preview', seq, line: { id: d.id, loop: d.loop, stops: d.stops } });
+    }, 120);
+  }
+  /** The server's route for the draft: drawn on the map, summed up in the panel. */
+  private applyPreview(p: LinePreview) {
+    if (!this.draft || p.seq !== this.seq) return;
+    this.preview = p;
+    this.render(); this.dirty = true;
   }
 
   /** the lines this player may edit: their own, or every line in a sandbox */
@@ -145,7 +197,8 @@ export class LinesPanel {
       this.draft = { number: n, colour: PALETTE[(n - 1) % PALETTE.length], loop: true, vehicles: 2, stops: [] };
     }
     this.onEdit();
-    this.render(); this.dirty = true;
+    this.preview = null;
+    this.changed();
   }
 
   private click(e: MouseEvent) {
@@ -160,12 +213,12 @@ export class LinesPanel {
       this.startDraft();
     } else if (act === 'edit') { const l = this.lines.find((x) => x.id === id); if (l) this.startDraft(l); }
     else if (act === 'delete') { if (confirm(`Delete line ${this.lines.find((x) => x.id === id)?.number}?`)) this.net.send({ t: 'line', op: 'delete', id }); }
-    else if (act === 'cancel') { this.draft = null; this.render(); this.dirty = true; }
+    else if (act === 'cancel') { this.draft = null; this.preview = null; this.render(); this.dirty = true; }
     else if (act === 'save' && d) this.net.send({ t: 'line', op: 'save', line: { id: d.id, number: d.number, colour: d.colour, loop: d.loop, vehicles: d.vehicles, stops: d.stops } });
-    else if (act === 'rm' && d) { d.stops.splice(id, 1); if (!d.stops.length && !d.id) d.mode = undefined; this.render(); this.dirty = true; }
-    else if (act === 'undo' && d) { d.stops.pop(); if (!d.stops.length && !d.id) d.mode = undefined; this.render(); this.dirty = true; }
+    else if (act === 'rm' && d) { d.stops.splice(id, 1); if (!d.stops.length && !d.id) d.mode = undefined; this.changed(); }
+    else if (act === 'undo' && d) this.undoStop();
     else if (act === 'swatch' && d) { d.colour = Number(t.dataset.c); this.render(); this.dirty = true; }
-    else if (act === 'mode' && d) { d.loop = t.dataset.v === 'loop'; this.render(); this.dirty = true; }
+    else if (act === 'mode' && d) { d.loop = t.dataset.v === 'loop'; this.changed(); }
   }
   private input(e: Event) {
     const t = e.target as HTMLInputElement, d = this.draft;
@@ -201,10 +254,29 @@ export class LinesPanel {
       <div class="lmode"><button class="chip${d.loop ? ' on' : ''}" data-act="mode" data-v="loop">loop ↺</button><button class="chip${d.loop ? '' : ' on'}" data-act="mode" data-v="back">there and back ⇄</button></div>
       <div class="lsect">Stops in order <span>${d.stops.length}</span></div>
       ${d.stops.length ? `<ol class="lstoplist">${d.stops.map((s, i) => `<li>${esc(stopName(s.x, s.y))} <span class="lxy">(${s.x}, ${s.y})</span><button class="lrm" data-act="rm" data-id="${i}" title="remove">✕</button></li>`).join('')}</ol>` : ''}
-      <div class="lhint">${d.mode === 'rail' ? `Click your rail stations in the order trains should call; consecutive stations must be joined by track, and no other line may use it. ${d.loop ? 'The track must lead from the last station back round to the first; the loop takes as many trains as fit.' : 'Trains reverse at the ends and call everywhere on the way back; one track runs one train.'}` : `Click your bus stops (or rail stations, for a rail line) on the map in the order the bus should call. ${d.loop ? 'The last stop runs back to the first.' : 'Buses turn round at the last stop and call at every stop on the way back.'}`}</div>
-      <div class="lbtns"><button class="chip" data-act="undo" ${d.stops.length ? '' : 'disabled'}>undo stop</button><button class="chip" data-act="cancel">cancel</button><button class="chip on" data-act="save" ${d.stops.length >= 2 ? '' : 'disabled'}>save line</button></div>`;
+      ${this.routeHtml(d)}
+      <div class="lhint">${d.mode === 'rail' ? `Click your rail stations in the order trains should call; consecutive stations must be joined by track, and no other line may use it. ${d.loop ? 'The track must lead from the last station back round to the first; the loop takes as many trains as fit.' : 'Trains reverse at the ends and call everywhere on the way back; one track runs one train.'}` : `Click your bus stops (or rail stations, for a rail line) on the map in the order the bus should call: the road between them fills in, the shortest way a bus can drive. ${d.loop ? 'The last stop runs back to the first.' : 'Buses call at every stop on the way back.'} Where a bus has to turn round it goes round a block or a roundabout, or turns at a dead end or a junction. Backspace or right-click takes the last stop off.`}</div>
+      <div class="lbtns"><button class="chip" data-act="undo" ${d.stops.length ? '' : 'disabled'}>undo stop</button><button class="chip" data-act="cancel">cancel</button><button class="chip on" data-act="save" ${d.stops.length >= 2 && !this.current()?.problem?.fatal ? '' : 'disabled'}>save line</button></div>`;
     }
     this.el.innerHTML = html;
+  }
+
+  /** The server's route for the draft as it is now, or null while it is still working it out. */
+  private current(): LinePreview | null { return this.preview && this.preview.seq === this.seq ? this.preview : null; }
+  /** The draft's route in the panel: lap length, round trip, where it turns round, or what is wrong and how to fix it. */
+  private routeHtml(d: Draft): string {
+    if (d.stops.length < 2) return '';
+    const p = this.current();
+    if (!p) return `<div class="lroute">routing…</div>`;
+    let html = '';
+    if (p.ok) {
+      const kinds: string[] = [];
+      for (let i = 0; i < p.turns.length; i += 3) kinds.push(`${TURN_KIND[p.turns[i + 2]]} (${p.turns[i]}, ${p.turns[i + 1]})`);
+      const turns = kinds.length ? ` · turns round ${kinds.length === 1 ? 'once' : `${kinds.length} times`}` : '';
+      html += `<div class="lroute" title="${esc(kinds.length ? `turns round at: ${kinds.join(', ')}` : 'drives round without turning')}">${p.length} tiles a lap${p.lapTicks ? ` · round trip ~${minutes(p.lapTicks)} min` : ''}${turns}</div>`;
+    }
+    if (p.problem) html += `<div class="lprob ${p.problem.fatal ? 'bad' : 'warn'}">${esc(p.problem.message)}${p.problem.fix ? `<div class="lfix">${esc(p.problem.fix)}</div>` : ''}</div>`;
+    return html;
   }
 
   /** Rebuild the ribbons when something changed; keep the edit preview joined to the stops. */
@@ -213,8 +285,9 @@ export class LinesPanel {
     this.dirty = false;
     for (const r of this.ribbons) { this.group.remove(r.mesh); r.mesh.geometry.dispose(); (r.mesh.material as MeshBasicMaterial).dispose(); }
     for (const m of this.marks) { this.group.remove(m); m.geometry.dispose(); (m.material as MeshBasicMaterial).dispose(); }
-    this.ribbons = []; this.marks = [];
-    this.editRibbon.hide();
+    for (const b of this.badges) { this.group.remove(b); b.material.map?.dispose(); b.material.dispose(); }
+    this.ribbons = []; this.marks = []; this.badges = [];
+    this.editRibbon.hide(); this.failRibbon.hide();
     if (!this.open) return;
     const mine = this.mine();
     mine.forEach((l, i) => {
@@ -229,16 +302,59 @@ export class LinesPanel {
     });
     const d = this.draft;
     if (d) {
-      const pts: number[] = [];
-      for (const s of d.stops) pts.push(s.x + 0.5, s.y + 0.5);
-      if (d.loop && d.stops.length > 2) pts.push(d.stops[0].x + 0.5, d.stops[0].y + 0.5);
       (this.editRibbon.mesh.material as MeshBasicMaterial).color.setHex(d.colour);
-      if (pts.length >= 4) this.editRibbon.set(pts, new Array(pts.length / 2).fill(EDIT_W));
-      for (const s of d.stops) this.mark(s, d.colour);
+      // the road the bus will take, once the server has routed it (the last answer while it works on the next)
+      const p = this.preview, rail = d.mode === 'rail';
+      if (p && p.path.length >= 4 && d.stops.length >= 2) {
+        const pts = lanePoints(p.path, p.ok, rail ? 0 : 0.19);
+        if (pts.length >= 4) this.editRibbon.set(pts, new Array(pts.length / 2).fill(RIBBON_W));
+      } else {
+        const pts: number[] = [];
+        for (const s of d.stops) pts.push(s.x + 0.5, s.y + 0.5);
+        if (d.loop && d.stops.length > 2) pts.push(d.stops[0].x + 0.5, d.stops[0].y + 0.5);
+        if (pts.length >= 4) this.editRibbon.set(pts, new Array(pts.length / 2).fill(EDIT_W));
+      }
+      const cur = this.current();
+      if (cur) {
+        for (let i = 0; i < cur.turns.length; i += 3) this.mark({ x: cur.turns[i], y: cur.turns[i + 1] }, 0xffffff, 0.1, 0.17);
+        const pr = cur.problem;
+        if (pr) {
+          const c = pr.fatal ? FAIL : WARN;
+          (this.failRibbon.mesh.material as MeshBasicMaterial).color.setHex(c);
+          if (pr.leg) this.failRibbon.set([pr.leg[0] + 0.5, pr.leg[1] + 0.5, pr.leg[2] + 0.5, pr.leg[3] + 0.5], [EDIT_W * 1.6, EDIT_W * 1.6]);
+          for (let i = 0; i < pr.tiles.length; i += 2) this.square(pr.tiles[i], pr.tiles[i + 1], c);
+          if (pr.suggest) this.mark({ x: pr.suggest[0], y: pr.suggest[1] }, SUGGEST);
+        }
+      }
+      d.stops.forEach((s, i) => { this.mark(s, d.colour); this.badge(s, i + 1, d.colour); });
     }
   }
-  private mark(s: StopRef, colour: number) {
-    const m = new Mesh(new RingGeometry(0.22, 0.32, 24).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false }));
+  /** A tile marked in a colour (land to lay a road over, a stop to move). */
+  private square(x: number, y: number, colour: number) {
+    const m = new Mesh(new PlaneGeometry(0.9, 0.9).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false }));
+    m.position.set(x + 0.5, RIBBON_Y + 0.008, y + 0.5);
+    m.renderOrder = 6;
+    this.marks.push(m); this.group.add(m);
+  }
+  /** A numbered badge over a stop: the order the bus calls in. */
+  private badge(s: StopRef, n: number, colour: number) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    g.fillStyle = hex(colour); g.beginPath(); g.arc(32, 32, 27, 0, Math.PI * 2); g.fill();
+    g.lineWidth = 5; g.strokeStyle = '#fff'; g.stroke();
+    g.fillStyle = '#fff'; g.font = `bold ${n > 9 ? 26 : 32}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(String(n), 32, 34);
+    const t = new CanvasTexture(c);
+    t.colorSpace = SRGBColorSpace;
+    const sp = new Sprite(new SpriteMaterial({ map: t, depthTest: false, depthWrite: false, transparent: true, toneMapped: false, sizeAttenuation: false }));
+    sp.scale.set(0.045, 0.045, 1);
+    sp.position.set(s.x + 0.5, 0.9, s.y + 0.5);
+    sp.renderOrder = 9;
+    this.badges.push(sp); this.group.add(sp);
+  }
+  private mark(s: StopRef, colour: number, r0 = 0.22, r1 = 0.32) {
+    const m = new Mesh(new RingGeometry(r0, r1, 24).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false }));
     m.position.set(s.x + 0.5, RIBBON_Y + 0.01, s.y + 0.5);
     m.renderOrder = 7;
     this.marks.push(m); this.group.add(m);
@@ -247,7 +363,8 @@ export class LinesPanel {
 
 /**
  * A line's lap as ribbon points in the lane the buses drive in: right-hand traffic, so each tile centre is pushed to the
- * right of the direction of travel by the lane offset; `closed` joins the end back to the start.
+ * right of the direction of travel by the lane offset; `closed` joins the end back to the start. Where the bus turns
+ * round (it goes back to the tile it came from: server sim/busroute.ts) the ribbon draws a U across the road.
  */
 function lanePoints(path: number[], closed: boolean, O = 0.19): number[] {
   const n = path.length / 2, out: number[] = [];
@@ -255,6 +372,14 @@ function lanePoints(path: number[], closed: boolean, O = 0.19): number[] {
   const at = (i: number) => [path[((i + n) % n) * 2] + 0.5, path[((i + n) % n) * 2 + 1] + 0.5];
   for (let i = 0; i <= (closed ? n : n - 1); i++) {
     const [x, y] = at(i), [px, py] = at(i - 1), [nx, ny] = at(i + 1);
+    if ((closed || (i > 0 && i < n - 1)) && O > 0 && px === nx && py === ny && (px !== x || py !== y)) {
+      const dx = x - px, dy = y - py; // the way in; right of it is (-dy, dx)
+      for (let k = 0; k <= 6; k++) {
+        const a = (k / 6) * Math.PI;
+        out.push(x - dy * O * Math.cos(a) + dx * (0.12 + O * Math.sin(a)), y + dx * O * Math.cos(a) + dy * (0.12 + O * Math.sin(a)));
+      }
+      continue;
+    }
     let dx = (closed || i < n - 1 ? nx : x) - (closed || i > 0 ? px : x), dy = (closed || i < n - 1 ? ny : y) - (closed || i > 0 ? py : y);
     const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
     out.push(x - dy * O, y + dx * O); // right of travel in x-east, y-south
@@ -290,6 +415,11 @@ const STYLE = `
 #linesPanel .lrm { margin-left: 4px; background: none; border: 0; color: var(--muted); cursor: pointer; font: inherit; }
 #linesPanel .lrm:hover { color: var(--danger); }
 #linesPanel .lbtns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
+#linesPanel .lroute { margin: 8px 0 2px; color: var(--fg); }
+#linesPanel .lprob { margin: 8px 0 2px; padding: 6px 8px; border-radius: 6px; line-height: 1.4; }
+#linesPanel .lprob.bad { background: rgba(255, 59, 48, 0.14); border: 1px solid rgba(255, 59, 48, 0.45); }
+#linesPanel .lprob.warn { background: rgba(255, 176, 32, 0.12); border: 1px solid rgba(255, 176, 32, 0.45); }
+#linesPanel .lfix { margin-top: 3px; color: var(--muted); }
 #linesPanel button:disabled { opacity: 0.4; cursor: default; }
 .lbadge { display: inline-block; min-width: 18px; padding: 1px 5px; border-radius: 5px; color: #fff; font-weight: 700; font-size: 11px; text-align: center; text-shadow: 0 1px 1px rgba(0,0,0,0.35); }
 body.fpv-full #linesPanel { display: none !important; }

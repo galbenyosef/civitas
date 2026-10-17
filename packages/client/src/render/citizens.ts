@@ -1,5 +1,5 @@
 import { InstancedMesh, RingGeometry, Mesh, MeshBasicMaterial, MeshLambertMaterial, Matrix4, Color, Vector3, Quaternion, Group, BufferGeometry, InstancedBufferAttribute, Frustum, Sphere, type Camera } from 'three';
-import { CitizenState, TICK_MS, Zone, VehicleClass, VehicleKind, citizenState, citizenMode, citizenKind, citizenClass, citizenQueued, citizenEmergency, citizenStage, citizenBag, LifeStage, hash2 } from '@msimcity/shared';
+import { CitizenState, TICK_MS, Zone, VehicleClass, VehicleKind, citizenState, citizenMode, citizenKind, citizenClass, citizenQueued, citizenEmergency, citizenStage, citizenBag, citizenReversing, LifeStage, hash2 } from '@msimcity/shared';
 import { Luggage } from './luggage';
 import { Kit } from './kit';
 import { P } from './models';
@@ -225,7 +225,8 @@ export class CitizensView {
       const a = this.agents.get(id);
       if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f) }); continue; }
       const dx = x - a.tx, dy = y - a.ty;
-      if (dx * dx + dy * dy > 1e-4) { const d = Math.hypot(dx, dy); a.hx = dx / d; a.hy = dy / d; }
+      // facing the way it moves, except a bus backing up in a three-point turn (server sim/traffic.ts)
+      if (dx * dx + dy * dy > 1e-4) { const d = Math.hypot(dx, dy) * (citizenReversing(f) ? -1 : 1); a.hx = dx / d; a.hy = dy / d; }
       a.px = a.x; a.py = a.y; a.tx = x; a.ty = y; a.t = 0; a.state = state; a.drives = drives; a.kind = kind; a.cls = cls; a.queued = queued; a.emergency = emergency; a.last = now; a.stage = stage; a.bag = citizenBag(f);
     }
   }

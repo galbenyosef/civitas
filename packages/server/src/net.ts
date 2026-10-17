@@ -44,11 +44,15 @@ export interface GameConfig {
 const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) => k.tool!.id));
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
 
+/** shortest gap between two line previews for one client (editLine) */
+const PREVIEW_MS = 100;
+
 /**
  * The game protocol over any transport (transport.ts: WebSockets on the server, a MessagePort in local mode). Clients subscribe to the chunks they can see and only
  * receive tile and citizen updates for those, which is what keeps per-client
  * bandwidth independent of total world size.
  */
+
 export class Net {
   private clients = new Set<Client>();
   /** last quad sent per agent, so only movement goes on the wire */
@@ -193,8 +197,9 @@ export class Net {
   private lastLines = '';
   private lastStats = ''; private lastBuses = ''; private statsAt = 0;
   /** Create, replace or delete one of your lines; everyone gets the new list. */
-  private editLine(c: Client, m: { op: 'save'; line: Partial<TransitLine> } | { op: 'delete'; id: number }) {
+  private editLine(c: Client, m: { op: 'save'; line: Partial<TransitLine> } | { op: 'delete'; id: number } | { op: 'preview'; line: Partial<TransitLine>; seq: number }) {
     const p = c.player!;
+    if (m.op === 'preview') return this.previewLine(c, m);
     const need = this.locked(p, 'lines');
     if (need && !(this.cfg.devTools && p.devUnlimited)) return this.toast(c, `${need} is needed before you can run bus lines`);
     if (m.op === 'delete') {
@@ -208,6 +213,27 @@ export class Net {
       this.send(c, this.linesMsg(r.id));
     } else return;
     this.lastLines = '';
+  }
+
+  /**
+   * The line editor's live preview: the draft routed as a save would route it, nothing kept. At most one every
+   * PREVIEW_MS per client; requests in between are coalesced into the latest (a route can be a few dozen searches).
+   */
+  private previews = new WeakMap<Client, { at: number; next: { line: Partial<TransitLine>; seq: number } | null; timer?: ReturnType<typeof setTimeout> }>();
+  private previewLine(c: Client, m: { line: Partial<TransitLine>; seq: number }) {
+    let st = this.previews.get(c);
+    if (!st) this.previews.set(c, st = { at: 0, next: null });
+    st.next = m;
+    const run = () => {
+      st!.timer = undefined;
+      const q = st!.next;
+      if (!q || !c.player) return;
+      st!.next = null; st!.at = Date.now();
+      this.send(c, { t: 'linePreview', preview: this.sim.transit.previewLine(c.player.id, q.line ?? {}, Number(q.seq) || 0) });
+    };
+    const wait = st.at + PREVIEW_MS - Date.now();
+    if (wait <= 0) run();
+    else st.timer ??= setTimeout(run, wait);
   }
 
   private subscribe(c: Client, chunks: [number, number][]) {
@@ -231,7 +257,7 @@ export class Net {
       const out: number[] = [];
       for (const a of this.sim.agents()) {
         if (Math.floor(a.x / CHUNK_SIZE) !== cx || Math.floor(a.y / CHUNK_SIZE) !== cy) continue;
-        out.push(a.id, Math.round(a.x * 100) / 100, Math.round(a.y * 100) / 100, packCitizenFlags(a.state, a.mode, a.kind, a.cls, a.queued, a.emergency, a.stage, a.bag));
+        out.push(a.id, Math.round(a.x * 100) / 100, Math.round(a.y * 100) / 100, packCitizenFlags(a.state, a.mode, a.kind, a.cls, a.queued, a.emergency, a.stage, a.bag, a.rev));
       }
       if (out.length) this.send(c, { t: 'citizens', c: out });
     }
@@ -859,7 +885,7 @@ export class Net {
     for (const a of this.sim.agents()) {
       seen.add(a.id);
       const x = Math.round(a.x * 100) / 100, y = Math.round(a.y * 100) / 100;
-      const flags = packCitizenFlags(a.state, a.mode, a.kind, a.cls, a.queued, a.emergency, a.stage, a.bag);
+      const flags = packCitizenFlags(a.state, a.mode, a.kind, a.cls, a.queued, a.emergency, a.stage, a.bag, a.rev);
       const prev = this.lastSent.get(a.id);
       if (prev && prev[0] === x && prev[1] === y && prev[2] === flags && a.id % 10 !== keep) continue;
       if (prev) { prev[0] = x; prev[1] = y; prev[2] = flags; } else this.lastSent.set(a.id, [x, y, flags]);

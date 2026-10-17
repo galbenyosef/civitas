@@ -1,7 +1,8 @@
 # Public transport: lines, buses and riders
 
-Code: `shared/src/transit.ts` (line and stop types, `TRANSIT` tunables, `walkCost`, stop names), `server/src/sim/transit.ts`
-(`Transit`: the registry of lines, riders, fares and the planner; `BusService`: buses), trip planning in
+Code: `shared/src/transit.ts` (line and stop types, `TRANSIT` tunables, `walkCost`, stop names, `LinePreview`), `server/src/sim/transit.ts`
+(`Transit`: the registry of lines, riders, fares and the planner; `BusService`: buses), `server/src/sim/busroute.ts` (the bus
+router: laps, turning round, what to fix), trip planning in
 `server/src/sim/simulation.ts` (`plan`, `transitChoice`, `startLeg`, `advance`), the halt at a stop in
 `server/src/sim/traffic.ts` (`Mover.halt`, `Mover.dwell`), the panel and ribbons in `client/src/lines.ts`, the bus model
 in `client/src/render/citizens.ts`. Kinds: `bus-stop` (id 17) and `bus-depot` (id 16), both sub-kinds of the transport-hub
@@ -19,10 +20,20 @@ family 15 (`shared/src/buildings/transport.ts`, docs/sub-kinds.md). Technology: 
    out per driver on shift**, so a depot carries roughly six buses at the morning peak and three late in the evening.
    Each line runs from its owner's built depot nearest its first stop.
 3. **Lines** (top-bar **lines** chip). *New line*, then click your stops on the map in the order the bus should call,
-   pick a number (1-999) and a colour, choose a loop or there and back, and set the buses you want. The server routes it
-   (below) and refuses a line it cannot drive, naming the stops. While the panel is open each line is drawn as a ribbon
-   in its colour on the lane the buses use, with rings at its stops; the list shows status (running, no depot, no drivers
-   on shift, outside service hours), buses in service, riders and fares today, and each stop's boardings.
+   pick a number (1-999) and a colour, choose a loop or there and back, and set the buses you want. **Backspace** or a
+   **right-click** on the map takes the last stop off (the *undo stop* button too). As you click, the server routes the
+   draft exactly as a save would (a `line` `preview` request, answered with `linePreview`, at most one per 100 ms per
+   client) and the editor draws it: the lap in the line's colour on the lanes the bus will use (a U where it turns
+   round, with a small white ring), each stop under a numbered badge, and in the panel the lap's length in tiles, a
+   rough round trip in game minutes (the first timing estimate below, the turns, and a dwell at every call) and how
+   many times it turns round (hover for where). When it cannot be driven the panel says which stop pair failed and why,
+   with a fix, and the map shows it: the failing leg as a straight red line between the two stops, the land a road
+   would join them over in red squares, a free tile to move a stop to in a green ring. Save is greyed out until it is
+   fixed. A depot that cannot reach the line is a warning in amber (the line saves; its status says *no road from the
+   bus depot to the line* until it can). The server refuses a line it cannot drive with the same message and fix. While
+   the panel is open each line is drawn as a ribbon in its colour on the lane the buses use, with rings at its stops;
+   the list shows status (running, no depot, no road from the depot, no drivers on shift, outside service hours), buses
+   in service, riders and fares today, and each stop's boardings.
 
 On the wire, every client gets a `lines` message with every line (routes included) when one changes, and between
 those a light `lineStats` message: which line each bus on the road runs (for its livery) as soon as that changes,
@@ -34,18 +45,50 @@ place with no lines). Buses and riders are not saved: buses leave the depot agai
 ## The lap
 
 A line's **calls** are its stops in visiting order: a loop calls S0 … Sn-1; there and back calls S0 … Sn-1 … S1 (the
-middle stops twice, once per direction). The **lap** is the road path through every call and back to the first, joined
-from A\* segments (`findRoute` with the live congestion costs) between the road tiles of consecutive calls. Lanes have
-no U-turns, so a segment never leaves a stop by the tile it arrived from: at the end of a there-and-back line the bus
-goes round a block to turn. Where no such way exists the line is refused ("a bus cannot turn round at …"). Every 100
-ticks lines are checked against the map; a lap whose roads or stops are gone is re-routed or suspended, and its waiting
-riders walk on.
+middle stops twice, once per direction). The **lap** is the road path through every call and back to the first
+(`sim/busroute.ts` `planLap`). Its legs are A\* searches over *(road tile, heading)*, not tiles alone, so a lap may run
+back over the same road the other way, and the bus never reverses except where it can **turn round**. In order of
+preference, by what each costs a route in tiles of driving (`TURN_COST`):
+
+1. **driving on**: round a block, or round a roundabout (forward moves only, the ring's own step rules), at the cost of
+   the tiles;
+2. **at a dead end** (14): a road tile with one neighbour, the turning head of a cul-de-sac or the end of a stub;
+3. **in a junction mouth** (22): a plain junction of three or four roads, no ring, flyover, bridge or level crossing;
+4. **via the depot** (60): in at the line's depot door and out again, where the depot is beside the road.
+
+So a loop round a block up to about 14-22 tiles longer beats a three-point turn, and the depot is the last resort.
+For each heading the bus could arrive at the first call in, the planner searches from every call and arrival heading
+to the next call (each search going on past its first arrival for the other headings), picks the cheapest way round
+over them, and requires the lap to arrive back at the first call in the heading it left in, so lap after lap joins up.
+Laps use fixed costs (a tile 1, a junction 1.6, a level crossing 2.5), never the day's congestion, so a line routes
+the same way every time it is routed and the editor's preview is what gets saved.
+
+When a lap cannot be made the line is refused with the stop pair that failed (stop numbers as the panel shows them)
+and a fix: *no road joins A to B* (with the shortest strip of open land, or failing that any land, that a road would
+join the two streets over, within 40 tiles: "connect the roads: lay road over the 3 tiles marked, (81, 8) to (83, 8)"),
+*a stop has no road beside it* or *faces a junction* (with the nearest free tile of yours within 4 beside a plain
+stretch of road: "move the stop to (225, 4)"), *two stops are served from the same road tile*, *too far by road* (the
+search ran out), or *nowhere on the way to turn round*. Every 100 ticks lines are checked against the map
+(`BusService.lapValid`): a lap whose roads or stops are gone, or that turns round where it no longer can (a dead end
+extended into a through road, a junction made a roundabout), is re-routed or suspended, and its waiting riders walk on.
 
 ## Buses on the road
 
 A bus is an ordinary `Vehicle` (`VehicleKind.Bus` 15, `VehicleClass.Bus` 3, 0.6 tiles long: `VEHICLE_LEN[3]`) driven by
 the traffic model: lanes, following, the stop line and junction conflicts, signals, crossings and the body guard all
 apply as to cars, at 0.8 of car speed like a truck. Its path is the lap, kept a lap ahead and trimmed behind as it runs.
+
+- **Turning round.** Where the lap goes back to the tile it came from, the traffic model drives a **three-point turn**
+  inside the turning tile (`sim/traffic.ts` `KTURN`): forward and left from its lane across to the far kerb, back a
+  little while still turning, forward and left again into the other lane and out the way it came, at half the speed of
+  a turn at a junction (about 8 ticks). It has the whole box to itself: every other movement through that tile waits
+  for it, and it waits for them. While it backs up the agent stream sets bit 15 of its flags (`citizenReversing`) and
+  the client draws it facing against its motion. Via the depot, the bus drives into the depot door and straight out.
+  A bus never comes into a lane already past its stop line before a junction (its 0.6-tile body would poke into the
+  box, in the way of a bus turning round there).
+- **Finding its way.** A bus leaving the depot for its first call, re-joining its lap after the line changed or when
+  stuck, and heading home at the end of service uses the same router with the live congestion costs, arriving at the
+  call in the lap's own heading.
 
 - **Pulling in.** `Mover.halt` is the path node of the next call's road tile; `Traffic.step` never lets the bus's centre
   past just beyond that tile's centre, so it stops inside the tile, in its lane, clear of both neighbours (a stop never
@@ -110,6 +153,17 @@ as rail does) and its stop kinds in `STOP_KINDS`; the planner then offers its li
 hand riders over with `Transit.serveCall(vehicleId, lineId, call, room)`.
 
 ## Measurements
+
+`npx tsx packages/server/src/loadtest/busroutes.ts [--hours 10]` builds small networks where a bus has to turn round (a
+street with dead ends at both ends and no junction at all; a ring with a one-tile and a two-tile stub; a comb of dead-end
+streets, the onboarding bot's layout, with two stops next to each other on one tooth; a street with a roundabout at one
+end), saves nine lines over them, and drives two buses per line under the real traffic model with every stop served.
+It asserts the laps are continuous and turn only where they may, the editor's preview has no problem, every bus runs
+at least two whole laps and none is withdrawn, and (`--hours 23`) every bus is back in the depot after service; and that
+a line between two unjoined streets and one with a stop facing a junction are refused with a fix and tiles to mark.
+On 2026-10-17: all nine lines run (3 to 36 laps per bus in 23 hours), 706 calls, none withdrawn, all 18 buses home,
+about 0.14 ms a tick for the 18 buses. The three lines the onboarding bot could not save on its comb of dead ends
+(docs/early-game-audit.md) save in a copy of its world, and its "First bus line" goal completes.
 
 `ab.ts --set bus=N` lays a depot and twelve stops on two lines over the Commons (a six-stop loop round the inner ring of
 streets, a six-stop there-and-back line down the middle street within a short walk of it at three places) with N buses

@@ -111,6 +111,43 @@ export interface LineInfo extends TransitLine {
   /** per stop (same order as stops): boardings today */
   stopBoardings: number[];
 }
+/**
+ * Why a line cannot run as drawn, or a warning about it (LinePreview.problem, and the text of a refused save): what is
+ * wrong, which stops, how to fix it, and what to mark on the map.
+ */
+export interface LineProblem {
+  message: string;
+  fix?: string;
+  /** stop indexes of the leg that failed (from → to), or the one stop at fault */
+  from?: number; to?: number; stop?: number;
+  /** the failing leg drawn straight, flat [x0, y0, x1, y1] tile coords (stop to stop, or depot to stop) */
+  leg?: number[];
+  /** tiles to mark in red: the land a road would join the streets over, a stop to move, flat [x, y, …] */
+  tiles: number[];
+  /** a tile to suggest instead (a free tile beside a plain stretch of road for a stop), flat [x, y] */
+  suggest?: number[];
+  /** true: the line cannot be saved; false: a warning (it saves, but buses will not run until it is fixed) */
+  fatal: boolean;
+}
+/** A draft line routed by the server before it is saved (the 'linePreview' message, docs/transit.md "Building a network"). */
+export interface LinePreview {
+  /** the client's draft counter this answers */
+  seq: number;
+  ok: boolean;
+  /** the lap, as far as it could be routed: flat [x0, y0, …] tiles (closed, back to node 0, when ok) */
+  path: number[];
+  /** stop index per call, and the path node of each call routed */
+  calls: number[];
+  callNodes: number[];
+  /** where the bus turns round: flat [x, y, kind], kind 0 at a dead end, 1 in a junction mouth, 2 via the depot */
+  turns: number[];
+  /** tiles driven in one lap, and a rough round trip in ticks (driving, turning round, a dwell at each call) */
+  length: number;
+  lapTicks: number;
+  problem?: LineProblem;
+}
+/** LineProblem as one line of text: the message, then the fix. */
+export const problemText = (p: LineProblem) => (p.fix ? `${p.message}: ${p.fix.charAt(0).toLowerCase()}${p.fix.slice(1)}` : p.message);
 /** The parts of a LineInfo that change as the vehicles run (the 'lineStats' message). */
 export type LineStats = Pick<LineInfo, 'id' | 'status' | 'inService' | 'ridersToday' | 'ridersYesterday' | 'faresToday' | 'stopBoardings'>;
 /** A stop's tooltip section (BuildingInfo.transit). */

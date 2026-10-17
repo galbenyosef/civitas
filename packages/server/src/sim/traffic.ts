@@ -93,16 +93,67 @@ const XING_SHORT = 0.5 - STOP_MARGIN - 0.105 - 0.02;
 const HALT_AT = 0.04;
 
 /**
+ * Turning round inside one tile (a bus at the end of its line, sim/busroute.ts): a three-point turn in the lane's
+ * frame, u along the way in from the tile's entry edge, w to the left of it. Forward and left from the right-hand lane
+ * across to the far kerb, back a little while still turning, then forward and left again into the other lane and out
+ * by the edge it came in at. Sampled once by arc length; `rev0`..`rev1` is the stretch driven backwards.
+ */
+const KTURN = (() => {
+  const o = LANE_OFFSET, u: number[] = [], w: number[] = [], rev: boolean[] = [];
+  const u0 = 0.25, R1 = 0.3, R2 = 0.25, f1 = (100 * Math.PI) / 180, f2 = (140 * Math.PI) / 180, N = 24;
+  const add = (a: number, b: number, back: boolean) => { u.push(a); w.push(b); rev.push(back); };
+  for (let i = 0; i <= N; i++) add((u0 * i) / N, -o, false);
+  for (let i = 1; i <= N; i++) { const f = (f1 * i) / N; add(u0 + R1 * Math.sin(f), -o + R1 * (1 - Math.cos(f)), false); }
+  const u1 = u[u.length - 1], w1 = w[w.length - 1];
+  for (let i = 1; i <= N; i++) { const f = f1 + ((f2 - f1) * i) / N; add(u1 + R2 * (Math.sin(f1) - Math.sin(f)), w1 + R2 * (Math.cos(f) - Math.cos(f1)), true); }
+  const u2 = u[u.length - 1], w2 = w[w.length - 1], R3 = (o - w2) / (1 + Math.cos(f2));
+  for (let i = 1; i <= N; i++) { const f = f2 + ((Math.PI - f2) * i) / N; add(u2 + R3 * (Math.sin(f) - Math.sin(f2)), w2 + R3 * (Math.cos(f2) - Math.cos(f)), false); }
+  const u3 = u[u.length - 1];
+  for (let i = 1; i <= N; i++) add(u3 * (1 - i / N), o, false);
+  const s = [0];
+  for (let i = 1; i < u.length; i++) s.push(s[i - 1] + Math.hypot(u[i] - u[i - 1], w[i] - w[i - 1]));
+  const len = s[s.length - 1];
+  for (let i = 0; i < s.length; i++) s[i] /= len;
+  const rev0 = s[rev.indexOf(true) - 1], rev1 = s[rev.lastIndexOf(true)];
+  return { u, w, s, len, rev0, rev1 };
+})();
+/** Speed factor through a three-point turn (on top of the junction turn factor): the time it takes to turn round. */
+const UTURN_SLOW = 0.5;
+/** A turn round at s (0..1): the lane's three-point turn, or a plain U for another offset (o: right of the way in). */
+function uturnPoint(s: number, o: number, out: [number, number]): [number, number] {
+  if (o !== LANE_OFFSET) {
+    const L = 1 + Math.PI * o, d = s * L; // in to the middle, half round it, back out
+    if (d < 0.5) { out[0] = d; out[1] = -o; } else if (d > L - 0.5) { out[0] = L - d; out[1] = o; } else { const a = ((d - 0.5) / (Math.PI * o)) * Math.PI; out[0] = 0.5 + o * Math.sin(a); out[1] = -o * Math.cos(a); }
+    return out;
+  }
+  const S = KTURN.s;
+  let lo = 0, hi = S.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (S[m] <= s) lo = m; else hi = m; }
+  const t = S[hi] > S[lo] ? Math.min(1, Math.max(0, (s - S[lo]) / (S[hi] - S[lo]))) : 0;
+  out[0] = KTURN.u[lo] + (KTURN.u[hi] - KTURN.u[lo]) * t;
+  out[1] = KTURN.w[lo] + (KTURN.w[hi] - KTURN.w[lo]) * t;
+  return out;
+}
+
+/**
  * Point `s` (0..1) along the path a mover takes through tile (tx,ty) when it
  * arrives heading `inD` and leaves heading `outD`, keeping `o` to the right of
  * the centreline. Straight across, or a quarter arc: tight around the near
- * corner for a right turn, wide around the far corner for a left turn.
+ * corner for a right turn, wide around the far corner for a left turn; back
+ * out the way it came, a three-point turn (uturnPoint).
  */
 export function pathPoint(tx: number, ty: number, inD: number, outD: number, s: number, o: number, out: [number, number]): [number, number] {
   const cx = tx + 0.5, cy = ty + 0.5;
   const ix = DIRS[inD][0], iy = DIRS[inD][1];
   const rx = -iy, ry = ix; // right of the incoming direction
-  if (outD === inD || outD === OPP[inD]) {
+  if (outD === OPP[inD]) {
+    uturnPoint(s, o, out);
+    const u = out[0], w = out[1]; // w is to the left: -right
+    out[0] = cx - 0.5 * ix + u * ix - w * rx;
+    out[1] = cy - 0.5 * iy + u * iy - w * ry;
+    return out;
+  }
+  if (outD === inD) {
     out[0] = cx - 0.5 * ix + o * rx + ix * s;
     out[1] = cy - 0.5 * iy + o * ry + iy * s;
     return out;
@@ -135,7 +186,8 @@ const CONFLICT: boolean[] = new Array(256).fill(false);
   };
   for (let i1 = 0; i1 < 4; i1++) for (let o1 = 0; o1 < 4; o1++) for (let i2 = 0; i2 < 4; i2++) for (let o2 = 0; o2 < 4; o2++) {
     const idx = ((i1 * 4 + o1) * 4 + i2) * 4 + o2;
-    if (o1 === OPP[i1] || o2 === OPP[i2]) continue;
+    // a vehicle turning round sweeps the whole box: it shares it with nobody but one following it round
+    if (o1 === OPP[i1] || o2 === OPP[i2]) { CONFLICT[idx] = !(i1 === i2 && o1 === o2); continue; }
     if (i1 === i2) { CONFLICT[idx] = o1 !== o2; continue; }
     const p1 = samples(i1, o1), p2 = samples(i2, o2);
     let hit = false;
@@ -153,13 +205,13 @@ const CONFLICT_LAST = new Float32Array(256).fill(-1);
 /** Clearance between centrelines (beyond a car's width) that still counts as in the way, for the rest of a path. */
 const CONFLICT_LAST_MARGIN = Number(env('CONFLICT_LAST_MARGIN') ?? 0.04);
 /** Path length per unit of s for a movement (straight 1, right-turn arc shorter, left-turn arc longer). */
-const ARC = (inD: number, outD: number) => (outD === inD || outD === OPP[inD] ? 1 : outD === RIGHT[inD] ? (Math.PI / 2) * (0.5 - LANE_OFFSET) : (Math.PI / 2) * (0.5 + LANE_OFFSET));
+const ARC = (inD: number, outD: number) => (outD === inD ? 1 : outD === OPP[inD] ? KTURN.len : outD === RIGHT[inD] ? (Math.PI / 2) * (0.5 - LANE_OFFSET) : (Math.PI / 2) * (0.5 + LANE_OFFSET));
 (() => {
   const a: [number, number] = [0, 0], b: [number, number] = [0, 0];
   const thr = (VEHICLE_WIDTH + CONFLICT_LAST_MARGIN) ** 2;
   for (let i1 = 0; i1 < 4; i1++) for (let o1 = 0; o1 < 4; o1++) for (let i2 = 0; i2 < 4; i2++) for (let o2 = 0; o2 < 4; o2++) {
-    if (o1 === OPP[i1] || o2 === OPP[i2]) continue;
     const idx = ((i1 * 4 + o1) * 4 + i2) * 4 + o2;
+    if (o1 === OPP[i1] || o2 === OPP[i2]) { CONFLICT_LAST[idx] = 1; continue; } // turning round: in the way until out of the box
     let last = -1;
     for (let s2 = 0; s2 <= 1.0001; s2 += 0.02) {
       pathPoint(0, 0, i2, o2, s2, LANE_OFFSET, b);
@@ -829,6 +881,15 @@ export class Traffic {
     out[0] = h[0]; out[1] = h[1];
     return true;
   }
+  /** Is the mover in the backing-up part of a three-point turn (the client draws it facing against its motion)? */
+  reversing(m: Mover): boolean {
+    if (m.lane < 0 || m.pi < 1 || m.pi * 2 + 1 >= m.path.length) return false;
+    const d = m.lane % 4;
+    const back = m.prog >= 0.5 ? this.nextDirOf(m) === OPP[d] : m.inDir === OPP[d];
+    if (!back) return false;
+    const s = m.prog >= 0.5 ? m.prog - 0.5 : m.prog + 0.5;
+    return s >= KTURN.rev0 && s <= KTURN.rev1;
+  }
   /** Unit heading of a car on the road from its lane geometry (body-overlap checks); false when it is not on a lane. */
   headingOf(m: Mover, out: [number, number]): boolean {
     if (m.lane < 0 || m.pi < 1 || m.pi * 2 + 1 >= m.path.length) return false;
@@ -1020,6 +1081,8 @@ export class Traffic {
     // turns slow a car for each half; on a roundabout the ring's wide corners not at all, the turns on and off less
     if (nextDir !== dir && m.prog > 0.3) base *= this.turnSlow(bx, by);
     if (m.inDir !== dir && m.prog < 0.3) base *= this.turnSlow(ax, ay);
+    // turning round (a bus at the end of its line): a three-point turn takes a while
+    if ((nextDir === OPP[dir] && m.prog > 0.4) || (m.inDir === OPP[dir] && m.prog < 0.5)) base *= UTURN_SLOW;
 
     // follow the car ahead: in this lane, or the tail of the next lane on my route
     const q = this.cells.get(m.lane)!;
@@ -1076,6 +1139,9 @@ export class Traffic {
         q.splice(idx, 1); if (q.length === 0) this.cells.delete(m.lane);
         this.push(Traffic.laneKey(bx, by, nextDir), m);
         m.inDir = dir; m.pi++; m.prog = Math.min(over, 0.3); m.committed = false;
+        // a bus never comes into a lane already past its stop line before a junction: its nose would be in the box,
+        // in the way of whatever turns there (a bus turning round sweeps the whole box: sim/busroute.ts)
+        if (m.cls === VehicleClass.Bus && m.pi * 2 + 1 < m.path.length && this.degreeOf(m.path[m.pi * 2], m.path[m.pi * 2 + 1]) >= 3) m.prog = Math.min(m.prog, Math.max(0, this.stopLine(m)));
         noteTrail(m, bx, by);
         if (this.degreeOf(bx, by) >= 3) this.cnt.junctionEntries++;
         if (TT.stuckClock) m.stuck = 0; // the stuck clock counts time since the car last reached a new tile

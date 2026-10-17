@@ -2708,7 +2708,7 @@ export class Simulation {
   }
 
   /** Everyone who should be drawn: travelling citizens and vehicles on the road. */
-  *agents(): Iterable<{ id: number; x: number; y: number; state: number; mode: number; kind: number; cls: number; queued: boolean; emergency: boolean; stage: number; bag?: boolean }> {
+  *agents(): Iterable<{ id: number; x: number; y: number; state: number; mode: number; kind: number; cls: number; queued: boolean; emergency: boolean; stage: number; bag?: boolean; rev?: boolean }> {
     for (const c of this.w.citizens.values()) {
       if (c.state === S.Home || c.state === S.Work) continue;
       if (c.leg?.lift) continue; // in someone's car, or waiting for it to set off (sim/carpool.ts): not drawn
@@ -2724,7 +2724,7 @@ export class Simulation {
     }
     for (const v of this.w.vehicles.values()) {
       if (v.phase === 'dwell' || v.lane < 0) continue;
-      yield { id: v.id, x: v.x, y: v.y, state: v.phase === 'back' ? S.ToHome : S.ToWork, mode: 1, kind: v.vkind, cls: v.cls, queued: v.wait > 1, emergency: v.priority, stage: 0 };
+      yield { id: v.id, x: v.x, y: v.y, state: v.phase === 'back' ? S.ToHome : S.ToWork, mode: 1, kind: v.vkind, cls: v.cls, queued: v.wait > 1, emergency: v.priority, stage: 0, rev: v.cls === VehicleClass.Bus && this.traffic.reversing(v) };
     }
   }
 

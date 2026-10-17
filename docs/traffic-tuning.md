@@ -467,6 +467,20 @@ up to 5 buses and 256 cars on the road. Car–pedestrian contacts were 0.11 and 
 of the second (`probe-obb-bus.mjs`) found none involving a bus and none involving anyone waiting at a stop. That city
 had become very congested (68–81% of vehicles queued).
 
+### Turning round (2026-10-17)
+
+Bus laps may now turn round (docs/transit.md "The lap"): a three-point turn that has the whole box to itself, and a bus
+held at its stop line before a junction instead of overshooting it on entering the lane. The first scenario run
+(`loadtest/busroutes.ts`) gridlocked a stub with a turn at each end: a bus coming out of its three-point turn in a
+junction mouth was held by the body guard against a bus waiting in the side road whose nose was 0.13 into the box
+(a 0.6-tile bus enters a lane up to 0.3 in, past its 0.17 stop line), and that one waited for the box. With the cap,
+no bus is withdrawn there. A/B on the Commons, `ab.ts --hour 8 --ticks 600 --set bus=4`, six seeds, HEAD against HEAD
+with only this change: with `busTiles=1` (no lines) the runs are identical, so nothing else moves; with buses, speed
+32.3% against 30.9% (paired −1.4 ± 0.8 points, 4 of 6 seeds lower), give-ups 80.5 against 84.7, buses withdrawn 18
+against 15, tick time the same within noise. No bus turns round in that run: the there-and-back line now turns at its
+south end round a 2×2 square of road (4 tiles) rather than a block (planned with fixed costs, it is 6 tiles shorter),
+so the buses meet the morning jam in different places.
+
 ## Roundabouts and flyovers
 
 Two junction types beyond give-way and lights (2026-10-17; design in docs/structures.md section 4, code in

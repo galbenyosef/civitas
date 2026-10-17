@@ -438,7 +438,9 @@ signals and Public transport bought. Minutes at normal speed after joining.
   the run-to-run noise).
 - F's bus line was never saved: on the bot's comb of dead-end streets every pair of stops gets "No way for a bus … without
   turning round in the road". The goal's own check (a line of yours with two or more stops) was verified offline instead
-  (`scratchpad/onboarding/unit.mts`: completes once, pays $400, the chain then ends).
+  (`scratchpad/onboarding/unit.mts`: completes once, pays $400, the chain then ends). Since fixed (2026-10-17, docs/transit.md "The lap"):
+  buses turn round at dead ends and in junction mouths, and in a copy of F's world the three lines it tried save and the
+  goal completes.
 - Hints heard over 15 days: B builders 1, jam 9, newcomers 8; F jam 10, newcomers 9 (the bot never presses "got it"; tips
   now repeat every three days rather than daily, so newcomers would come about 5 times).
 
