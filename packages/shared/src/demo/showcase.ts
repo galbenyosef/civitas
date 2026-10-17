@@ -319,7 +319,7 @@ const techLine = (feature: string) => {
 const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
   runway: {
     title: 'Runway',
-    what: 'Six rows of runway, shoulders and taxiway behind an airport terminal. A finished terminal with an intact strip is an airport: planes fly a timetable worked out from the tiles alone, and every landing pays the owner a fee (turboprop $24, narrow-body $40, business jet $16).',
+    what: 'Six rows of runway, shoulders and taxiway behind an airport terminal. A finished terminal with an intact strip is an airport: planes fly a timetable worked out from the tiles alone, and every landing pays the owner a fee by type (business jet $16, turboprop $24, regional jet $32, narrow-body $40; on runways of 16 tiles or more a wide-body $72, and from 20 tiles a jumbo $90).',
     how: `Pick Runway (U) and drag a straight line of ${RUNWAY_MIN} to ${RUNWAY_MAX} tiles, ${TERMINAL_ROW} rows behind the terminal's back row, along its whole width (a line up to 3 rows off snaps on). 16 tiles or more gives a flight an hour. Bulldozing any strip tile grounds the airport until it is repainted.`,
     facts: [['Tool', 'Runway (U), drag'], ['Footprint', '6 rows wide, 10-32 long'], ['Needs', 'a terminal in front, own dry land, no roads'], ['Technology', techLine('runway')], ['Cost', `${money(RUNWAY_COST)} a strip tile (${money(RUNWAY_COST * 6)} per tile of length)`]],
   },
