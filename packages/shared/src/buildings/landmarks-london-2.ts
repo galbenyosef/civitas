@@ -143,7 +143,7 @@ const palaceOfWestminster = (): Op[] => {
   ops.push(['box', 0.74, 1.84, 0.74, VX, 0.76, VZ, LIME, 'civic', { name: 'victoria', facade: { storeys: 5, bays: 3, sideBays: 3, margin: 0.1, top: 0.1 } }]);
   ops.push(...[-0.31, 0.31].map((dx): Op => ['box', 0.035, 1.84, 0.02, VX + dx, 0.76, VZ + 0.375, LIME_DK]));
   ops.push(['box', 0.78, 0.06, 0.78, VX, 2.6, VZ, LIME_DK]);
-  ops.push(...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz]): Op => ['lathe', VX + sx * 0.33, 2.66, VZ + sz * 0.33, LIME, [0.07, 0, 0.07, 0.24, 0.08, 0.25, 0.075, 0.28, 0.02, 0.43, 0, 0.45], { seg: 8 }]));
+  ops.push(...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz]): Op => ['lathe', VX + sx * 0.33, 2.66, VZ + sz * 0.33, LIME, [0.055, 0, 0.055, 0.3, 0.065, 0.31, 0.06, 0.33, 0.012, 0.52, 0, 0.55], { seg: 8 }]));
   ops.push(...pinnacles(3, VX - 0.2, VX + 0.2, VZ + 0.35, 2.66, true, LIME_DK), ...pinnacles(3, VX - 0.2, VX + 0.2, VZ - 0.35, 2.66, true, LIME_DK));
   ops.push(...unionFlag(VX, 2.66, VZ, 0.36));
   // Elizabeth Tower at the north end of the river front, by Westminster Bridge
@@ -162,7 +162,7 @@ export const parliament: KindDef = {
   levels: [{
     capacity: 260, wage: 30, cost: 24000, upkeep: 120, work: 4200, parking: { surface: 0, underground: 40 },
     designs: [
-      { name: 'Gothic river front with the Victoria Tower, Westminster Hall and Elizabeth Tower', height: 3.06, ops: palaceOfWestminster() },
+      { name: 'Gothic river front with the Victoria Tower, Westminster Hall and Elizabeth Tower', height: 3.21, ops: palaceOfWestminster() },
     ],
   }],
 };
@@ -320,19 +320,19 @@ const ec = (k0: number, k1: number) => cells(EX0, EM, ECW, k0, k1);
 const palaceOps = (): Op[] => {
   const ops: Op[] = [slab(4, 4, 'gravel')];
   // the east front, and the rest of the quadrangle behind it (windows on the garden front and the sides)
-  ops.push(['box', 3.56, 0.72, 0.44, 0, 0.02, -0.08, PORTLAND, 'civic', { name: 'east', facade: { storeys: 3, bays: 21, sideBays: 2, margin: EM, top: 0.05 } }]);
+  ops.push(['box', 3.56, 0.72, 0.44, 0, 0.02, -0.08, PORTLAND, 'home', { name: 'east', facade: { storeys: 3, bays: 21, sideBays: 2, margin: EM, top: 0.05 } }]);
   ops.push(['box', 3.6, 0.05, 0.48, 0, 0.74, -0.08, PORTLAND_DK]);
-  ops.push(['box', 3.5, 0.74, 1.58, 0, 0.02, -1.11, PORTLAND_DK, 'civic', { name: 'quad', facade: { storeys: 3, bays: 17, sideBays: 8, margin: 0.06, top: 0.05 } }]);
+  ops.push(['box', 3.5, 0.74, 1.58, 0, 0.02, -1.11, PORTLAND_DK, 'home', { name: 'quad', facade: { storeys: 3, bays: 17, sideBays: 8, margin: 0.06, top: 0.05 } }]);
   ops.push(['box', 3.54, 0.04, 1.62, 0, 0.76, -1.11, PORTLAND], ['box', 2.4, 0.012, 0.9, 0, 0.8, -1.05, 0x8d9097], ['box', 2.0, 0.014, 0.6, 0, 0.8, -1.05, 'gravel']);
   // the end pavilions: a little higher, standing forward, windows on their fronts
   for (const [x0, x1] of [[-1.8, ec(0, 3)[1]], [ec(18, 21)[0], 1.8]]) {
     const w = x1 - x0, x = (x0 + x1) / 2;
-    ops.push(['box', w, 0.8, 0.485, x, 0.02, -0.0225, PORTLAND, 'civic', { facade: { storeys: 3, bays: 3, sideBays: 0, margin: 0.06, top: 0.1 } }]);
+    ops.push(['box', w, 0.8, 0.485, x, 0.02, -0.0225, PORTLAND, 'home', { facade: { storeys: 3, bays: 3, sideBays: 0, margin: 0.06, top: 0.1 } }]);
     ops.push(['box', w + 0.04, 0.05, 0.52, x, 0.82, -0.0225, PORTLAND_DK]);
   }
   // the centre: five bays standing forward under a pediment, columns in front and the balcony over the middle three
   const [c0, c1] = ec(8, 13);
-  ops.push(['box', c1 - c0, 0.8, 0.505, 0, 0.02, -0.0125, PORTLAND, 'civic', { name: 'centre', facade: { storeys: 3, bays: 5, sideBays: 0, top: 0.1, ground: 'plain' } }]);
+  ops.push(['box', c1 - c0, 0.8, 0.505, 0, 0.02, -0.0125, PORTLAND, 'home', { name: 'centre', facade: { storeys: 3, bays: 5, sideBays: 0, top: 0.1, ground: 'plain' } }]);
   ops.push(['balcony', 'centre', 'front', 1, 1, 3, 'charcoal', PORTLAND_DK]);
   ops.push(...repeat(3, (i): Op => ['box', 0.1, 0.16, 0.012, (i - 1) * ((c1 - c0) / 5), 0.02, 0.246, 0x3a3630]));
   ops.push(...repeat(6, (i): Op => ['cyl', 0.02, 0.022, 0.46, -0.36 + i * 0.144, 0.3, 0.3, PORTLAND, 8]));
@@ -356,10 +356,10 @@ const palaceOps = (): Op[] => {
   ops.push(['cyl', 0.55, 0.55, 0.012, 0, 0.02, MZ, 'lawn', 24], ['cyl', 0.5, 0.5, 0.016, 0, 0.02, MZ, 0xc8323a, 24], ['cyl', 0.44, 0.44, 0.02, 0, 0.02, MZ, 'lawn', 24]);
   ops.push(['cyl', 0.36, 0.38, 0.04, 0, 0.03, MZ, 0xf3f0ea, 20], ['cyl', 0.3, 0.32, 0.04, 0, 0.07, MZ, 0xf3f0ea, 20]);
   ops.push(['cyl', 0.07, 0.07, 0.03, -0.27, 0.11, MZ, 'pond', 10], ['cyl', 0.07, 0.07, 0.03, 0.27, 0.11, MZ, 'pond', 10]);
-  ops.push(['box', 0.24, 0.16, 0.24, 0, 0.11, MZ, 0xf3f0ea], ['taper', 0.16, 0.16, 0.08, 0.08, 0.36, 0, 0.27, MZ, 0xf6f3ee]);
+  ops.push(['box', 0.24, 0.16, 0.24, 0, 0.11, MZ, 0xf3f0ea], ['taper', 0.15, 0.15, 0.07, 0.07, 0.5, 0, 0.27, MZ, 0xf6f3ee]);
   ops.push(['box', 0.07, 0.07, 0.05, 0, 0.17, MZ + 0.14, 0xf6f3ee], ['box', 0.05, 0.05, 0.04, 0, 0.24, MZ + 0.14, 0xeae6de]);
-  ops.push(['cyl', 0.035, 0.028, 0.03, 0, 0.63, MZ, 'gold', 8], ['cone', 0.022, 0.09, 0, 0.66, MZ, 'gold', 8], ['cyl', 0.012, 0.012, 0.02, 0, 0.75, MZ, 'gold', 6]);
-  ops.push(['taper', 0.012, 0.03, 0.09, 0.012, 0.07, 0, 0.69, MZ - 0.01, 'gold']);
+  ops.push(['cyl', 0.04, 0.03, 0.04, 0, 0.77, MZ, 'gold', 8], ['cone', 0.028, 0.12, 0, 0.81, MZ, 'gold', 8], ['cyl', 0.014, 0.014, 0.025, 0, 0.93, MZ, 'gold', 6]);
+  ops.push(['taper', 0.014, 0.035, 0.12, 0.014, 0.09, 0, 0.84, MZ - 0.012, 'gold']);
   ops.push(...tree(-1.75, 1.75, 0.8), ...tree(1.75, 1.75, 0.8), ...tree(-1.75, 1.15, 0.7), ...tree(1.75, 1.15, 0.7));
   return ops;
 };
@@ -385,5 +385,96 @@ export const buckinghamPalace: KindDef = {
   }],
 };
 
+// ================================================================= 100 Tower Bridge
+
+/**
+ * Tower Bridge along z (the door at the +z end, on the bank road), one tile wide and four long: two Gothic towers on
+ * piers in the river, the high walkways between them, suspension chains down to the shore towers, the road deck. The
+ * two bascules of the central span are render/landmarks.ts's: they rise for ships on a schedule. `deckY` is the top of
+ * the road, `hinge` where each bascule turns (the towers' inner faces), `leaf` a bascule's length, `width` its width.
+ *
+ * Interim (docs/buildings.md "Landmarks"): roads may not cross water yet, so the bridge is a structure standing on its
+ * own tiles with a deck nobody drives; the London demo reclaims the river under it in place of the Tower Bridge
+ * causeway. When road bridges arrive it becomes a real crossing.
+ */
+export const TOWER_BRIDGE = { deckY: 0.25, hinge: 0.39, leaf: 0.39, width: 0.5, towerZ: 0.6 };
+const TBR = TOWER_BRIDGE;
+const TB_STONE = 0xd8d0bf, TB_BLUE = 0x86b2da, TB_SLATE = 0x4e5867;
+
+const towerBridgeOps = (): Op[] => {
+  const ops: Op[] = [['box', 0.96, 0.006, 3.96, 0, 0, 0, 0x2e74c9]];
+  const D = TBR.deckY;
+  // a sloping bar from (z0, y0) to (z1, y1) at x
+  const bar = (x: number, z0: number, y0: number, z1: number, y1: number, t: number, c: Color): Op => {
+    if (Math.abs(y1 - y0) < 0.04) return ['box', t, t, Math.abs(z1 - z0), x, Math.min(y0, y1), (z0 + z1) / 2, c];
+    const [zl, yl, zh, yh] = y0 < y1 ? [z0, y0, z1, y1] : [z1, y1, z0, y0];
+    return ['taper', t, t, t, t, yh - yl, x, yl, zl, c, { shift: [0, zh - zl] }];
+  };
+  for (const side of [-1, 1]) {
+    const Z = side * TBR.towerZ, zIn = side * TBR.hinge, zOut = side * (TBR.towerZ + 0.21);
+    // the pier in the river with rounded cutwaters, the two legs either side of the road, the arch over it
+    ops.push(['box', 0.5, D - 0.03, 0.48, 0, 0, Z, 0xb9b1a1], ...[-1, 1].map((sx): Op => ['cyl', 0.24, 0.24, D - 0.03, sx * 0.25, 0, Z, 0xb9b1a1, 10]));
+    ops.push(...[-1, 1].map((sx): Op => ['box', 0.22, 1.1, 0.42, sx * 0.37, D, Z, TB_STONE]));
+    ops.push(['box', 0.52, 0.42, 0.42, 0, 0.92, Z, TB_STONE], ['roof', 0.52, 0.12, 0.42, 0, 0.8, Z, TB_STONE]);
+    ops.push(...[-1, 1].flatMap((sx): Op[] => [0.5, 0.75, 1.0].map((y): Op => ['box', 0.05, 0.1, 0.43, sx * 0.37, y, Z, 0x3b3f47])));
+    // the upper stage with its windows, a cornice, four corner turrets with spirelets and the steep middle roof
+    ops.push(['box', 0.98, 0.3, 0.46, 0, 1.34, Z, TB_STONE, 'civic', { facade: { storeys: 2, bays: 3, sideBays: 2, margin: 0.12 } }]);
+    ops.push(['box', 1.0, 0.03, 0.48, 0, 1.64, Z, 0xc4bba8]);
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const x = sx * 0.43, z = Z + sz * 0.17;
+      ops.push(['box', 0.12, 1.54, 0.12, x, D, z, TB_STONE], ['taper', 0.12, 0.12, 0, 0, 0.24, x, D + 1.54, z, TB_SLATE], ['cyl', 0.005, 0.005, 0.05, x, D + 1.78, z, 'gold', 4]);
+    }
+    ops.push(['taper', 0.86, 0.4, 0.08, 0.06, 0.3, 0, 1.67, Z, TB_SLATE], ['cyl', 0.006, 0.008, 0.08, 0, 1.97, Z, 'gold', 4]);
+    // the road deck through the tower and over the side span to the bank, with its blue girders and white rails
+    const len = 2 - TBR.hinge, mid = side * (TBR.hinge + len / 2);
+    ops.push(['box', TBR.width, 0.03, len, 0, D - 0.03, mid, 0x3a3d44]);
+    ops.push(...[-1, 1].flatMap((sx): Op[] => [['box', 0.03, 0.07, len, sx * 0.265, D - 0.05, mid, TB_BLUE], ['box', 0.012, 0.012, len, sx * 0.265, D + 0.04, mid, 'white']]));
+    // the shore tower at the bank end: two small turrets the chains anchor to
+    ops.push(...[-1, 1].flatMap((sx): Op[] => [['box', 0.13, 0.36, 0.2, sx * 0.36, D, side * 1.88, TB_STONE], ['taper', 0.13, 0.2, 0, 0, 0.14, sx * 0.36, D + 0.36, side * 1.88, TB_SLATE]]));
+    // the suspension chains, blue and white, from the walkway level down to the shore towers, with their hangers
+    const chain: [number, number][] = [[zOut, 1.24], [side * 1.2, 0.68], [side * 1.5, 0.42], [side * 1.78, 0.36]];
+    for (const sx of [-1, 1]) {
+      for (let k = 0; k + 1 < chain.length; k++) ops.push(bar(sx * 0.3, chain[k][0], chain[k][1], chain[k + 1][0], chain[k + 1][1], 0.045, TB_BLUE));
+      for (const z of [1.02, 1.2, 1.38, 1.56]) {
+        const zz = side * z;
+        let y = chain[chain.length - 1][1];
+        for (let k = 0; k + 1 < chain.length; k++) {
+          const [za, ya] = chain[k], [zb, yb] = chain[k + 1];
+          if ((zz - za) * (zz - zb) <= 0) { y = ya + ((yb - ya) * (zz - za)) / (zb - za); break; }
+        }
+        ops.push(['box', 0.012, y - D, 0.012, sx * 0.3, D, zz, 'white']);
+      }
+    }
+  }
+  // the high-level walkways between the towers: blue lattice girders with white chords and posts
+  for (const sx of [-1, 1]) {
+    const x = sx * 0.3, len = 2 * (TBR.towerZ - 0.21);
+    ops.push(['box', 0.1, 0.16, len, x, 1.12, 0, TB_BLUE], ['box', 0.106, 0.02, len, x, 1.12, 0, 'white'], ['box', 0.106, 0.02, len, x, 1.26, 0, 'white']);
+    ops.push(...repeat(7, (i): Op => ['box', 0.106, 0.16, 0.014, x, 1.12, -len / 2 + (len * (i + 0.5)) / 7, 'white']));
+  }
+  return ops;
+};
+
+export const towerBridge: KindDef = {
+  id: 'tower-bridge', name: 'Tower Bridge', code: library.code, kindId: 100, family: 'leisure', tier: 10,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', ...landmark,
+  footprint: { w: 1, h: 4, door: [0, 3] },
+  blurb: 'The Victorian bascule bridge by the Tower: two Gothic towers joined by high walkways, blue suspension chains, and a road that lifts in two halves to let tall ships through. Visitors cross the walkways for the view.',
+  howTo: 'One tile wide and four long, across the river with its door on the bank road at one end; the bascules rise for passing ships a few times a day. For now it stands on its own tiles and carries no traffic. London landmark: unlock rule to be decided.',
+  tool: { id: 'towerbridge', key: '', label: 'Tower Bridge', color: '#86b2da' },
+  occupation: { ...library.occupation!, name: 'bridge master' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 70, ticket: 12, openHours: [9.5, 18], stay: [0.8, 1.5], leisureValue: 7, radius: 26,
+    dayAppeal: 1.3, eveningAppeal: 0.2, retireeAppeal: 1.4, childAppeal: 1.6, title: 'Tower Bridge',
+  },
+  lot: { wage: 16 },
+  levels: [{
+    capacity: 20, wage: 16, cost: 16000, upkeep: 70, work: 3200, parking: { surface: 0, underground: 0 },
+    designs: [
+      { name: 'two Gothic towers with high walkways and blue suspension chains over the river', height: 2.03, ops: towerBridgeOps() },
+    ],
+  }],
+};
+
 /** The second five, in kind-id order (landmarks-london.ts appends them to LONDON_LANDMARKS). */
-export const LONDON_LANDMARKS_B: KindDef[] = [parliament, londonEye, towerOfLondon, buckinghamPalace];
+export const LONDON_LANDMARKS_B: KindDef[] = [parliament, londonEye, towerOfLondon, buckinghamPalace, towerBridge];

@@ -341,7 +341,7 @@ const ROUTE_25 = [
 // over Westminster Bridge, then south past the South Western line (over its level crossings or round its east end) to Brixton
 const ROUTE_159 = [
   stop('stop-159-oxford-circus', 51.5140, -0.1410, 'S'), stop('stop-159-piccadilly', 51.5090, -0.1360, 'E'),
-  stop('stop-159-whitehall', 51.5030, -0.1310, 'W'), stop('stop-159-lambeth-north', 51.5010, -0.1120, 'S'),
+  stop('stop-159-whitehall', 51.5030, -0.1310, 'W'), stop('stop-159-lambeth-north', 51.5010, -0.0990, 'S'),
   stop('stop-159-kennington', 51.4879, -0.0990, 'E'), stop('stop-159-oval', 51.4760, -0.0990, 'E'),
   stop('stop-159-brixton', 51.4600, -0.1110, 'N'),
 ];
@@ -358,9 +358,9 @@ export const LONDON_SECTIONS: DemoSection[] = [
   },
   {
     id: 'london-landmarks', name: 'Landmarks',
-    blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square and the Royal Opera House, and the hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
+    blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Big Ben and the Houses of Parliament, the London Eye, Buckingham Palace, the Tower and Tower Bridge, and the hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
     placements: [
-      fit('new-scotland-yard', 'police-hq', 51.4990, -0.1350, 'N'),
+      fit('new-scotland-yard', 'police-hq', 51.5037, -0.1338, 'E'), // on the Embankment north of Westminster Bridge, as the real one is now
       fit('st-thomas', 'teaching-hospital', 51.4986, -0.1110, 'W'),
       fit('royal-london', 'general-hospital', 51.5130, -0.0590, 'N'),
       fit('lambeth-fire', 'fire-hq', 51.4900, -0.1150, 'W'),
@@ -370,12 +370,23 @@ export const LONDON_SECTIONS: DemoSection[] = [
       fit('british-library', 'central-library', 51.5300, -0.1350, 'S'),
       fit('royal-opera-house', 'royal-opera-house', 51.5160, -0.1222, 'S'),
       // London landmarks (buildings/landmarks-london.ts) where the real ones stand, nudged onto land the map's narrower
-      // City leaves: the Gherkin and the Walkie Talkie either side of a street between Liverpool Street and the river,
-      // the Shard across the river by London Bridge, One Canada Square at Canary Wharf
+      // City leaves: the Gherkin between Liverpool Street and the river, the Walkie Talkie in the City block west of the
+      // station beside the Barbican (the riverside block east of the Gherkin is the Tower of London's), the Shard across
+      // the river by London Bridge, One Canada Square at Canary Wharf
       fit('gherkin', 'gherkin', 51.5145, -0.0855, 'N'),
-      fit('walkie-talkie', 'walkie-talkie', 51.5124, -0.0726, 'N'),
+      fit('walkie-talkie', 'walkie-talkie', 51.5195, -0.0980, 'N'),
       fit('shard', 'shard', 51.5045, -0.0865, 'S'),
       fit('one-canada-square', 'one-canada-square', 51.5049, -0.0195, 'W'),
+      // the second five (buildings/landmarks-london-2.ts): Parliament on the river south of Westminster Bridge, Big Ben at
+      // the bridge end; the Eye across the river on the South Bank; the Palace at the end of the Mall past St James's
+      // Park; the Tower by the river in the City. Tower Bridge stands in place of its causeway east of the Tower: roads
+      // cannot cross water yet, so the seeder reclaims the river under it (server/src/demo/london.ts) and the traffic
+      // crosses at London Bridge, a block west
+      fit('parliament', 'parliament', 51.4962, -0.1338, 'N'),
+      fit('london-eye', 'london-eye', 51.5033, -0.1098, 'W'),
+      fit('buckingham-palace', 'buckingham-palace', 51.5014, -0.1419, 'E'),
+      fit('tower-of-london', 'tower-of-london', 51.5081, -0.0759, 'N'),
+      { id: 'tower-bridge', kind: 'tower-bridge', door: [5, 0], rot: 2 },
       fit('palladium', 'theatre', 51.5140, -0.1350, 'E'),
       fit('lyceum', 'theatre', 51.5110, -0.1200, 'N'),
       fit('donmar', 'studio-theatre', 51.5130, -0.1260, 'W'),
@@ -444,9 +455,9 @@ export const LONDON_SECTIONS: DemoSection[] = [
 /** Tour order: west to east along the river, then the rings round it. */
 export const LONDON_TOUR: string[] = [
   'welcome',
-  'area-westminster', 'new-scotland-yard', 'st-thomas', 'lambeth-fire',
+  'area-westminster', 'parliament', 'london-eye', 'buckingham-palace', 'new-scotland-yard', 'st-thomas', 'lambeth-fire',
   'area-west-end', 'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'leicester-square', 'line-bus-25', 'line-bus-159',
-  'area-city', 'gherkin', 'walkie-talkie', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
+  'area-city', 'gherkin', 'walkie-talkie', 'tower-of-london', 'tower-bridge', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
   'area-south-bank', 'shard', 'waterloo', 'line-south-western', 'clapham-junction', 'area-clapham', 'victoria-garage', 'stockwell-garage', 'area-brixton',
   'area-canary-wharf', 'one-canada-square', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'maritime-museum', 'o2-arena',
   'area-royal-docks', 'area-thames-gateway', 'dagenham-yard', 'track-freight', 'barking-yard', 'line-freight',

@@ -817,7 +817,7 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); trains.scanChunk(key, c); junctions.scanChunk(key, c); landmarks.scanChunk(key, c); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); trains.scanChunk(key, c); junctions.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (world.parcelsDirty) { parcelsView.rebuild(world.parcels.values(), world.players, world.me, selectedParcel); world.parcelsDirty = false; }
@@ -881,7 +881,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { world, rig, input, net, views, lighting, buildings, citizens, lights, liveTick, liveTickF, planes, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { world, rig, input, net, views, lighting, buildings, landmarks, citizens, lights, liveTick, liveTickF, planes, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

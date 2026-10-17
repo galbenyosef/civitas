@@ -68,6 +68,16 @@ Code:
   longitudes with a width at each point and the bridges, the docks, about 90 named places, the parks, the land kept
   clear (Heathrow and the railway corridors), the landmarks, stations, lines and tour.
 - `server/src/demo/london.ts` (`seedLondon`) paints it into the world in place of `seedCity`'s districts.
+- The Landmarks section places the London landmarks (docs/buildings.md "Landmarks") where the real ones stand, nudged
+  onto the nearest block the map's land allows: the Gherkin between Liverpool Street and the river and the Walkie Talkie
+  a few blocks north, the Shard south of it by London Bridge, One Canada Square at Canary Wharf and the Royal Opera House
+  in Covent Garden; the Houses of Parliament on the river south of Westminster Bridge with Big Ben at the bridge end, the
+  London Eye facing them across the river, Buckingham Palace at the end of the Mall past St James's Park, the Tower of
+  London on the river in the City and Tower Bridge beside it. `demo:check` fails a landmark that no city demo places.
+  Tall placements are framed from further out on the tour.
+- **Tower Bridge stands on the river.** It replaces the Tower Bridge causeway: `seedLondon` turns the tiles of any
+  placement that would be river or causeway into land for it (only Tower Bridge's do), so that crossing carries no
+  traffic until road bridges exist; London Bridge, a block west, does.
 
 How the map is made:
 

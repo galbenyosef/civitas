@@ -3,24 +3,25 @@ import {
   Matrix4, Vector3, Quaternion, Color, Object3D,
 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CHUNK_SIZE, KIND_ID, hash2, zoneOf, levelOf, kindIdOf, isRoad, isAnchorAux, auxOrientation, placedFromAnchor } from '@msimcity/shared';
-import { LONDON_EYE, BIG_BEN } from '@msimcity/shared/src/buildings/landmarks-london-2';
+import { CHUNK_SIZE, KIND_ID, Terrain, hash2, zoneOf, levelOf, kindIdOf, isRoad, terrainOf, isAnchorAux, auxOrientation, placedFromAnchor, FRONT } from '@msimcity/shared';
+import { LONDON_EYE, BIG_BEN, TOWER_BRIDGE } from '@msimcity/shared/src/buildings/landmarks-london-2';
 import type { ClientChunk } from '../world';
 import { nightUniform } from './materials';
 
 /**
  * The moving and lit parts of the London landmarks (shared/src/buildings/landmarks-london-2.ts), which a recipe cannot
- * hold: the London Eye's wheel and capsules turning, and Big Ben's four dials, lit at night, with hands at the game's
- * time. Each landmark standing in a loaded chunk gets a small group placed as chunkView places the structure (centred
+ * hold: the London Eye's wheel and capsules turning, Big Ben's four dials, lit at night, with hands at the game's
+ * time, and Tower Bridge's bascules rising for a passing sailing barge. Each landmark standing in a loaded chunk gets a small group placed as chunkView places the structure (centred
  * on its footprint, turned to its door); `frame` moves them from the game clock, so every client sees the same.
  *
  * Organic: each instance has its own hash. An Eye starts turning a little earlier or later than another, its wheel
  * stands at its own angle, and its rim lights take their own colour each night (mostly blue and white, now and then
- * something else); a dial switches on at its own darkness and burns at its own brightness.
+ * something else); a dial switches on at its own darkness and burns at its own brightness; each bridge lifts its own
+ * number of times a day, at its own hours.
  */
 
-const EYE = LONDON_EYE, BB = BIG_BEN;
-const EYE_KIND = KIND_ID['london-eye'], BIGBEN_KIND = KIND_ID['parliament'];
+const EYE = LONDON_EYE, BB = BIG_BEN, TB = TOWER_BRIDGE;
+const EYE_KIND = KIND_ID['london-eye'], BIGBEN_KIND = KIND_ID['parliament'], BRIDGE_KIND = KIND_ID['tower-bridge'];
 const TAU = Math.PI * 2;
 const UP = new Vector3(0, 1, 0);
 const tmpM = new Matrix4(), tmpQ = new Quaternion(), tmpP = new Vector3(), tmpS = new Vector3(1, 1, 1), tmpC = new Color();
@@ -158,27 +159,106 @@ function updateClock(c: ClockInst, t: number, night: number) {
   }
 }
 
+// ---------------------------------------------------------------- Tower Bridge
+
+/** One lift: the leaves rise over RAISE hours, stand open for HOLD while the barge passes, and come down over RAISE. */
+const RAISE = 0.1, HOLD = 0.3, LIFT = 2 * RAISE + HOLD;
+
+let leafGeo: { deck: BufferGeometry; girders: BufferGeometry; rails: BufferGeometry } | null = null;
+let bargeGeo: { hull: BufferGeometry; rig: BufferGeometry; sails: BufferGeometry } | null = null;
+/** A bascule leaf in its hinge's frame: reaching from the hinge towards -z, its road on top at y = 0. */
+function leafGeometry() {
+  if (leafGeo) return leafGeo;
+  const L = TB.leaf, W = TB.width;
+  leafGeo = {
+    deck: new BoxGeometry(W, 0.03, L).translate(0, -0.015, -L / 2),
+    girders: mergeGeometries([-1, 1].map((sx) => new BoxGeometry(0.03, 0.07, L).translate(sx * 0.265, -0.035, -L / 2).toNonIndexed()), false)!,
+    rails: mergeGeometries([-1, 1].map((sx) => new BoxGeometry(0.012, 0.012, L).translate(sx * 0.265, 0.046, -L / 2).toNonIndexed()), false)!,
+  };
+  return leafGeo;
+}
+/** A Thames sailing barge along +x: black hull, mast and sprit, red-brown sails. */
+function bargeGeometry() {
+  if (bargeGeo) return bargeGeo;
+  bargeGeo = {
+    hull: new BoxGeometry(0.5, 0.06, 0.13).translate(0, 0.03, 0),
+    rig: mergeGeometries([new CylinderGeometry(0.006, 0.008, 0.55, 4).translate(0.04, 0.33, 0).toNonIndexed(), new BoxGeometry(0.26, 0.05, 0.11).translate(-0.12, 0.085, 0).toNonIndexed()], false)!,
+    sails: mergeGeometries([new BoxGeometry(0.26, 0.4, 0.006).translate(-0.09, 0.33, 0.01).toNonIndexed(), new BoxGeometry(0.14, 0.2, 0.006).translate(0.15, 0.2, 0.01).toNonIndexed()], false)!,
+  };
+  return bargeGeo;
+}
+const deckMat = new MeshLambertMaterial({ color: 0x3a3d44 }), blueMat = new MeshLambertMaterial({ color: 0x86b2da }), whiteMat = new MeshLambertMaterial({ color: 0xf6f2ea });
+const hullMat = new MeshLambertMaterial({ color: 0x24262b }), rigMat = new MeshLambertMaterial({ color: 0x5a3d26 }), sailMat = new MeshLambertMaterial({ color: 0x9a4527 });
+
+interface BridgeInst { kind: 'bridge'; root: Group; leaves: Group[]; barge: Group; river: boolean; seed: number }
+
+function makeBridge(seed: number, river: boolean): BridgeInst {
+  const g = leafGeometry(), b = bargeGeometry();
+  const root = new Group(), leaves: Group[] = [];
+  for (const side of [1, -1]) {
+    const hinge = new Group();
+    hinge.position.set(0, TB.deckY, side * TB.hinge);
+    if (side < 0) hinge.rotation.y = Math.PI; // the -z leaf is the +z one turned round
+    for (const [geo, mat] of [[g.deck, deckMat], [g.girders, blueMat], [g.rails, whiteMat]] as const) { const m = new Mesh(geo, mat); m.castShadow = true; hinge.add(m); }
+    root.add(hinge);
+    leaves.push(hinge);
+  }
+  const barge = new Group();
+  for (const [geo, mat] of [[b.hull, hullMat], [b.rig, rigMat], [b.sails, sailMat]] as const) { const m = new Mesh(geo, mat); m.castShadow = true; barge.add(m); }
+  barge.visible = false;
+  root.add(barge);
+  return { kind: 'bridge', root, leaves, barge, river, seed };
+}
+
+/** The lift under way at game time t (hours since day 0): its start, or NaN. Each bridge lifts 0-3 times a day between 7 and 21. */
+function liftAt(seed: number, t: number): number {
+  const day = Math.floor(t / 24);
+  for (const d of [day, day - 1]) {
+    const n = Math.floor(hash2(seed + d * 13, 7) * 3.6);
+    for (let k = 0; k < n; k++) {
+      const start = d * 24 + 7 + 14 * hash2(seed + d * 31 + k * 5, 19);
+      if (t >= start && t < start + LIFT) return start;
+    }
+  }
+  return NaN;
+}
+
+function updateBridge(b: BridgeInst, t: number) {
+  const start = liftAt(b.seed, t), u = t - start;
+  const open = Number.isNaN(start) ? 0 : u < RAISE ? smooth(0, RAISE, u) : u < RAISE + HOLD ? 1 : 1 - smooth(RAISE + HOLD, LIFT, u);
+  const angle = open * (80 * Math.PI) / 180;
+  for (const l of b.leaves) l.rotation.x = angle;
+  // the barge comes down the river while the leaves rise and is through before they fall (only where there is a river)
+  b.barge.visible = b.river && !Number.isNaN(start);
+  if (b.barge.visible) {
+    const dir = hash2(b.seed + Math.floor(start * 10), 3) < 0.5 ? 1 : -1;
+    b.barge.position.set(dir * (-3 + (6 * u) / LIFT), 0.004, 0.05 * dir);
+    b.barge.rotation.y = dir > 0 ? 0 : Math.PI;
+  }
+}
+
 // ---------------------------------------------------------------- placement in the city
 
-type Inst = EyeInst | ClockInst;
-const make = (kind: number, seed: number): Inst[] =>
-  kind === EYE_KIND ? [makeEye(seed)] : kind === BIGBEN_KIND ? [makeClock(seed)] : [];
+type Inst = EyeInst | ClockInst | BridgeInst;
+const make = (kind: number, seed: number, river: boolean): Inst[] =>
+  kind === EYE_KIND ? [makeEye(seed)] : kind === BIGBEN_KIND ? [makeClock(seed)] : kind === BRIDGE_KIND ? [makeBridge(seed, river)] : [];
 function update(i: Inst, t: number, night: number) {
-  if (i.kind === 'eye') updateEye(i, t, night); else updateClock(i, t, night);
+  if (i.kind === 'eye') updateEye(i, t, night); else if (i.kind === 'clock') updateClock(i, t, night); else updateBridge(i, t);
 }
 
 /** The kinds with moving or lit parts. */
-const MOVING = new Set<number>([EYE_KIND, BIGBEN_KIND]);
+const MOVING = new Set<number>([EYE_KIND, BIGBEN_KIND, BRIDGE_KIND]);
 
 /**
- * Every landmark with moving parts in the loaded chunks. `scanChunk` after a chunk's tiles change, `dropChunk` when it
- * unloads, `frame` once a frame with the game time in hours since day 0.
+ * Every landmark with moving parts in the loaded chunks. `scanChunk` after a chunk's tiles change (`getTile` reads
+ * neighbours: a bridge shows its barge only with water either side), `dropChunk` when it unloads, `frame` once a frame
+ * with the game time in hours since day 0.
  */
 export class LandmarkMotion {
   group = new Group();
   private perChunk = new Map<string, { insts: Inst[]; roots: Object3D[] }>();
 
-  scanChunk(key: string, c: ClientChunk) {
+  scanChunk(key: string, c: ClientChunk, getTile: (x: number, y: number) => number | undefined) {
     this.dropChunk(key);
     const insts: Inst[] = [], roots: Object3D[] = [];
     const x0 = c.cx * CHUNK_SIZE, z0 = c.cy * CHUNK_SIZE;
@@ -194,7 +274,12 @@ export class LandmarkMotion {
       const root = new Group();
       root.position.set(p.ax + p.w / 2, 0, p.ay + p.h / 2);
       root.quaternion.setFromAxisAngle(UP, (p.r * Math.PI) / 2);
-      for (const inst of make(kind, x * 7919 + z * 104729)) { root.add(inst.root); insts.push(inst); }
+      // a river across a bridge: water beside the middle of its span on both sides
+      const [fx, fy] = FRONT[p.r], mx = Math.floor(p.ax + p.w / 2), my = Math.floor(p.ay + p.h / 2);
+      const wet = (dx: number, dy: number) => { const w = getTile(mx + dx, my + dy); return w !== undefined && terrainOf(w) === Terrain.Water; };
+      const px = -fy, py = fx, reach = Math.floor((px ? p.w : p.h) / 2) + 1;
+      const river = wet(px * reach, py * reach) && wet(-px * reach, -py * reach);
+      for (const inst of make(kind, x * 7919 + z * 104729, river)) { root.add(inst.root); insts.push(inst); }
       roots.push(root);
       this.group.add(root);
     }
@@ -205,11 +290,15 @@ export class LandmarkMotion {
     const c = this.perChunk.get(key);
     if (!c) return;
     for (const r of c.roots) this.group.remove(r);
-    for (const i of c.insts) if (i.kind === 'eye') { i.rimMat.dispose(); i.capMat.dispose(); i.caps.dispose(); } else for (const d of i.dials) d.mat.dispose();
+    for (const i of c.insts) if (i.kind === 'eye') { i.rimMat.dispose(); i.capMat.dispose(); i.caps.dispose(); } else if (i.kind === 'clock') for (const d of i.dials) d.mat.dispose();
     this.perChunk.delete(key);
   }
 
+  /** pins the game time the landmarks show (debugging and screenshots: `msc.landmarks.fixedHours = 31.2`); null follows the clock */
+  fixedHours: number | null = null;
+
   frame(hours: number) {
+    if (this.fixedHours !== null) hours = this.fixedHours;
     const night = nightUniform.value;
     for (const c of this.perChunk.values()) for (const i of c.insts) update(i, hours, night);
   }
@@ -218,7 +307,7 @@ export class LandmarkMotion {
 /** The moving parts of one landmark kind for the building viewer: its group (in the model's frame) and how to move it. */
 export function landmarkPreview(kind: number): { object: Object3D; update(hours: number, night: number): void } | null {
   if (!MOVING.has(kind)) return null;
-  const insts = make(kind, 12345);
+  const insts = make(kind, 12345, true);
   const object = new Group();
   for (const i of insts) object.add(i.root);
   return { object, update: (hours, night) => { for (const i of insts) update(i, hours, night); } };

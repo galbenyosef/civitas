@@ -223,6 +223,11 @@ changing behaviour in game time.
   and the technology it needs. Bigger rungs cover homes further and more strongly, send more patrols and ambulances,
   bring more and faster builders or hold bigger crowds; the larger ones open late in the Civic, Construction and
   Culture tracks.
+- *Landmarks* (`shared/src/buildings/landmarks-london.ts`, docs/buildings.md "Landmarks"). Real London buildings (the
+  Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, and five more to come), tagged
+  `london`, each working as an office tower or a venue. The tool bar's Landmarks section has one London button whose
+  picker lists them. Their tech node, London landmarks, is locked until its unlock rule is decided, so for now they are
+  placed only in sandboxes (test cities and demos, where the London demo has them in their real places).
 - *Buses* (`server/src/sim/transit.ts`, `docs/transit.md`). Public transport, a fifth transport tier, opens bus
   stops (a shelter beside a plain stretch of road), a 3×2 bus depot whose staff drive the buses (one bus out per
   driver on shift, 05:30–00:30) and the Lines panel. Buses are 0.6-tile vehicles in the ordinary traffic model: they

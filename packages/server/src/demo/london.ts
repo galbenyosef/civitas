@@ -13,7 +13,9 @@ import { World, emptyStats } from '../world';
  * seedCity district. Deterministic: hashes only, no randomness.
  *
  * Bridges are causeways: v1 has no bridge pieces and roads may not be built on water (docs/structures.md E4), so the
- * crossing's water tiles become grass with a road on them.
+ * crossing's water tiles become grass with a road on them. A landmark placed across the river (Tower Bridge, standing in
+ * place of its causeway until roads can cross water) keeps its footprint: those tiles become land for it to stand on,
+ * neither water nor causeway.
  *
  * Railway corridors are kept clear except where a grid road meets one at right angles with road on both sides: that
  * tile stays road, and the scenario's track drag crosses it as a level crossing (docs/rail.md "Level crossings"), so
@@ -238,8 +240,9 @@ export function seedLondon(w: World, ownerId: string, keep: DemoRect[]): LondonS
   const blockChar = new Map<number, Character>();
   for (let y = MY; y < MY + MH; y++) for (let x = MX; x < MX + MW; x++) {
     const i = idx(x, y);
-    if (causeway[i]) { w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0)); stats.causeways++; continue; }
-    if (water[i]) { w.setTile(x, y, packTile(Terrain.Water, false, 0, 0)); stats.water++; continue; }
+    const kept = keep.some((r) => inRect(r, x, y));
+    if (causeway[i] && !kept) { w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0)); stats.causeways++; continue; }
+    if (water[i] && !kept) { w.setTile(x, y, packTile(Terrain.Water, false, 0, 0)); stats.water++; continue; }
     if (crossing(x, y)) { w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0)); stats.crossings++; continue; }
     if (reserved(x, y)) { w.setTile(x, y, packTile(Terrain.Grass, false, 0, 0)); continue; }
     if (park[i] >= 0) {
