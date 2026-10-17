@@ -1,79 +1,31 @@
 import {
   DEFAULT_TAX, Terrain, Zone, KIND_ID, ALL_TECH_IDS, packTile, isRoad, levelOf, zoneOf, isGrowableId, familyOf, subFor, hash2, placedFromAnchor, planStructure, workOf,
   planBridge, BridgeStyle, type BridgeStyleId,
-  LONDON_MAP, THAMES, DOCKS, PLACES, PARKS, RESERVED, geoF, type Character, type DemoRect, type PlaceEnv,
+  LONDON_MAP, PARKS, PLACES, RESERVED, BOROUGHS, LT, geoF, lidx, inLondon, londonBase, londonScenario, placeAt, eachThamesTile, isDemoOwner,
+  type Character, type DemoRect, type PlaceEnv,
 } from '@msimcity/shared';
-import { World, emptyStats } from '../world';
+import { World, emptyStats, DEV_FUNDS } from '../world';
+import { settleInteriors, GARDEN_KIND } from '../sim/blocks';
 
 /**
- * The London demo's town (docs/demo.md "London", shared/src/demo/london.ts): paints the map into a fresh World in
- * place of seedCity's districts. The river and docks are water; the roads are the usual grid (every 5th row and
- * column) except on water, in parks and on reserved land, with a road bridge wherever a named crossing is; each
- * block is zoned by the character of the place nearest it, pre-built, with merged towers and works placed through
- * the shared placement rule where the character is dense; services and car parks sit on a regular grid as in every
- * seedCity district. Deterministic: hashes only, no randomness.
+ * The London demo's town (docs/demo.md "London", shared/src/demo/london.ts): paints the scenario's street plan
+ * (shared/src/demo/londonMap.ts londonPlan) into a fresh World in place of seedCity's districts. The river and docks
+ * are water, the roads and level crossings are the plan's, each named crossing is a road bridge in the style of the
+ * real one; each block of lots between the roads is zoned by the character of the place nearest it and pre-built,
+ * with merged towers and works placed through the shared placement rule where the character is dense and the lots
+ * behind the frontage settled as deep plots and communal gardens (sim/blocks.ts). Deterministic: hashes only.
  *
- * Bridges are real road bridges over the water (shared/src/bridges.ts), laid through planBridge as the road tool lays
- * them, each in the style of the real one (BRIDGE_STYLES): stone and iron arches, girders, the suspension bridges at
- * Hammersmith and Chelsea, and Tower Bridge as a bascule span, drawn as the landmark. A grid road that would meet a
- * deck from the side on a ragged bank stops short of it, as the tool requires.
- *
- * Railway corridors are kept clear except where a grid road meets one at right angles with road on both sides: that
- * tile stays road, and the scenario's track drag crosses it as a level crossing (docs/rail.md "Level crossings"), so
- * the line does not cut the districts either side of it apart.
+ * The land belongs to the boroughs: each London borough is a player (`sys:<borough>`, every technology, an endless
+ * treasury) whose parcels follow its real outline (BOROUGHS: polygons of real latitudes and longitudes, the river
+ * the boundary between banks), each parcel named after the place nearest it in the borough, so the parcel overlay
+ * reads as a map of the boroughs and the tooltips as one of the neighbourhoods. The lines belong to the town (`sys`).
  */
 
 const K = KIND_ID as Record<string, number>;
 const [MX, MY, MW, MH] = LONDON_MAP;
-const inMap = (x: number, y: number) => x >= MX && y >= MY && x < MX + MW && y < MY + MH;
-const idx = (x: number, y: number) => (y - MY) * MW + (x - MX);
+const N = MW * MH;
 const inRect = (r: DemoRect, x: number, y: number) => x >= r[0] && y >= r[1] && x < r[0] + r[2] && y < r[1] + r[3];
-const mod5 = (v: number) => ((v % 5) + 5) % 5;
-const isGridLine = (x: number, y: number) => mod5(x) === 0 || mod5(y) === 0;
-
-/** Catmull-Rom through the Thames points: a smooth centre line with a width at every vertex. */
-function thamesLine(): { x: number; y: number; w: number }[] {
-  const p = THAMES.map(([lat, lon, w]) => { const [x, y] = geoF(lat, lon); return { x, y, w }; });
-  const out: { x: number; y: number; w: number }[] = [];
-  const at = (i: number) => p[Math.max(0, Math.min(p.length - 1, i))];
-  for (let i = 0; i < p.length - 1; i++) {
-    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
-    const n = Math.max(2, Math.ceil(Math.hypot(p2.x - p1.x, p2.y - p1.y) / 1.5));
-    for (let s = 0; s < n; s++) {
-      const t = s / n, t2 = t * t, t3 = t2 * t;
-      const cr = (a: number, b: number, c: number, d: number) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
-      out.push({ x: cr(p0.x, p1.x, p2.x, p3.x), y: cr(p0.y, p1.y, p2.y, p3.y), w: p1.w + (p2.w - p1.w) * t });
-    }
-  }
-  out.push(p[p.length - 1]);
-  return out;
-}
-
-/** Every tile inside [x0, x1) × [y0, y1) whose centre is within half the Thames' width of its centre line. */
-function eachThamesTile(x0: number, y0: number, x1: number, y1: number, visit: (x: number, y: number) => void) {
-  const line = thamesLine();
-  for (let i = 0; i < line.length - 1; i++) {
-    const a = line[i], b = line[i + 1];
-    const r = Math.max(a.w, b.w) / 2 + 1;
-    const sx0 = Math.max(x0, Math.floor(Math.min(a.x, b.x) - r)), sx1 = Math.min(x1 - 1, Math.ceil(Math.max(a.x, b.x) + r));
-    const sy0 = Math.max(y0, Math.floor(Math.min(a.y, b.y) - r)), sy1 = Math.min(y1 - 1, Math.ceil(Math.max(a.y, b.y) + r));
-    const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy || 1;
-    for (let y = sy0; y <= sy1; y++) for (let x = sx0; x <= sx1; x++) {
-      const px = x + 0.5, py = y + 0.5;
-      const t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len2));
-      const d = Math.hypot(px - (a.x + dx * t), py - (a.y + dy * t));
-      if (d <= (a.w + (b.w - a.w) * t) / 2) visit(x, y);
-    }
-  }
-}
-
-/** Water over the map: the Thames and the docks. */
-export function londonWater(): Uint8Array {
-  const water = new Uint8Array(MW * MH);
-  eachThamesTile(MX, MY, MX + MW, MY + MH, (x, y) => { water[idx(x, y)] = 1; });
-  for (const d of DOCKS) { const r = d.rect; for (let y = r[1]; y < r[1] + r[3]; y++) for (let x = r[0]; x < r[0] + r[2]; x++) if (inMap(x, y)) water[idx(x, y)] = 1; }
-  return water;
-}
+const DIRS: readonly [number, number][] = [[0, 1], [1, 0], [0, -1], [-1, 0]];
 
 /**
  * The style of each named crossing, after the real bridge: arches for the stone and iron arch bridges, girders for the
@@ -85,78 +37,94 @@ const BRIDGE_STYLES: Record<string, BridgeStyleId> = {
   'Hammersmith Bridge': BridgeStyle.Suspension, 'Putney Bridge': BridgeStyle.Arch, 'Wandsworth Bridge': BridgeStyle.Girder,
   'Battersea Bridge': BridgeStyle.Arch, 'Chelsea Bridge': BridgeStyle.Suspension, 'Vauxhall Bridge': BridgeStyle.Arch,
   'Lambeth Bridge': BridgeStyle.Arch, 'Westminster Bridge': BridgeStyle.Arch, 'Waterloo Bridge': BridgeStyle.Girder,
-  'Blackfriars Bridge': BridgeStyle.Arch, 'London Bridge': BridgeStyle.Girder,
+  'Blackfriars Bridge': BridgeStyle.Arch, 'Southwark Bridge': BridgeStyle.Arch, 'London Bridge': BridgeStyle.Girder,
   'Tower Bridge': BridgeStyle.Bascule, 'Blackwall Tunnel': BridgeStyle.Girder, 'Woolwich Ferry': BridgeStyle.Suspension,
 };
 
+/** Is (px, py) inside the polygon (ray casting)? */
+function inPoly(pts: readonly [number, number][], px: number, py: number): boolean {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 /**
- * Bridges: for each named crossing, the shortest run of water along a grid line near it (a column or a row, within a
- * block of the crossing) that has land at both ends and no other bridge uses. Returns tile indexes, low end first,
- * and whether the run is a column (the deck runs north-south).
+ * BOROUGHS index per map tile: the first borough whose polygon holds the tile's middle on the borough's own bank; a
+ * tile none holds goes to the nearest borough over land on its bank, and the river to the nearer bank's borough, so
+ * the boundary between banks runs down the middle of the river as the real one does.
  */
-export function londonBridges(water: Uint8Array): { name: string; tiles: number[]; ns: boolean }[] {
-  const out: { name: string; tiles: number[]; ns: boolean }[] = [];
-  const wet = (x: number, y: number) => inMap(x, y) && water[idx(x, y)] === 1;
-  const used = new Set<string>();
-  for (const [lat, lon, w, name] of THAMES) {
-    if (!name) continue;
-    const [x, y] = geoF(lat, lon);
-    let best: number[] | null = null, bestKey = '', bestNS = false;
-    // candidate lines: the columns and rows within a block either side of the crossing
-    for (const vertical of [true, false]) for (const off of [-5, 0, 5, 10]) {
-      const line = Math.floor((vertical ? x : y) / 5) * 5 + off;
-      const key = `${vertical ? 'c' : 'r'}${line}`;
-      if (used.has(key) || Math.abs(line - (vertical ? x : y)) > 7) continue;
-      const along = vertical ? y : x;
-      // the water run on this line nearest the crossing
-      for (let d = 0; d <= 6; d++) for (const s0 of [Math.round(along) - d, Math.round(along) + d]) {
-        const tx = vertical ? line : s0, ty = vertical ? s0 : line;
-        if (!wet(tx, ty)) continue;
-        let a = s0, b = s0;
-        while (a - s0 > -20 && (vertical ? wet(line, a - 1) : wet(a - 1, line))) a--;
-        while (b - s0 < 20 && (vertical ? wet(line, b + 1) : wet(b + 1, line))) b++;
-        const landA = vertical ? inMap(line, a - 1) && !wet(line, a - 1) : inMap(a - 1, line) && !wet(a - 1, line);
-        const landB = vertical ? inMap(line, b + 1) && !wet(line, b + 1) : inMap(b + 1, line) && !wet(b + 1, line);
-        if (landA && landB && b - a + 2 >= w && (!best || b - a + 1 < best.length)) {
-          best = []; bestKey = key; bestNS = vertical;
-          for (let v = a; v <= b; v++) best.push(vertical ? idx(line, v) : idx(v, line));
-        }
-        d = 7; break;
+export function londonBoroughs(): Int16Array {
+  const { bank } = londonBase();
+  const out = new Int16Array(N).fill(-1);
+  const polys = BOROUGHS.flatMap((b, bi) => b.polys.map((poly) => ({ bi, bank: b.bank === 'N' ? 1 : 2, pts: poly.map(([lat, lon]) => geoF(lat, lon)) })));
+  const q: number[] = [];
+  for (let y = MY; y < MY + MH; y++) for (let x = MX; x < MX + MW; x++) {
+    const i = lidx(x, y);
+    if (!bank[i]) continue;
+    const p = polys.find((p) => p.bank === bank[i] && inPoly(p.pts, x + 0.5, y + 0.5));
+    if (p) { out[i] = p.bi; q.push(i); }
+  }
+  // the rest of the land from its neighbours on the same bank, then the water from both banks at once
+  for (const wet of [false, true]) {
+    if (wet) for (let i = 0; i < N; i++) if (out[i] >= 0) q.push(i);
+    for (let k = 0; k < q.length; k++) {
+      const i = q[k], x = MX + (i % MW), y = MY + Math.floor(i / MW);
+      for (const [dx, dy] of DIRS) {
+        if (!inLondon(x + dx, y + dy)) continue;
+        const j = lidx(x + dx, y + dy);
+        if (out[j] >= 0 || (wet ? bank[j] !== 0 : bank[j] !== bank[i])) continue;
+        out[j] = out[i];
+        q.push(j);
       }
     }
-    if (best) { out.push({ name, tiles: best, ns: bestNS }); used.add(bestKey); }
+    q.length = 0;
   }
   return out;
 }
 
 /**
- * Park index per tile (-1 for none): every block whose middle is inside a park's box, and the roads between two such
- * blocks, so the roads round a park's edge stay.
+ * Parcels are rectangles: the borough map on 4×4 cells, each its tiles' majority (2×2 cells where a 4×4 one holds
+ * land of both banks, so the river stays the boundary), cut into rectangles of at most 32 tiles a side. Coarse cells
+ * keep the count near the old 16×16 squares' (every parcel's stats go to every client when they change).
  */
-export function londonParks(): Int16Array {
-  const park = new Int16Array(MW * MH).fill(-1);
-  PARKS.forEach((p, n) => {
-    const [x0, y0] = geoF(p.box[0], p.box[1]), [x1, y1] = geoF(p.box[2], p.box[3]);
-    const blockIn = (bx: number, by: number) => { const cx = bx * 5 + 2.5, cy = by * 5 + 2.5; return cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1; };
-    for (let y = Math.floor(y0) - 5; y <= Math.ceil(y1) + 5; y++) for (let x = Math.floor(x0) - 5; x <= Math.ceil(x1) + 5; x++) {
-      if (!inMap(x, y)) continue;
-      const bx = Math.floor(x / 5), by = Math.floor(y / 5), lx = mod5(x), ly = mod5(y);
-      const inside = lx && ly ? blockIn(bx, by)
-        : lx ? blockIn(bx, by) && blockIn(bx, by - 1)
-        : ly ? blockIn(bx, by) && blockIn(bx - 1, by)
-        : blockIn(bx, by) && blockIn(bx - 1, by) && blockIn(bx, by - 1) && blockIn(bx - 1, by - 1);
-      if (inside) park[idx(x, y)] = n;
+const CELL = 2, MAX_CELLS = 16;
+export function londonParcelRects(borough: Int16Array): { x: number; y: number; w: number; h: number; b: number }[] {
+  const { bank } = londonBase();
+  const CW = MW / CELL, CH = MH / CELL;
+  const majority = (x0: number, y0: number, n: number) => {
+    const votes = new Map<number, number>();
+    let banks = 0;
+    for (let k = 0; k < n * n; k++) { const i = lidx(x0 + (k % n), y0 + Math.floor(k / n)); votes.set(borough[i], (votes.get(borough[i]) ?? 0) + 1); banks |= bank[i]; }
+    let best = -1, bn = 0;
+    for (const [b, c] of votes) if (c > bn) { bn = c; best = b; }
+    return { best, both: banks === 3 };
+  };
+  const cell = new Int16Array(CW * CH);
+  for (let cy = 0; cy < CH; cy += 2) for (let cx = 0; cx < CW; cx += 2) {
+    const big = majority(MX + cx * CELL, MY + cy * CELL, 2 * CELL);
+    for (let k = 0; k < 4; k++) {
+      const qx = cx + (k & 1), qy = cy + (k >> 1);
+      cell[qy * CW + qx] = big.both ? majority(MX + qx * CELL, MY + qy * CELL, CELL).best : big.best;
     }
-  });
-  return park;
-}
-
-const PLACE_XY = PLACES.map(([name, lat, lon, c, reach]) => { const [x, y] = geoF(lat, lon); return { name, x, y, c, reach: reach ?? 1 }; });
-/** The place nearest (x, y), each place's distance divided by its reach. */
-export function placeAt(x: number, y: number) {
-  let best = PLACE_XY[0], bd = Infinity;
-  for (const p of PLACE_XY) { const d = Math.hypot(p.x - x, p.y - y) / p.reach; if (d < bd) { bd = d; best = p; } }
-  return best;
+  }
+  const done = new Uint8Array(CW * CH), out: { x: number; y: number; w: number; h: number; b: number }[] = [];
+  for (let cy = 0; cy < CH; cy++) for (let cx = 0; cx < CW; cx++) {
+    if (done[cy * CW + cx]) continue;
+    const b = cell[cy * CW + cx];
+    let w = 1, h = 1;
+    while (cx + w < CW && w < MAX_CELLS && !done[cy * CW + cx + w] && cell[cy * CW + cx + w] === b) w++;
+    for (; cy + h < CH && h < MAX_CELLS; h++) {
+      let ok = true;
+      for (let k = 0; k < w && ok; k++) ok = !done[(cy + h) * CW + cx + k] && cell[(cy + h) * CW + cx + k] === b;
+      if (!ok) break;
+    }
+    for (let j = 0; j < h; j++) for (let k = 0; k < w; k++) done[(cy + j) * CW + cx + k] = 1;
+    out.push({ x: MX + cx * CELL, y: MY + cy * CELL, w: w * CELL, h: h * CELL, b });
+  }
+  return out;
 }
 
 /** Zone shares per character: residential, commercial, office, industrial. */
@@ -170,7 +138,7 @@ const MIX: Record<Character, [number, number, number, number]> = {
   industry: [0.08, 0.1, 0.02, 0.8],
 };
 /** Share of a character's blocks left green (commons, playing fields). */
-const GREEN: Partial<Record<Character, number>> = { suburb: 0.25, outer: 0.08 };
+const GREEN: Partial<Record<Character, number>> = { suburb: 0.12, outer: 0.03 };
 const ZONES = [Zone.Residential, Zone.Commercial, Zone.Office, Zone.Industrial];
 /**
  * 1×1 level (1-3) for a lot: the character's usual level with a per-lot nudge. Homes thin out towards the suburbs;
@@ -199,109 +167,176 @@ const DENSE: Partial<Record<Character, Partial<Record<number, [string, number, n
   inner: { [Zone.Residential]: [['res-midrise', 4, 4], ['res-block', 5, 5], ['res-tower', 6, 6]] },
   industry: { [Zone.Industrial]: [['ind-works', 5, 5], ['ind-depot', 3, 4], ['ind-plant', 6, 7]] },
 };
-/** Share of a dense character's blocks that get merged buildings. */
+/** Share of a dense character's blocks that get merged buildings, and how many at most per block (more in a bigger block). */
 const DENSE_SHARE: Partial<Record<Character, number>> = { city: 0.9, westend: 0.35, civic: 0.4, inner: 0.12, industry: 0.45 };
 
-/** Services and car parks per 25×25 cell, as in every seedCity district (local offsets, all beside a road). */
+/** Services and car parks per 25×25 cell, as in every seedCity district (local offsets; each moves to the nearest frontage lot). */
 const SERVICES: [number, number, string][] = [
   [1, 1, 'police'], [16, 1, 'fire'], [1, 16, 'hospital'], [16, 16, 'yard'],
   [6, 3, 'parking'], [13, 6, 'parking'], [4, 13, 'parking'], [18, 11, 'parking'],
 ];
 
-export interface LondonSeed { water: number; roads: number; bridges: number; crossings: number; lots: number; merged: number; parcels: number; stranded: number; problems: string[] }
+export interface LondonSeed { water: number; roads: number; bridges: number; crossings: number; lots: number; merged: number; parcels: number; boroughs: number; stranded: number; problems: string[] }
 
 /**
- * Paint London into w for `owner` (every technology), parcels named after the nearest place. `keep` is land the
- * scenario places structures on: no roads and no zones there.
+ * Paint London into w: the town's player `ownerId` (every technology; it runs the lines) and a player per borough
+ * (`ownerId:<borough>`) owning that borough's parcels. `keep` is land the scenario places structures on: no zones there.
  */
 export function seedLondon(w: World, ownerId: string, keep: DemoRect[]): LondonSeed {
   const owner = w.getOrCreatePlayer(ownerId, 'London', 0);
   owner.color = 0x9e9e9e;
   owner.tech = [...ALL_TECH_IDS];
-  const water = londonWater();
-  const bridges = londonBridges(water);
-  const deck = new Uint8Array(MW * MH);
-  for (const b of bridges) for (const i of b.tiles) deck[i] = 1;
-  const park = londonParks();
-  const reserved = (x: number, y: number) => RESERVED.some((r) => inRect(r.rect, x, y)) || keep.some((r) => inRect(r, x, y));
-  const stats: LondonSeed = { water: 0, roads: 0, bridges: 0, crossings: 0, lots: 0, merged: 0, parcels: 0, stranded: 0, problems: [] };
-  // a grid road over a railway corridor at right angles, with road on both sides: kept, for a level crossing. Never at
-  // a corridor's ends or corners (the track turns or stops there) nor where a station or a park stops the road
-  const corridors = RESERVED.filter((r) => !r.airfield);
-  const gridRoad = (x: number, y: number) => inMap(x, y) && isGridLine(x, y) && (deck[idx(x, y)] === 1 || (!water[idx(x, y)] && !reserved(x, y) && park[idx(x, y)] < 0));
-  const crossing = (x: number, y: number) => {
-    const on = corridors.filter((r) => inRect(r.rect, x, y));
-    if (on.length !== 1 || keep.some((r) => inRect(r, x, y))) return false;
-    const [rx, ry, rw] = on[0].rect, alongX = rw > 1;
-    if (alongX ? x === rx || x === rx + rw - 1 || mod5(x) !== 0 : y === ry || y === ry + on[0].rect[3] - 1 || mod5(y) !== 0) return false;
-    return alongX ? gridRoad(x, y - 1) && gridRoad(x, y + 1) : gridRoad(x - 1, y) && gridRoad(x + 1, y);
-  };
+  const { plan, problems: planned } = londonScenario();
+  const stats: LondonSeed = { water: 0, roads: 0, bridges: 0, crossings: 0, lots: 0, merged: 0, parcels: 0, boroughs: 0, stranded: 0, problems: [...planned] };
+  const kept = new Uint8Array(N);
+  for (const r of keep) for (let y = r[1]; y < r[1] + r[3]; y++) for (let x = r[0]; x < r[0] + r[2]; x++) if (inLondon(x, y)) kept[lidx(x, y)] = 1;
   // the scenario's structures must keep off the railway corridors and the airfield
   for (const k of keep) for (const r of RESERVED.filter((q) => !q.airfield)) {
     if (k[0] < r.rect[0] + r.rect[2] && r.rect[0] < k[0] + k[2] && k[1] < r.rect[1] + r.rect[3] && r.rect[1] < k[1] + k[3]) stats.problems.push(`a placement at (${k[0]}, ${k[1]}) overlaps ${r.name}`);
   }
 
-  // parcels: 16×16 squares, each named after the place nearest its middle
-  const P = 16;
-  for (let py = MY; py < MY + MH; py += P) for (let px = MX; px < MX + MW; px += P) {
-    const name = placeAt(px + P / 2, py + P / 2).name;
-    const parcel = { id: w.nextId++, owner: ownerId, name, x: px, y: py, w: P, h: P, taxRate: DEFAULT_TAX, stats: emptyStats() };
+  // the boroughs and their parcels, each named after the place nearest it in the borough
+  const borough = londonBoroughs();
+  const ownerOf = (b: number) => `${ownerId}:${BOROUGHS[b].id}`;
+  for (const b of BOROUGHS) {
+    if (w.players.has(`${ownerId}:${b.id}`)) continue;
+    const p = w.getOrCreatePlayer(`${ownerId}:${b.id}`, b.name, DEV_FUNDS);
+    p.color = b.colour; p.tech = [...ALL_TECH_IDS]; p.devUnlimited = true;
+    stats.boroughs++;
+  }
+  const places = PLACES.map(([name, lat, lon, , reach]) => {
+    const [x, y] = geoF(lat, lon), tx = Math.max(MX, Math.min(MX + MW - 1, Math.floor(x))), ty = Math.max(MY, Math.min(MY + MH - 1, Math.floor(y)));
+    return { name, x, y, reach: reach ?? 1, owner: ownerOf(borough[lidx(tx, ty)]) };
+  });
+  const heathrow = RESERVED.find((r) => r.airfield)!;
+  for (const r of londonParcelRects(borough)) {
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2, own = ownerOf(r.b);
+    let name = BOROUGHS[r.b].name, bd = Infinity;
+    if (inRect(heathrow.rect, Math.floor(cx), Math.floor(cy))) name = heathrow.name;
+    else for (const p of places) { const d = Math.hypot(p.x - cx, p.y - cy) / p.reach; if (p.owner === own && d < bd) { bd = d; name = p.name; } }
+    const parcel = { id: w.nextId++, owner: own, name, x: r.x, y: r.y, w: r.w, h: r.h, taxRate: DEFAULT_TAX, stats: emptyStats() };
     w.parcels.set(parcel.id, parcel);
-    for (let y = py; y < py + P; y++) for (let x = px; x < px + P; x++) w.setParcelId(x, y, parcel.id);
+    for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) w.setParcelId(x, y, parcel.id);
     w.dirtyParcels.add(parcel.id);
     stats.parcels++;
   }
 
+  // the tiles: water, roads and crossings, parks, and every block zoned by the character of the place nearest it
   const parkId = K['park'];
-  const blockChar = new Map<number, Character>();
-  for (let y = MY; y < MY + MH; y++) for (let x = MX; x < MX + MW; x++) {
-    const i = idx(x, y);
-    if (water[i]) { w.setTile(x, y, packTile(Terrain.Water, false, 0, 0)); stats.water++; continue; } // bridge decks go down below
-    if (crossing(x, y)) { w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0)); stats.crossings++; continue; }
-    if (reserved(x, y)) { w.setTile(x, y, packTile(Terrain.Grass, false, 0, 0)); continue; }
-    if (park[i] >= 0) {
-      // park tiles, with open grass between them (more on a heath)
-      const open = hash2(x * 5 + 1, y * 7 + 2) < (PARKS[park[i]].heath ? 0.45 : 0.2);
-      w.setTile(x, y, open ? packTile(Terrain.Grass, false, 0, 0) : packTile(Terrain.Grass, false, familyOf(parkId), 1), open ? 0 : subFor(parkId));
-      continue;
-    }
-    if (isGridLine(x, y)) { w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0)); stats.roads++; continue; }
-    const bx = Math.floor(x / 5), by = Math.floor(y / 5);
-    const place = placeAt(bx * 5 + 2.5, by * 5 + 2.5);
-    const c = place.c;
-    blockChar.set((bx + 2048) * 4096 + by + 2048, c);
-    // commons and playing fields: some suburban blocks stay green, so the edge of town thins out
-    if (hash2(bx * 11 + 3, by * 7 + 5) < (GREEN[c] ?? 0)) {
-      const open = hash2(x * 5 + 1, y * 7 + 2) < 0.45;
-      w.setTile(x, y, open ? packTile(Terrain.Grass, false, 0, 0) : packTile(Terrain.Grass, false, familyOf(parkId), 1), open ? 0 : subFor(parkId));
-      continue;
-    }
-    const mix = MIX[c], h = hash2(bx * 7 + 1, by * 13 + 3);
+  const parkTile = (x: number, y: number, open: number) => {
+    const o = hash2(x * 5 + 1, y * 7 + 2) < open;
+    w.setTile(x, y, o ? packTile(Terrain.Grass, false, 0, 0) : packTile(Terrain.Grass, false, familyOf(parkId), 1), o ? 0 : subFor(parkId));
+  };
+  const blockChar = plan.blocks.map((b) => placeAt(b.cx, b.cy).c);
+  const blockZone = plan.blocks.map((b, n) => {
+    const mix = MIX[blockChar[n]], h = hash2(b.x0 * 7 + 1, b.y0 * 13 + 3);
     let zi = 0;
     for (let acc = mix[0]; zi < 3 && h >= acc; acc += mix[++zi]);
-    const zone = ZONES[zi];
-    const lx = mod5(x), ly = mod5(y), inner = lx >= 2 && lx <= 3 && ly >= 2 && ly <= 3;
-    // the four inner lots of a block have no road: gardens behind suburban homes, zoned land elsewhere (merges use it)
-    if (inner && (c === 'suburb' || c === 'outer') && zone === Zone.Residential) { w.setTile(x, y, packTile(Terrain.Grass, false, 0, 0)); continue; }
-    w.setTile(x, y, packTile(Terrain.Grass, false, zone, inner ? 0 : lotLevel(c, zone, x, y)));
+    return ZONES[zi];
+  });
+  const blockGreen = plan.blocks.map((b, n) => hash2(b.x0 * 11 + 3, b.y0 * 7 + 5) < (GREEN[blockChar[n]] ?? 0));
+  for (let y = MY; y < MY + MH; y++) for (let x = MX; x < MX + MW; x++) {
+    const i = lidx(x, y);
+    switch (plan.t[i]) {
+      case LT.Water: case LT.Deck: w.setTile(x, y, packTile(Terrain.Water, false, 0, 0)); stats.water++; continue; // bridge decks go down below
+      case LT.Road: w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0)); stats.roads++; continue;
+      case LT.Crossing: w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0)); stats.crossings++; continue;
+      case LT.Park: parkTile(x, y, PARKS[plan.park[i]]?.heath ? 0.45 : 0.2); continue; // park tiles, with open grass between them (more on a heath)
+      case LT.Land: break;
+      default: w.setTile(x, y, packTile(Terrain.Grass, false, 0, 0)); continue; // railways, the airfield, the scenario's structures
+    }
+    const b = plan.block[i], c = blockChar[b], zone = blockZone[b], reach = plan.reach[i];
+    if (kept[i] || !reach) { w.setTile(x, y, packTile(Terrain.Grass, false, 0, 0)); continue; }
+    // commons and playing fields: some suburban blocks stay green, so the edge of town thins out
+    if (blockGreen[b]) { parkTile(x, y, 0.45); continue; }
+    // a lot behind the frontage: gardens behind suburban homes, zoned land elsewhere (deep plots and merges build on it)
+    if (reach === 2 && (c === 'suburb' || c === 'outer') && zone === Zone.Residential) { w.setTile(x, y, packTile(Terrain.Grass, false, 0, 0)); continue; }
+    w.setTile(x, y, packTile(Terrain.Grass, false, zone, reach === 2 ? 0 : lotLevel(c, zone, x, y)));
     stats.lots++;
   }
 
-  // the bridges, as the road tool lays them: a grid road meeting a deck from the side on a ragged bank stops short of it
-  for (const b of bridges) {
-    const x0 = MX + (b.tiles[0] % MW), y0 = MY + Math.floor(b.tiles[0] / MW), dx = b.ns ? 0 : 1, dy = b.ns ? 1 : 0;
-    for (let k = 0; k < b.tiles.length; k++) for (const s of [-1, 1]) {
-      const sx = x0 + dx * k + dy * s, sy = y0 + dy * k + dx * s, t = w.getTile(sx, sy);
-      if (isRoad(t) && t !== undefined && (t & 3) !== Terrain.Water) w.setTile(sx, sy, packTile(Terrain.Grass, false, 0, 0));
-    }
-    const plan = planBridge(x0, y0, dx, dy, b.tiles.length, { tile: (x, y) => w.getTile(x, y), aux: (x, y) => w.auxAt(x, y), land: () => null }, BRIDGE_STYLES[b.name]);
-    if (!plan.ok) { stats.problems.push(`${b.name} at (${x0}, ${y0}): ${plan.reason}`); continue; }
-    w.placeBridge(plan.tiles!);
+  // the bridges, as the road tool lays them
+  for (const b of plan.bridges) {
+    const dx = b.ns ? 0 : 1, dy = b.ns ? 1 : 0;
+    const bp = planBridge(b.x, b.y, dx, dy, b.len, { tile: (x, y) => w.getTile(x, y), aux: (x, y) => w.auxAt(x, y), land: () => null }, BRIDGE_STYLES[b.name]);
+    if (!bp.ok) { stats.problems.push(`${b.name} at (${b.x}, ${b.y}): ${bp.reason}`); continue; }
+    w.placeBridge(bp.tiles!);
     stats.bridges++;
   }
 
-  // nothing may stand where no road reaches its door (nobody could ever get there): the parks' inner tiles stay open
-  // grass, and a lot cut off by the river, a park or a railway corridor stays an empty lot of its zone
+  // services and car parks on a 25-tile grid, each on the frontage lot nearest its spot
+  for (let cy = Math.floor(MY / 25) * 25; cy < MY + MH; cy += 25) for (let cx = Math.floor(MX / 25) * 25; cx < MX + MW; cx += 25) {
+    for (const [lx, ly, kind] of SERVICES) {
+      let spot = -1;
+      for (let r = 0; r <= 2 && spot < 0; r++) for (let oy = -r; oy <= r && spot < 0; oy++) for (let ox = -r; ox <= r && spot < 0; ox++) {
+        const x = cx + lx + ox, y = cy + ly + oy;
+        if (!inLondon(x, y)) continue;
+        const i = lidx(x, y);
+        if (plan.t[i] === LT.Land && plan.reach[i] === 1 && !kept[i] && !blockGreen[plan.block[i]] && w.hasRoadAccess(x, y)) spot = i;
+      }
+      if (spot < 0) continue;
+      const k = K[kind];
+      w.setTile(MX + (spot % MW), MY + Math.floor(spot / MW), packTile(Terrain.Grass, false, familyOf(k), 1), subFor(k));
+    }
+  }
+
+  // merged buildings in dense blocks: towers in the City and Canary Wharf, stores in the West End, mid-rise homes,
+  // works by the docks; every one through planStructure like the growth step's merges, anywhere in the block its
+  // footprint fits on lots of the block's zone with its door on the road
+  const env: PlaceEnv = {
+    tile: (x, y) => w.getTile(x, y),
+    aux: (x, y) => w.auxAt(x, y),
+    sub: (x, y) => w.subAt(x, y),
+    land: (x, y) => (isDemoOwner(w.parcelAt(x, y)?.owner) ? null : 'Not your land'),
+  };
+  plan.blocks.forEach((blk, n) => {
+    const c = blockChar[n], share = DENSE_SHARE[c];
+    if (!share || blockGreen[n] || hash2(blk.x0 * 3 + 11, blk.y0 * 5 + 13) >= share) return;
+    const options = DENSE[c]?.[blockZone[n]];
+    if (!options) return;
+    const h = hash2(blk.x0 * 17 + 5, blk.y0 * 19 + 7);
+    const mine = (x: number, y: number) => inLondon(x, y) && plan.block[lidx(x, y)] === n && !kept[lidx(x, y)];
+    for (let o = 0; o < options.length; o++) {
+      const [kind, lo, hi] = options[(Math.floor(h * options.length) + o) % options.length];
+      const k = K[kind];
+      if (!k) continue;
+      for (let ay = blk.y0; ay <= blk.y1; ay++) for (let ax = blk.x0; ax <= blk.x1; ax++) for (let r0 = 0; r0 < 4; r0++) {
+        const p = placedFromAnchor(k, ax, ay, (r0 + Math.floor(h * 4)) & 3);
+        if (!isRoad(w.getTile(p.frontX, p.frontY))) continue;
+        // only over lots of the block's own zone (empty or 1×1)
+        let ok = true;
+        for (let yy = p.ay; yy < p.ay + p.h && ok; yy++) for (let xx = p.ax; xx < p.ax + p.w && ok; xx++) {
+          const tt = w.getTile(xx, yy);
+          if (!mine(xx, yy) || w.auxAt(xx, yy) || zoneOf(tt) !== familyOf(k) || w.subAt(xx, yy)) ok = false;
+        }
+        if (!ok) continue;
+        const v = planStructure(k, p.doorX, p.doorY, {
+          ...env,
+          tile: (x, y) => { const tt = w.getTile(x, y); return x >= p.ax && y >= p.ay && x < p.ax + p.w && y < p.ay + p.h ? packTile(Terrain.Grass, false, familyOf(k), 0) : tt; },
+        }, p.r);
+        if (!v.ok) continue;
+        const level = lo + Math.floor(hash2(ax + o * 31, ay * 3 + o) * (hi - lo + 1));
+        w.placeStructure(v.placed, { work: workOf(k, level), priority: 0, built: true, target: level });
+        stats.merged++;
+      }
+    }
+  });
+
+  // the lots behind the frontage, as growth would settle them: communal gardens in rings of homes, else deep plots
+  // built from the frontage lot in front (sim/blocks.ts); a middle no frontage lot of its zone fronts stays an empty lot
+  settleInteriors(w, MX, MY, MX + MW - 1, MY + MH - 1, 2);
+  // pockets no road reaches: a communal garden on every 2×2 of them, open grass round it
+  for (let y = MY; y < MY + MH - 1; y++) for (let x = MX; x < MX + MW - 1; x++) {
+    let ok = true;
+    for (let k = 0; k < 4 && ok; k++) {
+      const qx = x + (k & 1), qy = y + (k >> 1), i = lidx(qx, qy);
+      ok = plan.t[i] === LT.Land && plan.reach[i] === 0 && !kept[i] && !w.auxAt(qx, qy);
+    }
+    if (ok) w.placeStructure(placedFromAnchor(GARDEN_KIND, x, y, Math.floor(hash2(x * 5 + 1, y * 7 + 3) * 4) & 3), { work: 0, priority: 0, built: true, target: 1 });
+  }
+
+  // nothing may stand where no road reaches its door (nobody could ever get there): a lot cut off by the river, a park
+  // or a railway stays an empty lot of its zone
   for (let y = MY; y < MY + MH; y++) for (let x = MX; x < MX + MW; x++) {
     const t = w.getTile(x, y);
     if (isRoad(t) || levelOf(t) === 0 || w.auxAt(x, y) || w.hasRoadAccess(x, y)) continue;
@@ -310,67 +345,12 @@ export function seedLondon(w: World, ownerId: string, keep: DemoRect[]): LondonS
     stats.stranded++;
   }
 
-  // services and car parks on a 25-tile grid, where the lot is ordinary town beside a road
-  for (let cy = Math.floor(MY / 25) * 25; cy < MY + MH; cy += 25) for (let cx = Math.floor(MX / 25) * 25; cx < MX + MW; cx += 25) {
-    for (const [lx, ly, kind] of SERVICES) {
-      const x = cx + lx, y = cy + ly;
-      if (!inMap(x, y) || water[idx(x, y)] || park[idx(x, y)] >= 0 || reserved(x, y) || isGridLine(x, y) || !w.hasRoadAccess(x, y)) continue;
-      const k = K[kind];
-      w.setTile(x, y, packTile(Terrain.Grass, false, familyOf(k), 1), subFor(k));
-    }
-  }
-
-  // merged buildings in dense blocks: towers in the City and Canary Wharf, stores in the West End, mid-rise homes,
-  // works by the docks; every one through planStructure like the growth step's merges
-  const env: PlaceEnv = {
-    tile: (x, y) => w.getTile(x, y),
-    aux: (x, y) => w.auxAt(x, y),
-    sub: (x, y) => w.subAt(x, y),
-    land: (x, y) => (inMap(x, y) && w.parcelAt(x, y)?.owner === ownerId ? null : 'Not your land'),
-  };
-  for (const [key, c] of blockChar) {
-    const bx = Math.floor(key / 4096) - 2048, by = (key % 4096) - 2048;
-    const share = DENSE_SHARE[c];
-    if (!share || hash2(bx * 3 + 11, by * 5 + 13) >= share) continue;
-    const x0 = bx * 5 + 1, y0 = by * 5 + 1;
-    const t = w.getTile(x0, y0);
-    const options = DENSE[c]?.[(t >> 3) & 15];
-    if (!options) continue;
-    // fill the block: start at a hashed option and corner, try every option at every corner and turn
-    const h = hash2(bx * 17 + 5, by * 19 + 7);
-    for (let n = 0; n < 4; n++) {
-      const [kind, lo, hi] = options[(Math.floor(h * options.length) + n) % options.length];
-      const k = K[kind];
-      if (!k) continue;
-      const level = lo + Math.floor(hash2(bx + n * 31, by * 3 + n) * (hi - lo + 1));
-      for (let corner = 0; corner < 4; corner++) for (let r = 0; r < 4; r++) {
-        const p0 = placedFromAnchor(k, 0, 0, (r + Math.floor(h * 4)) & 3);
-        const ax = corner & 1 ? x0 + 4 - p0.w : x0, ay = corner & 2 ? y0 + 4 - p0.h : y0;
-        const p = placedFromAnchor(k, ax, ay, p0.r);
-        if (p.ax < x0 || p.ay < y0 || p.ax + p.w > x0 + 4 || p.ay + p.h > y0 + 4) continue;
-        // only over lots of the block's own zone (empty or 1×1)
-        let ok = true;
-        for (let yy = p.ay; yy < p.ay + p.h && ok; yy++) for (let xx = p.ax; xx < p.ax + p.w && ok; xx++) {
-          const tt = w.getTile(xx, yy);
-          if (w.auxAt(xx, yy) || ((tt >> 3) & 15) !== familyOf(k) || w.subAt(xx, yy)) ok = false;
-        }
-        if (!ok) continue;
-        const v = planStructure(k, p.doorX, p.doorY, {
-          ...env,
-          tile: (x, y) => { const tt = w.getTile(x, y); return x >= p.ax && y >= p.ay && x < p.ax + p.w && y < p.ay + p.h ? packTile(Terrain.Grass, false, familyOf(k), 0) : tt; },
-        }, p.r);
-        if (!v.ok) continue;
-        w.placeStructure(v.placed, { work: workOf(k, level), priority: 0, built: true, target: level });
-        stats.merged++;
-      }
-    }
-  }
   // round the map, a margin of plain country with the river running on out of it, so the noise terrain's lakes do not
   // read as more river from above
   const M = 24, wet = new Set<number>(), key = (x: number, y: number) => (x + 4096) * 8192 + y + 4096;
   eachThamesTile(MX - M, MY - M, MX + MW + M, MY + MH + M, (x, y) => wet.add(key(x, y)));
   for (let y = MY - M; y < MY + MH + M; y++) for (let x = MX - M; x < MX + MW + M; x++) {
-    if (!inMap(x, y)) w.setTile(x, y, packTile(wet.has(key(x, y)) ? Terrain.Water : Terrain.Grass, false, 0, 0));
+    if (!inLondon(x, y)) w.setTile(x, y, packTile(wet.has(key(x, y)) ? Terrain.Water : Terrain.Grass, false, 0, 0));
   }
   return stats;
 }

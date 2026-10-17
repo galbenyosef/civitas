@@ -2,7 +2,7 @@ import {
   DEFAULT_TAX, Terrain, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, KIND_ID, KIND_NAMES, chunkKey, isBuildable, isRoad, packTile, terrainOf,
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
-  isMergedKind, planBridge, BridgeStyle,
+  isMergedKind, planBridge, BridgeStyle, isDemoOwner,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS } from '../world';
 import { seedCity } from '../loadtest/cities';
@@ -28,13 +28,13 @@ const kindId = (s: string): number => (KIND_ID as Record<string, number>)[s] ?? 
 const eachTile = (r: DemoRect, f: (x: number, y: number) => void) => { for (let y = r[1]; y < r[1] + r[3]; y++) for (let x = r[0]; x < r[0] + r[2]; x++) f(x, y); };
 const at = (p: DemoXY) => `(${p[0]}, ${p[1]})`;
 
-/** Placement on the demo owner's land, the same reads the build tool gives planStructure. */
+/** Placement on the demo's land (the town's, or a London borough's), the same reads the build tool gives planStructure. */
 function placeEnv(w: World): PlaceEnv {
   return {
     tile: (x, y) => w.getTile(x, y),
     aux: (x, y) => w.auxAt(x, y),
     sub: (x, y) => w.subAt(x, y),
-    land: (x, y) => { const q = w.parcelAt(x, y); return q ? (q.owner === DEMO_OWNER ? null : 'Not your land') : 'Buy this land first'; },
+    land: (x, y) => { const q = w.parcelAt(x, y); return q ? (isDemoOwner(q.owner) ? null : 'Not your land') : 'Buy this land first'; },
   };
 }
 
@@ -146,11 +146,14 @@ export function seedDemoNetwork(w: World, sim: Simulation, rail: Rail, id: DemoI
   const owner = w.players.get(DEMO_OWNER);
   if (!owner) return ['the demo town has no owner (seedDemoTown first)'];
   const sections = demoSections(id);
+  // a demo is a sandbox (index.ts runs its child with sandbox on): lines call at any owner's stops and stations and
+  // run from any owner's depot, track goes on any owner's land; London's land belongs to its boroughs, its lines to the town
+  sim.transit.sandbox = sim.buses.sandbox = rail.sandbox = true;
   for (const s of sections) for (const p of s.placements ?? []) {
     if (kindId(p.kind) !== BUS_STOP_KIND) continue;
     const [x, y] = p.door, t = w.getTile(x, y);
     if (isRoad(t)) { problems.push(`${s.id}: ${p.id ?? p.kind} at ${at(p.door)}: a bus stop goes beside the road, not on it`); continue; }
-    if (w.parcelAt(x, y)?.owner !== DEMO_OWNER) { problems.push(`${s.id}: ${p.id ?? p.kind} at ${at(p.door)}: not the town's land`); continue; }
+    if (!isDemoOwner(w.parcelAt(x, y)?.owner)) { problems.push(`${s.id}: ${p.id ?? p.kind} at ${at(p.door)}: not the town's land`); continue; }
     const merged = w.auxAt(x, y) ? w.structureAt(x, y) : null;
     if (w.auxAt(x, y) && !(merged && isMergedKind(merged.kind))) { problems.push(`${s.id}: ${p.id ?? p.kind} at ${at(p.door)}: would bulldoze part of a structure, runway or track`); continue; }
     if (merged) w.removeStructure(merged); // a district lot settled into a deep plot (sim/blocks.ts) breaks back into lots first
@@ -160,7 +163,7 @@ export function seedDemoNetwork(w: World, sim: Simulation, rail: Rail, id: DemoI
     w.setTile(x, y, packTile(terrainOf(t), false, familyOf(BUS_STOP_KIND), 1), subFor(BUS_STOP_KIND));
   }
   for (const s of sections) for (const tr of s.tracks ?? []) for (const [a, b] of tr.drags) {
-    const r = rail.paint(owner, trackDragPath([a[0], a[1]], [b[0], b[1]]));
+    const r = rail.paint(owner, trackDragPath([a[0], a[1]], [b[0], b[1]]), true);
     if (!r.ok) problems.push(`${s.id}: ${tr.id} drag ${at(a)} to ${at(b)}: ${r.msg}`);
   }
   for (const s of sections) for (const l of s.lines ?? []) {

@@ -10,7 +10,7 @@ import { RUNWAY_COST, RUNWAY_MIN, RUNWAY_MAX, TERMINAL_ROW } from '../airport';
 import { RAIL_COST, CROSSING_COST } from '../rail';
 import { ROUNDABOUT_COST, FLYOVER_COST } from '../junctions';
 import { BRIDGE_TILE_COST, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES, BridgeStyle } from '../bridges';
-import { LONDON_SECTIONS, LONDON_TOUR, LONDON_VIEW } from './london';
+import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
 
 /**
  * Demo maps (docs/demo.md): a planned, lived-in town where every large object in the catalogue is placed once and
@@ -256,7 +256,6 @@ export const SECTIONS: DemoSection[] = [
     zones: [block(0, 2, 0, 3), block(0, 2, 1, 3), block(0, 2, 1, 2)].map((rect): DemoZone => ({ zone: 'industrial', rect })),
     blocks: [{ id: 'block-estate', kind: 'industrial', name: 'Industrial estate', rect: [-34, 24, 9, 9], inspect: [-34, 30] }],
   },
-  ...LONDON_SECTIONS,
 ];
 
 /** Tour order: placement, block, runway, track, junction and line ids, plus 'welcome' (the whole town). */
@@ -293,9 +292,12 @@ export const DEMOS: DemoDef[] = [
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
 export const isDemoId = (s: unknown): s is DemoId => typeof s === 'string' && DEMO_BY_ID.has(s as DemoId);
 export const demoSections = (id: DemoId): DemoSection[] => {
-  const want = new Set(DEMO_BY_ID.get(id)?.sections ?? []);
-  return SECTIONS.filter((s) => want.has(s.id));
+  const d = DEMO_BY_ID.get(id), want = new Set(d?.sections ?? []);
+  // London's sections are planned with its streets, on first use (london.ts)
+  return (d?.town === 'london' ? londonSections() : SECTIONS).filter((s) => want.has(s.id));
 };
+/** Land a demo's owners hold: the town's owner, and London's boroughs (`sys:<borough>`, server/src/demo/london.ts). */
+export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER || !!owner?.startsWith(`${DEMO_OWNER}:`);
 
 // ---------------------------------------------------------------- linear surfaces and lines (not catalogue kinds)
 

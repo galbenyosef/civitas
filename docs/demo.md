@@ -64,61 +64,116 @@ every station, landmark, track drag, bus stop and line goes through the same pla
 
 Code:
 
-- `shared/src/demo/london.ts` is the map as data, and the scenario: the Thames as a centre line of real latitudes and
-  longitudes with a width at each point and the bridges, the docks, about 90 named places, the parks, the land kept
-  clear (Heathrow and the railway corridors), the landmarks, stations, lines and tour.
-- `server/src/demo/london.ts` (`seedLondon`) paints it into the world in place of `seedCity`'s districts.
-- The Landmarks section places the London landmarks (docs/buildings.md "Landmarks") where the real ones stand, nudged
-  onto the nearest block the map's land allows: the Gherkin between Liverpool Street and the river and the Walkie Talkie
-  a few blocks north, the Shard south of it by London Bridge, One Canada Square at Canary Wharf and the Royal Opera House
-  in Covent Garden; the Houses of Parliament on the river south of Westminster Bridge with Big Ben at the bridge end, the
-  London Eye facing them across the river, Buckingham Palace at the end of the Mall past St James's Park, the Tower of
-  London on the river in the City and Tower Bridge beside it. `demo:check` fails a landmark that no city demo places.
-  Tall placements are framed from further out on the tour.
+- `shared/src/demo/londonMap.ts` is the map as data and the street plan: the Thames as a centre line of real latitudes
+  and longitudes with a width at each point and the bridges, the docks, about 90 named places, the parks, the land kept
+  clear (Heathrow and the railway corridors), the main roads (`ARTERIALS`) and the boroughs (`BOROUGHS`), and
+  `londonPlan`, which lays the streets.
+- `shared/src/demo/london.ts` is the scenario: the landmarks, stations, stops, lines and tour. It is built on first
+  use (`londonScenario`, through `demoSections('london')`), so a process that never opens London never plans it.
+- `server/src/demo/london.ts` (`seedLondon`) paints the plan into the world in place of `seedCity`'s districts, and
+  makes the boroughs and their parcels.
+- The Landmarks section places the London landmarks (docs/buildings.md "Landmarks") where the real ones stand: each
+  structure is fitted before any street is laid, as near its real place as the land allows, on the real one's bank of
+  the river, off the water, the railways, the main roads and the bridges' landings, a tile clear of the others; the
+  streets are then planned round them with a road along every front. Parliament stands on the river south of
+  Westminster Bridge with Big Ben at the bridge end and its door on the bridge's approach, the London Eye faces it
+  across the river, New Scotland Yard is on the Embankment north of the bridge, Buckingham Palace faces St James's Park,
+  the Tower of London is on the river by Tower Bridge, the Shard by London Bridge, the Gherkin and the Walkie Talkie in
+  the City, One Canada Square at Canary Wharf and the Royal Opera House in Covent Garden. `demo:check` fails a landmark
+  that no city demo places. Tall placements are framed from further out on the tour.
 - **Tower Bridge is a real crossing.** The Landmarks section lays it as a bridge (`bridges`, a `DemoBridge` with
-  `style: 'Bascule'` and `landmark: 'tower-bridge'`) rather than placing the structure: a bascule span is drawn as the
-  landmark's model with its lifting leaves, and the traffic drives over it, waiting at the barriers while it lifts. A bridge's `landmark` counts as placed for
-  the landmark rule, and its tour stop frames the span.
+  `style: 'Bascule'` and `landmark: 'tower-bridge'`, its ends taken from the plan's Tower Bridge) rather than placing
+  the structure: a bascule span is drawn as the landmark's model with its lifting leaves, and the traffic drives over
+  it, waiting at the barriers while it lifts. A bridge's `landmark` counts as placed for the landmark rule, and its tour
+  stop frames the span.
 
 How the map is made:
 
 - **Scale.** `geo(lat, lon)` puts Charing Cross at (-20, 0), 6 tiles a kilometre, x east and y south. The map is
   224×112 tiles, x from -112 to 111 and y from -56 to 55, from Isleworth to the Thames Gateway and from Walthamstow to
   Wimbledon. The Isle of Dogs and Greenwich peninsula loops are drawn larger than life so the land inside them holds
-  blocks.
+  blocks. At this scale a tile is about 170 m, so the streets are London's main roads and the larger side streets.
 - **River.** A Catmull-Rom curve through the points; a tile is water when its centre is within half the width of the
-  curve. The width grows from 3.5 tiles upstream to 16 off the east edge.
-- **Bridges.** Each named crossing bridges the shortest run of water along a nearby grid line with a real road bridge
-  (shared/src/bridges.ts), laid through `planBridge` as the road tool lays it, in the style of the real one
-  (`BRIDGE_STYLES`): stone and iron arches (Richmond, Kew, Putney, Battersea, Vauxhall, Lambeth, Westminster,
-  Blackfriars), girders (Wandsworth, Waterloo, London Bridge, Blackwall), suspension spans (Hammersmith, Chelsea, the
-  7-tile Woolwich crossing) and Tower Bridge's bascules. No two bridges share a line, and a run must be about as long as
-  the river is wide. A grid road meeting a deck from the side on a ragged bank stops short of it, as the tool requires.
-  Southwark Bridge has no grid line of its own between Blackfriars and London Bridge, so it is left out. The 159 crosses
-  at Lambeth Bridge, the nearest to its Whitehall and Lambeth North stops.
-- **Roads.** The usual grid, every 5th row and column, except on water, inside parks, on the airfield and on the railway
-  corridors. Each line runs in a one-tile corridor; where a grid road meets it at right angles with road on both sides
-  (not at a corridor's end or corner, nor where a station or park stops the road) the road is kept and the track crosses
-  it on a level crossing (docs/rail.md), 31 in all, so a line no longer cuts the districts either side of it apart
-  (Camden and Islington either side of the King's Cross line).
-- **Zoning.** Each block takes the character of the nearest place (distance over the place's reach): `city` (offices,
-  merged towers and headquarters on 90% of blocks), `westend` (shops, offices, stores), `civic`, `inner` (dense homes,
-  some mid-rise), `outer` (homes, high streets, gardens), `suburb` (low homes with gardens), `industry` (works, depots,
-  heavy plant). Lot levels and the zone of each block come from hashes, so neighbouring blocks differ. Parcels are 16×16
-  squares named after the nearest place, which is what the tooltips show.
-- **Services.** Police, fire, a 1×1 hospital, a builders' yard and four car parks on every 25×25 cell, as in a
-  `seedCity` district.
-- **Jobs near every home.** Homes thin out towards the suburbs (levels 1-2, gardens behind, a quarter of suburban blocks
+  curve. The width grows from 3.5 tiles upstream to 16 off the east edge. Every dry tile is on the north or the south
+  bank (`londonBase().bank`), which the landmarks and the boroughs follow.
+- **Bridges** (`londonBridges`). Each named crossing bridges the shortest run of water along a row or column near it
+  (a little dearer the further it strays), with dry land that is not a park or a railway at both ends and a tile clear
+  of the bridges already chosen; chosen from the river alone, before anything else, so the landmarks keep off the
+  landings. Each is a real road bridge (shared/src/bridges.ts), laid through `planBridge` as the road tool lays it, in
+  the style of the real one (`BRIDGE_STYLES`): stone and iron arches (Richmond, Kew, Chiswick, Putney, Battersea,
+  Vauxhall, Lambeth, Westminster, Blackfriars, Southwark), girders (Wandsworth, Waterloo, London Bridge, Blackwall),
+  suspension spans (Hammersmith, Chelsea, the 8-tile Woolwich crossing) and Tower Bridge's bascules. No road joins a
+  deck from the side. Westminster Bridge sits a little north of the real one so Parliament fits between it and Lambeth
+  Bridge.
+- **Streets** (`londonPlan`). Not a grid: in order, (1) the main roads, real arterials drawn from latitude and
+  longitude waypoints as L-shaped legs or staircases of legs at least two tiles long (Uxbridge Road, Bayswater Road,
+  Oxford Street and Holborn to Cheapside, Whitechapel and Mile End; Marylebone and Euston Road to City Road and Old
+  Street; the Highway and Commercial Road to the A13; the Edgware Road, Tottenham Court Road and Camden High Street,
+  Upper Street and the Holloway Road, Bishopsgate and the Kingsland Road; Piccadilly, Knightsbridge and Kensington High
+  Street to Chiswick; the King's Road; Kennington and Brixton Road, Borough High Street and Walworth Road, the Old Kent
+  Road, Jamaica Road to Woolwich, Clapham Road, Lavender Hill to Richmond, the South Circular; the loop round the Isle
+  of Dogs over the gaps between the docks); a road along every placed structure's front; a road round every park; each
+  bridge's approach on to the nearest road. (2) Each cell of land left between them is split by through roads until it
+  is no bigger than its character allows (`STREETS.cell`: 14 tiles in the City, 22 in the suburbs), then filled with
+  parallel streets (along the river where the cell meets it, else along the cell's long side) `depth` lots apart and
+  cross streets between them at staggered places `len` lots apart, so neighbouring blocks never line up into a
+  lattice: T junctions, offset streets and the odd cul-de-sac; a few cross streets run straight through every strip
+  of the cell, so a trip across the grain does not zigzag. The grain follows the character: blocks 2-3 lots deep and
+  2-4 long in the City, 3-4 by 3-6 for the inner rings, terraces 3-4 deep and 5-8 long in the suburbs (longer ones
+  cost too much in detours: see the fill below). A side
+  street is never laid where it would make a 2×2 of road or leave a sliver of lots one deep between two parallel
+  streets; a street broken by a gap of one or two lots is joined up, and a spur of one or two tiles left where one
+  was cut short goes back to lots. (3) A pocket of three or more
+  lots no road reaches in a dense character gets a short cul-de-sac (the suburbs keep theirs as gardens), and every
+  road joins one network: a link over land, through a park, or over a railway on a level crossing, or the road is
+  dropped; each structure's front is joined to the network at both ends where a short link can (a station or
+  landmark at the end of a cul-de-sac jams its own traffic). `plan.loop` marks the road tiles on a loop of the network (not on a dead-end branch, Tarjan's bridges), where
+  a bus can carry on and come back round.
+- **Railways.** Each line runs in a one-tile corridor that only crosses roads at right angles. Where a main road crosses
+  one, or streets meet it from both sides (a street a tile or two short on the far side is carried on to it), the road
+  crosses on a level crossing (docs/rail.md), a few tiles apart along the line, never at a corridor's end or beside a
+  station, and a stretch of more than eight tiles without one gets one carried through to the streets either side:
+  29 in all, three of them on the King's Cross line between Camden and Islington.
+- **Zoning.** Each block (lots between roads) takes the character of the nearest place (distance over the place's
+  reach): `city` (offices, merged towers and headquarters on 90% of blocks), `westend` (shops, offices, stores),
+  `civic`, `inner` (dense homes, some mid-rise), `outer` (homes, high streets, gardens), `suburb` (low homes with
+  gardens), `industry` (works, depots, heavy plant). The zone of each block and the lot levels come from hashes, so
+  neighbouring blocks differ. Merged buildings stand anywhere in a dense block their footprint fits on its lots with
+  the door on a road. The lots behind the frontage are settled as growth would settle them (sim/blocks.ts
+  `settleInteriors`, level 2): communal gardens in rings of homes, else deep plots built from the frontage lot in front; behind
+  suburban and outer homes they are back gardens, and a pocket no road reaches is a communal garden.
+- **Boroughs and parcels.** The land belongs to the London boroughs, each a player (`sys:<borough>`, every technology
+  and an endless treasury, its own colour) whose parcels follow the real outline: `BOROUGHS` are polygons of real
+  latitudes and longitudes, a tile goes to the first one holding it on that borough's bank, and the rest (and the
+  river, split down the middle) to the nearest borough. The map is cut into rectangles on 4×4 cells (2×2 where a cell
+  holds land of both banks, so the river stays the boundary), at most 32 tiles a side: 194 parcels, each named after
+  the place nearest it in its borough, so the overlay reads as a borough map (one outline per owner, see
+  client/src/render/parcels.ts) and the tooltips name the neighbourhood. The lines belong to the town (`sys`, the demo
+  owner); a demo is a sandbox, so its lines call at any owner's stops and stations and run from any owner's depot.
+- **Services.** Police, fire, a 1×1 hospital, a builders' yard and four car parks on every 25×25 cell, each on the
+  frontage lot nearest its spot, as in a `seedCity` district.
+- **Jobs near every home.** Homes thin out towards the suburbs (levels 1-2, gardens behind, an eighth of suburban blocks
   left as commons) while shops, offices and works stay full size everywhere. A newcomer's job search is a bounded
   breadth-first search, and in a first draft with job-poor suburbs the searches that found nothing made fill ticks of
   several seconds. The town has about twice as many jobs as people.
+- **Buses.** Each stop is on a frontage lot near the real one, beside a plain stretch of road (never facing a junction)
+  on a loop of the network, preferably a main road, on the side the server boards it from (`boardDir`: south, east,
+  west, north), three tiles or more from the route's other stops. The 25 and the 159 run out and back; the D3 runs one
+  way round the Isle of Dogs loop.
 - **Margin.** A 24-tile ring of plain grass round the map, with the river running on out of it, so the noise terrain's
   lakes do not read as more river from above. It has no parcels; players can buy it.
 
-What a fill gives (2026-10-17, machine shared with other agents, load average 12-20): about 29,000 citizens after 2.4
-game days in under four minutes, 8 lines running, and in the running child a server tick of about 54 ms average,
-85 ms p95 over 09:30-14:00. Per citizen that is the showcase's cost (both about 3.4 ms per 1,000 citizens timed side by
-side), so the London tick is the size of the town, nothing worse.
+What a fill gives (2026-10-17, machine shared with other agents, load average 12-26). With the 4×4 grid: about 29,000
+citizens after 2.4 game days in 140 s, 62,500 jobs, 8 lines running. With the street plan: about 31,500 citizens in
+190-200 s (the same scenario run side by side, so the same load), 77,000 jobs (the deep plots behind shop and office
+frontage add jobs the empty middles did not), 8 lines running. The next 900 ticks from 09:30, timed in-process side by
+side: 51-62 ms against 44-53 ms a tick, 1.59-1.89 against 1.46-1.77 ms per 1,000 citizens, so about 7-9% more per
+citizen. The difference is routing: an irregular network makes longer searches and more congestion, so more drivers
+reroute (`findRoute` from `maybeReroute`). Two things brought it down from 31% per citizen: the finer outer grain
+above (the routes' detour over the Manhattan distance fell from 1.48 to 1.22 against the grid's 1.10) and joining
+the stations' fronts at both ends. Without the fast fill (`demo:check --run`) London grows slowly on either map: a
+newcomer arrives through a live gateway once there is one (sim/gateways.ts), and on the new map one station is staffed
+early, which ends the start-up arrivals sooner (1,400 citizens after 2.4 days against 7,800).
 
 The tour runs west to east along the river and then round the rings: Westminster, the West End, the City and the
 Great Eastern line to Stratford, Waterloo and the line to Clapham Junction, Canary Wharf, the Isle of Dogs and Greenwich,
