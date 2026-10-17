@@ -31,4 +31,3 @@ export * from './goals';
 export * from './demo/showcase';
 export * from './demo/london';
 export * from './demo/londonMap';
-export * from './helicopters';
