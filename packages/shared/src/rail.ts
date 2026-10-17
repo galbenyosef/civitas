@@ -231,9 +231,9 @@ export function stationStop(p: Placed): StationStop {
   const a0 = alongX ? p.ax : p.ay, a1 = alongX ? p.ax + p.w - 1 : p.ay + p.h - 1;
   return { doorX: p.doorX, doorY: p.doorY, alongX, row: back - bs, a0, a1, len: a1 - a0 + 1 };
 }
-const stopTile = (s: StationStop, a: number): [number, number] => (s.alongX ? [a, s.row] : [s.row, a]);
+export const stopTile = (s: StationStop, a: number): [number, number] => (s.alongX ? [a, s.row] : [s.row, a]);
 /** side a train leaves a row tile by when moving towards +along (E or S) or -along (W or N) */
-const alongSide = (s: StationStop, dir: 1 | -1) => (s.alongX ? (dir > 0 ? 1 : 3) : (dir > 0 ? 2 : 0));
+export const alongSide = (s: StationStop, dir: 1 | -1) => (s.alongX ? (dir > 0 ? 1 : 3) : (dir > 0 ? 2 : 0));
 
 /** The rail station whose door is at (x, y) (or that covers (x, y)), or null. */
 export function railStationAt(x: number, y: number, env: RailEnv): Placed | null {
@@ -260,6 +260,33 @@ export function stationTrackProblem(p: Placed, env: RailEnv): string | null {
   return null;
 }
 
+/**
+ * What the route search reads: a network of tiles whose masks say which sides a train may leave by, and the stops a
+ * line names. Surface rail reads track aux bytes and stations (`surfaceNet`); the metro reads the under layer and its
+ * platforms (metro.ts `underNet`). Everything downstream of the route (geometry, timetable, poses, calls) is the same.
+ */
+export interface TrackNet {
+  /** the sides a train may leave (x, y) by, -1 where there is nothing (or it is not loaded) */
+  mask(x: number, y: number): number;
+  /** where a line naming (x, y) stops (its platform row), or why it cannot call there and the tile to mark */
+  stop(x: number, y: number): StationStop | { reason: string; at: [number, number] };
+  /** what the network is called in refusals ("track" when absent) */
+  noun?: string;
+}
+/** Surface rail's network: track aux bytes, and rail stations whose platform row is connected track. */
+export function surfaceNet(env: RailEnv): TrackNet {
+  return {
+    mask: (x, y) => trackAt(env, x, y),
+    stop: (x, y) => {
+      const p = railStationAt(x, y, env);
+      if (!p) return { reason: env.tile(x, y) === undefined ? 'a station is not loaded' : `no rail station at (${x}, ${y})`, at: [x, y] };
+      const why = stationTrackProblem(p, env);
+      if (why) return { reason: `the station at (${p.doorX}, ${p.doorY}) is not on the track: ${why}`, at: [p.doorX, p.doorY] };
+      return stationStop(p);
+    },
+  };
+}
+
 // ---- lines and routes -----------------------------------------------------------------------------
 /** A line as its owner defines it (persisted; routes are re-derived from the tiles). */
 export interface RailLineDef {
@@ -278,6 +305,8 @@ export interface RailLineDef {
   cars: number;
   /** a freight line: it calls at freight yards, carries containers and no passengers (absent: passengers) */
   freight?: boolean;
+  /** an underground line (metro.ts): twin bores, so a there-and-back line runs many trains; tube stock and METRO timing */
+  metro?: boolean;
   /** round and round (the track must close), or there and back */
   loop: boolean;
 }
@@ -315,20 +344,22 @@ export function routeTiles(r: RailRoute): { x: number; y: number; i: number; o: 
 type LegResult = { steps: { x: number; y: number; i: number; o: number }[]; dir: 1 | -1 } | null;
 const BFS_BUDGET = 40000;
 const tkey = (x: number, y: number) => (x + 0x8000) * 65536 + (y + 0x8000);
+/** a tile as one number, as routes' `tiles` sets hold them */
+export const trackKey = tkey;
 
 /**
  * Shortest way through the track from leaving tile (sx, sy) by side `exit` to entering station `to`'s row at either
  * end (or only at the end `wantDir` names), never touching a tile in `forbid`. States are (tile, exit side); a train
  * may leave a tile by any connected side but the one it came in by, except on a four-way crossing (straight only).
  */
-function legSearch(env: RailEnv, sx: number, sy: number, exit: number, to: StationStop, forbid: Set<number>, wantDir: 1 | -1 | 0): LegResult {
+function legSearch(net: TrackNet, sx: number, sy: number, exit: number, to: StationStop, forbid: Set<number>, wantDir: 1 | -1 | 0): LegResult {
   const goals = new Map<number, 1 | -1>(); // tile key * 4 + entry side -> heading along the target row
   const [ex0, ey0] = stopTile(to, to.a0), [ex1, ey1] = stopTile(to, to.a1);
   if (wantDir >= 0) goals.set(tkey(ex0, ey0) * 4 + alongSide(to, -1), 1);
   if (wantDir <= 0) goals.set(tkey(ex1, ey1) * 4 + alongSide(to, 1), -1);
   const px: number[] = [], py: number[] = [], pin: number[] = [], pexit: number[] = [], parent: number[] = [];
   const seen = new Set<number>();
-  const startMask = trackAt(env, sx, sy);
+  const startMask = net.mask(sx, sy);
   if (startMask < 0 || !(startMask & (1 << exit))) return null;
   // node 0 is the start tile (not part of the leg)
   px.push(sx); py.push(sy); pin.push(-1); pexit.push(exit); parent.push(-1);
@@ -344,7 +375,7 @@ function legSearch(env: RailEnv, sx: number, sy: number, exit: number, to: Stati
       return { steps, dir: g };
     }
     if (forbid.has(nk)) continue;
-    const m = trackAt(env, nx, ny);
+    const m = net.mask(nx, ny);
     if (m < 0 || !(m & (1 << ni))) continue;
     const four = bits(m) === 4;
     for (let e = 0; e < 4; e++) {
@@ -367,19 +398,22 @@ export type RouteResult = { ok: true; route: RailRoute; tiles: Set<number> } | {
  * way it left; and the route may not use a tile twice.
  */
 export function routeLine(def: Pick<RailLineDef, 'stations' | 'loop'>, env: RailEnv): RouteResult {
+  return routeNet(def, surfaceNet(env));
+}
+/** `routeLine` over any network (surface track, or the metro's tunnels): the shared route search. */
+export function routeNet(def: Pick<RailLineDef, 'stations' | 'loop'>, net: TrackNet): RouteResult {
   const n = def.stations.length;
+  const noun = net.noun ?? 'track';
   if (n < RAIL_LIMITS.stationsMin) return { ok: false, reason: `A line needs at least ${RAIL_LIMITS.stationsMin} stations` };
   const stops: StationStop[] = [];
   const seenDoor = new Set<string>();
   for (const [dx, dy] of def.stations) {
-    const p = railStationAt(dx, dy, env);
-    if (!p) return { ok: false, reason: env.tile(dx, dy) === undefined ? 'a station is not loaded' : `no rail station at (${dx}, ${dy})`, at: [dx, dy] };
-    const k = `${p.doorX},${p.doorY}`;
-    if (seenDoor.has(k)) return { ok: false, reason: `the station at (${p.doorX}, ${p.doorY}) is on the line twice`, at: [dx, dy] };
+    const st = net.stop(dx, dy);
+    if ('reason' in st) return { ok: false, reason: st.reason, at: st.at };
+    const k = `${st.doorX},${st.doorY}`;
+    if (seenDoor.has(k)) return { ok: false, reason: `the station at (${st.doorX}, ${st.doorY}) is on the line twice`, at: [dx, dy] };
     seenDoor.add(k);
-    const why = stationTrackProblem(p, env);
-    if (why) return { ok: false, reason: `the station at (${p.doorX}, ${p.doorY}) is not on the track: ${why}`, at: [p.doorX, p.doorY] };
-    stops.push(stationStop(p));
+    stops.push(st);
   }
   const rows = stops.map((s) => { const set = new Set<number>(); for (let a = s.a0; a <= s.a1; a++) { const [x, y] = stopTile(s, a); set.add(tkey(x, y)); } return set; });
   for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) for (const k of rows[i]) if (rows[j].has(k)) return { ok: false, reason: 'two stations of the line share the same platform track', at: [def.stations[j][0], def.stations[j][1]] };
@@ -407,13 +441,13 @@ export function routeLine(def: Pick<RailLineDef, 'stations' | 'loop'>, env: Rail
     const last = acc[acc.length - 1];
     const forbid = new Set(used);
     for (const k of allRows) forbid.add(k); // never run through a platform row; entering the target's end is the goal
-    const search = (want: 1 | -1 | 0) => (budget-- > 0 ? legSearch(env, last.x, last.y, last.o, stops[toIdx], forbid, want) : null);
+    const search = (want: 1 | -1 | 0) => (budget-- > 0 ? legSearch(net, last.x, last.y, last.o, stops[toIdx], forbid, want) : null);
     const legA = search(closing ? firstDir : 0);
     if (!legA) {
       const [ax, ay] = def.stations[i], [bx, by] = def.stations[toIdx];
       firstFail ??= closing
-        ? { reason: `the track does not lead from the last station (${ax}, ${ay}) back round into the first (${bx}, ${by}) for a loop`, at: [bx, by] }
-        : { reason: `the stations at (${ax}, ${ay}) and (${bx}, ${by}) are not connected by track a train can run along`, at: [bx, by] };
+        ? { reason: `the ${noun} does not lead from the last station (${ax}, ${ay}) back round into the first (${bx}, ${by}) for a loop`, at: [bx, by] }
+        : { reason: `the stations at (${ax}, ${ay}) and (${bx}, ${by}) are not connected by ${noun} a train can run along`, at: [bx, by] };
       return null;
     }
     if (closing) return { tiles: [...acc, ...legA.steps], stopsK };
@@ -433,7 +467,7 @@ export function routeLine(def: Pick<RailLineDef, 'stations' | 'loop'>, env: Rail
     const got = solve(0, rowTiles(stops[0], d), [0], new Set(rows[0]), d);
     if (got && (!best || got.tiles.length < best.tiles.length)) best = got;
   }
-  if (!best) return { ok: false, ...(firstFail ?? { reason: 'no route through the track' }) };
+  if (!best) return { ok: false, ...(firstFail ?? { reason: `no route through the ${noun}` }) };
   const tiles = new Set<number>();
   for (const t of best.tiles) {
     const k = tkey(t.x, t.y);
@@ -528,23 +562,36 @@ export const SERVICE_START_HOUR = 5;
 export const SERVICE_END_HOUR = 25;
 /** a train still out after this hour of the next morning is cut short, so two days' services never overlap */
 const SERVICE_HARD_END_HOUR = 28.8;
+/**
+ * Underground running (RailLineDef.metro, metro.ts METRO): line speed and acceleration, dwells (ticks, by the
+ * station; longer at the ends of a there-and-back line, where the train crosses to the other bore), and the most
+ * trains a line runs. Twin bores let a there-and-back line run many trains.
+ */
+export const METRO_TIMING = { vmax: 0.55, accel: 0.045, dwell: [3, 5], terminusDwell: [10, 14], trainsMax: 12 } as const;
 
 /**
  * Vehicle types: RAIL_VEHICLE_LEN gives each body's length, and every pair of neighbours is RAIL_VEHICLE_GAP apart. Passenger trains
  * are a locomotive, carriages and a driving trailer; freight trains a locomotive and 4 to 8 short wagons (a locomotive
  * at each end on a there-and-back line, which has nowhere to run round).
  */
-export const RailVehicle = { Loco: 0, Carriage: 1, Trailer: 2, Flat: 3, Tank: 4, Hopper: 5, Van: 6 } as const;
-export const RAIL_VEHICLE_NAMES = ['locomotive', 'carriage', 'driving trailer', 'container flat', 'tank wagon', 'hopper wagon', 'covered van'];
-export const RAIL_VEHICLE_LEN = [CAR_LEN, CAR_LEN, CAR_LEN, 0.58, 0.58, 0.58, 0.58];
+export const RailVehicle = { Loco: 0, Carriage: 1, Trailer: 2, Flat: 3, Tank: 4, Hopper: 5, Van: 6, TubeCab: 7, TubeCar: 8 } as const;
+export const RAIL_VEHICLE_NAMES = ['locomotive', 'carriage', 'driving trailer', 'container flat', 'tank wagon', 'hopper wagon', 'covered van', 'driving motor car', 'tube car'];
+export const RAIL_VEHICLE_LEN = [CAR_LEN, CAR_LEN, CAR_LEN, 0.58, 0.58, 0.58, 0.58, CAR_LEN, CAR_LEN];
 export const RAIL_VEHICLE_GAP = CAR_PITCH - CAR_LEN;
 /** containers (or container-loads of bulk) a wagon carries */
-export const WAGON_LOAD = [0, 0, 0, 2, 1, 1, 1];
+export const WAGON_LOAD = [0, 0, 0, 2, 1, 1, 1, 0, 0];
 export const FREIGHT_WAGONS = { min: 4, max: 8 } as const;
-const isWagon = (k: number) => k >= RailVehicle.Flat;
+const isWagon = (k: number) => k >= RailVehicle.Flat && k <= RailVehicle.Van;
+/** a driving cab at either end of a train: the locomotive, or a tube train's motor car (drawn facing outwards at the back) */
+const isCab = (k: number) => k === RailVehicle.Loco || k === RailVehicle.TubeCab;
 export const consistLength = (kinds: readonly number[]) => kinds.reduce((a, k) => a + RAIL_VEHICLE_LEN[k], 0) + RAIL_VEHICLE_GAP * (kinds.length - 1);
-/** Vehicles in a passenger line's trains: the locomotive plus its carriages, as many as the shortest platform takes. */
-export function consistFor(def: Pick<RailLineDef, 'cars'>, route: RailRoute): number {
+/**
+ * Vehicles in a passenger line's trains: the locomotive plus its carriages, as many as the shortest platform takes.
+ * A metro train fills the shortest platform with cars, whatever `cars` says.
+ */
+export function consistFor(def: Pick<RailLineDef, 'cars' | 'metro'>, route: RailRoute): number {
+  const shortestRoom = () => Math.floor((Math.min(...route.stops.map((s) => s.len)) - CAR_LEN) / CAR_PITCH + 1e-9) + 1;
+  if (def.metro) return Math.max(2, shortestRoom());
   const want = 1 + Math.max(RAIL_LIMITS.carsMin, Math.min(RAIL_LIMITS.carsMax, Math.round(def.cars)));
   const shortest = Math.min(...route.stops.map((s) => s.len));
   return Math.max(2, Math.min(want, Math.floor((shortest - CAR_LEN) / CAR_PITCH + 1e-9) + 1));
@@ -555,7 +602,11 @@ export const trainLength = (vehicles: number) => (vehicles - 1) * CAR_PITCH + CA
  * own (4-8 by hash, as many as the shortest dock takes) and the same for all its trains, so they all have one length;
  * which wagons they are is seeded per train, in runs of a kind (organic rule).
  */
-export function consistKinds(def: Pick<RailLineDef, 'id' | 'cars' | 'freight'>, route: RailRoute, train: number): number[] {
+export function consistKinds(def: Pick<RailLineDef, 'id' | 'cars' | 'freight' | 'metro'>, route: RailRoute, train: number): number[] {
+  if (def.metro) {
+    const n = consistFor(def, route);
+    return Array.from({ length: n }, (_, j) => (j === 0 || j === n - 1 ? RailVehicle.TubeCab : RailVehicle.TubeCar));
+  }
   if (!def.freight) {
     const n = consistFor(def, route);
     return Array.from({ length: n }, (_, j) => (j === 0 ? RailVehicle.Loco : j === n - 1 ? RailVehicle.Trailer : RailVehicle.Carriage));
@@ -581,7 +632,7 @@ export function consistKinds(def: Pick<RailLineDef, 'id' | 'cars' | 'freight'>, 
 /** containers a freight train of this consist carries */
 export const consistLoad = (kinds: readonly number[]) => kinds.reduce((a, k) => a + WAGON_LOAD[k], 0);
 
-interface Piece { t0: number; dur: number; s0: number; d: number; dir: 1 | -1; stop: number; vp: number; tAcc: number }
+interface Piece { t0: number; dur: number; s0: number; d: number; dir: 1 | -1; stop: number; vp: number; tAcc: number; a: number }
 /** Everything about a line's service that follows from its definition and route. Pure and cached. */
 export interface RailService {
   lineId: number;
@@ -593,6 +644,8 @@ export interface RailService {
   /** vehicles per train and the train's length (the same for every train of a line) */
   vehicles: number; length: number;
   freight: boolean;
+  /** an underground line: there and back runs out in one bore and home in the other (`unfoldedS`) */
+  metro: boolean;
   /** each train's vehicles, front first (Vehicle kinds) */
   consists: number[][];
   /** dwell at each station (by calling order), ticks */
@@ -603,27 +656,28 @@ export interface RailService {
 
 /** distance covered t ticks into a run of length d (trapezoid, or a triangle when too short to reach line speed) */
 function runDist(p: Piece, t: number): number {
-  const A = TRAIN_ACCEL, d = p.d, T = p.dur;
+  const A = p.a, d = p.d, T = p.dur;
   if (t <= 0) return 0;
   if (t >= T) return d;
   if (t < p.tAcc) return 0.5 * A * t * t;
   if (t > T - p.tAcc) { const r = T - t; return d - 0.5 * A * r * r; }
   return 0.5 * A * p.tAcc * p.tAcc + p.vp * (t - p.tAcc);
 }
-function runPiece(t0: number, s0: number, s1: number, dir: 1 | -1): Piece {
-  const d = Math.abs(s1 - s0), V = TRAIN_VMAX, A = TRAIN_ACCEL;
+function runPiece(t0: number, s0: number, s1: number, dir: 1 | -1, V = TRAIN_VMAX, A = TRAIN_ACCEL): Piece {
+  const d = Math.abs(s1 - s0);
   const dAcc = (V * V) / (2 * A);
-  if (d >= 2 * dAcc) { const tAcc = V / A; return { t0, dur: 2 * tAcc + (d - 2 * dAcc) / V, s0, d, dir, stop: -1, vp: V, tAcc }; }
+  if (d >= 2 * dAcc) { const tAcc = V / A; return { t0, dur: 2 * tAcc + (d - 2 * dAcc) / V, s0, d, dir, stop: -1, vp: V, tAcc, a: A }; }
   const vp = Math.sqrt(A * d), tAcc = vp / A;
-  return { t0, dur: 2 * tAcc, s0, d, dir, stop: -1, vp, tAcc };
+  return { t0, dur: 2 * tAcc, s0, d, dir, stop: -1, vp, tAcc, a: A };
 }
 /**
  * Dwell at a station, ticks: 8 to 13 (5-8 game minutes) by the station, longer at the ends of a there-and-back line.
  * Freight trains stand 36 to 60 ticks at a yard while they are loaded and unloaded.
  */
-export function stationDwell(door: [number, number], terminus: boolean, freight = false): number {
+export function stationDwell(door: [number, number], terminus: boolean, freight = false, metro = false): number {
   const h = hash2(door[0] * 31 + 7, door[1] * 17 + 3);
   if (freight) return Math.round(36 + 24 * h);
+  if (metro) { const [a, b] = terminus ? METRO_TIMING.terminusDwell : METRO_TIMING.dwell; return Math.round(a + (b - a) * h); }
   return Math.round((terminus ? 22 : 8) + (terminus ? 10 : 5) * h);
 }
 
@@ -632,16 +686,19 @@ const ahead = (a: number, b: number, L: number) => ((a - b) % L + L) % L;
 
 const serviceCache = new Map<string, RailService>();
 export function railService(def: RailLineDef, route: RailRoute): RailService {
-  const key = `${def.id}|${def.trains}|${def.cars}|${def.freight ? 1 : 0}|${def.stations.map((s) => s.join(',')).join(';')}|${routeKey(route)}`;
+  const metro = !!def.metro && !def.freight;
+  const key = `${def.id}|${def.trains}|${def.cars}|${def.freight ? 1 : 0}${metro ? 'm' : ''}|${def.stations.map((s) => s.join(',')).join(';')}|${routeKey(route)}`;
   const hit = serviceCache.get(key);
   if (hit) return hit;
   const geom = railGeometry(route);
   const n = geom.stopS.length;
-  const dwell = def.stations.map((d, i) => stationDwell(d, !route.loop && (i === 0 || i === n - 1), !!def.freight));
+  const dwell = def.stations.map((d, i) => stationDwell(d, !route.loop && (i === 0 || i === n - 1), !!def.freight, metro));
+  const V = metro ? METRO_TIMING.vmax : TRAIN_VMAX, A = metro ? METRO_TIMING.accel : TRAIN_ACCEL;
+  const maxTrains = metro ? METRO_TIMING.trainsMax : RAIL_LIMITS.trainsMax;
   const pieces: Piece[] = [];
   let t = 0;
-  const visit = (i: number, dir: 1 | -1) => { pieces.push({ t0: t, dur: dwell[i], s0: geom.stopS[i], d: 0, dir, stop: i, vp: 0, tAcc: 0 }); t += dwell[i]; };
-  const run = (a: number, b: number, dir: 1 | -1) => { const p = runPiece(t, a, b, dir); pieces.push(p); t += p.dur; };
+  const visit = (i: number, dir: 1 | -1) => { pieces.push({ t0: t, dur: dwell[i], s0: geom.stopS[i], d: 0, dir, stop: i, vp: 0, tAcc: 0, a: A }); t += dwell[i]; };
+  const run = (a: number, b: number, dir: 1 | -1) => { const p = runPiece(t, a, b, dir, V, A); pieces.push(p); t += p.dur; };
   if (route.loop) {
     for (let i = 0; i < n; i++) { visit(i, 1); run(geom.stopS[i], i + 1 < n ? geom.stopS[i + 1] : geom.stopS[0] + geom.L, 1); }
   } else {
@@ -649,25 +706,29 @@ export function railService(def: RailLineDef, route: RailRoute): RailService {
     for (let i = n - 1; i > 0; i--) { visit(i, -1); run(geom.stopS[i], geom.stopS[i - 1], -1); }
   }
   const T = t;
-  const consists = Array.from({ length: RAIL_LIMITS.trainsMax }, (_, i) => consistKinds(def, route, i));
+  const consists = Array.from({ length: maxTrains }, (_, i) => consistKinds({ ...def, metro }, route, i));
   const vehicles = consists[0].length;
   const length = consistLength(consists[0]);
-  const svc: RailService = { lineId: def.id, geom, pieces, T, trains: 1, headway: T, vehicles, length, dwell, freight: !!def.freight, consists };
-  const want = Math.max(1, Math.min(RAIL_LIMITS.trainsMax, Math.round(def.trains)));
-  if (!route.loop) {
+  const svc: RailService = { lineId: def.id, geom, pieces, T, trains: 1, headway: T, vehicles, length, dwell, freight: !!def.freight, metro, consists };
+  const want = Math.max(1, Math.min(maxTrains, Math.round(def.trains)));
+  if (!route.loop && !metro) {
     if (want > 1) svc.note = 'a there-and-back line on one track runs one train; make it a loop for more';
   } else {
-    // as many trains as keep a train length plus TRAIN_GAP apart at every moment of the cycle
-    const need = length + TRAIN_GAP;
+    // as many trains as keep a train length plus TRAIN_GAP apart at every moment of the cycle; twin bores unfold a
+    // there-and-back cycle onto a loop of twice the length (out in one bore, home in the other), where a train
+    // standing at a terminus is in both bores: the leader counts where it came in, the follower where it leaves
+    const need = length + TRAIN_GAP, ring = route.loop ? geom.L : 2 * geom.L;
+    const lead = (tau: number) => (route.loop ? serviceS(svc, tau) : unfoldedS(svc, tau, true));
+    const follow = (tau: number) => (route.loop ? serviceS(svc, tau) : unfoldedS(svc, tau));
     let k = want;
     for (; k > 1; k--) {
       const H = T / k;
       let min = Infinity;
-      for (let tau = 0; tau < T; tau += 0.5) min = Math.min(min, ahead(serviceS(svc, tau), serviceS(svc, tau - H), geom.L));
+      for (let tau = 0; tau < T; tau += 0.5) min = Math.min(min, ahead(lead(tau), follow(tau - H), ring));
       if (min >= need) break;
     }
     svc.trains = k; svc.headway = T / k;
-    if (k < want) svc.note = `the loop has room for ${k} train${k === 1 ? '' : 's'}`;
+    if (k < want) svc.note = `the ${route.loop ? 'loop' : 'line'} has room for ${k} train${k === 1 ? '' : 's'}`;
   }
   if (serviceCache.size > 128) serviceCache.clear();
   serviceCache.set(key, svc);
@@ -688,6 +749,19 @@ export function serviceS(svc: RailService, tau: number): number {
   if (p.stop >= 0) return p.s0;
   const s = p.s0 + p.dir * runDist(p, tau - p.t0);
   return svc.geom.loop ? ((s % svc.geom.L) + svc.geom.L) % svc.geom.L : s;
+}
+/**
+ * Where a train of a twin-bore there-and-back line is `tau` ticks into its cycle, on the loop of length 2L its two
+ * bores make: s on the way out, 2L - s on the way home. A train standing at a terminus crosses from the bore it came
+ * in by to the one it leaves by (a scissors crossover), so it is in both: this is the bore it leaves by, or with
+ * `arrival` the one it came in by. On a loop it is serviceS.
+ */
+export function unfoldedS(svc: RailService, tau: number, arrival = false): number {
+  const s = serviceS(svc, tau);
+  if (svc.geom.loop) return s;
+  const T = svc.T, p = pieceAt(svc, ((tau % T) + T) % T), n = svc.geom.stopS.length;
+  const crossing = arrival && (p.stop === 0 || p.stop === n - 1);
+  return (p.dir > 0) !== crossing ? s : 2 * svc.geom.L - s;
 }
 
 export interface TrainState {
@@ -745,7 +819,7 @@ function trainState(svc: RailService, day: number, i: number, tau: number): Trai
   };
   if (p.stop >= 0) st.doors = local > 1.5 && local < p.dur - 2;
   else {
-    const A = TRAIN_ACCEL;
+    const A = p.a;
     st.v = local < p.tAcc ? A * local : local > p.dur - p.tAcc ? A * (p.dur - local) : p.vp;
     const next = svc.pieces[svc.pieces.indexOf(p) + 1] ?? svc.pieces[0];
     st.stop = next.stop;
@@ -756,11 +830,11 @@ function trainState(svc: RailService, day: number, i: number, tau: number): Trai
 /** One vehicle of a train, placed on the track: world position of its middle, heading, and what it is. */
 export interface VehiclePose {
   x: number; z: number; h: number;
-  /** Vehicle kind: 0 locomotive, 1 carriage, 2 driving trailer, 3-6 wagons */
+  /** Vehicle kind: 0 locomotive, 1 carriage, 2 driving trailer, 3-6 wagons, 7 tube motor car, 8 tube car */
   kind: number;
   /** index in the train, 0 = the front (outbound) end */
   j: number;
-  /** a locomotive at the rear of a there-and-back freight train faces the other way */
+  /** a locomotive at the rear of a there-and-back freight train (or a tube train's rear motor car) faces the other way */
   flip: boolean;
 }
 /** half the distance between a vehicle's two bogies */
@@ -781,7 +855,7 @@ export function trainPoses(svc: RailService, t: TrainState, out: VehiclePose[] =
     front -= len + RAIL_VEHICLE_GAP;
     railPoint(svc.geom, s + b, P1);
     railPoint(svc.geom, s - b, P2);
-    out.push({ x: (P1.x + P2.x) / 2, z: (P1.z + P2.z) / 2, h: Math.atan2(P1.z - P2.z, P1.x - P2.x), kind: k, j, flip: k === RailVehicle.Loco && j > 0 });
+    out.push({ x: (P1.x + P2.x) / 2, z: (P1.z + P2.z) / 2, h: Math.atan2(P1.z - P2.z, P1.x - P2.x), kind: k, j, flip: isCab(k) && j > 0 });
   }
   return out;
 }

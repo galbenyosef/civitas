@@ -12,7 +12,7 @@ Code:
 - `client/src/rail.ts` handles the track preview and the track and station tooltips.
 - `client/src/render/atlas.ts` and `render/chunkView.ts` draw the track itself.
 
-`packages/shared/scripts/rail-check.ts` checks routes, geometry, timetables and spacing.
+`packages/shared/scripts/rail-check.ts` checks routes, geometry, timetables and spacing. The route search and the timetable also serve the metro (`shared/src/metro.ts`, docs/underground.md), which has its own `metro-check.ts`.
 
 ## Track
 
@@ -109,6 +109,11 @@ Lines are transit lines with mode `'rail'` (docs/transit.md). The registry keeps
 
 Each leg is the shortest way into either end of the next platform. When the rest of the line cannot follow, the other end is tried. The search is deterministic, so a client running it on the same tiles gets the same route; the check script compares the two.
 
+**The search is shared with the metro** (docs/underground.md).
+- `routeNet(def, net)` reads a `TrackNet`: `mask(x, y)` gives the sides a train may leave a tile by, or -1 for none; `stop(x, y)` gives a `StationStop` or `{ reason, at }`; and the optional `noun` names the network in refusals, "track" when absent.
+- `routeLine(def, env)` is `routeNet(def, surfaceNet(env))`, where `surfaceNet` reads track aux bytes and stations with `stationTrackProblem`. The metro passes `underNet` (`shared/src/metro.ts`) instead.
+- `legSearch` is private, as before, and runs on the net.
+
 Lines are re-derived from the tiles every 10 ticks, and at the next tick after any track edit. A broken route or a missing station grounds the line, with the reason as its status. Repairing the track brings it back. When two lines would share track, the line with the lower id keeps it.
 
 ### What goes over the wire
@@ -168,12 +173,18 @@ Runs accelerate at `TRAIN_ACCEL` (0.03 tiles/tick²) to `TRAIN_VMAX` (0.6 tiles/
 
 | Rule | Value |
 | --- | --- |
-| Trains on a there-and-back line | 1 (one track, nowhere to pass) |
+| Trains on a there-and-back line | 1 (one track, nowhere to pass); a metro line runs up to 12 on its twin bores (below) |
 | Trains on a loop | as asked, up to 8, cut to as many as keep at least a train length plus `TRAIN_GAP` (1.5 tiles) apart at every half tick of the cycle |
 | Headway | cycle ÷ trains |
 | Train i of a day | starts its first cycle at 05:00 + i × headway |
 | Last cycle | the last one starting by 01:00 and ending before 04:48 the next morning, so two days' services never overlap |
 | Consist | a locomotive and 2 to 4 carriages (hash of the line id), as many as the shortest platform takes (`CAR_PITCH` 0.92, `CAR_LEN` 0.86) |
+
+**Metro lines** (`RailLineDef.metro`, docs/underground.md):
+- Timing comes from `METRO_TIMING`: 0.55 tiles a tick, 0.045 acceleration, dwells of 3-5 ticks (10-14 at a terminus), and up to 12 trains.
+- A train is a tube consist: `RailVehicle.TubeCab` (7) at each end and `TubeCar` (8) between, as many cars as the shortest platform has tiles.
+- A there-and-back line spaces its trains on the loop of length 2L its two bores make (`unfoldedS`). A train standing at a terminus is in both bores.
+- `RailService.metro` says which kind of line it is. Each `Piece` carries its own acceleration.
 
 `trainsAt(svc, tick)` lists the trains in service, each with:
 
