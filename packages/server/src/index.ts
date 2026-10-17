@@ -1,0 +1,172 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { Duplex } from 'node:stream';
+import { readFile, stat } from 'node:fs/promises';
+import { existsSync, renameSync, unlinkSync, readFileSync, copyFileSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
+import { join, extname, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { TICK_MS, DEMO_TOWN, isDemoId } from '@msimcity/shared';
+import { World } from './world';
+import { createGame, tuneEconomy } from './game';
+import { WsSource } from './transport-ws';
+import { loadWorld, saveWorld } from './store';
+import { seedCommons } from './seed';
+import { seedCity } from './loadtest/cities';
+import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, stopsChildrenOn } from './testcities';
+import { fillCity } from './fill';
+import { seedDemoTown, seedDemoNetwork, fillDemo, seededRandom, worldHash } from './demo/seed';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT ?? 8080);
+const HOST = process.env.HOST ?? '0.0.0.0';
+const DATA = resolve(process.env.WORLD_FILE ?? join(here, '../../../data/world.json'));
+const STATIC = resolve(process.env.STATIC_DIR ?? join(here, '../../client/dist'));
+const SAVE_EVERY_MS = 30_000;
+/** Dev knobs: SIM_STEPS runs several simulation ticks per interval (fast-forward); a RESET marker next to the
+ *  world file makes the next start discard the world and reseed; SEED_BUILT pre-builds the Commons at that level. */
+const SIM_STEPS = Math.max(1, Number(process.env.SIM_STEPS ?? 1) | 0);
+/** ECON=name=value,... overrides ECONOMY_TUNING (shared/src/tuning.ts) for an offline economy run */
+tuneEconomy(process.env.ECON ?? '');
+const RESET_MARKER = join(dirname(DATA), 'RESET');
+/** CITY_DISTRICTS=n makes this process a test city (testcities.ts): a fresh world is an n×n-district city built to level 3
+ *  and filled with citizens before clients are accepted. Set by the parent server, not by hand (though it works by hand). */
+const CITY = Math.max(0, Number(process.env.CITY_DISTRICTS ?? 0) | 0);
+/** DEMO=<id> makes this process a demo map (docs/demo.md, shared/src/demo/showcase.ts): a fresh world is the scenario,
+ *  seeded through the players' planners and filled before clients are accepted; DEMO_SNAPSHOT is where the filled
+ *  world is copied for Reset demo. Set by the parent's world launcher (testcities.ts). */
+const DEMO = isDemoId(process.env.DEMO) ? process.env.DEMO : null;
+const DEMO_SNAPSHOT = process.env.DEMO_SNAPSHOT;
+/** a child world (test city or demo): saves on stop and after its fill, not every 30 s, and stops itself when idle */
+const CHILD = CITY > 0 || DEMO !== null;
+
+// ---- world ---------------------------------------------------------------------
+let seedBuilt = Number(process.env.SEED_BUILT ?? 0) | 0;
+if (existsSync(RESET_MARKER)) {
+  // the marker may carry options, e.g. "built=3" for a ready-made Commons
+  const opts = Object.fromEntries(readFileSync(RESET_MARKER, 'utf8').split(/\s+/).filter(Boolean).map((kv) => kv.split('=') as [string, string]));
+  if (opts.built) seedBuilt = Number(opts.built) | 0;
+  if (existsSync(DATA)) renameSync(DATA, DATA + '.reset.bak');
+  unlinkSync(RESET_MARKER);
+  console.log(`RESET marker found: starting a fresh world${seedBuilt ? ` with the Commons built to level ${seedBuilt}` : ''}`);
+}
+let world = loadWorld(DATA);
+let needsFill = false;
+/** a demo being seeded draws from a seeded generator until its fill is done, so the same scenario gives the same town */
+const realRandom = Math.random;
+if (world) {
+  console.log(`loaded world from ${DATA}: ${world.chunks.size} chunks, ${world.parcels.size} parcels, ${world.citizens.size} citizens, day ${world.day}`);
+} else if (DEMO) {
+  Math.random = seededRandom(DEMO_TOWN.seed);
+  world = new World(DEMO_TOWN.seed);
+  const problems = seedDemoTown(world, DEMO);
+  if (problems.length) { console.error(`demo ${DEMO}: the scenario does not build:\n  ${problems.join('\n  ')}`); process.exit(1); }
+  needsFill = true;
+  console.log(`demo ${DEMO}: seeded the town (seed ${DEMO_TOWN.seed})`);
+} else {
+  const seed = Number(process.env.SEED ?? (CITY ? 1 : Math.floor(Math.random() * 2 ** 31)));
+  world = new World(seed);
+  if (CITY) { seedCity(world, { districts: CITY, built: 3 }); needsFill = true; } else seedCommons(world, seedBuilt);
+  console.log(`created new world with seed ${seed}`);
+}
+// ---- http (serves the built client when present; the game's WebSockets share its port) -----------
+const http = createServer((req, res) => void serve(req, res));
+/** the game (game.ts): simulation, airports, rail and the protocol, here over WebSockets on the http port. Draft kinds and
+ *  dev actions on a non-production server; a test city or demo is a sandbox (all tech, endless funds, no onboarding). */
+const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD }, SIM_STEPS);
+const { sim, airports, rail, net, tickWin } = game;
+if (DEMO && needsFill) { // the second half of seeding needs the simulation: bus stops, track and every line
+  const problems = seedDemoNetwork(world, sim, rail, DEMO);
+  if (problems.length) { console.error(`demo ${DEMO}: the scenario's network does not build:\n  ${problems.join('\n  ')}`); process.exit(1); }
+}
+/** a demo's tiles, aux, sub and lines as it starts (after the fill, or as loaded): Reset demo must give the same */
+let startHash = DEMO && !needsFill ? worldHash(world) : undefined;
+/** test cities: false while the fast-fill runs; the progress is on /healthz */
+let ready = !needsFill;
+let fillProgress: { tick: number; of: number; pop: number } | undefined;
+/** the live server's test-city launcher (dev only; a test city itself has none) */
+const testCities = worldLauncherAvailable() // demos on every main server, test cities on dev servers only
+  ? new TestCities({ entry: fileURLToPath(import.meta.url), staticDir: STATIC, dataDir: join(dirname(DATA), 'test-cities'), cwd: join(here, '..'), cities: testCitiesAvailable(), demoDir: join(dirname(DATA), 'demos') })
+  : null;
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
+  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json',
+};
+async function serve(req: IncomingMessage, res: ServerResponse) {
+  if (req.url === '/healthz') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify({
+      ok: true, chunks: world!.chunks.size, citizens: world!.citizens.size, clients: net.connections,
+      pid: process.pid, day: world!.day, dayFrac: sim.dayFrac, ready, ...(CITY ? { districts: CITY } : {}), ...(DEMO ? { demo: DEMO, startHash } : {}), ...(fillProgress && !ready ? { fill: fillProgress } : {}),
+      ...(net.tickStats ? { tickAvg: net.tickStats.avg, tickP95: net.tickStats.p95, tickMax: net.tickStats.max } : {}),
+    }));
+  }
+  if (testCities?.handle(req, res)) return;
+  if (['/api/test-cities', '/api/demos'].includes(req.url?.split('?')[0] ?? '')) { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); return res.end('{"available":false}'); }
+  if (!existsSync(STATIC)) { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('msimcity server running. Build the client (npm run build) or use the Vite dev server.\n'); }
+  const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
+  let file = join(STATIC, urlPath === '/' ? 'index.html' : urlPath);
+  if (!file.startsWith(STATIC)) { res.writeHead(403); return res.end(); }
+  try {
+    if ((await stat(file)).isDirectory()) file = join(file, 'index.html');
+    const body = await readFile(file);
+    res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });
+    res.end(body);
+  } catch {
+    const body = await readFile(join(STATIC, 'index.html')).catch(() => null);
+    if (!body) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'content-type': MIME['.html'] });
+    res.end(body);
+  }
+}
+// demo sockets (/demo-ws/<id>) are piped to the demo's own process before the game's socket server sees them
+if (testCities) {
+  const emit = http.emit.bind(http) as (ev: string, ...args: unknown[]) => boolean;
+  (http as { emit: (ev: string, ...args: unknown[]) => boolean }).emit = (ev, ...args) =>
+    ev === 'upgrade' && testCities.upgrade(args[0] as IncomingMessage, args[1] as Duplex, args[2] as Buffer) ? true : emit(ev, ...args);
+}
+
+// ---- main loop -----------------------------------------------------------------------
+function startLoop() {
+  setInterval(() => game.loop(), TICK_MS);
+  // a test city saves when it stops (and after its fill), not every 30 s: a big world takes seconds to write
+  if (!CHILD) setInterval(() => save('autosave'), SAVE_EVERY_MS);
+}
+function save(reason: string) {
+  try { saveWorld(world!, DATA); console.log(`saved (${reason}): ${world!.citizens.size} citizens, day ${world!.day}`); }
+  catch (e) { console.error('save failed', e); }
+}
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => {
+  if (CHILD && !ready) process.exit(0); // half-grown: nothing worth saving, the next start fills again
+  save(sig);
+  // tsx watch sends SIGTERM on every reload and the test cities must survive that; SIGINT (Ctrl-C) or
+  // TEST_CITY_STOP_ON_EXIT=1 is a real shutdown and stops them (testcities.ts, stopsChildrenOn)
+  if (testCities && stopsChildrenOn(sig)) void testCities.stopAll().then(() => process.exit(0)); else process.exit(0);
+});
+
+http.listen(PORT, HOST, async () => {
+  const lan = Object.values(networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal && !i.address.startsWith('169.254.'))?.address;
+  console.log(`civitas server listening on http://${lan ?? HOST}:${PORT}  (ws same port)`);
+  if (needsFill && DEMO) {
+    net.accepting = false;
+    const t0 = performance.now();
+    const r = await fillDemo(world!, game.step, (p) => { fillProgress = p; });
+    Math.random = realRandom;
+    startHash = worldHash(world!);
+    ready = true;
+    net.accepting = true;
+    console.log(`demo ${DEMO} filled: ${r.pop} citizens after ${(r.ticks / 2400).toFixed(2)} days in ${((performance.now() - t0) / 1000).toFixed(1)} s, hash ${startHash}`);
+    save('fill');
+    if (DEMO_SNAPSHOT) try { copyFileSync(DATA, DEMO_SNAPSHOT); } catch (e) { console.error('demo snapshot failed', e); }
+  } else if (needsFill) {
+    net.accepting = false;
+    const r = await fillCity(world!, game.step, (p) => { fillProgress = p; });
+    ready = true;
+    net.accepting = true;
+    console.log(`test city ${CITY}×${CITY} filled: ${r.pop} citizens after ${(r.ticks / 2400).toFixed(2)} days in ${r.seconds.toFixed(1)} s${r.settled ? '' : ' (still growing at the cap)'}`);
+    save('fill');
+  }
+  // a child world looks after itself: no clients for TEST_CITY_IDLE_MS and it saves and exits, parent or no parent
+  if (CHILD) watchIdle(() => net.connections, () => { console.log(`${DEMO ? `demo ${DEMO}` : 'test city'} idle, stopping`); save('idle'); process.exit(0); });
+  startLoop();
+});

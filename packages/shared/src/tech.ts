@@ -1,0 +1,91 @@
+import type { TechDTO } from './protocol';
+
+/**
+ * The technology tree. Tiers are earned by playing (a counter the player's own
+ * city drives crosses a threshold) and then bought. Conditions are data, so the
+ * server enforces them and the client can show progress bars without either
+ * side knowing the other's code.
+ */
+export type Counter = 'built' | 'roads' | 'housed' | 'jobs' | 'parked';
+export const COUNTER_LABELS: Record<Counter, string> = {
+  built: 'units of construction work completed by your builders',
+  roads: 'road tiles laid',
+  housed: 'residents housed at once',
+  jobs: 'jobs filled in your parcels at once',
+  parked: 'cars parked at your buildings',
+};
+
+export interface TechNode {
+  id: string;
+  track: 'zoning' | 'construction' | 'transport' | 'civic' | 'culture';
+  tier: number;
+  name: string;
+  blurb: string;
+  cost: number;
+  requires: string[];
+  condition: { counter: Counter; min: number };
+  /** feature ids this node opens: tool names, 'level2' ... 'level7', 'underground', 'signals', 'publicRoads', 'patrols', 'airport', 'runway', 'lines' (the transit Lines panel) */
+  unlocks: string[];
+}
+
+/**
+ * Costs and conditions were retuned for the first two hours of play (docs/early-game-audit.md, "After Gauntlet 3"):
+ * tiers 2-5 cost about a third less, so after the opening a node is a day or so of tax away rather than five, and the
+ * transport nodes that asked for road tiles (met by any opening layout, so they gated nothing) now ask for residents,
+ * arriving as the traffic they fix does. Parking lots (tr1) still opens on 20 road tiles. The motorway connection needs no
+ * technology (no node unlocks it): newcomers should be able to arrive through it from the first homes.
+ */
+export const TECH: TechNode[] = [
+  // zoning: what land may be used for
+  { id: 'zon1', track: 'zoning', tier: 1, name: 'Commercial zoning', blurb: 'Shops, cafés and bars. Your residents spend money and pay sales tax here.', cost: 200, requires: [], condition: { counter: 'housed', min: 12 }, unlocks: ['com'] },
+  { id: 'zon2', track: 'zoning', tier: 2, name: 'Industrial zoning', blurb: 'Factories and warehouses: well-paid shift work and freight on your roads.', cost: 300, requires: ['zon1'], condition: { counter: 'housed', min: 40 }, unlocks: ['ind'] },
+  { id: 'zon3', track: 'zoning', tier: 3, name: 'Office zoning', blurb: 'Office towers hold the most jobs per tile and draw the heaviest commuter traffic.', cost: 1000, requires: ['zon2', 'con1'], condition: { counter: 'jobs', min: 80 }, unlocks: ['off'] },
+  // construction: how big things can be built
+  { id: 'con1', track: 'construction', tier: 1, name: 'Masonry', blurb: 'Your builders can raise two-storey buildings. Zones in your parcels grow to level 2.', cost: 500, requires: [], condition: { counter: 'built', min: 300 }, unlocks: ['level2'] },
+  { id: 'con2', track: 'construction', tier: 2, name: 'Steel frame', blurb: 'Towers. Zones in your parcels grow to level 3, and steel lets you build a builders\' depot with its own crane and a multi-storey car park.', cost: 1200, requires: ['con1'], condition: { counter: 'built', min: 2500 }, unlocks: ['level3', 'depot', 'multistorey'] },
+  { id: 'con3', track: 'construction', tier: 3, name: 'Deep foundations', blurb: 'Basement levels under new and existing buildings: underground parking for everyone who works or shops there.', cost: 1500, requires: ['con2'], condition: { counter: 'built', min: 5000 }, unlocks: ['underground'] },
+  { id: 'con4', track: 'construction', tier: 4, name: 'Industrialised building', blurb: 'A construction company with a batching plant, mixer trucks and three times a yard\'s crews, each working sixty per cent faster.', cost: 3500, requires: ['con3'], condition: { counter: 'built', min: 12000 }, unlocks: ['buildco'] },
+  { id: 'con5', track: 'construction', tier: 5, name: 'High-rise', blurb: 'Neighbouring lots of one zone merge into bigger buildings and climb past level 3: mid-rise flats, department stores, office towers and distribution centres at levels 4 and 5, then residential towers, hotels, corporate campuses, supertalls and heavy plants at 6 and 7.', cost: 4000, requires: ['con3'], condition: { counter: 'built', min: 10000 }, unlocks: ['level4', 'level5', 'level6', 'level7'] },
+  // transport: moving people and cars
+  { id: 'tr1', track: 'transport', tier: 1, name: 'Parking lots', blurb: 'Surface lots with a dozen bays, and kerbside bays for half a dozen. Drivers who find no space at their destination park here and walk, and pay you for it.', cost: 150, requires: [], condition: { counter: 'roads', min: 20 }, unlocks: ['park', 'kerbbays'] },
+  { id: 'tr2', track: 'transport', tier: 2, name: 'Traffic signals', blurb: 'Crossroads in your parcels get phased signals, roughly doubling what a busy junction can carry.', cost: 500, requires: ['tr1'], condition: { counter: 'housed', min: 100 }, unlocks: ['signals'] },
+  { id: 'tr3', track: 'transport', tier: 3, name: 'Public works', blurb: 'Lay roads on unclaimed land to link your parcels to the wider world.', cost: 700, requires: ['tr2'], condition: { counter: 'housed', min: 150 }, unlocks: ['publicRoads'] },
+  { id: 'tr7', track: 'transport', tier: 3, name: 'Junction design', blurb: 'Roundabouts and flyovers. A roundabout keeps traffic moving without lights: drivers give way to cars already on the ring. A flyover lifts one road over the other, so nothing crossing ever waits (but nobody can turn there).', cost: 1200, requires: ['tr2'], condition: { counter: 'roads', min: 120 }, unlocks: ['roundabout', 'flyover'] },
+  { id: 'tr4', track: 'transport', tier: 4, name: 'Aviation', blurb: 'An airport terminal and a runway behind it. Planes land on a daily timetable, every landing pays you a fee, and the ground crew work early and late shifts.', cost: 4500, requires: ['tr3'], condition: { counter: 'jobs', min: 200 }, unlocks: ['airport', 'runway'] },
+  { id: 'tr5', track: 'transport', tier: 5, name: 'Public transport', blurb: 'Bus stops, a bus depot and the Lines panel: route buses round your stops, set a fare-paying timetable running from 05:30 to 00:30, and take cars off the road.', cost: 1000, requires: ['tr2'], condition: { counter: 'housed', min: 200 }, unlocks: ['busstop', 'busdepot', 'lines', 'parkride'] },
+  { id: 'tr6', track: 'transport', tier: 6, name: 'Rail', blurb: 'Railway track, halts, stations and freight yards. Trains run your lines on a timetable from 05:00 to 01:00, 40 riders a carriage paying fares; a there-and-back line runs one train, a loop as many as fit. Freight yards load containers for freight lines.', cost: 3000, requires: ['tr5'], condition: { counter: 'jobs', min: 250 }, unlocks: ['rail', 'railhalt', 'railstation', 'freightyard'] },
+  // civic: services
+  { id: 'civ1', track: 'civic', tier: 1, name: 'Emergency services', blurb: 'Police and fire stations, with police boxes, neighbourhood posts and fire posts to fill the gaps. Covered homes tolerate higher taxes and grow faster.', cost: 400, requires: [], condition: { counter: 'housed', min: 20 }, unlocks: ['police', 'fire', 'policebox', 'policepost', 'firepost'] },
+  { id: 'civ2', track: 'civic', tier: 2, name: 'Healthcare', blurb: 'GP surgeries, health centres, walk-in centres and the city hospital: the best-paid jobs in town and the third service homes look for.', cost: 800, requires: ['civ1'], condition: { counter: 'housed', min: 100 }, unlocks: ['hospital', 'gp', 'healthcentre', 'walkin'] },
+  { id: 'civ3', track: 'civic', tier: 3, name: 'Patrols and call-outs', blurb: 'Your stations put patrol cars, fire engines and ambulances on the road.', cost: 700, requires: ['civ2'], condition: { counter: 'jobs', min: 60 }, unlocks: ['patrols'] },
+  { id: 'civ4', track: 'civic', tier: 4, name: 'Regional services', blurb: 'Bigger stations that cover a whole district: a divisional police station with a car pound, a large fire station with a drill tower and a community hospital.', cost: 1800, requires: ['civ3'], condition: { counter: 'housed', min: 300 }, unlocks: ['divstation', 'bigfire', 'commhospital'] },
+  { id: 'civ5', track: 'civic', tier: 5, name: 'Metropolitan services', blurb: 'Police headquarters, a fire and rescue headquarters and a general hospital with a helipad: the strongest cover, reaching across much of the city.', cost: 4000, requires: ['civ4'], condition: { counter: 'housed', min: 600 }, unlocks: ['policehq', 'firehq', 'genhospital'] },
+  { id: 'civ6', track: 'civic', tier: 6, name: 'Medical school', blurb: 'A teaching hospital campus with a research wing: the finest health care there is.', cost: 8000, requires: ['civ5', 'cul4'], condition: { counter: 'jobs', min: 600 }, unlocks: ['teachhospital'] },
+  // culture: places to go (parks need no technology)
+  { id: 'cul1', track: 'culture', tier: 1, name: 'Libraries and halls', blurb: 'A library or community hall, and the lakeside park: free daytime outings that retirees and children love, and a reason to stay.', cost: 400, requires: [], condition: { counter: 'housed', min: 25 }, unlocks: ['library', 'lakepark'] },
+  { id: 'cul2', track: 'culture', tier: 2, name: 'Cinemas and sports halls', blurb: 'Evening crowds, premiere and match nights, ticket sales taxed in your parcel, and traffic to match.', cost: 700, requires: ['cul1'], condition: { counter: 'housed', min: 70 }, unlocks: ['cinema', 'sports', 'cafecinema', 'centrallibrary'] },
+  { id: 'cul3', track: 'culture', tier: 3, name: 'Theatre', blurb: 'A playhouse with performances three nights a week. The best night out in town draws people from far away.', cost: 1200, requires: ['cul2', 'zon1'], condition: { counter: 'jobs', min: 100 }, unlocks: ['theatre', 'studiotheatre', 'leisurecentre'] },
+  { id: 'cul4', track: 'culture', tier: 4, name: 'Big nights out', blurb: 'A multiplex, an indoor arena and a museum: big venues with big event nights that draw people from across town.', cost: 2200, requires: ['cul3'], condition: { counter: 'housed', min: 350 }, unlocks: ['multiplex', 'arena', 'museum'] },
+  { id: 'cul5', track: 'culture', tier: 5, name: 'Landmarks', blurb: 'An opera house, a stadium with floodlights and a botanical garden: places people cross the city for.', cost: 5000, requires: ['cul4', 'con2'], condition: { counter: 'jobs', min: 500 }, unlocks: ['opera', 'stadium', 'botanic'] },
+];
+export const TECH_BY_ID = new Map(TECH.map((t) => [t.id, t]));
+export const ALL_TECH_IDS = TECH.map((t) => t.id);
+export const TRACK_NAMES: Record<TechNode['track'], string> = { zoning: 'Zoning', construction: 'Construction', transport: 'Transport', civic: 'Civic', culture: 'Culture' };
+
+/** The tech node that opens a feature, or undefined when it is available from the start. */
+export function techFor(feature: string): TechNode | undefined {
+  return TECH.find((t) => t.unlocks.includes(feature));
+}
+export const hasFeature = (unlocked: readonly string[], feature: string) => {
+  const t = techFor(feature);
+  return !t || unlocked.includes(t.id);
+};
+/** Tech needed for a zone to grow to `level` (1 is always allowed): Masonry for 2, Steel frame for 3, High-rise for 4-7. */
+export const levelFeature = (level: number) => (level >= 2 ? `level${Math.min(7, level)}` : '');
+
+export function describeCondition(t: TechNode): string {
+  return `${t.condition.min} ${COUNTER_LABELS[t.condition.counter]}`;
+}
+export function techDTO(t: TechNode): TechDTO {
+  return { id: t.id, track: t.track, tier: t.tier, name: t.name, blurb: t.blurb, cost: t.cost, requires: t.requires, condition: describeCondition(t), unlocks: t.unlocks };
+}

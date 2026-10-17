@@ -1,0 +1,117 @@
+/**
+ * Onboarding (docs/early-game-audit.md, "Onboarding"): a chain of goals for a new player's first two hours and the
+ * advisor's one-shot hints. The definitions are data both sides read: the server (server/src/goals.ts) measures each
+ * goal's parts and pays the reward, the client (client/src/onboarding.ts) draws the card, the "show me" and the hints.
+ */
+
+export type GoalId =
+  | 'plot' | 'road' | 'homes' | 'yard' | 'res12' | 'shops' | 'masonry' | 'res50' | 'cover' | 'leisure' | 'books' | 'res250' | 'busline';
+
+/** Where "show me" points the camera: the open land beside the Commons, or the player's own land. */
+export type GoalFocus = 'commons' | 'plot';
+
+export interface GoalDef {
+  id: GoalId;
+  title: string;
+  /** what to do, one line */
+  how: string;
+  /** why it matters, one line */
+  why: string;
+  /** what is measured, each with its target; the goal is done when every part reaches its target */
+  parts: { label: string; target: number }[];
+  /** cash paid on completion, and/or a technology granted for free (when already owned, its price is paid instead) */
+  reward: { cash?: number; tech?: string };
+  /** the "show me" button: a tool to pick, a panel to open, where to look */
+  show: { tool?: string; panel?: 'tech' | 'ledger' | 'lines'; focus?: GoalFocus };
+}
+
+/**
+ * The chain, in order: one goal is active at a time and the next two are previewed. Targets follow the after-Gauntlet-3
+ * curve (12 / 50 / 250 residents at about 13 / 20 / 70 minutes); rewards are modest (about $3,000 over the whole chain
+ * against $10-15k of tax in the same two hours) and land in the stretches where cash runs thin.
+ */
+export const GOALS: GoalDef[] = [
+  { id: 'plot', title: 'Claim your plot', how: 'Buy Land (2) and drag out at least 8×8 tiles beside the Commons\' edge road.',
+    why: 'Lots only grow beside a road the builders can reach: land touching the Commons is already connected.',
+    parts: [{ label: 'tiles of land', target: 64 }], reward: {}, show: { tool: 'buy', focus: 'commons' } },
+  { id: 'road', title: 'Lay a street', how: 'Road (3): drag streets through your plot and join them to the Commons\' road.',
+    why: 'Every lot needs a road beside it; every third row is a good rhythm.',
+    parts: [{ label: 'road tiles on your land', target: 12 }], reward: { cash: 100 }, show: { tool: 'road', focus: 'plot' } },
+  { id: 'homes', title: 'Zone homes', how: 'Residential (4): paint lots along your streets. Zoning goes round roads.',
+    why: 'Homes bring residents, and residents pay property tax to you.',
+    parts: [{ label: 'residential lots beside a road', target: 24 }], reward: { cash: 200 }, show: { tool: 'res', focus: 'plot' } },
+  { id: 'yard', title: 'Hire your own builders', how: "Builders' yard (Y): place one beside one of your roads ($300; your first opens at once).",
+    why: "The Commons' builders work their own streets first; with a yard of your own your lots go up straight away.",
+    parts: [{ label: "builders' yard", target: 1 }], reward: { cash: 300 }, show: { tool: 'yard', focus: 'plot' } },
+  { id: 'res12', title: 'First residents', how: 'Wait for the first homes to finish: builders walk to each site and work their shift.',
+    why: 'Twelve residents open Commercial zoning on the tech tree.',
+    parts: [{ label: 'residents', target: 12 }], reward: { tech: 'zon1' }, show: { focus: 'plot' } },
+  { id: 'shops', title: 'Open the shops', how: 'Commercial (5): zone a few lots near your homes.',
+    why: 'Shops give your residents work close by, and their staff pay income tax to you rather than to the Commons.',
+    parts: [{ label: 'commercial lots', target: 6 }, { label: 'shop jobs filled', target: 8 }], reward: { cash: 300 }, show: { tool: 'com', focus: 'plot' } },
+  { id: 'masonry', title: 'Masonry', how: 'Open the tech tree (T) and unlock Masonry once 300 units of building work are done.',
+    why: 'Two-storey buildings: each lot holds twice the people.',
+    parts: [{ label: 'Masonry unlocked', target: 1 }], reward: { cash: 250 }, show: { panel: 'tech' } },
+  { id: 'res50', title: 'A growing town', how: 'Keep zoning homes along your streets, and a few more shops.',
+    why: 'Fifty residents open Industrial zoning and most of tier 2.',
+    parts: [{ label: 'residents', target: 50 }], reward: { cash: 300 }, show: { tool: 'res', focus: 'plot' } },
+  { id: 'cover', title: 'Police and fire cover', how: 'Unlock Emergency services (T), then place a police box and a fire post: cheap, with few staff.',
+    why: 'Covered homes grow faster and put up with higher taxes. Half their staff wages come from a regional grant.',
+    parts: [{ label: 'police building', target: 1 }, { label: 'fire building', target: 1 }], reward: { cash: 200 }, show: { tool: 'policebox', focus: 'plot' } },
+  { id: 'leisure', title: 'Somewhere to go', how: 'Park (G): place one among your homes ($120, no technology needed).',
+    why: 'Bored residents are unhappy residents; a park nearby keeps them content.',
+    parts: [{ label: 'park or venue', target: 1 }], reward: { cash: 150 }, show: { tool: 'citypark', focus: 'plot' } },
+  { id: 'books', title: 'Balance the books', how: 'Open the ledger (click the treasury) and finish a day with taxes covering wages and upkeep.',
+    why: 'Running costs come out every day. The tax slider in a parcel panel is the quickest lever.',
+    parts: [{ label: 'residents', target: 40 }, { label: 'days in the black', target: 1 }], reward: { cash: 300 }, show: { panel: 'ledger' } },
+  { id: 'res250', title: 'A real town', how: 'Grow to 250 residents: more homes, jobs near them, and signals (T) when the crossroads clog.',
+    why: 'Public transport (tier 5) opens at 200 residents; regional services at 300.',
+    parts: [{ label: 'residents', target: 250 }], reward: { cash: 500 }, show: { tool: 'res', focus: 'plot' } },
+  { id: 'busline', title: 'First bus line', how: 'Unlock Public transport (T), place bus stops beside your roads and draw a line in the Lines panel.',
+    why: 'A bus takes a dozen cars off a jammed street, and fares go to you.',
+    parts: [{ label: 'bus line with 2+ stops', target: 1 }], reward: { cash: 400 }, show: { tool: 'busstop', panel: 'lines', focus: 'plot' } },
+];
+export const GOAL_BY_ID = new Map(GOALS.map((g) => [g.id, g]));
+/** Goals shown after the active one. */
+export const GOAL_PREVIEW = 2;
+
+/** A player's onboarding as the server sends it, only to that player. */
+export interface GoalsDTO {
+  /** goals completed (in completion order) */
+  done: GoalId[];
+  /** the goal being worked on, or null when the chain is finished */
+  active: GoalId | null;
+  /** the active goal's parts, current values in the order of GoalDef.parts */
+  parts: number[];
+  /** the player chose to skip the tutorial: no card, no tips (alerts still come) */
+  skipped: boolean;
+  /** hints the player dismissed: never shown again */
+  dismissed: string[];
+}
+
+/**
+ * Advisor hints. `alert`s name a problem and come even after the tutorial is skipped; `tip`s are teaching and stop with
+ * it. The server sends the ones only it can see (builders, the books, the jam, boredom, newcomers), the client raises the
+ * rest (night, a refused build on an empty treasury); either way the client shows at most one per HINT_GAP ticks.
+ */
+export type HintId = 'builders' | 'buildersRoad' | 'deficit' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night';
+export interface HintDef { kind: 'tip' | 'alert'; msg: string; tool?: string; panel?: 'tech' | 'ledger' | 'lines' }
+export const HINTS: Record<HintId, HintDef> = {
+  builders: { kind: 'alert', tool: 'yard', msg: "Your lots are waiting: the Commons' builders serve the Commons first. Place a builders' yard ($300; your first opens at once) beside one of your roads." },
+  buildersRoad: { kind: 'alert', msg: "Your lots are waiting and nobody has built on your land for a day: check that a road links your builders' yard to them." },
+  deficit: { kind: 'alert', panel: 'ledger', msg: 'You are spending more than you earn, two days running: staff wages and upkeep come out of your treasury. Raise the tax slider in a parcel, add homes, or hold off on services.' },
+  broke: { kind: 'alert', panel: 'ledger', msg: 'The treasury is nearly empty.' },
+  jam: { kind: 'alert', tool: 'res', panel: 'tech', msg: 'Traffic has been jammed all day: traffic signals (T), a bus line, or jobs closer to the homes all help.' },
+  bored: { kind: 'tip', tool: 'citypark', msg: 'Residents are bored, with nowhere to go: a park costs $120 and needs no technology.' },
+  newcomers: { kind: 'tip', tool: 'motorway', panel: 'tech', msg: 'Newcomers are moving straight into your homes. Parking lots (T, $150) also brings the motorway connection: newcomers then drive in through it, and visitors and freight use it too.' },
+  night: { kind: 'tip', msg: "It's night in the city. The light chip at the top right holds the view at mid-afternoon; click it again to follow the clock." },
+};
+export const isHintId = (id: string): id is HintId => id in HINTS;
+
+/** Words for a goal's reward, e.g. "$300" or "Commercial zoning, free". */
+export function rewardText(g: GoalDef, techName: (id: string) => string): string {
+  const bits: string[] = [];
+  if (g.reward.cash) bits.push(`$${g.reward.cash}`);
+  if (g.reward.tech) bits.push(`${techName(g.reward.tech)}, free`);
+  return bits.join(' and ');
+}

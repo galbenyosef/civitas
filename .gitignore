@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-local/
+data/*.json
+data/*.bak
+.DS_Store
+*.log
+data/test-cities/
+data/demos/
+.idea/
+packages/client/dev-dist/

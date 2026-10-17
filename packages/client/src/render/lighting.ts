@@ -1,0 +1,93 @@
+import { DirectionalLight, HemisphereLight, Color, Scene, Vector3 } from 'three';
+import { sceneUniforms } from './materials';
+
+const DAY_SKY = new Color(0x9fc4e8), DUSK_SKY = new Color(0xe09a66), BLUE_HOUR = new Color(0x2c3f72), NIGHT_SKY = new Color(0x0c1428);
+const SUN_WARM = new Color(0xffa95c), SUN_WHITE = new Color(0xfff3e0), MOON = new Color(0x7f93d0);
+const HEMI_DAY_SKY = new Color(0xbfd9ff), HEMI_DAY_GROUND = new Color(0x5a6b45);
+// moonlit night floor: bright enough that empty land, roads and parcel edges read on a first view at night (Gauntlet 3)
+const HEMI_NIGHT_SKY = new Color(0x34467a), HEMI_NIGHT_GROUND = new Color(0x1c2233);
+
+const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+/**
+ * Sun + hemisphere light driven by the in-game clock, with a shadow camera
+ * that follows the view. `sky` is the background/fog colour for this moment.
+ */
+export class Lighting {
+  sun = new DirectionalLight(0xffffff, 2.4);
+  hemi = new HemisphereLight(HEMI_DAY_SKY, HEMI_DAY_GROUND, 0.8);
+  sky = new Color();
+  mode: 'live' | 'fixed' = 'live';
+  fixedHour = 15.5;
+  hour = 12;
+  /** 0 = no shadows, 1 = 1024px, 2 = 2048px */
+  quality = 2;
+  private extent = -1;
+  private tmp = new Color();
+
+  constructor(scene: Scene) {
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.setQuality(2);
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.03;
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 700;
+    scene.add(this.sun, this.sun.target, this.hemi);
+  }
+
+  setQuality(q: number) {
+    this.quality = Math.max(0, Math.min(2, q));
+    this.sun.castShadow = this.quality > 0;
+    const size = this.quality === 2 ? 2048 : 1024;
+    if (this.sun.shadow.mapSize.x !== size) {
+      this.sun.shadow.mapSize.set(size, size);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+  }
+
+  update(liveHour: number, target: Vector3, dist: number) {
+    const h = this.mode === 'live' ? liveHour : this.fixedHour;
+    this.hour = h;
+    const theta = (h / 24) * Math.PI * 2 - Math.PI / 2; // 6:00 east horizon, 12:00 overhead, 18:00 west
+    const elev = Math.sin(theta);
+    const day = smooth(-0.22, 0.16, elev);
+    const dusk = Math.exp(-((elev / 0.2) ** 2)) * 0.8;
+    const blue = Math.exp(-(((elev + 0.15) / 0.09) ** 2)); // blue hour after the orange has gone
+
+    const dir = elev >= 0 ? new Vector3(Math.cos(theta), Math.max(elev, 0.05), 0.45) : new Vector3(-Math.cos(theta), Math.max(-elev, 0.1), 0.45);
+    dir.normalize();
+    this.sun.position.copy(target).addScaledVector(dir, 260);
+    this.sun.target.position.copy(target);
+    this.sun.target.updateMatrixWorld();
+
+    // sun fades out into the horizon and the moon fades in, so the light never pops when the direction flips
+    if (elev >= 0) {
+      this.sun.color.copy(SUN_WARM).lerp(SUN_WHITE, smooth(0, 0.45, elev));
+      this.sun.intensity = 2.6 * smooth(0, 0.12, elev) + 0.3 * smooth(0, 0.03, elev);
+    } else {
+      this.sun.color.copy(MOON);
+      this.sun.intensity = 1.3 * smooth(0, 0.08, -elev);
+    }
+    this.hemi.color.copy(HEMI_NIGHT_SKY).lerp(HEMI_DAY_SKY, day).lerp(DUSK_SKY, dusk * 0.35);
+    this.hemi.groundColor.copy(HEMI_NIGHT_GROUND).lerp(HEMI_DAY_GROUND, day);
+    this.hemi.intensity = 2.6 - 1.55 * day + 0.25 * dusk * (1 - day); // 1.05 by day; the night floor keeps land readable
+
+    this.sky.copy(NIGHT_SKY).lerp(DAY_SKY, day);
+    this.tmp.copy(this.sky).lerp(DUSK_SKY, dusk);
+    this.sky.copy(this.tmp).lerp(BLUE_HOUR, blue * 0.6);
+    sceneUniforms.uNight.value = 1 - smooth(-0.12, 0.1, elev);
+    sceneUniforms.uHour.value = h;
+    sceneUniforms.uTime.value = performance.now() / 1000;
+
+    // shadow frustum sized to what is on screen
+    const extent = Math.min(170, Math.max(22, dist * 1.35));
+    if (Math.abs(extent - this.extent) > 1) {
+      this.extent = extent;
+      const cam = this.sun.shadow.camera;
+      cam.left = -extent; cam.right = extent; cam.top = extent; cam.bottom = -extent;
+      cam.updateProjectionMatrix();
+    }
+  }
+}

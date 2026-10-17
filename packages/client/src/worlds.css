@@ -1,0 +1,28 @@
+/* world picker on the join form, test-city banner, perf readout (worlds.ts, render/perfhud.ts) */
+#worlds { margin: 14px 0 4px; }
+#worlds.hidden { display: none; }
+#worlds .wtitle { margin-bottom: 4px; color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+#worlds .wrow { display: grid; grid-template-columns: 16px 1fr auto; column-gap: 8px; align-items: baseline; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+#worlds .wrow:hover { background: rgba(255,255,255,0.05); }
+#worlds .wrow input { margin: 0; accent-color: var(--accent); }
+#worlds .wpop { color: var(--muted); font-variant-numeric: tabular-nums; }
+#worlds .wstat { grid-column: 2 / 4; min-height: 14px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+#worlds .wstat:empty { display: none; }
+#worlds .wstat.ok { color: var(--accent); }
+#worlds .wstat.warn { color: #ffbe5a; }
+#worlds .wstat.bad { color: var(--danger); }
+#worlds .whint { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+#loginForm button:disabled { opacity: 0.7; cursor: progress; }
+
+#worldHud { position: absolute; top: 48px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+#worldHud > * { pointer-events: auto; }
+#cityBanner { padding: 5px 12px; background: rgba(40,30,8,0.88); border: 1px solid rgba(255,190,90,0.55); border-radius: 999px; color: #ffbe5a; font-size: 12px; white-space: nowrap; }
+#cityBanner a { color: var(--fg); }
+#perf { min-width: 360px; padding: 7px 11px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(8px); font-size: 12px; font-variant-numeric: tabular-nums; }
+#perf.hidden { display: none; }
+#perf .prow { display: flex; justify-content: space-between; gap: 18px; padding: 1px 0; color: var(--muted); }
+#perf .prow > span:last-child { color: var(--fg); text-align: right; }
+#perf b { font-weight: 600; }
+#perf i { color: var(--muted); font-style: normal; }
+#perf .warn, #perf .warn b { color: #ffbe5a; }
+#perf .bad, #perf .bad b { color: var(--danger); }

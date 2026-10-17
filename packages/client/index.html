@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Civitas</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%2362d2a2%27/%3E%3Crect x=%273%27 y=%276%27 width=%274%27 height=%277%27 fill=%27%230e1116%27/%3E%3Crect x=%279%27 y=%273%27 width=%274%27 height=%2710%27 fill=%27%230e1116%27/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="ui">
+    <div id="top">
+      <span id="brand">civitas</span>
+      <span id="who" class="stat"></span>
+      <span id="money" class="stat"></span>
+      <span id="clock" class="stat"></span>
+      <span id="worldstats" class="stat"></span>
+      <button id="heat" class="chip" title="Tint roads by congestion (H)"></button>
+      <button id="techBtn" class="chip" title="Technology tree (T)">tech</button>
+      <button id="perfBtn" class="chip" title="Performance readout: server tick time, stream, FPS (M)">perf</button>
+      <button id="light" class="chip"></button>
+      <span id="conn" class="stat"></span>
+    </div>
+    <div id="tools"></div>
+    <div id="panel" class="hidden"></div>
+    <div id="cpanel" class="hidden"></div>
+    <div id="tech" class="hidden"></div>
+    <div id="status"></div>
+    <div id="help">middle drag to rotate · right drag / WASD to pan · wheel to zoom · 1-0 Y P X tools · Z / C turn a big building's footprint before placing it · hover or click people and cars · H traffic heat · T tech tree · I / O first-person view of the selected person or car · M perf · Esc select · <a href="/viewer.html" target="_blank" style="color:inherit">building viewer</a></div>
+    <div id="tip" class="hidden"></div>
+    <div id="toasts"></div>
+    <div id="worldHud"></div>
+  </div>
+  <div id="login">
+    <form id="loginForm">
+      <h1>Civitas</h1>
+      <p>One shared, unbounded world. Buy land, zone it, lay roads. Your citizens will go wherever the jobs are, and sit in whatever traffic you leave them.</p>
+      <input id="nameInput" maxlength="20" placeholder="Mayor name" autocomplete="off" required title="Enter a mayor name to join" />
+      <div id="worlds" class="hidden"></div>
+      <button type="submit">Join world</button>
+    </form>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
