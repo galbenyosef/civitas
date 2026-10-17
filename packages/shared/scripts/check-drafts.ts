@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { CATALOGUE, HELPER_MODELS } from '../src/buildings/catalogue';
 import { validateCatalogue } from '../src/buildings/validate';
 import { compileOps } from '../src/buildings/compile';
-import { windowCollisions, isFeature } from '../src/buildings/facade';
+import { windowCollisions, isFeature, shapeExtent } from '../src/buildings/facade';
 import type { CompiledOp, KindDef, Op } from '../src/buildings/schema';
 import type { ExtraDesign } from '../src/buildings/designs/index';
 
@@ -46,6 +46,7 @@ list.forEach((e, i) => {
     if (o[0] === 'box' || o[0] === 'roof') return [o[4] - o[1] / 2, o[4] + o[1] / 2, o[5], o[5] + o[2], o[6] - o[3] / 2, o[6] + o[3] / 2];
     if (o[0] === 'cyl') { const r = Math.max(o[1], o[2]); return [o[4] - r, o[4] + r, o[5], o[5] + o[3], o[6] - r, o[6] + r]; }
     if (o[0] === 'cone') return [o[3] - o[1], o[3] + o[1], o[4], o[4] + o[2], o[5] - o[1], o[5] + o[1]];
+    if (o[0] === 'taper' || o[0] === 'lathe') return shapeExtent(o);
     return null;
   });
   let top = 0;

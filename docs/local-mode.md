@@ -1,14 +1,47 @@
 # Local mode: Civitas with no server
 
 UTD card c5fe9155, "local mode, no internet server required". Status: phases **B** (Node-API shims) and **A** (transport seam)
-are done (card f8c2a1d5), and **E** (build) and **C** (worker host + persistence) are done (card 5ccde920), all 2026-10-17, see
-"Done so far" below; D (UI) and F (PWA) are still plan. The online game is unchanged.
+are done (card f8c2a1d5), **E** (build) and **C** (worker host + persistence) are done (card 5ccde920), and **D** (UI) and **F**
+(PWA) are done (card 5ff7785c), all 2026-10-17, see "Done so far" below. The online game is unchanged.
+
+## Done so far (phases D and F)
+
+Try it: online build, join form, **Play offline** (reloads into `?local`); or `npm run build:local` and serve `packages/client/dist-local/`
+(`cd packages/client && npx vite preview --mode offline --host 0.0.0.0 --port 4174`; the PWA part needs https or `http://localhost`, see below).
+
+* **Join form (`local/ui.ts`).** Online page: a **Play offline** button under Join world (not on `?ws=`, `?city=` or demo pages); it reloads into `?local`
+  (the page picks its transport once at load; `?dev` is kept). In a local game the form shows the mayor name, "Your city: day N, M citizens, saved <date>" with
+  **Continue** (or "No city yet" with **Start a new city**), **New game…**, **Saves…**, and a link back to the online server (not in the static build). The city
+  is paused behind the form and unpaused on join. The world picker, test-city and demo code never runs in local mode (no `/api/*` fetches). The login overlay now
+  scrolls (`#login` flex + `overflow-y: auto`, in `local/local.css`), since the online form with the picker plus the new button is taller than a laptop window.
+* **Top bar.** After the clock: pause/play, a 1× 2× 4× segmented control, `saves`, and "saved HH:MM" (autosaves and manual ones). A "Paused · Space to resume" badge
+  hangs under the bar. Keys (no single letter was free; `input.ts` ignores these): **Space** pause/resume, **+ / =** faster, **-** slower, **Ctrl/Cmd+S** save now.
+  The chips do not take focus, so Space never double-fires. The online-only bits are hidden: "online N" in the world stats, the "connected" chip. Onboarding goals work
+  (the server-side `Onboarding` runs in the worker; sandbox games turn it off as before). The client clock fix (`rate`) had already landed with phase C.
+* **Saves dialog (`SavesDialog`).** *This city* (day, citizens; save under a name; export file), *Saved cities* (label, day, citizens, size, date; **Load**, **Rename**,
+  **Export**, **Delete** with a second click; **Import a file…** keeps the file as a saved city; the two autosaves are listed under a fold, loadable and exportable),
+  *New game…* (seed as a number or any word, hashed; sandbox checkbox) and *Storage* (usage and quota from `navigator.storage.estimate()`, whether the browser promised
+  to keep the saves, a button to ask, and the install button when the browser offers one). Load and New game replace the running city, so they first offer to keep it as a
+  named save (checked by default once the city has a day or citizens), because the rolling autosaves would overwrite it within a minute. After a load, import or new game the
+  page reloads and joins straight back in (sessionStorage `civitas.autojoin` + the remembered mayor name), no form. New host control `rename {slot, label}`.
+* **PWA (phase F).** Static build only (`vite build --mode offline`): `public-local/` holds `manifest.webmanifest` and the icons (made by `packages/client/scripts/make-icons.mjs`,
+  plain PNG encoding, the favicon's towers: 192, 512, maskable 512, apple-touch 180); a Vite plugin (`offlinePwa` in vite.config.ts) injects the manifest, apple-touch-icon and
+  theme-color links and, after the bundle is written, turns `sw.template.js` into `dist-local/sw.js` with the list of every emitted file (not the source maps) and a hash of
+  them as the cache version. `sw.js`: precache everything on install, cache-first (ignoring the query string, so `?name=` and friends hit the same page), navigation fallback to
+  `index.html`, old caches dropped on activate, no `skipWaiting` (a new version applies when the old one's tabs close; the page toasts "a new version is ready").
+  `registerServiceWorker` registers it from `main.ts` only when `__LOCAL_ONLY__`: the online build, and `?local` on it, never get a service worker, so online play is untouched.
+  Browsers only allow service workers on https and `localhost`: `http://192.168.x.x:4174` works as a game but not offline, `http://localhost:4174` and any https host do.
+  `navigator.storage.persist()` is asked after each manual or auto save (cheap, remembered by the browser); if it is refused, a one-time toast says the browser may clear the
+  saves and to export now and then, and the saves dialog repeats it with a button to ask again.
+* Not done: dead-code removal of the WebSocket path from the static build, `file://`, an update toast with a reload button, auto-picking local when no server answers.
+* Test: scratchpad `pw/local-ui-e2e.mjs` (online Play offline, join form, goals card, Space/+/-, saves dialog save/rename/export/import, new game keeping the old city, load,
+  Ctrl+S, service worker, offline reload with `context.setOffline(true)`).
 
 ## Done so far (phases E and C)
 
 Try it: `?local` on any build (`http://<host>:8080/?local`, or the Vite dev server), or `npm run build:local` and serve
 `packages/client/dist-local/` from any static server bound to 0.0.0.0 (`cd packages/client && npx vite preview --mode offline --host 0.0.0.0 --port 4174`).
-The join form starts a local game in this tab; the top bar gains pause / 1×-2×-4× / save / export / import chips (a placeholder for phase D).
+The join form starts a local game in this tab (the top-bar controls are described under phases D and F).
 
 * **Build (E).** `client/src/local/worker.ts` is the worker entry; `local/client.ts` creates it with `new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })`,
   which Vite emits as its own chunk (`worker: { format: 'es' }` in vite.config.ts; 466 KB minified, 135 KB gzip), fetched only when local mode starts.
@@ -313,8 +346,8 @@ Order: B, A, E, C, D, F. Each phase leaves the online game working and shippable
 | A. Transport seam | `Conn`/`ConnSource` + `WsSource` + `PortSource` in the server; `Net` takes a source and config; client `ClientSocket`, `WsSocket`, `WorkerSocket`, `NetClient(factory)`. Acceptance: online game unchanged; a Node test drives `Net` over an in-memory `PortSource` pair through hello, sub, build and a few ticks. | M | opus (protocol, `net.ts` is 719 lines) |
 | E. Build (done) | worker entry stub that boots a world and answers `hello`; Vite worker config; `build:local` mode with `__LOCAL_ONLY__`; CI/`typecheck` script that bundles the worker graph with esbuild `--platform=browser` and fails on any `node:` import or bare `process` use. Smoke: open `dist-local` via a static server, a town grows. | S-M | sonnet |
 | C. Worker host + persistence (done) | Fixed-timestep loop with pause/speed and adaptive guard; IndexedDB store with gzip, autosave cadence, two rolling autosaves, named slots; control channel (`save`, `load`, `export`, `import`, `newGame`, `listSaves`, `deleteSave`, `pause`, `speed`); error and quota handling; slimmer citizen snapshot (optional, with a version bump). | L | opus |
-| D. UI | "Play offline" on the join form (and auto-pick local when no server answers, or in the `__LOCAL_ONLY__` build); New game dialog (name, seed, sandbox); Saves dialog (list, load, delete, export, import, storage estimate); pause/speed buttons; `rate` in `stats` and the client clock fix; hide online-only UI and `/api` fetches; "saved" indicator; hidden-tab pause. | M | sonnet |
-| F. PWA / offline cache | web manifest, icons, service worker precaching the build (versioned, update toast), `navigator.storage.persist()`, install prompt wiring; offline test (airplane mode). Desktop wrapper (Tauri) is a later, separate card. | S-M | sonnet |
+| D. UI (done) | "Play offline" on the join form (and auto-pick local when no server answers, or in the `__LOCAL_ONLY__` build); New game dialog (name, seed, sandbox); Saves dialog (list, load, delete, export, import, storage estimate); pause/speed buttons; `rate` in `stats` and the client clock fix; hide online-only UI and `/api` fetches; "saved" indicator; hidden-tab pause. | M | sonnet |
+| F. PWA / offline cache (done) | web manifest, icons, service worker precaching the build (versioned, update toast), `navigator.storage.persist()`, install prompt wiring; offline test (airplane mode). Desktop wrapper (Tauri) is a later, separate card. | S-M | sonnet |
 
 Total: about 2 L-equivalents of work, mostly in B, A and C. Phase B alone is valuable regardless (it removes the `process.env` landmine and makes the server testable).
 

@@ -81,8 +81,9 @@ export function checkOp(op: Op, where: string): string[] {
     });
     return errs;
   }
+  if (name === 'taper' || name === 'lathe') return shapeErrors(name, args, where);
   const p = PRIMS[name];
-  if (!p) return [`${where}: unknown op '${name}' (known: ${[...Object.keys(PRIMS), ...Object.keys(HELPERS), ...Object.keys(FEATURES)].join(', ')})`];
+  if (!p) return [`${where}: unknown op '${name}' (known: ${[...Object.keys(PRIMS), 'taper', 'lathe', ...Object.keys(HELPERS), ...Object.keys(FEATURES)].join(', ')})`];
   // boxes and roofs may end with an options object ({ name, facade }), checked per design by facadeErrors
   const opts = (name === 'box' || name === 'roof') && args.length === p.nums + 3 && typeof args[p.nums + 2] === 'object';
   const max = p.nums + 1 + (p.tail ? 1 : 0) + (opts ? 1 : 0);
@@ -95,6 +96,47 @@ export function checkOp(op: Op, where: string): string[] {
     if (p.tail === 'bool' && typeof t !== 'boolean') errs.push(`${where}: roof alongZ must be true or false`);
     if (p.tail === 'seg' && !(Number.isInteger(t) && (t as number) >= 3 && (t as number) <= 64)) errs.push(`${where}: segments must be an integer 3-64`);
   }
+  return errs;
+}
+
+const winOk = (w: unknown) => w === undefined || w === true || (typeof w === 'string' && w in WINDOW_CLASSES);
+/** The two shaped primitives (schema.ts): a taper (a box with a different top) and a lathe (a solid of revolution). */
+function shapeErrors(name: 'taper' | 'lathe', args: unknown[], where: string): string[] {
+  const errs: string[] = [];
+  const opts = (o: unknown, keys: string[]) => {
+    if (o === undefined) return {} as Record<string, unknown>;
+    if (!o || typeof o !== 'object' || Array.isArray(o)) { errs.push(`${where}: ${name} options must be an object`); return {}; }
+    for (const k of Object.keys(o)) if (!keys.includes(k)) errs.push(`${where}: ${name} option '${k}' unknown (${keys.join(', ')})`);
+    return o as Record<string, unknown>;
+  };
+  if (name === 'taper') {
+    if (args.length < 9 || args.length > 10) return [`${where}: taper takes wBot dBot wTop dTop h x y z, a colour and optional { win, shift }; got ${args.length} args`];
+    for (let i = 0; i < 8; i++) if (!isNum(args[i])) errs.push(`${where}: taper arg ${i + 1} must be a number`);
+    if ([0, 1, 4].some((i) => isNum(args[i]) && (args[i] as number) <= 0) || [2, 3].some((i) => isNum(args[i]) && (args[i] as number) < 0)) errs.push(`${where}: taper base and height must be positive, the top not negative`);
+    if (!isColor(args[8])) errs.push(`${where}: taper colour ${JSON.stringify(args[8])} is not a palette name or 0xRRGGBB`);
+    const o = opts(args[9], ['win', 'shift']);
+    if (!winOk(o.win)) errs.push(`${where}: taper win ${JSON.stringify(o.win)} unknown`);
+    if (o.shift !== undefined && !(Array.isArray(o.shift) && o.shift.length === 2 && o.shift.every(isNum))) errs.push(`${where}: taper shift must be [dx, dz]`);
+    return errs;
+  }
+  if (args.length < 5 || args.length > 6) return [`${where}: lathe takes x y z, a colour, a profile [r, dy, ...] and optional { seg, twist, stripe, every, width, axis, win }; got ${args.length} args`];
+  for (let i = 0; i < 3; i++) if (!isNum(args[i])) errs.push(`${where}: lathe arg ${i + 1} must be a number`);
+  if (!isColor(args[3])) errs.push(`${where}: lathe colour ${JSON.stringify(args[3])} is not a palette name or 0xRRGGBB`);
+  const pr = args[4];
+  if (!Array.isArray(pr) || pr.length < 4 || pr.length % 2 || !pr.every(isNum)) errs.push(`${where}: lathe profile must be [r, dy, r, dy, ...] with at least two points`);
+  else for (let i = 0; i < pr.length; i += 2) {
+    if (pr[i] < 0) errs.push(`${where}: lathe profile radius ${pr[i]} is negative`);
+    if (i && pr[i + 1] < pr[i - 1]) errs.push(`${where}: lathe profile heights must not go down (${pr[i - 1]} then ${pr[i + 1]})`);
+  }
+  if (Array.isArray(pr) && pr[1] !== 0) errs.push(`${where}: lathe profile starts at dy 0 (its base sits at y)`);
+  const o = opts(args[5], ['seg', 'twist', 'stripe', 'every', 'width', 'axis', 'win']);
+  if (o.twist !== undefined && !isNum(o.twist)) errs.push(`${where}: lathe twist must be degrees per tile`);
+  if (o.width !== undefined && !(Number.isInteger(o.width) && (o.width as number) >= 1 && (o.width as number) < ((o.every as number) ?? 4))) errs.push(`${where}: lathe width must be an integer from 1 to less than every`);
+  if (o.axis !== undefined && !['x', 'y', 'z'].includes(o.axis as string)) errs.push(`${where}: lathe axis must be 'x', 'y' or 'z'`);
+  if (o.seg !== undefined && !(Number.isInteger(o.seg) && (o.seg as number) >= 3 && (o.seg as number) <= 64)) errs.push(`${where}: lathe seg must be an integer 3-64`);
+  if (o.stripe !== undefined && !isColor(o.stripe)) errs.push(`${where}: lathe stripe ${JSON.stringify(o.stripe)} is not a palette name or 0xRRGGBB`);
+  if (o.every !== undefined && !(Number.isInteger(o.every) && (o.every as number) >= 2)) errs.push(`${where}: lathe every must be an integer 2 or more`);
+  if (!winOk(o.win)) errs.push(`${where}: lathe win ${JSON.stringify(o.win)} unknown`);
   return errs;
 }
 
@@ -174,6 +216,9 @@ export function validateCatalogue(kinds: KindDef[], helpers: HelperModel[]): str
       if (f && f.marks !== undefined) errs.push(...footprintMarkErrors(f, w));
     }
     if (k.draft !== undefined && typeof k.draft !== 'boolean') errs.push(`${w}: draft must be true or false`);
+    if (k.tags !== undefined && (!Array.isArray(k.tags) || k.tags.some((t) => typeof t !== 'string' || !/^[a-z][a-z0-9-]*$/.test(t)) || new Set(k.tags).size !== k.tags.length)) errs.push(`${w}: tags must be distinct lower-case words ('london')`);
+    if (k.landmark !== undefined && typeof k.landmark !== 'boolean') errs.push(`${w}: landmark must be true or false`);
+    if (k.landmark) errs.push(...landmarkErrors(k, w));
     if (!Array.isArray(k.levels) || k.levels.length === 0) { errs.push(`${w}: needs at least one level`); continue; }
     const minLevel = k.minLevel ?? 1;
     if (!Number.isInteger(minLevel) || minLevel < 1 || minLevel > MAX_LEVEL_CODE) errs.push(`${w}: minLevel ${k.minLevel} outside 1-${MAX_LEVEL_CODE}`);
@@ -250,6 +295,23 @@ export function footprintMarkErrors(f: { w: number; h: number; marks?: unknown }
   return errs;
 }
 
+/**
+ * Landmarks (docs/buildings.md "Landmarks"): a placed civic kind with a tool, at least one tag, a rung of a collection
+ * group, and a tool that only a `locked` tech node unlocks, so a live game cannot place it before its unlock rule is decided.
+ */
+function landmarkErrors(k: KindDef, w: string): string[] {
+  const errs: string[] = [];
+  if (!k.flags?.civic) errs.push(`${w}: a landmark is placed by a player and built by builders: it needs the civic flag`);
+  if (!k.tags?.length) errs.push(`${w}: a landmark needs tags (its city, e.g. ['london'])`);
+  if (!k.group || !GROUP_BY_ID.get(k.group)?.collection) errs.push(`${w}: a landmark belongs to a collection group (buildings/groups.ts, e.g. 'london')`);
+  if (!k.tool) errs.push(`${w}: a landmark needs a tool`);
+  else {
+    const t = techFor(k.tool.id);
+    if (!t?.locked) errs.push(`${w}: a landmark's tool '${k.tool.id}' must be unlocked only by a locked tech node (tech.ts 'lnd1'), so live games cannot place it yet`);
+  }
+  return errs;
+}
+
 /** Tier attributes (schema.ts Attributes, read through shared/src/tiers.ts) and their sane ranges. */
 const TIER_ATTRS: Record<string, [number, number]> = { serviceRadius: [1, 40], serviceStrength: [0.1, 2], patrolRate: [0, 6], workRate: [0.25, 4], eventSize: [0.25, 4] };
 
@@ -281,7 +343,7 @@ export function groupErrors(kinds: KindDef[]): string[] {
     const tiers = list.map((k) => k.tier).sort((a, b) => (a ?? 0) - (b ?? 0));
     if (tiers.some((t, i) => t !== i + 1)) errs.push(`group '${g}': tiers must run 1..${list.length} with no gaps or repeats (got ${tiers.join(', ')})`);
     const codes = new Set(list.map((k) => k.code));
-    if (codes.size > 1) errs.push(`group '${g}': every rung must share one family code (got ${[...codes].join(', ')}) so the simulation treats them as one service`);
+    if (codes.size > 1 && !GROUP_BY_ID.get(g)?.collection) errs.push(`group '${g}': every rung must share one family code (got ${[...codes].join(', ')}) so the simulation treats them as one service`);
     const keyed = list.filter((k) => k.tool?.key);
     if (keyed.length > 1) errs.push(`group '${g}': only one rung may carry a shortcut key (the group's key); ${keyed.map((k) => k.id).join(', ')} all do`);
     if (list.some((k) => k.draft) && !list.some((k) => !k.draft)) errs.push(`group '${g}': every rung is a draft`);

@@ -241,6 +241,7 @@ export class Net {
     const t = TECH_BY_ID.get(id);
     if (!t) return;
     if (p.tech.includes(id)) return;
+    if (t.locked) return this.toast(c, `${t.name}: ${t.locked}`); // unlock rule still to be decided (tech.ts): sandboxes and dev only
     for (const r of t.requires) if (!p.tech.includes(r)) return this.toast(c, `${t.name} needs ${TECH_BY_ID.get(r)?.name ?? r} first`);
     if (p.progress[t.condition.counter] < t.condition.min) return this.toast(c, `${t.name} is not available yet`);
     if (p.money < t.cost) return this.toast(c, `Need $${t.cost} to unlock ${t.name}`);

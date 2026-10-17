@@ -7,8 +7,8 @@ import { MANIFEST, LEDGER_LABELS, type KindToolId, type LedgerDTO, type LedgerCa
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
 
 /** Tool bar groups: land and roads first, then the catalogue kinds by what they are, bulldoze last. */
-const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.family === 'leisure' ? 'Leisure' : k.flags.growable ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
-const GROUP_ORDER = ['Zones', 'Services', 'Transport', 'Leisure'];
+const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
+const GROUP_ORDER = ['Zones', 'Services', 'Transport', 'Leisure', 'Landmarks'];
 export const TOOLS: { id: ToolId; label: string; key: string; cost?: string; color?: string; group?: string }[] = [
   { id: 'select', label: 'Select / inspect', key: '1' },
   { id: 'buy', label: 'Buy land', key: '2', cost: `$${LAND_PRICE_PER_TILE}/tile`, color: '#62d2a2' },
@@ -127,7 +127,7 @@ export class UI {
         if (tools.querySelector(`button[data-ladder="${ladder.group.id}"]`)) continue;
         const g = ladder.group, key = ladder.tiers.find((k) => k.tool!.key)?.tool!.key ?? '';
         b.dataset.ladder = g.id;
-        b.innerHTML = `<span class="sw" style="background:${g.color}"></span><span>${esc(g.label)} <em class="tier"></em></span><span class="cost">${ladder.tiers.length} sizes</span><span class="key">${key}</span>`;
+        b.innerHTML = `<span class="sw" style="background:${g.color}"></span><span>${esc(g.label)} <em class="tier"></em></span><span class="cost">${ladder.tiers.length} ${g.collection ? 'landmarks' : 'sizes'}</span><span class="key">${key}</span>`;
         b.onclick = () => this.ladderClick(g.id);
         tools.appendChild(b);
         continue;
@@ -214,7 +214,7 @@ export class UI {
       if (!b) continue;
       const open = l.tiers.filter((k) => DEV_TOOLS || hasFeature(tech, k.tool!.id));
       b.classList.toggle('locked', open.length === 0);
-      b.title = open.length ? `${l.group.label}: ${open.length} of ${l.tiers.length} sizes unlocked` : `Needs ${techFor(l.tiers[0].tool!.id)?.name ?? ''} (press T for the tech tree)`;
+      b.title = open.length ? `${l.group.label}: ${open.length} of ${l.tiers.length} ${l.group.collection ? 'landmarks' : 'sizes'} unlocked` : `Needs ${techFor(l.tiers[0].tool!.id)?.name ?? ''} (press T for the tech tree)`;
     }
     this.picker.refresh();
     for (const b of $('tools').querySelectorAll<HTMLButtonElement>('button[data-tool]')) {
@@ -742,15 +742,15 @@ export class UI {
         const prereqOk = t.requires.every((r) => me.tech.includes(r));
         const cur = me.progress[t.condition.counter] ?? 0;
         const pct = Math.min(100, Math.round((100 * cur) / t.condition.min));
-        const earned = cur >= t.condition.min;
+        const earned = cur >= t.condition.min && !t.locked; // a locked node's unlock rule is still to be decided (tech.ts)
         const canBuy = !have && prereqOk && earned && me.money >= t.cost;
         const state = have ? 'have' : canBuy ? 'ready' : 'locked';
         html += `<div class="node ${state}">
           <div class="nhead"><b>${esc(t.name)}</b><span class="cost">${have ? 'unlocked' : `$${t.cost}`}</span></div>
           <div class="blurb">${esc(t.blurb)}</div>
-          ${have ? '' : `<div class="cond">${esc(describeCondition(t))}<span>${cur} / ${t.condition.min}</span></div><div class="bar"><i style="width:${pct}%"></i></div>`}
+          ${have ? '' : t.locked ? `<div class="cond">${esc(t.locked)}</div>` : `<div class="cond">${esc(describeCondition(t))}<span>${cur} / ${t.condition.min}</span></div><div class="bar"><i style="width:${pct}%"></i></div>`}
           ${!have && !prereqOk ? `<div class="cond">needs ${t.requires.filter((r) => !me.tech.includes(r)).map((r) => esc(TECH_BY_ID.get(r)?.name ?? r)).join(', ')}</div>` : ''}
-          ${!have ? `<button class="unlock" data-id="${t.id}" ${canBuy ? '' : 'disabled'}>${earned && prereqOk ? (me.money >= t.cost ? 'Unlock' : 'Not enough money') : 'Not yet'}</button>` : ''}
+          ${!have ? `<button class="unlock" data-id="${t.id}" ${canBuy ? '' : 'disabled'}>${t.locked ? 'Locked' : earned && prereqOk ? (me.money >= t.cost ? 'Unlock' : 'Not enough money') : 'Not yet'}</button>` : ''}
         </div>`;
       }
       html += '</div>';

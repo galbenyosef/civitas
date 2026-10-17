@@ -37,6 +37,7 @@ import * as F from '../src/flights';
 import { RECIPES } from '../src/buildings/recipes';
 import * as TI from '../src/tiers';
 import { GROUPS } from '../src/buildings/groups';
+import { shapeExtent } from '../src/buildings/facade';
 import { techFor } from '../src/tech';
 import { SERVICE_RADIUS } from '../src/constants';
 import * as Z from '../src/zones';
@@ -386,7 +387,8 @@ for (const m of MANIFEST.filter((e) => e.family === 'leisure')) {
   eq(`${m.id}: isLeisure`, isLeisure(m.kindId), true);
   for (const l of m.levels) {
     const live = l.designs.filter((d) => !d.draft);
-    if (live.length < 2) fail(`${m.id} L${l.level}: needs at least two live designs, has ${live.length}`); else passes++;
+    // a landmark (docs/buildings.md "Landmarks") is one real building: one design
+    if (live.length < (m.landmark ? 1 : 2)) fail(`${m.id} L${l.level}: needs at least ${m.landmark ? 'one live design' : 'two live designs'}, has ${live.length}`); else passes++;
     const specs = leisureSpecs(m.kindId, l.level);
     eq(`${m.id} L${l.level}: one spec per live design`, specs.length, live.length);
     specs.forEach((sp, i) => {
@@ -510,6 +512,7 @@ section('footprints');
     for (const rec of RECIPES.filter((x) => x.kind === m.kindId)) {
       let out = 0;
       for (const op of rec.ops) {
+        if (op[0] === 'taper' || op[0] === 'lathe') { const e = shapeExtent(op); if (e[0] < -fp.w / 2 - 1e-6 || e[1] > fp.w / 2 + 1e-6 || e[4] < -fp.h / 2 - 1e-6 || e[5] > fp.h / 2 + 1e-6) out++; continue; }
         const [hw, hd, x, z] = op[0] === 'box' || op[0] === 'roof' ? [op[1] / 2, op[3] / 2, op[4], op[6]]
           : op[0] === 'cyl' ? [Math.max(op[1], op[2]), Math.max(op[1], op[2]), op[4], op[6]] : op[0] === 'cone' ? [op[1], op[1], op[3], op[5]] : [0, 0, 0, 0];
         if (Math.abs(x) + hw > fp.w / 2 + 1e-6 || Math.abs(z) + hd > fp.h / 2 + 1e-6) out++;
@@ -690,13 +693,15 @@ section('groups and tiers');
   for (const l of TI.LADDERS) {
     const g = l.group.id, ts = l.tiers;
     eq(`${g}: tiers 1..${ts.length}`, ts.map((k) => k.tier), ts.map((_, i) => i + 1));
-    eq(`${g}: one family code`, new Set(ts.map((k) => k.code)).size, 1);
+    const collection = !!l.group.collection; // landmarks: separate buildings of any family, not sizes of one
+    if (!collection) eq(`${g}: one family code`, new Set(ts.map((k) => k.code)).size, 1);
     eq(`${g}: ladderOf round trip`, ts.every((k) => TI.ladderOf(k.kindId) === l), true);
     eq(`${g}: every rung has a tool, a blurb and how to place it`, ts.filter((k) => !k.tool || !k.blurb || !k.howTo).map((k) => k.id), []);
     eq(`${g}: one shortcut key at most`, ts.filter((k) => k.tool?.key).length <= 1, true);
     eq(`${g}: at least two sizes`, ts.length >= 2, true);
     // the numbers scale up the ladder (each rung at least matches the one below it)
     const up = (what: string, f: (k: typeof ts[number]) => number) => {
+      if (collection) return;
       const v = ts.map(f);
       eq(`${g}: ${what} never shrinks up the ladder (${v.join(' ')})`, v.every((x, i) => i === 0 || x >= v[i - 1]), true);
     };
@@ -709,7 +714,7 @@ section('groups and tiers');
     // build work grows with the footprint among the new rungs (the original kinds keep CIVIC_WORK)
     const fresh = ts.filter((k) => isNew(k.kindId)).sort((a, b) => (a.footprint?.w ?? 1) * (a.footprint?.h ?? 1) - (b.footprint?.w ?? 1) * (b.footprint?.h ?? 1));
     const works = fresh.map((k) => k.levels[0].work);
-    eq(`${g}: build work grows with the footprint (${works.join(' ')})`, works.every((x, i) => i === 0 || x >= works[i - 1]) && works.every((x) => x > 0), true);
+    eq(`${g}: build work grows with the footprint (${works.join(' ')})`, (collection || works.every((x, i) => i === 0 || x >= works[i - 1])) && works.every((x) => x > 0), true);
     // every rung places: a multi-tile rung in all four rotations on clear land beside a road, a single tile through the civic or lot tool
     for (const k of ts) {
       const tool = k.tool!.id;
@@ -866,7 +871,7 @@ section('windows');
     expectError('a feature on a box without a facade', (cat) => { const d = facadeDesign(cat); d.ops.push(['box', 0.1, 0.1, 0.1, 0, 0, 0, 'white', true, { name: 'plainbox' }], ['door', 'plainbox', 'front', 0]); }, /has no facade/);
     expectError('a facade with no storeys', (cat) => { const b = facadeDesign(cat).ops.find((o) => o[0] === 'box' && o[9]?.facade)!; (b[9] as { facade: { storeys: number } }).facade.storeys = 0; }, /storeys must be an integer/);
     expectError('a facade without windows', (cat) => { const b = facadeDesign(cat).ops.find((o) => o[0] === 'box' && o[9]?.facade)!; (b as unknown[])[8] = 'none'; }, /a facade needs a window class/);
-    expectError('two parts with one name', (cat) => { const d = facadeDesign(cat); const b = d.ops.find((o) => o[0] === 'box' && o[9]?.facade)!; d.ops.push(['box', 0.1, 0.1, 0.1, 0, 0, 0, 'white', true, { name: b[9]!.name }]); }, /used twice/);
+    expectError('two parts with one name', (cat) => { const d = facadeDesign(cat); const b = d.ops.find((o) => o[0] === 'box' && o[9]?.facade)!; d.ops.push(['box', 0.1, 0.1, 0.1, 0, 0, 0, 'white', true, { name: (b[9] as { name?: string }).name }]); }, /used twice/);
   }
 }
 

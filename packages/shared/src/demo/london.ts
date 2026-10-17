@@ -358,7 +358,7 @@ export const LONDON_SECTIONS: DemoSection[] = [
   },
   {
     id: 'london-landmarks', name: 'Landmarks',
-    blurb: 'The hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
+    blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square and the Royal Opera House, and the hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
     placements: [
       fit('new-scotland-yard', 'police-hq', 51.4990, -0.1350, 'N'),
       fit('st-thomas', 'teaching-hospital', 51.4986, -0.1110, 'W'),
@@ -368,7 +368,14 @@ export const LONDON_SECTIONS: DemoSection[] = [
       fit('natural-history-museum', 'museum', 51.4967, -0.1764, 'N'),
       fit('maritime-museum', 'museum', 51.4699, -0.0101, 'N'),
       fit('british-library', 'central-library', 51.5300, -0.1350, 'S'),
-      fit('royal-opera-house', 'opera-house', 51.5160, -0.1222, 'S'),
+      fit('royal-opera-house', 'royal-opera-house', 51.5160, -0.1222, 'S'),
+      // London landmarks (buildings/landmarks-london.ts) where the real ones stand, nudged onto land the map's narrower
+      // City leaves: the Gherkin and the Walkie Talkie either side of a street between Liverpool Street and the river,
+      // the Shard across the river by London Bridge, One Canada Square at Canary Wharf
+      fit('gherkin', 'gherkin', 51.5145, -0.0855, 'N'),
+      fit('walkie-talkie', 'walkie-talkie', 51.5124, -0.0726, 'N'),
+      fit('shard', 'shard', 51.5045, -0.0865, 'S'),
+      fit('one-canada-square', 'one-canada-square', 51.5049, -0.0195, 'W'),
       fit('palladium', 'theatre', 51.5140, -0.1350, 'E'),
       fit('lyceum', 'theatre', 51.5110, -0.1200, 'N'),
       fit('donmar', 'studio-theatre', 51.5130, -0.1260, 'W'),
@@ -439,9 +446,9 @@ export const LONDON_TOUR: string[] = [
   'welcome',
   'area-westminster', 'new-scotland-yard', 'st-thomas', 'lambeth-fire',
   'area-west-end', 'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'leicester-square', 'line-bus-25', 'line-bus-159',
-  'area-city', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
-  'area-south-bank', 'waterloo', 'line-south-western', 'clapham-junction', 'area-clapham', 'victoria-garage', 'stockwell-garage', 'area-brixton',
-  'area-canary-wharf', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'maritime-museum', 'o2-arena',
+  'area-city', 'gherkin', 'walkie-talkie', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
+  'area-south-bank', 'shard', 'waterloo', 'line-south-western', 'clapham-junction', 'area-clapham', 'victoria-garage', 'stockwell-garage', 'area-brixton',
+  'area-canary-wharf', 'one-canada-square', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'maritime-museum', 'o2-arena',
   'area-royal-docks', 'area-thames-gateway', 'dagenham-yard', 'track-freight', 'barking-yard', 'line-freight',
   'royal-london', 'area-hackney', 'area-islington', 'kings-cross', 'british-library', 'line-east-coast', 'finsbury-park', 'british-museum',
   'area-camden', 'regents-park-lake', 'lords', 'serpentine', 'area-kensington', 'natural-history-museum',

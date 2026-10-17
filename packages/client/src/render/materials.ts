@@ -155,8 +155,9 @@ float mscLitShare(float cls, float t, float bld) {
  * wall is not glass), civic buildings tall arched windows, venues tall plain ones and factories only a
  * clerestory strip under the eaves. Past a distance where a cell is smaller than a few pixels the detail
  * fades to the class average so nothing shimmers. Further out, where a cell is about a pixel, the wall skips the
- * per-pane work altogether and draws its class's expected look by day and by night (mscGlow, mscLitShare), which is
- * cheaper and stops lit windows sparkling as the camera moves; each building fades over to it at its own distance.
+ * per-pane hands: by day it draws the class's expected look, by night each pane is only lit or not at the class's lit
+ * share for the hour (mscLitShare) in one of its lights (mscGlow), from two hashes instead of eight. Each building
+ * fades over to it at its own distance.
  *
  * At dusk the glazing hands over to the lit-window logic below: each pane keeps its own hours, a
  * darkness level at which it switches on, a bedtime or closing time, maybe an early start, maybe a night
@@ -195,7 +196,6 @@ if (vWin > 0.5) {
     vec2 f = fract(gg);
     vec2 fw = fwidth(gg);
     if (fac) { f = vFac.xy; fw = fwidth(vFac.xy); cell = vec2(vCell.x + vFac.w * 32.0, vCell.y); }
-    float sq = 1.0; // how much a squeezed facade cell narrows its window
     float ground = abs(cell.y) < 0.5 ? 1.0 : 0.0;
     // layout: 1 sash (homes, and shops above the ground floor), 2 shopfront, 3 office, 4 civic, 5 factory, 6 venue,
     // 7 glazed door (behind a balcony), 8 bay-window pane, 9 garage door (facade.ts RECT mirrors these)
@@ -210,7 +210,7 @@ if (vWin > 0.5) {
       // a cell wider than its window should be squeezes the window across (facade.ts squeezeOf): pane w, pane h, widest w/h
       vec3 pa = lay < 1.5 ? (cls < 1.5 ? vec3(0.46, 0.48, 0.75) : vec3(0.60, 0.48, 0.75))
         : abs(lay - 4.0) < 0.5 ? vec3(0.40, 0.81, 0.5) : abs(lay - 6.0) < 0.5 ? vec3(0.56, 0.84, 0.6) : abs(lay - 7.0) < 0.5 ? vec3(0.40, 0.78, 0.6) : vec3(0.0);
-      if (pa.z > 0.0 && vCell.w > 0.0) { float k = max(1.0, pa.x * vCell.z / (pa.y * vCell.w) / pa.z); f.x = 0.5 + (f.x - 0.5) * k; fw.x *= k; sq = k; }
+      if (pa.z > 0.0 && vCell.w > 0.0) { float k = max(1.0, pa.x * vCell.z / (pa.y * vCell.w) / pa.z); f.x = 0.5 + (f.x - 0.5) * k; fw.x *= k; }
     }
     vec2 w = clamp(fw * 0.5, 0.002, 0.2);
     float dst = smoothstep(0.18, 0.5, max(fw.x, fw.y)); // 0 near, 1 where a cell is only a few pixels
@@ -434,23 +434,21 @@ if (vWin > 0.5) {
     }
 
     if (farK > 0.001) {
-      // ---- far windows: the panes above averaged over a wall, as they come out where a cell is a pixel or two (dst = 1:
-      // frames, sills and signs gone, glazing at the class's mean). Mirrors the layouts and the hands above (curtains,
-      // blinds, shop interiors by day; the lit share and the mix of lights by night), so the fade band does not show.
+      // ---- far windows: by day the panes above averaged over the wall, as they come out where a cell is a pixel or two
+      // (dst = 1: frames, sills and signs gone, glazing at the class's mean, curtains, blinds and shop interiors at their
+      // expected share), so the fade band does not show. Mirrors the layouts and hands above; keep the two in step.
       bool gls = abs(lay - 3.0) < 0.5 && wallC.b - wallC.r > 0.2;
       bool hl = lay < 1.5 || (lay > 6.5 && lay < 8.5 && cls < 2.5);
-      // per layout: pane area, the day mean, reflectance head-on and the night gain per area (meanPane, refl0, litK)
-      vec4 lp = lay < 1.5 ? vec4(cls < 1.5 ? 0.221 : 0.288, 0.22, 0.10, 1.0)
-        : lay < 2.5 ? vec4(0.573, 0.38, 0.12, 0.55)
-        : lay < 3.5 ? (gls ? vec4(0.645, 0.52, 0.30, 0.6) : vec4(0.464, 0.36, 0.20, 0.8))
-        : lay < 4.5 ? vec4(0.309, 0.30, 0.12, 0.8)
-        : lay < 5.5 ? vec4(fac ? 0.248 : 0.0, 0.10, 0.14, 0.85)
-        : lay < 6.5 ? vec4(0.470, 0.45, 0.14, 0.85)
-        : lay < 7.5 ? vec4(0.312, 0.25, 0.14, 0.9)
-        : lay < 8.5 ? vec4(0.576, 0.45, 0.14, 0.8)
-        : vec4(0.0);
-      float paA = lp.x / sq;
-      if (lay > 4.5 && lay < 5.5 && !fac && top > 0.2) paA = 0.92 * mscBand((g.y - (top - 0.15)) / 0.10, 0.0, 1.0, clamp(fw.y * 0.5 / (freq.y * 0.10), 0.002, 0.3));
+      // per layout: the day mean, reflectance head-on and the night gain per area (meanPane, refl0, litK)
+      vec3 lp = lay < 1.5 ? vec3(0.22, 0.10, 1.0)
+        : lay < 2.5 ? vec3(0.38, 0.12, 0.55)
+        : lay < 3.5 ? (gls ? vec3(0.52, 0.30, 0.6) : vec3(0.36, 0.20, 0.8))
+        : lay < 4.5 ? vec3(0.30, 0.12, 0.8)
+        : lay < 5.5 ? vec3(0.10, 0.14, 0.85)
+        : lay < 6.5 ? vec3(0.45, 0.14, 0.85)
+        : lay < 7.5 ? vec3(0.25, 0.14, 0.9)
+        : lay < 8.5 ? vec3(0.45, 0.14, 0.8)
+        : vec3(0.0);
       vec3 glassC = gls ? wallC * 0.28 : vec3(0.022, 0.030, 0.042) + wallC * 0.05;
       vec3 paneC = glassC;
       float rfm = 1.0;
@@ -460,24 +458,22 @@ if (vWin > 0.5) {
       vec3 fb = wallC;
       if (abs(lay - 3.0) < 0.5) fb = mix(fb, wallC * 0.55 + vec3(0.004, 0.008, 0.014), 0.24);
       if (lay > 8.5) fb = mix(fb, vec3(0.50, 0.52, 0.55) * 0.93, 0.45);
-      fb = mix(fb, paneC, lp.y);
+      fb = mix(fb, paneC, lp.x);
       float fres = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 3.0);
-      vec3 fe = (vSky + vec3(0.012, 0.016, 0.030)) * (lp.z + (1.0 - lp.z) * 0.9 * fres) * rfm * lp.y;
-      if (uNight > 0.001 && paA > 0.0) {
+      vec3 fe = (vSky + vec3(0.012, 0.016, 0.030)) * (lp.y + (1.0 - lp.y) * 0.9 * fres) * rfm * lp.x;
+      if (uNight > 0.001 && pane > 0.002) {
+        // by night each pane still decides for itself, so lit windows keep their speckle (an average reads as a flat
+        // glow), but from two hashes rather than the hands above: lit or not (the class's lit share at this hour,
+        // mscLitShare, drawn from the panes the near drawing leaves occupied, h6) and which light
         float t = uHour < 12.0 ? uHour + 24.0 : uHour;
-        // the building's mix of lights, from four even picks across the class's range (dim lamps, a lamp left on late)
+        vec2 seed = cell * 1.3 + bseed * 7.1 + floor(vLocalN.xz * 2.0) * 13.7;
+        float lit = step(1.0 - mscLitShare(cls, t, bld), mscHash(seed + 9.1));
         float coolP = cls < 1.5 ? 0.15 : cls < 2.5 ? 0.50 : cls < 3.5 ? 0.85 : cls < 4.5 ? 0.75 : cls < 5.5 ? 0.70 : 0.25;
-        float k0 = mscHash(bseed + 2.71) * 0.28 + (coolP - 0.5) * 0.2;
-        float late = cls < 1.5 ? clamp((t - 22.0) / 2.5, 0.0, 1.0) * 0.55 : 0.0;
-        vec3 glow = vec3(0.0);
-        for (int i = 0; i < 4; i++) {
-          float s = (float(i) + 0.5) * 0.25, lampI;
-          vec3 gi = mscGlow(cls, clamp(k0 + 0.72 * s, 0.0, 0.999), fract(s + 0.5), 1.0 - s, lampI);
-          if (lampI < 0.5) gi = mix(gi, vec3(1.0, 0.62, 0.32) * 0.42, late);
-          glow += gi * (lampI > 0.5 ? 0.105 : 0.25);
-        }
-        if (cls < 1.5) glow = glow * 0.899 + vec3(0.45, 0.62, 1.0) * 0.0878; // the odd TV
-        fe += glow * mscLitShare(cls, t, bld) * 1.1 * min(1.0, uNight * 1.6) * 1.8 * lp.w * paA;
+        float k = clamp(mscHash(seed + 13.1) * 0.72 + mscHash(bseed + 2.71) * 0.28 + (coolP - 0.5) * 0.2, 0.0, 0.999);
+        float lamp;
+        vec3 glow = mscGlow(cls, k, fract(k * 7.3), fract(k * 11.9), lamp);
+        if (cls < 1.5 && lamp < 0.5 && t > 22.0 + 2.5 * fract(k * 5.1) && fract(k * 3.7) > 0.45) { glow = vec3(1.0, 0.62, 0.32); lamp = 1.0; }
+        fe += glow * (lamp > 0.5 ? 0.42 : 1.0) * lit * 1.1 * min(1.0, uNight * 1.6) * 1.8 * lp.z * pane;
       }
       diffuseColor.rgb = mix(diffuseColor.rgb, fb, farK);
       totalEmissiveRadiance = mix(totalEmissiveRadiance, em0 + fe, farK);

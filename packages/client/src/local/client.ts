@@ -55,7 +55,7 @@ export class LocalGame {
         if (r.ok) p.ok(r); else p.fail(new Error(r.error ?? 'failed'));
         return;
       }
-      case 'state': this.state = { paused: !!d.paused, speed: Number(d.speed) || 1, sandbox: !!d.sandbox }; this.onState(this.state); return;
+      case 'state': if (!this.inflight) this.applyState(d); return; // while our own pause/speed requests are out, an older event must not undo them
       case 'saved': this.lastSaved = d.meta as SaveMeta; this.onSaved(this.lastSaved, Number(d.ms) || 0); return;
       case 'error': this.onError(String(d.msg), !!d.fatal); return;
       case 'switched': this.onSwitched(); return;
@@ -72,8 +72,19 @@ export class LocalGame {
   }
 
   // pause and speed take effect in the state at once (a second click before the worker answers builds on the first); the worker's 'state' confirms
-  pause(paused: boolean) { if (!paused) this.autoPaused = false; this.state = { ...this.state, paused }; return this.request('pause', { paused }); }
-  setSpeed(speed: 1 | 2 | 4) { this.state = { ...this.state, speed }; return this.request('speed', { speed }); }
+  pause(paused: boolean) { if (!paused) this.autoPaused = false; this.state = { ...this.state, paused }; return this.settle(this.request('pause', { paused })); }
+  setSpeed(speed: 1 | 2 | 4) { this.state = { ...this.state, speed }; return this.settle(this.request('speed', { speed })); }
+  /** pause/speed requests in flight; the last reply (replies come in order) carries the state the worker ended in */
+  private inflight = 0;
+  private settle(p: Promise<Reply>) {
+    this.inflight++;
+    const done = () => { this.inflight--; };
+    return p.then((r) => { done(); if (!this.inflight) this.applyState(r); return r; }, (e) => { done(); throw e; });
+  }
+  private applyState(d: Record<string, unknown>) {
+    this.state = { paused: !!d.paused, speed: Number(d.speed) || 1, sandbox: !!d.sandbox };
+    this.onState(this.state);
+  }
   /** no slot: an autosave now (into the older of the two rolling slots); a slot: a named save */
   async save(slot?: string, label?: string) {
     const r = await this.request('save', { slot, label });

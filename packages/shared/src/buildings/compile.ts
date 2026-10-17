@@ -61,6 +61,12 @@ export function compileOps(ops: Op[], windows: WindowClass, src?: number[]): Com
       case 'cyl': emit(['cyl', op[1], op[2], op[3], op[4], op[5], op[6], colour(op[7]), op[8] ?? 8]); break;
       case 'cone': emit(['cone', op[1], op[2], op[3], op[4], op[5], colour(op[6]), op[7] ?? 8]); break;
       case 'wheel': emit(['wheel', op[1], op[2], op[3], op[4], op[5], colour(op[6])]); break;
+      case 'taper': { const o = op[10] ?? {}; emit(['taper', op[1], op[2], op[3], op[4], op[5], op[6], op[7], op[8], colour(op[9]), winOf(o.win), o.shift?.[0] ?? 0, o.shift?.[1] ?? 0]); break; }
+      case 'lathe': {
+        const o = op[6] ?? {};
+        emit(['lathe', op[1], op[2], op[3], colour(op[4]), o.seg ?? 16, colour(o.stripe ?? op[4]), o.stripe === undefined ? 0 : o.every ?? 4, o.width ?? 1, o.twist ?? 0, o.axis === 'x' ? 1 : o.axis === 'z' ? 2 : 0, winOf(o.win), [...op[5]]]);
+        break;
+      }
       default: {
         const h = HELPERS[op[0]];
         if (!h) throw new Error(`unknown op ${op[0]}`);
@@ -181,6 +187,7 @@ export function compileCatalogue(kinds: KindDef[], helperModels: HelperModel[]):
       occupation: k.occupation, attrs: { ...(k.attrs ?? {}) }, tints: k.tints, lotTint: k.lotTint, levels,
       footprint: fp ? { w: fp.w, h: fp.h, door: [fp.door[0], fp.door[1]], ...(fp.marks?.length ? { marks: JSON.parse(JSON.stringify(fp.marks)) } : {}) } : undefined, draft: k.draft || undefined,
       group: k.group, tier: k.tier, blurb: k.blurb, howTo: k.howTo,
+      ...(k.landmark ? { landmark: true } : {}), ...(k.tags?.length ? { tags: [...k.tags] } : {}),
     });
   }
   const helpers = helperModels.map((h) => ({ key: h.key, kind: 0, level: 0, index: 0, height: h.height, draft: false, ops: compileOps(h.ops, 'none') }));

@@ -18,6 +18,7 @@ Every building kind is data. One file per kind family under `packages/shared/src
 | `motorway.ts` | The motorway connection (2×3, kind id 21): the road gateway newcomers, leavers, visitors and inter-city freight use (README "Gateways") |
 | `residential-merged.ts`, `commercial-merged.ts`, `office-merged.ts`, `industrial-merged.ts`, `zonekit.ts` | Merged lots: the bigger zone kinds growth assembles from neighbouring lots (see "Merged lots"), and the recipe parts they are drawn with |
 | `block-interior.ts` | Block interiors: the deep plots that grow back into a block's landlocked middle and the communal garden (see "Block interiors") |
+| `landmarks-london.ts` | London landmarks (kind ids 91-100): the Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, and ids 96-100 reserved for the second five (see "Landmarks") |
 | `catalogue.ts` | The list of kinds the compile step reads |
 | `validate.ts`, `compile.ts` | Validation and the pure catalogue-to-tables compiler |
 | `compiled.ts` | Generated: typed tables, tool maps and the manifest. Committed like source |
@@ -123,6 +124,8 @@ A design is a list of ops. Each op is a tuple of the op name and the same argume
 | `cyl` | rTop rBot h x y z colour [segments, default 8] |
 | `cone` | r h x y z colour [segments, default 8] |
 | `wheel` | r w x y z colour; a cylinder lying along x |
+| `taper` | wBot dBot wTop dTop h x y z colour [{ win, shift }]: a box whose top is another rectangle (0×0 for a pyramid), centred over the base or `shift`ed by [dx, dz]; base at y. Tapering towers, leaning shards, a slab that widens upwards. `win` gives its near-vertical faces the legacy window grid |
+| `lathe` | x y z colour profile [{ seg, twist, stripe, every, width, axis, win }]: a solid of revolution; `profile` is [r, dy, r, dy, ...] from the base up (r 0 for a point; an open top is capped). `twist` turns the rings that many degrees per tile of height, and `width` facets in every `every` take the `stripe` colour, so a twisted lathe has spiral bands. `axis` 'x' or 'z' lays it on its side (a barrel vault) |
 | `crane` | x y z mastHeight |
 | `flag` | x y z colour |
 | `chimneyStack` | x y z h r [body colour, default `chimney`] |
@@ -446,6 +449,24 @@ The garden is a 2×2 park-family structure (civic, no tool, never placed by a pl
 **Seeded towns.** `seedCommons`, `seedCity` (test cities and the demos' grid town) and the demos' rezoned blocks pre-build every tile of a block, the middle included. `settleInteriors` then settles each landlocked middle by the same rules: emptied, planted as a garden when the homes round it stand, else taken into deep plots from the frontage at the seed level (2-4; below 2 the lots stay empty for growth). It uses hashes only, so a demo seeds the same town twice. No seeded door is left without a road (`demo:check` used to note 548-568 in the grid town). A built=3 district now has 1,228 beds instead of 1,248.
 
 Nothing new is persisted: the kinds live in the sub layer like every merged lot, so older saves load unchanged.
+
+## Landmarks
+
+A **landmark** is a recognisable real building: the Gherkin, the Shard, Big Ben. Each is an ordinary placed civic kind (a site, builders, staff, upkeep) that works as an existing role, so the simulation needs nothing new: the towers are office-family kinds (family code 4: office jobs, office visitors and the office car-ownership rate), the Royal Opera House a theatre-family venue (code 12, with the theatre attributes and its own event nights). What makes it a landmark is metadata on the kind:
+
+| Field | Meaning |
+| --- | --- |
+| `landmark: true` | Validation then requires the civic flag, a tool, at least one tag, a rung of a `collection` group and a tool unlocked only by a `locked` tech node |
+| `tags: ['london']` | Lower-case labels, copied to the manifest. `/viewer.html?tag=london` (or the Tag row) shows only those kinds; any code can list a city's kinds with `MANIFEST.filter((k) => k.tags?.includes('london'))` |
+| `group: 'london'`, `tier` | A rung of the London collection (`groups.ts`, `collection: true`): the tool bar shows one **London** button in a **Landmarks** section, and its picker lists the buildings in tier order. A collection is not a size ladder: rungs may be any family, and the never-shrinks checks skip it |
+
+**Unlocking: to be decided.** Every landmark tool is unlocked by the tech node `lnd1` "London landmarks" (`tech.ts`), which is `locked`: the tech tree shows it with the text "How these unlock is still to be decided", it cannot be earned, and the server refuses to buy it. So a live game never places a landmark. Sandboxes (test cities and demos: `GameConfig.sandbox` gives every player `ALL_TECH_IDS`), the Commons, the dev "unlock everything" action and a `?dev` client on a dev server (which skips tech locks) can. When the real rule is decided (a population, a district's jobs, a scenario goal), give `lnd1` a condition and drop `locked`, or split it into one node per landmark.
+
+**Kind ids.** London uses 91-100: 91 the Gherkin, 92 the Shard, 93 the Walkie Talkie, 94 One Canada Square, 95 the Royal Opera House; 96 Big Ben and the Houses of Parliament (`bigben`), 97 the London Eye (`londoneye`), 98 the Tower of London (`toweroflondon`), 99 Buckingham Palace (`buckingham`) and 100 Tower Bridge (`towerbridge`) are reserved, with their tool ids already in `lnd1` and collection tiers 6-10. Footprints stay within 4×4 so each fits one of the London demo's blocks.
+
+**Scale.** About 33 m to a tile: the Shard (310 m) is the tallest thing in London at 9.6 tiles, One Canada Square 7.2, the Gherkin 5.5, the Walkie Talkie 5 (the merged supertall is 8). A landmark has one design (it is one building, not a type; `buildings:check` waives the two-designs rule for landmarks), and the window lighting still varies per instance. Curved and faceted shapes use the `taper` and `lathe` ops.
+
+**Checks.** `buildings:check` places every landmark in all four rotations through the civic tool and keeps its model inside the footprint; `demo:check` fails a landmark that stands in no city demo (`showcaseProblems`: landmarks belong in their city, not the showcase).
 
 ## More than 16 kinds
 

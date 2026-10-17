@@ -218,7 +218,24 @@ function bounds(op: CompiledOp): { min: [number, number, number]; max: [number, 
     case 'cyl': { const r = Math.max(op[1], op[2]); return { min: [op[4] - r, op[5], op[6] - r], max: [op[4] + r, op[5] + op[3], op[6] + r] }; }
     case 'cone': return { min: [op[3] - op[1], op[4], op[5] - op[1]], max: [op[3] + op[1], op[4] + op[2], op[5] + op[1]] };
     case 'wheel': return { min: [op[3] - op[2] / 2, op[4] - op[1], op[5] - op[1]], max: [op[3] + op[2] / 2, op[4] + op[1], op[5] + op[1]] };
+    case 'taper': case 'lathe': { const [x0, x1, y0, y1, z0, z1] = shapeExtent(op); return { min: [x0, y0, z0], max: [x1, y1, z1] }; }
   }
+}
+
+/** Axis-aligned extent [x0, x1, y0, y1, z0, z1] of a taper or lathe (schema.ts), for the bounds checks that know only boxes and round parts. */
+export function shapeExtent(op: Extract<CompiledOp, ['taper', ...unknown[]] | ['lathe', ...unknown[]]>): [number, number, number, number, number, number] {
+  if (op[0] === 'taper') {
+    const [, wb, db, wt, dt, h, x, y, z, , , sx, sz] = op;
+    return [Math.min(x - wb / 2, x + sx - wt / 2), Math.max(x + wb / 2, x + sx + wt / 2), y, y + h, Math.min(z - db / 2, z + sz - dt / 2), Math.max(z + db / 2, z + sz + dt / 2)];
+  }
+  const p = op[12], axis = op[10];
+  let r = 0;
+  for (let i = 0; i < p.length; i += 2) r = Math.max(r, p[i]);
+  const len = p[p.length - 1], [x, y, z] = [op[1], op[2], op[3]];
+  // axis 1 (x) and 2 (z): lying on its side, centred on y, running from x (or z) along the profile
+  if (axis === 1) return [x, x + len, y - r, y + r, z - r, z + r];
+  if (axis === 2) return [x - r, x + r, y - r, y + r, z, z + len];
+  return [x - r, x + r, y, y + len, z - r, z + r];
 }
 
 /** What a part hides on a wall: its outline seen head-on, for the slice of it between the wall and REACH in front. */

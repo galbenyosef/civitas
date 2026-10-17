@@ -226,7 +226,7 @@ export function mountLocalUi(game: LocalGame, toast: Toast, mayor: () => string)
     b.addEventListener('click', fn);
     return b;
   };
-  const pause = chip('localPause', '⏸ pause', 'Pause or resume the city (Space)', () => ui.togglePause());
+  const pause = chip('localPause', '⏸', 'Pause or resume the city (Space)', () => ui.togglePause());
   const speeds = ([1, 2, 4] as const).map((n) => chip(`localSpeed${n}`, `${n}×`, `Game speed ${n}× (${n === 1 ? '-' : '+'} changes it)`, () => ui.setSpeed(n)));
   const saves = chip('localSaves', 'saves', 'Save, load, export and import cities (Ctrl/Cmd+S saves now)', () => void dialog.open().catch(fail));
   const savedAt = h('span', { id: 'localSavedAt', class: 'stat' });
@@ -236,7 +236,8 @@ export function mountLocalUi(game: LocalGame, toast: Toast, mayor: () => string)
   document.getElementById('worldHud')?.append(badge);
 
   const show = (s: LocalState) => {
-    pause.textContent = s.paused ? '▶ play' : '⏸ pause';
+    pause.textContent = s.paused ? '▶' : '⏸';
+    pause.title = s.paused ? 'Resume the city (Space)' : 'Pause the city (Space)';
     pause.classList.toggle('on', s.paused);
     speeds.forEach((b, i) => b.classList.toggle('on', !s.paused && s.speed === [1, 2, 4][i]));
     badge.classList.toggle('hidden', !s.paused); // the join form covers it until the game starts
@@ -246,7 +247,7 @@ export function mountLocalUi(game: LocalGame, toast: Toast, mayor: () => string)
   let noted = false;
   game.onSaved = (meta) => {
     savedAt.textContent = `saved ${new Date(meta.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    savedAt.title = `${meta.label}: ${fmtBytes(meta.bytes)}`;
+    savedAt.title = `Saved ${new Date(meta.savedAt).toLocaleTimeString()} (${meta.label}, ${fmtBytes(meta.bytes)})`;
     if (!noted) { noted = true; void persistNote(toast); }
   };
   game.onError = (msg) => toast('error', msg);

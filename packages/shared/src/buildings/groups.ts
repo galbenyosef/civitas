@@ -10,12 +10,17 @@ export interface GroupDef {
   /** tool bar label */
   label: string;
   /** tool bar section the group's button sits in */
-  section: 'Services' | 'Transport' | 'Leisure';
+  section: 'Services' | 'Transport' | 'Leisure' | 'Landmarks';
   /** swatch colour of the group's button */
   color: string;
   /** what one tier holds, for the picker's capacity line: 'staff', 'builders', 'bays', 'visitors' */
   holds: string;
   reserved?: boolean;
+  /**
+   * A collection rather than a size ladder (the landmarks): its rungs are separate buildings of any family, in `tier`
+   * order, so the one-family-code rule and the never-shrinks-up-the-ladder checks do not apply. The picker lists them the same way.
+   */
+  collection?: boolean;
 }
 
 export const GROUPS: GroupDef[] = [
@@ -29,6 +34,8 @@ export const GROUPS: GroupDef[] = [
   { id: 'theatre', label: 'Theatres', section: 'Leisure', color: '#7a3e8f', holds: 'seats' },
   { id: 'sports', label: 'Sport', section: 'Leisure', color: '#2f6fb5', holds: 'visitors' },
   { id: 'library', label: 'Libraries', section: 'Leisure', color: '#a8875a', holds: 'visitors' },
+  // landmarks (docs/buildings.md "Landmarks"): real buildings, one picker per city; buildings/landmarks-london.ts
+  { id: 'london', label: 'London', section: 'Landmarks', color: '#c8102e', holds: 'staff', collection: true },
   // reserved for other cards
   { id: 'bus', label: 'Buses', section: 'Transport', color: '#e0a92e', holds: 'staff', reserved: true },
   { id: 'rail', label: 'Rail', section: 'Transport', color: '#b0563d', holds: 'staff', reserved: true },

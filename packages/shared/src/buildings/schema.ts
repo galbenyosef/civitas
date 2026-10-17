@@ -24,6 +24,20 @@ export type Op =
   | ['cone', number, number, number, number, number, Color, number?]
   /** wheel r w x y z color: a cylinder lying along x */
   | ['wheel', number, number, number, number, number, Color]
+  /**
+   * taper wBot dBot wTop dTop h x y z color [{ win, shift }]: a box whose top face is a different rectangle (wTop×dTop,
+   * 0×0 for a pyramid), centred over the base or `shift`ed by [dx, dz]; base at y. Tapering towers, splayed shards, a slab
+   * that widens upwards. `win` lights its near-vertical faces with the legacy window grid.
+   */
+  | ['taper', number, number, number, number, number, number, number, number, Color, TaperOpts?]
+  /**
+   * lathe x y z color profile [{ seg, twist, stripe, every, width, axis, win }]: a solid of revolution about the vertical
+   * axis through x, y, z. `profile` is [r, dy, r, dy, ...] from the base up (dy above y; r 0 for a point); an open top is
+   * capped flat. `twist` turns the rings by that many degrees per tile of height; with `stripe`, `width` facets in every
+   * `every` take that colour, so a twisted lathe has spiral bands (the Gherkin's glazing). `axis` 'x' or 'z' lays it on
+   * its side, the profile running along +x or +z from x, y, z (a barrel vault: half of it inside the box below).
+   */
+  | ['lathe', number, number, number, Color, number[], LatheOpts?]
   /** crane x y z mastHeight: tower crane (helper) */
   | ['crane', number, number, number, number]
   /** flag x y z color: pole with a flag (helper) */
@@ -47,6 +61,9 @@ export type Op =
   | ['dormer', PartRef, number, Color?]
   /** cornice part storey [colour='stone']: a band round the box on that storey's floor line (storey = storeys: on top) */
   | ['cornice', PartRef, number, Color?];
+
+export interface TaperOpts { win?: Win; shift?: [number, number] }
+export interface LatheOpts { seg?: number; twist?: number; stripe?: Color; every?: number; width?: number; axis?: 'y' | 'x' | 'z'; win?: Win }
 
 /** A wall of a box: front faces +z (the road), right +x, back -z, left -x. Bays count from the left as seen from outside. */
 export type FaceName = 'front' | 'right' | 'back' | 'left';
@@ -296,6 +313,14 @@ export interface KindDef extends Partial<LevelStats> {
   blurb?: string;
   /** grouped kinds: how to place it well (footprint, facing, what it needs nearby) */
   howTo?: string;
+  /**
+   * A landmark: a recognisable real building (docs/buildings.md "Landmarks"). It is a placed civic kind that works as an
+   * existing role (offices, a venue, an attraction), sits in a `collection` group's picker, carries `tags`, and its
+   * tool is unlocked only by a `locked` tech node, so a live game cannot place it until its unlock rule is decided.
+   */
+  landmark?: boolean;
+  /** metadata labels, lower case ('london'): the viewer filters by them (?tag=london) and the client can list kinds by them */
+  tags?: string[];
 }
 
 /** A helper model the renderer places on its own (the crane over a site, the site fence). */
@@ -321,6 +346,8 @@ export interface KindManifest {
   draft?: boolean;
   /** size ladder (groups.ts) and its picker texts */
   group?: string; tier?: number; blurb?: string; howTo?: string;
+  /** a landmark (docs/buildings.md "Landmarks") and its metadata tags */
+  landmark?: boolean; tags?: string[];
 }
 /** A compiled recipe: primitive ops only, colours and window classes resolved to numbers. */
 export type CompiledOp =
@@ -328,7 +355,11 @@ export type CompiledOp =
   | ['roof', number, number, number, number, number, number, number, boolean]
   | ['cyl', number, number, number, number, number, number, number, number]
   | ['cone', number, number, number, number, number, number, number]
-  | ['wheel', number, number, number, number, number, number];
+  | ['wheel', number, number, number, number, number, number]
+  /** taper wBot dBot wTop dTop h x y z colour win shiftX shiftZ */
+  | ['taper', number, number, number, number, number, number, number, number, number, number, number, number]
+  /** lathe x y z colour segments stripeColour every width twist axis(0 y, 1 x, 2 z) win profile ([r, dy] pairs, flat) */
+  | ['lathe', number, number, number, number, number, number, number, number, number, number, number, number[]];
 /**
  * A facade as recipes.ts carries it: storeys, bays front/back, side bays, margin, top band, and cell overrides as
  * flat quadruples (face 0-3 front/right/back/left, storey, bay, mode; buildings/facade.ts CELL).

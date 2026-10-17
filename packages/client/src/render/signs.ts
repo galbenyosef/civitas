@@ -4,6 +4,7 @@ import {
 } from 'three';
 import { MANIFEST, SIGN_POOLS, signSource, signText, houseNumber, hash2, type CompiledOp, type KindManifest } from '@msimcity/shared';
 import { RECIPES } from '@msimcity/shared/src/buildings/recipes';
+import { shapeExtent } from '@msimcity/shared/src/buildings/facade';
 import { sceneUniforms } from './materials';
 
 /**
@@ -154,6 +155,7 @@ function bounds(op: CompiledOp): number[] {
     case 'cyl': { const r = Math.max(op[1], op[2]); return [op[4] - r, op[4] + r, op[5], op[5] + op[3], op[6] - r, op[6] + r]; }
     case 'cone': return [op[3] - op[1], op[3] + op[1], op[4], op[4] + op[2], op[5] - op[1], op[5] + op[1]];
     case 'wheel': return [op[3] - op[2] / 2, op[3] + op[2] / 2, op[4] - op[1], op[4] + op[1], op[5] - op[1], op[5] + op[1]];
+    case 'taper': case 'lathe': return shapeExtent(op);
   }
 }
 

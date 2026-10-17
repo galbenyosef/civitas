@@ -20,6 +20,7 @@ import { TrainsView } from './render/trains';
 import { RailClient, trainHtml } from './rail';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
+import { LandmarkMotion } from './render/landmarks';
 import { FootprintOverlay } from './render/footprint';
 import { Fpv, type CabEye } from './render/fpv';
 import { vehicleKey, trainPanelHtml, trainKmh, planePanelHtml, planeTipHtml, planeDoing, planeKnots, planeFeet, type VehicleSel } from './vehicles';
@@ -136,6 +137,7 @@ const rail = new RailClient(world);
 scene.add(trains.group, rail.group);
 const junctions = new JunctionView(world); scene.add(junctions.group); // roundabout islands, flyover decks and ramps
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz); // cars and walkers on a flyover deck and its ramps
+const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
 const airportParam = params.get('airport')?.split(',').map(Number);
 if (airportParam && airportParam.length >= 3 && airportParam.every((n) => Number.isFinite(n))) {
   planes.setPreviews([{ id: 1, x: airportParam[0], y: airportParam[1], dir: (airportParam[2] & 3) as 0 | 1 | 2 | 3, gates: airportParam[3] || 3, runwayLen: 12, flightsPerHour: airportParam[4] || 2 }]);
@@ -297,6 +299,7 @@ function dropView(key: string) {
   airfield.dropChunk(key);
   trains.dropChunk(key);
   junctions.dropChunk(key);
+  landmarks.dropChunk(key);
   world.dropChunk(key);
 }
 setInterval(streamChunks, 300);
@@ -814,7 +817,7 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); trains.scanChunk(key, c); junctions.scanChunk(key, c); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); trains.scanChunk(key, c); junctions.scanChunk(key, c); landmarks.scanChunk(key, c); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (world.parcelsDirty) { parcelsView.rebuild(world.parcels.values(), world.players, world.me, selectedParcel); world.parcelsDirty = false; }
@@ -833,6 +836,7 @@ function frame(now: number) {
   rail.frame(input.tool === 'rail' ? input.railPath : null);
   airfield.frame();
   parks.frame(clock.day);
+  landmarks.frame((vehTick * 24) / TICKS_PER_DAY);
   fpv.update(now, dt, routeInfo?.id === selectedCitizen ? routeInfo.route ?? null : null);
   if ((following || fpv.mode === 'full') && selectedCitizen) {
     const pos = citizens.positionOf(selectedCitizen);

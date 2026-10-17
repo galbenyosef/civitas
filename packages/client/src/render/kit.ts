@@ -59,6 +59,50 @@ export class Kit {
     return this.add(g, color, 0);
   }
 
+  /** a box whose top is another rectangle wt×dt (0×0: a pyramid) centred at (sx, sz) from the base's centre; base at y */
+  taper(wb: number, db: number, wt: number, dt: number, h: number, x: number, y: number, z: number, color: number, win = 0, sx = 0, sz = 0) {
+    const b = [[-wb / 2, 0, -db / 2], [wb / 2, 0, -db / 2], [wb / 2, 0, db / 2], [-wb / 2, 0, db / 2]];
+    const t = [[sx - wt / 2, h, sz - dt / 2], [sx + wt / 2, h, sz - dt / 2], [sx + wt / 2, h, sz + dt / 2], [sx - wt / 2, h, sz + dt / 2]];
+    const pos: number[] = [];
+    const tri = (a: number[], c: number[], d: number[]) => {
+      // skip the zero-area triangles a pointed or knife-edged top leaves
+      const ux = c[0] - a[0], uy = c[1] - a[1], uz = c[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
+      if (Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) < 1e-9) return;
+      pos.push(...a, ...c, ...d);
+    };
+    const quad = (a: number[], c: number[], d: number[], e: number[]) => { tri(a, c, d); tri(a, d, e); };
+    // sides wound outward (counter-clockwise seen from outside), then the top
+    for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; quad(b[i], t[i], t[j], b[j]); }
+    quad(t[0], t[3], t[2], t[1]);
+    return this.add(flat(pos).translate(x, y, z), color, win);
+  }
+  /**
+   * A solid of revolution: profile [r, dy, ...] from the base up, `seg` facets round, each ring turned `twist` degrees
+   * per tile of height. With `every` > 0, facets i with i % every < width take `stripe`: straight bands, or spirals
+   * when twisted. A flat cap closes an open top. `axis` 1 or 2 lays it along +x or +z.
+   */
+  lathe(x: number, y: number, z: number, color: number, seg: number, stripe: number, every: number, width: number, twist: number, axis: number, win: number, profile: readonly number[]) {
+    const plain: number[] = [], banded: number[] = [];
+    const tw = (twist * Math.PI) / 180;
+    const pt = (r: number, dy: number, i: number) => { const a = (i / seg) * Math.PI * 2 + tw * dy; return [Math.sin(a) * r, dy, Math.cos(a) * r]; };
+    const n = profile.length / 2;
+    for (let j = 0; j < n - 1; j++) {
+      const r0 = profile[2 * j], y0 = profile[2 * j + 1], r1 = profile[2 * j + 2], y1 = profile[2 * j + 3];
+      for (let i = 0; i < seg; i++) {
+        const out = every > 0 && i % every < width ? banded : plain;
+        const a = pt(r0, y0, i), b = pt(r0, y0, i + 1), c = pt(r1, y1, i + 1), d = pt(r1, y1, i);
+        if (r0 > 0) out.push(...a, ...b, ...c);
+        if (r1 > 0) out.push(...a, ...c, ...d);
+      }
+    }
+    const rTop = profile[2 * n - 2], yTop = profile[2 * n - 1];
+    if (rTop > 0) for (let i = 0; i < seg; i++) plain.push(0, yTop, 0, ...pt(rTop, yTop, i), ...pt(rTop, yTop, i + 1));
+    const place = (g: BufferGeometry) => (axis === 1 ? g.rotateZ(-Math.PI / 2) : axis === 2 ? g.rotateX(Math.PI / 2) : g).translate(x, y, z);
+    this.add(place(flat(plain)), color, win);
+    if (banded.length) this.add(place(flat(banded)), stripe, win);
+    return this;
+  }
+
   /** any geometry as a part, flat-coloured */
   part(g: BufferGeometry, color: number) { return this.add(g, color, 0); }
 
@@ -91,6 +135,14 @@ export class Kit {
     g.computeBoundingSphere();
     return g;
   }
+}
+
+/** Non-indexed triangles with flat normals. */
+function flat(pos: number[]): BufferGeometry {
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
 }
 
 /**

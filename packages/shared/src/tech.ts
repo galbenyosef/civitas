@@ -26,6 +26,12 @@ export interface TechNode {
   condition: { counter: Counter; min: number };
   /** feature ids this node opens: tool names, 'level2' ... 'level7', 'underground', 'signals', 'publicRoads', 'patrols', 'airport', 'runway', 'lines' (the transit Lines panel) */
   unlocks: string[];
+  /**
+   * The node cannot be earned or bought in a live game yet: its unlock rule is still to be decided, and this text
+   * says so in the tech tree in place of the condition. Sandboxes (test cities, demos), the Commons and the dev
+   * "unlock everything" action still get it (they take ALL_TECH_IDS), and so does a ?dev client on a dev server.
+   */
+  locked?: string;
 }
 
 /**
@@ -67,6 +73,11 @@ export const TECH: TechNode[] = [
   { id: 'cul3', track: 'culture', tier: 3, name: 'Theatre', blurb: 'A playhouse with performances three nights a week. The best night out in town draws people from far away.', cost: 1200, requires: ['cul2', 'zon1'], condition: { counter: 'jobs', min: 100 }, unlocks: ['theatre', 'studiotheatre', 'leisurecentre'] },
   { id: 'cul4', track: 'culture', tier: 4, name: 'Big nights out', blurb: 'A multiplex, an indoor arena and a museum: big venues with big event nights that draw people from across town.', cost: 2200, requires: ['cul3'], condition: { counter: 'housed', min: 350 }, unlocks: ['multiplex', 'arena', 'museum'] },
   { id: 'cul5', track: 'culture', tier: 5, name: 'Landmarks', blurb: 'An opera house, a stadium with floodlights and a botanical garden: places people cross the city for.', cost: 5000, requires: ['cul4', 'con2'], condition: { counter: 'jobs', min: 500 }, unlocks: ['opera', 'stadium', 'botanic'] },
+  // London landmarks (buildings/landmarks-london.ts, docs/buildings.md "Landmarks"): real buildings, tagged 'london'. How a
+  // live game earns them is still to be decided, so the node is `locked`: only sandboxes and dev clients place them.
+  // The second five tool ids are reserved for the landmarks of kind ids 96-100.
+  { id: 'lnd1', track: 'culture', tier: 6, name: 'London landmarks', blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Big Ben, the London Eye, the Tower, Buckingham Palace and Tower Bridge: real London buildings that work as offices, venues and attractions.', cost: 10000, requires: ['cul5'], condition: { counter: 'jobs', min: 1000 }, locked: 'How these unlock is still to be decided: for now they stand only in test cities and demos.',
+    unlocks: ['gherkin', 'shard', 'walkietalkie', 'canadasquare', 'royalopera', 'bigben', 'londoneye', 'toweroflondon', 'buckingham', 'towerbridge'] },
 ];
 export const TECH_BY_ID = new Map(TECH.map((t) => [t.id, t]));
 export const ALL_TECH_IDS = TECH.map((t) => t.id);
@@ -83,7 +94,11 @@ export const hasFeature = (unlocked: readonly string[], feature: string) => {
 /** Tech needed for a zone to grow to `level` (1 is always allowed): Masonry for 2, Steel frame for 3, High-rise for 4-7. */
 export const levelFeature = (level: number) => (level >= 2 ? `level${Math.min(7, level)}` : '');
 
+/** Whether a player may earn and buy this node: false for a `locked` node (its unlock rule is still to be decided). */
+export const isEarnable = (t: TechNode) => !t.locked;
+
 export function describeCondition(t: TechNode): string {
+  if (t.locked) return t.locked;
   return `${t.condition.min} ${COUNTER_LABELS[t.condition.counter]}`;
 }
 export function techDTO(t: TechNode): TechDTO {

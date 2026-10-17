@@ -422,7 +422,9 @@ export function demoTour(id: DemoId): TourStop[] {
         if (!k) continue;
         const rot = p.rot ?? 0, placed = footprintOf(kid).w * footprintOf(kid).h > 1 ? placedFromDoor(kid, p.door[0], p.door[1], rot) : undefined;
         const area = placed ? [placed.ax, placed.ay, placed.w, placed.h] as const : [p.door[0], p.door[1], 1, 1] as const;
-        out.push({ id: sid, ...base, ...kindCaption(k, p.door, rot), ...framing(area[0], area[1], area[2], area[3], rot), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door });
+        // a tall landmark (the Shard is 9.6 tiles) is framed from further out so its top stays in view
+        const tall = Math.max(...k.levels.flatMap((l) => l.designs.map((dz) => dz.height)));
+        out.push({ id: sid, ...base, ...kindCaption(k, p.door, rot), ...framing(area[0], area[1], area[2], area[3], rot, tall > 3 ? tall / 3 : 1), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door });
         continue;
       }
       const b = s.blocks?.find((q) => q.id === sid);
@@ -491,8 +493,14 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
     for (const j of s.junctions ?? []) dup(j.id);
     for (const l of s.lines ?? []) dup(l.id);
   }
+  // landmarks (docs/buildings.md "Landmarks") stand in their own city's demo (the London ones in London), not the showcase
+  const inCity = new Set(DEMOS.filter((d) => d.id !== 'showcase').flatMap((d) => demoSections(d.id).flatMap((s) => (s.placements ?? []).map((p) => p.kind))));
   for (const k of manifest) {
     if (k.draft || !k.tool) continue;
+    if (k.landmark) {
+      if (!inCity.has(k.id)) out.push(`${k.id} (a ${(k.tags ?? []).join(', ')} landmark) is not placed in its city's demo`);
+      continue;
+    }
     if (k.flags.growable) {
       if (!blockKinds.has(k.id)) out.push(`zone ${k.id} (${k.tool.label}) has no grown block on the showcase tour`);
       continue;

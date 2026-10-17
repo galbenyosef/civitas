@@ -14,6 +14,8 @@ import { buildModels, allDesigns, model, type Design } from './render/models';
 import { buildingMaterial } from './render/materials';
 import { Lighting } from './render/lighting';
 import { parkScatterGroup } from './render/parks';
+import { landmarkPreview } from './render/landmarks';
+import { nightUniform } from './render/materials';
 
 // ---------------------------------------------------------------- catalogue entries
 
@@ -24,10 +26,12 @@ const tierOf = (l: LevelManifest) => Math.max(0, ...l.tech.map((id) => TECH_BY_I
 const entries: Entry[] = MANIFEST.flatMap((kind) => kind.levels.flatMap((level) => level.designs.map((design) => ({ kind, level, design, tier: tierOf(level), built: built.get(design.key)! }))));
 const FAMILY_LABEL: Record<string, string> = { residential: 'Residential', commercial: 'Commercial', industrial: 'Industrial', office: 'Office', civic: 'Civic', transport: 'Transport', leisure: 'Leisure' };
 const families = [...new Set(MANIFEST.map((k) => k.family))];
+/** metadata tags on kinds ('london': the landmarks), for the Tag filter (?tag=london) */
+const TAGS = [...new Set(MANIFEST.flatMap((k) => k.tags ?? []))].sort();
 
 // ---------------------------------------------------------------- state (kept in the hash so HMR reloads land in the same place)
 
-const state = { key: entries[0].design.key, family: 'all', tier: -1, drafts: true, author: 'all', hour: 11, spin: true, site: false, tint: -1, view: 'kinds' as 'kinds' | 'ladders', lineup: false };
+const state = { key: entries[0].design.key, family: 'all', tier: -1, tag: 'all', drafts: true, author: 'all', hour: 11, spin: true, site: false, tint: -1, view: 'kinds' as 'kinds' | 'ladders', lineup: false };
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
   if (p.get('d') && entries.some((e) => e.design.key === p.get('d'))) state.key = p.get('d')!;
@@ -37,6 +41,7 @@ function readHash() {
   if (p.get('drafts') === '0') state.drafts = false;
   const q = new URLSearchParams(location.search); // ?author=… also works, for shareable links
   if (p.get('author') || q.get('author')) state.author = (p.get('author') || q.get('author'))!;
+  if (p.get('tag') || q.get('tag')) state.tag = (p.get('tag') || q.get('tag'))!; // ?tag=london: the London landmarks
   if (p.get('site') === '1') state.site = true;
   if (p.get('v') === 'ladders') state.view = 'ladders';
   if (p.get('lu') === '1') state.lineup = true;
@@ -45,6 +50,7 @@ function writeHash() {
   const p = new URLSearchParams({ d: state.key, f: state.family, t: String(state.tier), h: String(state.hour) });
   if (!state.drafts) p.set('drafts', '0');
   if (state.author !== 'all') p.set('author', state.author);
+  if (state.tag !== 'all') p.set('tag', state.tag);
   if (state.site) p.set('site', '1');
   if (state.view === 'ladders') p.set('v', 'ladders');
   if (state.lineup) p.set('lu', '1');
@@ -57,7 +63,7 @@ const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;',
 const money = (n: number) => '$' + (Math.round(n * 100) / 100).toLocaleString();
 const hh = (h: number) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
 const authorOf = (e: { design: { author?: string } }) => e.design.author ?? 'original';
-const visible = () => entries.filter((e) => (state.family === 'all' || e.kind.family === state.family) && (state.tier < 0 || e.tier === state.tier) && (state.drafts || !e.design.draft) && (state.author === 'all' || authorOf(e) === state.author));
+const visible = () => entries.filter((e) => (state.family === 'all' || e.kind.family === state.family) && (state.tier < 0 || e.tier === state.tier) && (state.drafts || !e.design.draft) && (state.author === 'all' || authorOf(e) === state.author) && (state.tag === 'all' || !!e.kind.tags?.includes(state.tag)));
 const current = () => entries.find((e) => e.design.key === state.key) ?? entries[0];
 
 // ---------------------------------------------------------------- turntable
@@ -109,8 +115,11 @@ function lineupEntries(e: Entry): Entry[] {
   if (!lad) return [e];
   return lad.tiers.map((k) => (k.kindId === e.kind.kindId ? e : entries.find((x) => x.kind.kindId === k.kindId && x.level.level === 1 && !x.design.draft) ?? e));
 }
+/** the current landmark's moving parts, turned by the game clock the viewer's hour stands for */
+let moving: ReturnType<typeof landmarkPreview> = null;
 function showCurrent() {
   turntable.clear();
+  moving = null;
   const e = current();
   const d = e.built;
   const tint = state.tint >= 0 && e.kind.tints ? e.kind.tints[state.tint] : 0xffffff;
@@ -147,6 +156,8 @@ function showCurrent() {
     turntable.add(m);
     const trees = parkScatterGroup(e.design.attrs); // parks: the trees and benches the city scatters as instances
     if (trees) turntable.add(trees);
+    moving = landmarkPreview(e.kind.kindId); // landmarks: the Eye's wheel, Big Ben's dials (render/landmarks.ts)
+    if (moving) turntable.add(moving.object);
   }
   // the grey lot under the model covers its footprint
   bench.lot.visible = true;
@@ -183,6 +194,7 @@ function tick(now: number) {
   camera.lookAt(target);
   applyHour(lighting, target, frameDist);
   scene.background = lighting.sky;
+  moving?.update(state.hour + now / 20000, nightUniform.value); // a game hour is 20 s, as in the city
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
@@ -221,6 +233,8 @@ function shootThumbs() {
       thumbScene.add(m);
       const trees = parkScatterGroup(e.design.attrs);
       if (trees) thumbScene.add(trees);
+      const parts = landmarkPreview(e.kind.kindId);
+      if (parts) { parts.update(state.hour, nightUniform.value); thumbScene.add(parts.object); }
       const hgt = e.design.height, y = Math.min(hgt * 0.42, 1.6), dist = 1.75 * Math.max(1.2, hgt * 1.1 + 0.45, spanOf(e.kind) * 1.05 + 0.2);
       thumbCam.position.set(Math.sin(-0.6) * Math.cos(0.45) * dist, y + Math.sin(0.45) * dist, Math.cos(-0.6) * Math.cos(0.45) * dist);
       target.set(0, y, 0);
@@ -230,6 +244,7 @@ function shootThumbs() {
       thumbRenderer.render(thumbScene, thumbCam);
       thumbs.set(e.design.key, thumbCanvas.toDataURL('image/png'));
       thumbScene.remove(m);
+      if (parts) thumbScene.remove(parts.object);
       if (trees) { thumbScene.remove(trees); trees.traverse((o) => (o as Mesh).geometry?.dispose()); }
       const img = document.querySelector<HTMLImageElement>(`img[data-key="${e.design.key}"]`);
       if (img) img.src = thumbs.get(e.design.key)!;
@@ -252,7 +267,16 @@ function renderFilters() {
   fam.replaceChildren(fam.firstElementChild!, chip('All', state.family === 'all', () => setFilter('all', state.tier)), ...families.map((f) => chip(FAMILY_LABEL[f] ?? f, state.family === f, () => setFilter(f, state.tier))));
   const tiers = [...new Set(entries.map((e) => e.tier))].sort();
   tier.replaceChildren(tier.firstElementChild!, chip('Any', state.tier < 0, () => setFilter(state.family, -1)), ...tiers.map((t) => chip(t === 0 ? 'From the start' : `Tier ${t}`, state.tier === t, () => setFilter(state.family, t))));
+  const tag = $('tagRow');
+  tag.hidden = !TAGS.length;
+  tag.replaceChildren(tag.firstElementChild!, chip('Any', state.tag === 'all', () => setTag('all')), ...TAGS.map((t) => chip(cap(t), state.tag === t, () => setTag(t))));
   $<HTMLInputElement>('drafts').checked = state.drafts;
+}
+function setTag(t: string) {
+  state.tag = t;
+  const list = visible();
+  if (list.length && !list.some((e) => e.design.key === state.key)) state.key = list[0].design.key;
+  writeHash(); renderFilters(); renderGrid(); showCurrent(); renderSpec();
 }
 function renderGrid() {
   const list = visible();
@@ -309,7 +333,7 @@ function ladderHtml(kind: KindManifest): string {
     const key = entries.find((x) => x.kind.kindId === k.kindId && !x.design.draft)?.design.key ?? '';
     return `<tr data-key="${esc(key)}" class="${k.kindId === kind.kindId ? 'on' : ''}"><td class="${k.kindId === kind.kindId ? 'on' : ''}">${s.tier}</td><td class="${k.kindId === kind.kindId ? 'on' : ''}">${esc(k.tool?.label ?? k.name)}</td><td>${s.footprint}</td><td>${s.holds}</td><td>${does}</td><td>${money(s.cost)}</td><td>${money(s.upkeep)}</td><td title="${esc(t?.name ?? 'from the start')}">${t ? `${esc(TRACK_NAMES[t.track].slice(0, 3))} ${t.tier}` : '–'}</td></tr>`;
   };
-  return `<h4>${esc(lad.group.label)} ladder · size ${kind.tier} of ${lad.tiers.length}</h4>
+  return `<h4>${esc(lad.group.label)} ${lad.group.collection ? `landmarks · ${kind.tier} of ${lad.tiers.length}` : `ladder · size ${kind.tier} of ${lad.tiers.length}`}</h4>
     ${kind.blurb ? `<p class="blurb">${esc(kind.blurb)}</p>` : ''}${kind.howTo ? `<p class="howto">${esc(kind.howTo)}</p>` : ''}
     <table class="levels ladder"><thead><tr><th>#</th><th>Size</th><th>Tiles</th><th>${esc(lad.group.holds)}</th><th>Covers</th><th>Cost</th><th>/day</th><th>Tech</th></tr></thead><tbody>${lad.tiers.map(row).join('')}</tbody></table>
     <p class="note">Click a row to view that size; tick <b>Ladder line-up</b> to see them side by side.</p>`;
@@ -353,7 +377,7 @@ function renderSpec() {
   $('spec').innerHTML = `
     <h2>${esc(cap(design.name))}</h2>
     <div class="sub">${esc(cap(kind.name))}${kind.name !== kind.family ? `, ${esc((FAMILY_LABEL[kind.family] ?? kind.family).toLowerCase())} family` : ''}. Kind id ${kind.kindId}${kind.kindId !== kind.code ? ` (sub-kind of family code ${kind.code})` : ''}, level ${level.level}, design ${design.index + 1} of ${level.designs.length}.${merged ? ` Merged lots, ${footprintLabel(kind)}: grown when neighbouring ${esc(kind.family)} lots of one owner merge, never placed.` : ''}</div>
-    <div>${design.draft ? '<span class="pill draft">Draft: viewer only, not placed in the city</span>' : ''}<span class="pill">${esc(design.key)}</span><span class="pill">${design.height} tiles tall</span><span class="pill">${design.ops} parts · ${e.built.geometry.attributes.position.count} vertices</span><span class="pill">${esc(kind.windows)} windows</span><span class="pill author">designed by ${esc(design.author ?? 'original catalogue')}</span></div>
+    <div>${design.draft ? '<span class="pill draft">Draft: viewer only, not placed in the city</span>' : ''}<span class="pill">${esc(design.key)}</span><span class="pill">${design.height} tiles tall</span><span class="pill">${design.ops} parts · ${e.built.geometry.attributes.position.count} vertices</span><span class="pill">${esc(kind.windows)} windows</span><span class="pill author">designed by ${esc(design.author ?? 'original catalogue')}</span>${kind.landmark ? '<span class="pill">landmark</span>' : ''}${(kind.tags ?? []).map((t) => `<span class="pill">tag: ${esc(t)}</span>`).join('')}</div>
     ${ladderHtml(kind)}
     <h4>Per level</h4>${table}
     <h4>Tech needed</h4>${techText(level.tech)}
@@ -425,6 +449,7 @@ window.addEventListener('keydown', (ev) => {
 });
 
 setHour(state.hour, false);
+if (state.tag !== 'all' && !visible().some((e) => e.design.key === state.key)) state.key = visible()[0]?.design.key ?? state.key; // ?tag=london opens on a landmark
 renderFilters(); renderGrid(); showCurrent(); renderSpec();
 shootThumbs();
 requestAnimationFrame(tick);

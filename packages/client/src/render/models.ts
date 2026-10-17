@@ -26,6 +26,8 @@ function make(r: Pick<CompiledRecipe, 'ops'>): BufferGeometry {
       case 'cyl': k.cyl(op[1], op[2], op[3], op[4], op[5], op[6], op[7], op[8]); break;
       case 'cone': k.cone(op[1], op[2], op[3], op[4], op[5], op[6], op[7]); break;
       case 'wheel': k.wheel(op[1], op[2], op[3], op[4], op[5], op[6]); break;
+      case 'taper': k.taper(op[1], op[2], op[3], op[4], op[5], op[6], op[7], op[8], op[9], op[10], op[11], op[12]); break;
+      case 'lathe': k.lathe(op[1], op[2], op[3], op[4], op[5], op[6], op[7], op[8], op[9], op[10], op[11], op[12]); break;
     }
   }
   return k.build();
@@ -89,6 +91,16 @@ export function farOps(ops: readonly CompiledOp[]): CompiledOp[] {
       }
       case 'cone': v = (Math.PI * op[1] * op[1] * op[2]) / 3; if (v >= FAR_MIN_VOLUME) keep = [op[0], op[1], op[2], op[3], op[4], op[5], op[6], Math.min(op[7], 5)]; break;
       case 'wheel': break;
+      case 'taper': v = ((op[1] * op[2] + op[3] * op[4]) / 2) * op[5]; if (v >= FAR_MIN_VOLUME) keep = op; break;
+      case 'lathe': {
+        // a landmark's body: keep it whole (its facets and bands are what make it recognisable)
+        const p = op[12];
+        let r = 0;
+        for (let i = 0; i < p.length; i += 2) r = Math.max(r, p[i]);
+        v = Math.PI * r * r * p[p.length - 1] * 0.6;
+        if (v >= FAR_MIN_VOLUME) keep = op;
+        break;
+      }
     }
     if (keep) out.push(keep);
     if (v > bigV) { bigV = v; big = op; }

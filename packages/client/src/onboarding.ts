@@ -233,7 +233,7 @@ export class Onboarding {
   private techChip(me: PlayerDTO) {
     const btn = document.getElementById('techBtn');
     if (!btn) return;
-    const now = new Set(TECH.filter((t) => !me.tech.includes(t.id) && t.requires.every((r) => me.tech.includes(r))
+    const now = new Set(TECH.filter((t) => !t.locked && !me.tech.includes(t.id) && t.requires.every((r) => me.tech.includes(r))
       && (me.progress[t.condition.counter] ?? 0) >= t.condition.min && me.money >= t.cost).map((t) => t.id));
     const fresh = [...now].filter((id) => !this.ready.has(id));
     this.ready = now;

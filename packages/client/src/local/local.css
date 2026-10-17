@@ -1,5 +1,5 @@
 /* local mode (local/ui.ts): the top-bar controls, the paused badge, the saves dialog, the local join form */
-#localBar { display: inline-flex; align-items: center; gap: 6px; }
+#localBar { display: inline-flex; flex: none; align-items: center; gap: 6px; white-space: nowrap; }
 #localBar .seg { display: inline-flex; }
 #localBar .seg .chip { border-radius: 0; margin-left: -1px; }
 #localBar .seg .chip:first-child { border-radius: 999px 0 0 999px; margin-left: 0; }
