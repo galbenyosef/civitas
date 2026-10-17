@@ -553,7 +553,7 @@ function cabEye(): CabEye | null {
       key: vehicleKey(v), ...e, label: `${title} · cockpit`,
       lines: [heliDoing(s), `${s.phase !== 'onPad' ? `${planeFeet(s.y).toLocaleString()} ft · ` : ''}${kt} kt`],
       fogFar: 130, dip: s.y - (s.pad?.y ?? 0) > 1 ? 0.14 : 0.06, sway: s.phase === 'onPad' ? 0.15 * s.rotor : 0.45, seed: s.seed,
-      instruments: { ktPerTile: heliKnots(1000) / 1000, ftPerTile: planeFeet(100) / 100, ticksPerSec: (1000 / TICK_MS) * clock.rate, eyeAbove: e.y - s.y },
+      instruments: { ktPerTile: heliKnots(1000) / 1000, ftPerTile: planeFeet(100) / 100, ticksPerSec: (1000 / TICK_MS) * clock.rate, tick: helis.lastTick, eyeAbove: e.y - s.y },
     };
   }
   const hit = planes.stateOf(v.airport, v.flight);
@@ -564,7 +564,7 @@ function cabEye(): CabEye | null {
     key: vehicleKey(v), ...e, label: `${outbound ? m.outbound : m.inbound} · ${m.airline} · cockpit`,
     lines: [planeDoing(hit.s, m), `${hit.s.y > 0.05 ? `${planeFeet(hit.s.y).toLocaleString()} ft · ` : ''}${kt} kt`],
     fogFar: 150, dip: hit.s.y > 0.3 ? 0.1 : 0.04, sway: hit.s.y > 0.05 ? 0.6 : 0.2, seed: hit.s.seed,
-    instruments: { ktPerTile: planeKnots(hit.s.type, 1000) / 1000, ftPerTile: planeFeet(100) / 100, ticksPerSec: (1000 / TICK_MS) * clock.rate, eyeAbove: e.y - hit.s.y },
+    instruments: { ktPerTile: planeKnots(hit.s.type, 1000) / 1000, ftPerTile: planeFeet(100) / 100, ticksPerSec: (1000 / TICK_MS) * clock.rate, tick: planes.lastTick, eyeAbove: e.y - hit.s.y },
   };
 }
 /** where the follow camera looks for the selected vehicle */

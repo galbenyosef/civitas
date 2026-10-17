@@ -15,6 +15,8 @@ export interface AircraftCal {
   ftPerTile: number;
   /** game ticks per real second right now (0 while paused); speeds are measured in game time, so fast-forward reads true */
   ticksPerSec: number;
+  /** the game tick (fractional) the pose was drawn at; when given, speeds are distance over ticks elapsed, so a clock resync, a pause or a speed change never reads as a burst of speed */
+  tick?: number;
   /** how far the eye sits above the aircraft's own altitude, in tiles, so the gate reads 0 ft rather than the cockpit's height */
   eyeAbove: number;
 }
@@ -42,6 +44,7 @@ const labels = new Map<number, string>();
 /** number to string, remembered: the tapes ask for the same few hundred labels every frame */
 const lab = (n: number) => { let s = labels.get(n); if (s === undefined) { s = String(n); labels.set(n, s); } return s; };
 const lab3 = (n: number) => { const k = n + 100000; let s = labels.get(k); if (s === undefined) { s = String(n).padStart(3, '0'); labels.set(k, s); } return s; };
+const lab2 = (n: number) => { const k = n + 200000; let s = labels.get(k); if (s === undefined) { s = String(n).padStart(2, '0'); labels.set(k, s); } return s; };
 const grouped = (n: number) => (n >= 1000 ? `${Math.floor(n / 1000)},${String(n % 1000).padStart(3, '0')}` : String(n));
 
 const FWD = new Vector3(), UP = new Vector3(), RIGHT = new Vector3(), TRUE_UP = new Vector3(), Y = new Vector3(0, 1, 0);
@@ -56,7 +59,7 @@ export class Instruments {
   private compact = false;
   // motion, measured from the eye between frames
   private key = '';
-  private have = false;
+  private have = false; private haveTick = false; private ltick = 0;
   private lx = 0; private ly = 0; private lz = 0;
   private kt = 0; private vs = 0;
   // attitude and heading this frame
@@ -73,7 +76,7 @@ export class Instruments {
 
   hide() {
     if (!this.shown) return;
-    this.shown = false; this.have = false; this.key = '';
+    this.shown = false; this.have = false; this.haveTick = false; this.key = '';
     this.el.style.display = 'none';
   }
 
@@ -97,17 +100,19 @@ export class Instruments {
   private measure(cab: InstrumentFeed, cal: AircraftCal, dt: number) {
     const { x, y, z } = cab;
     // a new ride, or a long gap (the tab was in the background): start again rather than read the jump as speed
-    if (cab.key !== this.key || dt > 0.25) { this.key = cab.key; this.have = false; }
-    if (this.have && dt > 1e-4 && cal.ticksPerSec > 0.05 && cal.ktPerTile > 0) {
-      // game ticks passed this frame, so a fast-forward reads as the aircraft really flying, and a pause holds the last reading
-      const perTick = 1 / (dt * cal.ticksPerSec);
+    if (cab.key !== this.key || dt > 0.25) { this.key = cab.key; this.have = false; this.haveTick = false; }
+    // game ticks passed since the last frame: from the pose's own tick when it has one, else from real time at the current rate
+    const ticks = cal.tick !== undefined ? (this.haveTick ? cal.tick - this.ltick : 0) : dt * cal.ticksPerSec;
+    if (cal.tick !== undefined) { this.ltick = cal.tick; this.haveTick = true; }
+    if (this.have && dt > 1e-4 && ticks > 1e-4 && ticks < 40 && cal.ktPerTile > 0) {
+      const perTick = 1 / ticks;
       const vx = (x - this.lx) * perTick, vy = (y - this.ly) * perTick, vz = (z - this.lz) * perTick;
       const kt = Math.hypot(vx, vy, vz) * cal.ktPerTile;
       // a vertical tile is as long as a horizontal one in the sim's own knots, so the climb rate comes off the same scale
       const vs = vy * cal.ktPerTile * FT_PER_MIN_PER_KT;
       if (kt < 700) {
-        this.kt += (kt - this.kt) * (1 - Math.exp(-dt / 0.6));
-        this.vs += (clamp(vs, -6000, 6000) - this.vs) * (1 - Math.exp(-dt / 1.0));
+        this.kt += (kt - this.kt) * (1 - Math.exp(-dt / 0.7));
+        this.vs += (clamp(vs, -6000, 6000) - this.vs) * (1 - Math.exp(-dt / 1.1));
       }
     }
     this.lx = x; this.ly = y; this.lz = z; this.have = true;
@@ -136,7 +141,7 @@ export class Instruments {
   private fit(mode: 'inset' | 'full', w: number, h: number) {
     const compact = mode === 'inset';
     const lw = compact ? COMPACT_W : FULL_W, lh = compact ? COMPACT_H : FULL_H;
-    const s = compact ? clamp(h / 190, 0.9, 1.7) : clamp(h / 680, 0.8, 1.3);
+    const s = compact ? clamp(h / 190, 0.9, 1.7) : clamp(h / 600, 0.85, 1.5);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const tag = `${compact ? 'c' : 'f'}|${w}|${h}|${s.toFixed(3)}|${dpr}`;
     if (tag === this.sizeTag) return;
@@ -214,7 +219,7 @@ export class Instruments {
     c.fillStyle = vs >= 0 ? GREEN : AMBER;
     c.fillRect(vx + 3, Math.min(vy, mid), vw - 6, Math.max(1.5, Math.abs(vy - mid)));
     const vr = Math.round(vs / 50) * 50;
-    this.text(`VS ${vr > 0 ? '+' : vr < 0 ? '-' : ''}${lab(Math.abs(vr))}`, 342, ty + th + 11, 9, vs >= 0 ? GREEN : AMBER, 'center', 600);
+    this.text(`VS ${vr > 0 ? '+' : vr < 0 ? '-' : ''}${lab(Math.abs(vr))}`, 332, ty + th + 11, 9, vs >= 0 ? GREEN : AMBER, 'center', 600);
   }
 
   private drawCompact(pitch: number, bank: number, kt: number, alt: number, vs: number, hdg: number) {
@@ -351,7 +356,7 @@ export class Instruments {
       if (a % 30 !== 0) continue;
       const px = cx + (n * 5 - hdg) * pp;
       const card = a % 90 === 0;
-      this.text(card ? CARD[a / 45] : lab(a / 10), px, y + 8, card ? 11 : 9.5, card ? GREEN : WHITE, 'center', card ? 700 : 500);
+      this.text(card ? CARD[a / 45] : lab2(a / 10), px, y + 8, card ? 11 : 9.5, card ? GREEN : WHITE, 'center', card ? 700 : 500);
     }
     c.restore();
     c.fillStyle = AMBER;
