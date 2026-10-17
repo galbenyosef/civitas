@@ -3,7 +3,7 @@ import { Zone } from './codes';
 import { repeat } from './helpers';
 import { office } from './office';
 import { sports, library } from './leisure';
-import { slab, tree, PAVING } from './tierkit';
+import { slab, tree, helipad, PAVING } from './tierkit';
 
 /**
  * London landmarks, the second five (docs/buildings.md "Landmarks"; the first five and the framework are in
@@ -361,6 +361,8 @@ const palaceOps = (): Op[] => {
   ops.push(['cyl', 0.04, 0.03, 0.04, 0, 0.77, MZ, 'gold', 8], ['cone', 0.028, 0.12, 0, 0.81, MZ, 'gold', 8], ['cyl', 0.014, 0.014, 0.025, 0, 0.93, MZ, 'gold', 6]);
   ops.push(['taper', 0.014, 0.035, 0.12, 0.014, 0.09, 0, 0.84, MZ - 0.012, 'gold']);
   ops.push(...tree(-1.75, 1.75, 0.8), ...tree(1.75, 1.75, 0.8), ...tree(-1.75, 1.15, 0.7), ...tree(1.75, 1.15, 0.7));
+  // a helicopter landing pad on a square of lawn beside the memorial, for the King's flight (shared/src/helicopters.ts)
+  ops.push(['box', 0.62, 0.006, 0.62, 1.2, 0.02, 1.5, 'lawn'], ...helipad(1.2, 0.026, 1.5, 0.25));
   return ops;
 };
 

@@ -1,5 +1,6 @@
 import type { KindDef } from './schema';
 import { Zone } from './codes';
+import { helipad } from './tierkit';
 
 /** Staffed civic buildings: placed by a player, built by builders, paid for daily. One level each. */
 export const police: KindDef = {
@@ -72,8 +73,8 @@ export const hospital: KindDef = {
     designs: [{ name: 'white block with a roof cross and helipad', height: 1.15, ops: [
       ['box', 0.88, 1.1, 0.56, 0, 0, -0.14, 'white', true],
       ['box', 0.46, 0.6, 0.34, -0.2, 0, 0.26, 'white', true],
-      ['box', 0.3, 0.05, 0.08, 0, 1.1, -0.14, 'crossRed'], ['box', 0.08, 0.05, 0.3, 0, 1.1, -0.14, 'crossRed'],
-      ['cyl', 0.14, 0.14, 0.02, 0.27, 1.1, -0.14, 0x4a4f58, 12],
+      ['box', 0.3, 0.05, 0.08, -0.2, 1.1, -0.14, 'crossRed'], ['box', 0.08, 0.05, 0.3, -0.2, 1.1, -0.14, 'crossRed'],
+      ...helipad(0.21, 1.1, -0.14, 0.2),
       ['box', 0.3, 0.03, 0.14, -0.2, 0.28, 0.45, 'crossRed'],
     ] }],
   }],

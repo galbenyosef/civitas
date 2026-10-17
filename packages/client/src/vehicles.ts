@@ -1,16 +1,17 @@
 import {
-  TRAIN_VMAX, PLANE_TYPES, APPROACH_ALT, flightAboard, flightPassenger,
-  type TrainInfo, type RailLineDTO, type TrainState, type FlightState, type FlightManifest, type FlightPhase, type PlaneType, type CrewMember, type PersonRow,
+  TRAIN_VMAX, PLANE_TYPES, APPROACH_ALT, flightAboard, flightPassenger, CATALOGUE_KIND_NAMES, heliOperator, heliCrew, heliPassengers, heliTowns,
+  type HeliState, type TrainInfo, type RailLineDTO, type TrainState, type FlightState, type FlightManifest, type FlightPhase, type PlaneType, type CrewMember, type PersonRow,
 } from '@msimcity/shared';
 import { consistText } from './rail';
 
 /**
- * The panels of a selected train or plane (docs/rail.md, docs/airport.md). Where either is, what it is doing and its
- * crew come from the shared deterministic schedules and crews.ts; a train's riders and containers come from the server
- * (an `inspectTrain` with `full`, only for the selected train); a plane's passengers are generated from its flight.
+ * The panels of a selected train, plane or helicopter (docs/rail.md, docs/airport.md, docs/helicopters.md). Where each
+ * is, what it is doing and its crew come from the shared deterministic schedules and crews.ts; a train's riders and
+ * containers come from the server (an `inspectTrain` with `full`, only for the selected train); a plane's passengers are
+ * generated from its flight.
  */
-export type VehicleSel = { kind: 'train'; line: number; train: number } | { kind: 'plane'; airport: number; flight: number };
-export const vehicleKey = (v: VehicleSel) => (v.kind === 'train' ? `t${v.line}:${v.train}` : `p${v.airport}:${v.flight}`);
+export type VehicleSel = { kind: 'train'; line: number; train: number } | { kind: 'plane'; airport: number; flight: number } | { kind: 'heli'; flight: number };
+export const vehicleKey = (v: VehicleSel) => (v.kind === 'train' ? `t${v.line}:${v.train}` : v.kind === 'plane' ? `p${v.airport}:${v.flight}` : `h${v.flight}`);
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]!));
@@ -65,9 +66,9 @@ export const PHASE_LABEL: Record<FlightPhase, string> = {
   approach: 'on approach', flare: 'landing', rollout: 'landing roll', taxiIn: 'taxiing to the gate', dwell: 'at the gate',
   pushback: 'pushing back', taxiOut: 'taxiing to the runway', takeoff: 'taking off', rotate: 'lifting off', climb: 'climbing out',
 };
-const TYPE_LABEL: Record<PlaneType, string> = { narrowbody: 'narrow-body jet', turboprop: 'turboprop', bizjet: 'business jet' };
+const TYPE_LABEL: Record<PlaneType, string> = { turboprop: 'turboprop', regional: 'regional jet', narrowbody: 'narrow-body jet', widebody: 'wide-body jet', jumbo: 'four-engined jumbo jet', bizjet: 'business jet' };
 /** approach speed in knots by type: the sim's tiles per tick are scaled so the approach reads as this */
-const APPROACH_KT: Record<PlaneType, number> = { narrowbody: 140, turboprop: 115, bizjet: 125 };
+const APPROACH_KT: Record<PlaneType, number> = { turboprop: 115, regional: 135, narrowbody: 140, widebody: 145, jumbo: 150, bizjet: 125 };
 export const planeKnots = (type: PlaneType, tilesPerTick: number) => Math.round((tilesPerTick / PLANE_TYPES[type].vApproach) * APPROACH_KT[type]);
 /** feet shown for an altitude in tiles: the top of the glide path reads as 2,500 ft */
 export const planeFeet = (y: number) => Math.max(0, Math.round((y / APPROACH_ALT) * 2500 / 50) * 50);
@@ -120,5 +121,58 @@ export function planePanelHtml(s: FlightState, m: FlightManifest, gate: number, 
     }
     html += rows.join('');
   }
+  return html;
+}
+
+// ---- helicopters --------------------------------------------------------------------------------------
+
+const HELI_LABEL = { light: 'light twin helicopter', medium: 'medium twin helicopter' } as const;
+/** cruise speed reads as about 120 knots, on the planes' scale */
+export const heliKnots = (tilesPerTick: number) => Math.round(tilesPerTick * 226);
+/** the building a pad is on, in a sentence: 'the general hospital', 'Buckingham Palace' */
+const padPlace = (s: HeliState) => {
+  const n = s.pad ? CATALOGUE_KIND_NAMES[s.pad.building] ?? 'a helipad' : 'a helipad';
+  return /^[A-Z]|^the /.test(n) ? n : `the ${n}`;
+};
+/** What a helicopter is doing, in a line. */
+export function heliDoing(s: HeliState): string {
+  const f = s.flight, towns = heliTowns(f), last = s.stop >= f.stops.length - 1;
+  const med = s.kind === 'medical', pol = s.kind === 'police', roy = s.kind === 'royal';
+  switch (s.phase) {
+    case 'inbound': case 'approach':
+      if (s.stop > 0) return med ? `transferring a patient to ${padPlace(s)}` : `flying across to ${padPlace(s)}`;
+      return pol ? `returning from patrol to ${padPlace(s)}` : med ? `flying a patient in from ${towns.from}` : roy ? `royal flight from ${towns.from}` : `flying in from ${towns.from}`;
+    case 'landing': return `landing at ${padPlace(s)}`;
+    case 'onPad': return s.rotor > 0.05 ? `on the pad at ${padPlace(s)} · rotors turning` : `parked on the pad at ${padPlace(s)}`;
+    case 'liftoff': return `lifting off from ${padPlace(s)}`;
+    default:
+      if (!last && s.pad) return `on to ${padPlace(s)}`;
+      return pol ? 'out on patrol' : med ? `heading back to base at ${towns.to}` : `leaving for ${towns.to}`;
+  }
+}
+export function heliTitle(s: HeliState) {
+  const op = heliOperator(s.flight);
+  return `🚁 ${esc(op.flightNo)} <span style="color:var(--muted);font-weight:400">${esc(op.name)}</span>`;
+}
+/** A helicopter's hover tooltip. */
+export function heliTipHtml(s: HeliState): string {
+  const op = heliOperator(s.flight);
+  let html = `<h3>${heliTitle(s)}</h3><div class="sub">${esc(heliDoing(s))}</div>`;
+  html += row('Aircraft', `${HELI_LABEL[s.type]} · ${op.reg}`);
+  if (s.y - (s.pad?.y ?? 0) > 0.05 && s.phase !== 'onPad') html += row('Altitude', `${planeFeet(s.y).toLocaleString()} ft`);
+  html += `<div class="clickhint">click for the crew and the cockpit view</div>`;
+  return html;
+}
+/** The selected helicopter's panel. */
+export function heliPanelHtml(s: HeliState, knots: number): string {
+  const f = s.flight, op = heliOperator(f), towns = heliTowns(f), crew = heliCrew(f), pax = heliPassengers(f);
+  let html = `<h3>${heliTitle(s)}</h3><div class="sub">${esc(heliDoing(s))}</div>`;
+  html += row('Aircraft', `${HELI_LABEL[s.type]} · ${op.reg}`);
+  const stops = f.stops.map((st) => CATALOGUE_KIND_NAMES[st.pad.building] ?? 'helipad').join(' → ');
+  html += row('Route', `${esc(towns.from)} → ${esc(stops)} → ${esc(towns.to)}`);
+  if (s.phase !== 'onPad') html += row('Altitude', `${planeFeet(s.y).toLocaleString()} ft`);
+  html += row('Speed', knots > 0 ? `${knots} kt` : s.rotor > 0.05 ? 'hovering' : 'stopped');
+  if (pax) html += row(s.kind === 'medical' ? 'Patient' : 'Passengers', s.kind === 'medical' ? '1 on a stretcher' : String(pax));
+  html += `<div class="sect">Crew (${crew.length})</div>${crewRows(crew)}`;
   return html;
 }

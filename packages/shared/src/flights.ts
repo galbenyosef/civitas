@@ -25,12 +25,14 @@ import { hash2 } from './noise';
  * and rolling in the wind direction.
  */
 
-export type PlaneType = 'turboprop' | 'narrowbody' | 'bizjet';
+export type PlaneType = 'turboprop' | 'regional' | 'narrowbody' | 'widebody' | 'jumbo' | 'bizjet';
 
 export interface PlaneSpec {
   /** tiles (a car is 0.34) */
   length: number;
   wingspan: number;
+  /** main gear to the tip of the nose, tiles: a long-nosed plane stops short of the terminal (standOffset) */
+  nose: number;
   /** tiles per tick */
   vApproach: number;
   vTouchdown: number;
@@ -42,14 +44,26 @@ export interface PlaneSpec {
   taxiRadius: number;
   /** turnaround at the gate, game minutes */
   dwell: [number, number];
-  /** share of traffic */
+  /** share of traffic where the type can fly (typeWeights renormalises over the types an airport takes) */
   weight: number;
+  /** shortest runway, in tiles, the type uses: the big jets need a long one */
+  minRunway: number;
 }
 
+/**
+ * The fleet, smallest to biggest silhouette (render/planes.ts draws each): a high-wing twin turboprop with a T-tail, a
+ * regional jet with two engines on the tail under a T-tail, the narrow-body twin, a twin-aisle wide-body with two
+ * big underwing engines, a four-engined jumbo with an upper-deck hump, and the business jet. Every model puts the main
+ * gear (the origin) about 40% of the length ahead of the tail, as the ground footprint assumes.
+ */
 export const PLANE_TYPES: Record<PlaneType, PlaneSpec> = {
-  turboprop: { length: 2.0, wingspan: 2.1, vApproach: 0.52, vTouchdown: 0.4, vTaxi: 0.24, vPush: 0.12, vLiftoff: 0.46, vClimb: 0.6, taxiRadius: 0.8, dwell: [30, 50], weight: 0.28 },
-  narrowbody: { length: 3.0, wingspan: 2.6, vApproach: 0.62, vTouchdown: 0.5, vTaxi: 0.26, vPush: 0.12, vLiftoff: 0.58, vClimb: 0.75, taxiRadius: 0.9, dwell: [45, 90], weight: 0.57 },
-  bizjet: { length: 1.3, wingspan: 1.2, vApproach: 0.7, vTouchdown: 0.55, vTaxi: 0.28, vPush: 0.12, vLiftoff: 0.64, vClimb: 0.85, taxiRadius: 0.6, dwell: [20, 45], weight: 0.15 },
+  turboprop: { length: 2.0, wingspan: 2.1, nose: 1.2, vApproach: 0.52, vTouchdown: 0.4, vTaxi: 0.24, vPush: 0.12, vLiftoff: 0.46, vClimb: 0.6, taxiRadius: 0.8, dwell: [30, 50], weight: 0.24, minRunway: 0 },
+  regional: { length: 2.5, wingspan: 1.9, nose: 1.5, vApproach: 0.6, vTouchdown: 0.48, vTaxi: 0.26, vPush: 0.12, vLiftoff: 0.55, vClimb: 0.75, taxiRadius: 0.8, dwell: [30, 60], weight: 0.2, minRunway: 0 },
+  narrowbody: { length: 3.0, wingspan: 2.6, nose: 1.8, vApproach: 0.62, vTouchdown: 0.5, vTaxi: 0.26, vPush: 0.12, vLiftoff: 0.58, vClimb: 0.75, taxiRadius: 0.9, dwell: [45, 90], weight: 0.4, minRunway: 0 },
+  // a parked wide-body's half span plus a narrow-body's, with both margins, just fits the gate pitch (3.3)
+  widebody: { length: 3.9, wingspan: 3.18, nose: 2.34, vApproach: 0.66, vTouchdown: 0.52, vTaxi: 0.24, vPush: 0.1, vLiftoff: 0.6, vClimb: 0.72, taxiRadius: 1.2, dwell: [70, 120], weight: 0.09, minRunway: 16 },
+  jumbo: { length: 4.1, wingspan: 3.18, nose: 2.46, vApproach: 0.66, vTouchdown: 0.52, vTaxi: 0.24, vPush: 0.1, vLiftoff: 0.6, vClimb: 0.7, taxiRadius: 1.3, dwell: [80, 140], weight: 0.05, minRunway: 20 },
+  bizjet: { length: 1.3, wingspan: 1.2, nose: 0.78, vApproach: 0.7, vTouchdown: 0.55, vTaxi: 0.28, vPush: 0.12, vLiftoff: 0.64, vClimb: 0.85, taxiRadius: 0.6, dwell: [20, 45], weight: 0.12, minRunway: 0 },
 };
 export const PLANE_TYPE_NAMES = Object.keys(PLANE_TYPES) as PlaneType[];
 
@@ -82,6 +96,14 @@ export const STAND_OFFSET = 6.6;
 export const GATE_PITCH = 3.3;
 /** the terminal front, where noses stop */
 export const TERMINAL_OFFSET = 8.6;
+/** Where a type's main gear stops on its stand: STAND_OFFSET, or short of it when the nose would reach the terminal. */
+export const standOffset = (type: PlaneType) => Math.min(STAND_OFFSET, TERMINAL_OFFSET - 0.2 - PLANE_TYPES[type].nose);
+/** Each type's share of an airport's traffic: the types its runway is long enough for, renormalised. */
+export function typeWeights(ap: Pick<Airport, 'runwayLen'>): [PlaneType, number][] {
+  const ok = PLANE_TYPE_NAMES.filter((t) => Math.max(8, ap.runwayLen) >= PLANE_TYPES[t].minRunway);
+  const sum = ok.reduce((a, t) => a + PLANE_TYPES[t].weight, 0);
+  return ok.map((t) => [t, PLANE_TYPES[t].weight / sum]);
+}
 /** where the glide path starts, and how high it is there */
 export const APPROACH_DIST = 50;
 export const APPROACH_ALT = 8;
@@ -260,7 +282,8 @@ function buildPlan(ap: Airport, type: PlaneType, s: 1 | -1, gate: number): Plan 
 
   // arrival: touchdown -> far end -> across to the taxiway -> back along it -> into the stand
   const uTd = -s * (L / 2 - TD_INSET), uFar = s * (L / 2 - EXIT_INSET);
-  const apath = new Path([P(uTd, 0), P(uFar, 0), P(uFar, TAXI_OFFSET), P(ug, TAXI_OFFSET), P(ug, STAND_OFFSET)], sp.taxiRadius);
+  const stand = standOffset(type);
+  const apath = new Path([P(uTd, 0), P(uFar, 0), P(uFar, TAXI_OFFSET), P(ug, TAXI_OFFSET), P(ug, stand)], sp.taxiRadius);
   const aprof = new Profile();
   const sBrake = apath.corners.length ? apath.corners[0].s0 : apath.total * 0.5;
   const dStop = Math.min(1.0, apath.total * 0.2);
@@ -282,7 +305,7 @@ function buildPlan(ap: Airport, type: PlaneType, s: 1 | -1, gate: number): Plan 
   dprof.cruise(Math.max(0, sRoll0 - dprof.dist));
   dprof.ramp(sp.vLiftoff, dpath.total - dprof.dist);
   const pushProf = new Profile();
-  const pd = STAND_OFFSET - TAXI_OFFSET;
+  const pd = stand - TAXI_OFFSET;
   pushProf.ramp(sp.vPush, 0.3).cruise(pd - 0.6).ramp(0, 0.3);
   const first = { x: 0, z: 0, h: 0 };
   dpath.at(0, first);
@@ -420,11 +443,12 @@ function generate(ap: Airport, day: number): Flight[] {
   const tracks: Track[] = [];
   const out: Flight[] = [];
   const nGates = gates.length;
+  const mix = typeWeights(ap);
 
   noms.forEach((nom, idx) => {
     const r = H(idx, 3);
     let type: PlaneType = 'narrowbody', acc = 0;
-    for (const t of PLANE_TYPE_NAMES) { acc += PLANE_TYPES[t].weight; if (r < acc) { type = t; break; } }
+    for (const [t, w] of mix) { acc += w; if (r < acc) { type = t; break; } }
     const sp = PLANE_TYPES[type];
     const dwell = Math.round(((sp.dwell[0] + (sp.dwell[1] - sp.dwell[0]) * H(idx, 4)) * TICKS_PER_HOUR) / 60);
     const firstGate = Math.floor(H(idx, 5) * nGates);
@@ -577,7 +601,7 @@ export function flightState(ap: Airport, f: Flight, tick: number): FlightState {
     // ---- pushback: tail first, nose still toward the terminal
     const t = tick - f.tPush;
     const S = dep.pushProf.S(t);
-    world(gateU(ap, f.gate), STAND_OFFSET - S);
+    world(gateU(ap, f.gate), standOffset(f.type) - S);
     st.heading = Math.atan2(fa.nz, fa.nx);
     st.phase = 'pushback'; st.progress = t / dep.tPush;
   } else if (tick < f.tPivotEnd) {

@@ -1,4 +1,5 @@
 import type { ExtraDesign } from './index';
+import { helipad } from '../tierkit';
 
 /** Haiku batch: commercial level 3 designs by claude-haiku-5-5 (reviewed by a Sonnet pass on 2026-10-17; live). */
 export const HAIKU_COMMERCIAL_3: ExtraDesign[] = [
@@ -62,7 +63,7 @@ export const HAIKU_COMMERCIAL_3: ExtraDesign[] = [
     ['box', 0.7, 0.3, 0.6, 0, 0, 0, 'grey', true, { name: 'podium', facade: { storeys: 1, bays: 4, ground: 'shopfront' } }],
     ['box', 0.56, 1.6, 0.46, 0, 0.3, 0, 'stone', true, { name: 'tower', facade: { storeys: 6, bays: 3, sideBays: 2 } }],
     ['box', 0.58, 0.04, 0.48, 0, 1.9, 0, 'dark'],
-    ['cyl', 0.2, 0.2, 0.02, 0, 1.94, 0, 'yellow', 16],
+    ...helipad(0, 1.94, 0, 0.2),
   ] } },
   { kind: 'commercial', level: 3, design: { name: 'cylindrical tower on a shopfront base', height: 2.12, author: 'claude-haiku-5-5', ops: [
     ['box', 0.7, 0.3, 0.7, 0, 0, 0, 'stone', true, { name: 'base', facade: { storeys: 1, bays: 4, ground: 'shopfront' } }],

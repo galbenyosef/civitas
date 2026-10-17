@@ -11,6 +11,7 @@ export type CtxTarget =
   | { k: 'agent'; id: number }
   | { k: 'train'; line: number; train: number }
   | { k: 'plane'; airport: number; flight: number }
+  | { k: 'heli'; flight: number }
   | { k: 'tile'; x: number; y: number }
   | { k: 'cab' };
 
@@ -191,6 +192,7 @@ export class ContextMenu {
       case 'agent': return this.agentModel(t.id);
       case 'train': return this.vehicleModel({ kind: 'train', line: t.line, train: t.train });
       case 'plane': return this.vehicleModel({ kind: 'plane', airport: t.airport, flight: t.flight });
+      case 'heli': return this.vehicleModel({ kind: 'heli', flight: t.flight });
       case 'cab': return this.cabModel();
       case 'tile': return this.tileModel(t.x, t.y);
     }
@@ -236,8 +238,8 @@ export class ContextMenu {
     const pick = () => { if (!sel) d.selectVehicle(v); };
     const follow = d.following() && sel;
     return {
-      title: v.kind === 'train' ? `Train ${v.train + 1}` : `Flight`,
-      sub: v.kind === 'train' ? `line ${v.line}` : `airport ${v.airport}`,
+      title: v.kind === 'train' ? `Train ${v.train + 1}` : v.kind === 'plane' ? `Flight` : 'Helicopter',
+      sub: v.kind === 'train' ? `line ${v.line}` : v.kind === 'plane' ? `airport ${v.airport}` : 'helicopter flight',
       groups: [[
         { key: 'inspect', label: sel ? 'Inspecting' : 'Inspect', on: sel, run: () => d.selectVehicle(v), disabled: sel ? 'Already selected' : undefined },
         { key: 'follow', label: follow ? 'Stop following' : 'Follow', on: follow, run: () => { pick(); d.follow(!follow); } },

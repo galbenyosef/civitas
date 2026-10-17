@@ -4,7 +4,7 @@ import {
 } from 'three';
 import {
   flightsAt, flightState, timetable, PLANE_TYPES, airportFrame, gateCount, gateU, liveryIndex, bodyTintIndex, RUNWAY_WIDTH, TAXI_OFFSET, STAND_OFFSET, TERMINAL_OFFSET,
-  TICKS_PER_DAY, type Airport, type FlightState, type FlightPhase, type PlaneType,
+  TICKS_PER_DAY, AIRLINES, hash2, type Airport, type FlightState, type FlightPhase, type PlaneType,
 } from '@msimcity/shared';
 import { Kit } from './kit';
 import { vehicleMaterial, sceneUniforms } from './materials';
@@ -14,17 +14,27 @@ import { vehicleMaterial, sceneUniforms } from './materials';
  * `flightsAt(airport, tick)` (shared/src/flights.ts); this file only draws them.
  *
  * Model frame: +x is forward, +y up, +z the right wing, and the origin is the main
- * gear contact point so a plane pitches about its wheels. One InstancedMesh per plane
- * type for the white body, a second for the livery (fin and cheat line, tinted by
- * instance colour), a gear mesh that retracts, and for the turboprop spinning propellers.
+ * gear contact point so a plane pitches about its wheels. Each type has its own silhouette
+ * (shared/src/flights.ts PLANE_TYPES): engines on the wing or the tail, a T-tail or a low
+ * one, slim or twin-aisle fuselages, two engines or four. One InstancedMesh per plane type
+ * for the white body, two for the airline's livery (the fin, winglets and engine lips in
+ * the tail colour, the cheat line in the stripe colour; shared/src/crews.ts AIRLINES), a gear
+ * mesh that retracts, and for the turboprop spinning propellers. Every plane's paint is its
+ * own: the colours jitter a little and weather by a per-flight amount (organic rule).
  * Lights (nav, beacon, strobes, landing) are small emissive boxes plus additive glow blobs.
  */
 
 const MAX_PLANES = 16;
 const GROUND_LIFT = 0.03;
-/** one per airline (shared/src/crews.ts AIRLINES, same order) */
-const LIVERIES = [0xd7263d, 0x1b6ca8, 0x1f9d8b, 0xf08a24, 0x6a4c93, 0x2d6a4f, 0xf2c14e, 0x2b2f36, 0xe05a9d, 0x3aa0e6].map((c) => new Color(c));
 const BODY_TINTS = [0xffffff, 0xf2f0e8, 0xe4eaf0, 0xf6f6f6].map((c) => new Color(c));
+const AIRLINE_COLORS = AIRLINES.map((a) => ({ tail: new Color(a.tail), stripe: new Color(a.stripe), body: a.body !== undefined ? new Color(a.body) : null }));
+const GRIME = new Color(0x8f8a7e);
+/** A livery colour as this plane wears it: a touch of hue, saturation and lightness jitter, then weathering. */
+function paint(out: Color, base: Color, seed: number, k: number, wear: number): Color {
+  const n = Math.floor(seed * 65536);
+  out.copy(base).offsetHSL((hash2(n, k) - 0.5) * 0.02, (hash2(n, k + 1) - 0.5) * 0.08, (hash2(n, k + 2) - 0.5) * 0.06);
+  return out.lerp(GRIME, wear * 0.45).multiplyScalar(1 - wear * 0.2);
+}
 const RED = new Color(0xff2a20), GREEN = new Color(0x22ff55), WHITE = new Color(0xffffff), WARM = new Color(0xfff0c8);
 
 // ---- geometry helpers -------------------------------------------------------------------------
@@ -86,16 +96,18 @@ interface LightLayout {
   /** scale of glow blobs relative to the narrow-body */
   size: number;
 }
-interface TypeModel { body: BufferGeometry; livery: BufferGeometry; gear: BufferGeometry; lights: LightLayout }
+interface TypeModel { body: BufferGeometry; tail: BufferGeometry; stripe: BufferGeometry; gear: BufferGeometry; lights: LightLayout }
 
 /** the cockpit eye (x forward, y up from the main gear) just ahead of the nose */
-const COCKPIT: Record<PlaneType, [number, number]> = { narrowbody: [1.83, 0.33], turboprop: [1.23, 0.285], bizjet: [0.8, 0.168] };
+const COCKPIT: Record<PlaneType, [number, number]> = {
+  turboprop: [1.23, 0.285], regional: [1.53, 0.26], narrowbody: [1.83, 0.33], widebody: [2.38, 0.47], jumbo: [2.3, 0.74], bizjet: [0.8, 0.168],
+};
 
 const BODY = 0xffffff, WING = 0xe6eaee, GLASS = 0x1f2c3a, DARK = 0x16181b, NACELLE = 0xc4cad0, INTAKE = 0x24272b;
 
 function narrowbody(): TypeModel {
   const c = 0.3, r = 0.17;
-  const k = new Kit(), lv = new Kit(), gk = new Kit();
+  const k = new Kit(), lv = new Kit(), st = new Kit(), gk = new Kit();
   k.part(cylX(r, r, -0.7, 1.3, c, 0), BODY)
     .part(cylX(0.04, r, 1.3, 1.8, c - 0.01, 0), BODY)
     .part(cylX(0.05, r, -1.2, -0.7, c + 0.04, 0), BODY)
@@ -107,19 +119,21 @@ function narrowbody(): TypeModel {
     k.part(cylX(0.07, 0.07, 0.12, 0.6, 0.13, side * 0.5, 10), NACELLE).part(cylX(0.055, 0.055, 0.6, 0.62, 0.13, side * 0.5, 10), INTAKE);
     lv.part(wing(side, 0.2 + 0.06, 0.2, 0.14, 0.12, 0.1, 1.3, 1.3, 0.16, 0.02), 0xffffff); // winglet
   }
-  lv.part(fin(c + 0.12, 0.55, -0.75, 0.45, -1.05, 0.2, 0.03), 0xffffff).box(2.0, 0.026, 0.354, 0.1, c - 0.055, 0, 0xffffff);
+  lv.part(fin(c + 0.12, 0.55, -0.75, 0.45, -1.05, 0.2, 0.03), 0xffffff);
+  for (const side of [1, -1]) lv.part(cylX(0.074, 0.074, 0.585, 0.6, 0.13, side * 0.5, 10), 0xffffff); // engine lips
+  st.box(2.0, 0.026, 0.354, 0.1, c - 0.055, 0, 0xffffff);
   // gear: nose + two mains with a pair of wheels each
   gk.cyl(0.012, 0.012, 0.14, 1.25, 0.05, 0, DARK, 5).part(wheelZ(0.035, 0.05, 1.25, 0.035, 0), DARK);
   for (const s of [1, -1]) gk.cyl(0.014, 0.014, 0.17, 0, 0.05, s * 0.2, DARK, 5).part(wheelZ(0.045, 0.1, 0, 0.045, s * 0.2), DARK);
   return {
-    body: k.build(), livery: lv.build(), gear: gk.build(),
+    body: k.build(), tail: lv.build(), stripe: st.build(), gear: gk.build(),
     lights: { navL: [0.02, 0.27, -1.3], navR: [0.02, 0.27, 1.3], navT: [-1.27, c + 0.5, 0], beacon: [0.2, c + 0.18, 0], strobes: [[0.02, 0.27, -1.3], [0.02, 0.27, 1.3], [-1.27, c + 0.5, 0]], landing: [1.3, 0.2, 0], props: [], gearPivot: [0.5, 0.2, 0], size: 1 },
   };
 }
 
 function turboprop(): TypeModel {
   const c = 0.26, r = 0.13;
-  const k = new Kit(), lv = new Kit(), gk = new Kit();
+  const k = new Kit(), lv = new Kit(), st = new Kit(), gk = new Kit();
   k.part(cylX(r, r, -0.45, 0.85, c, 0), BODY)
     .part(cylX(0.035, r, 0.85, 1.2, c - 0.01, 0), BODY)
     .part(cylX(0.045, r, -0.8, -0.45, c + 0.03, 0), BODY)
@@ -130,13 +144,14 @@ function turboprop(): TypeModel {
     k.part(wing(side, c + 0.66, -0.52, 0.26, -0.7, 0.16, 0.0, 0.4, 0.0, 0.022), WING); // T-tail plane
     k.part(cylX(0.065, 0.065, -0.2, 0.62, c + 0.06, side * 0.45, 10), NACELLE).part(cylX(0.012, 0.065, 0.62, 0.7, c + 0.06, side * 0.45, 10), INTAKE);
   }
-  lv.part(fin(c + 0.08, 0.58, -0.38, 0.4, -0.62, 0.18, 0.028), 0xffffff).box(1.5, 0.022, 0.274, 0.15, c - 0.04, 0, 0xffffff);
+  lv.part(fin(c + 0.08, 0.58, -0.38, 0.4, -0.62, 0.18, 0.028), 0xffffff);
+  st.box(1.5, 0.022, 0.274, 0.15, c - 0.04, 0, 0xffffff);
   for (const s of [1, -1]) {
     gk.cyl(0.012, 0.012, 0.22, 0.1, 0.04, s * 0.45, DARK, 5).part(wheelZ(0.04, 0.07, 0.1, 0.04, s * 0.45), DARK);
   }
   gk.cyl(0.01, 0.01, 0.17, 0.85, 0.04, 0, DARK, 5).part(wheelZ(0.03, 0.04, 0.85, 0.03, 0), DARK);
   return {
-    body: k.build(), livery: lv.build(), gear: gk.build(),
+    body: k.build(), tail: lv.build(), stripe: st.build(), gear: gk.build(),
     lights: {
       navL: [0.35, c + 0.12, -1.05], navR: [0.35, c + 0.12, 1.05], navT: [-0.78, c + 0.55, 0], beacon: [0.1, c + 0.14, 0],
       strobes: [[0.35, c + 0.12, -1.05], [0.35, c + 0.12, 1.05], [-0.78, c + 0.55, 0]], landing: [0.95, 0.2, 0],
@@ -147,7 +162,7 @@ function turboprop(): TypeModel {
 
 function bizjet(): TypeModel {
   const c = 0.15, r = 0.075;
-  const k = new Kit(), lv = new Kit(), gk = new Kit();
+  const k = new Kit(), lv = new Kit(), st = new Kit(), gk = new Kit();
   k.part(cylX(r, r, -0.25, 0.45, c, 0, 10), BODY)
     .part(cylX(0.02, r, 0.45, 0.78, c - 0.005, 0, 10), BODY)
     .part(cylX(0.03, r, -0.52, -0.25, c + 0.02, 0, 10), BODY)
@@ -158,17 +173,128 @@ function bizjet(): TypeModel {
     k.part(wing(side, c + 0.3, -0.42, 0.14, -0.5, 0.08, 0.0, 0.2, 0.0, 0.014), WING);
     k.part(cylX(0.04, 0.036, -0.55, -0.2, c + 0.045, side * 0.115, 8), NACELLE);
   }
-  lv.part(fin(c + 0.05, 0.27, -0.38, 0.22, -0.52, 0.1, 0.02), 0xffffff).box(0.85, 0.016, 0.158, 0.12, c - 0.03, 0, 0xffffff);
+  lv.part(fin(c + 0.05, 0.27, -0.38, 0.22, -0.52, 0.1, 0.02), 0xffffff);
+  st.box(0.85, 0.016, 0.158, 0.12, c - 0.03, 0, 0xffffff);
   gk.cyl(0.007, 0.007, 0.08, 0.55, 0.03, 0, DARK, 5).part(wheelZ(0.02, 0.03, 0.55, 0.02, 0), DARK);
   for (const s of [1, -1]) gk.cyl(0.008, 0.008, 0.1, 0.0, 0.03, s * 0.1, DARK, 5).part(wheelZ(0.026, 0.035, 0, 0.026, s * 0.1), DARK);
   return {
-    body: k.build(), livery: lv.build(), gear: gk.build(),
+    body: k.build(), tail: lv.build(), stripe: st.build(), gear: gk.build(),
     lights: { navL: [-0.1, c - 0.01, -0.6], navR: [-0.1, c - 0.01, 0.6], navT: [-0.5, c + 0.3, 0], beacon: [0.1, c + 0.09, 0], strobes: [[-0.1, c - 0.01, -0.6], [-0.1, c - 0.01, 0.6], [-0.5, c + 0.3, 0]], landing: [0.7, 0.12, 0], props: [], gearPivot: [0.25, 0.1, 0], size: 0.6 },
   };
 }
 
+/** A CRJ-like regional jet: slim and long, low wing, two engines hung on the tail under a T-tail. */
+function regional(): TypeModel {
+  const c = 0.22, r = 0.115;
+  const k = new Kit(), lv = new Kit(), st = new Kit(), gk = new Kit();
+  k.part(cylX(r, r, -0.55, 1.12, c, 0), BODY)
+    .part(cylX(0.03, r, 1.12, 1.5, c - 0.01, 0), BODY)
+    .part(cylX(0.04, r, -1.0, -0.55, c + 0.03, 0), BODY)
+    .box(1.35, 0.026, 0.234, 0.3, c + 0.025, 0, GLASS)
+    .box(0.09, 0.04, 0.2, 1.24, c + 0.02, 0, GLASS);
+  for (const side of [1, -1] as const) {
+    k.part(wing(side, 0.13, 0.42, 0.5, -0.06, 0.16, 0.09, 0.95, 0.05, 0.03), WING);
+    k.part(wing(side, c + 0.5, -0.78, 0.2, -0.92, 0.11, 0.0, 0.36, 0.0, 0.02), WING); // T-tail plane
+    // engines on short pylons either side of the rear fuselage
+    k.box(0.22, 0.03, 0.1, -0.52, c + 0.05, side * 0.14, NACELLE);
+    k.part(cylX(0.058, 0.05, -0.78, -0.36, c + 0.07, side * 0.215, 10), NACELLE).part(cylX(0.046, 0.046, -0.36, -0.345, c + 0.07, side * 0.215, 10), INTAKE);
+    lv.part(wing(side, 0.13 + 0.05, -0.04, 0.12, -0.1, 0.07, 0.95, 0.95, 0.12, 0.016), 0xffffff); // winglet
+    lv.part(cylX(0.062, 0.062, -0.375, -0.36, c + 0.07, side * 0.215, 10), 0xffffff);
+  }
+  lv.part(fin(c + 0.08, 0.43, -0.6, 0.38, -0.85, 0.18, 0.026), 0xffffff);
+  st.box(1.7, 0.022, 0.234, 0.2, c - 0.04, 0, 0xffffff);
+  gk.cyl(0.01, 0.01, 0.12, 1.2, 0.04, 0, DARK, 5).part(wheelZ(0.03, 0.04, 1.2, 0.03, 0), DARK);
+  for (const s of [1, -1]) gk.cyl(0.012, 0.012, 0.13, 0, 0.04, s * 0.15, DARK, 5).part(wheelZ(0.038, 0.08, 0, 0.038, s * 0.15), DARK);
+  return {
+    body: k.build(), tail: lv.build(), stripe: st.build(), gear: gk.build(),
+    lights: {
+      navL: [-0.06, 0.18, -0.95], navR: [-0.06, 0.18, 0.95], navT: [-0.92, c + 0.5, 0], beacon: [0.2, c + 0.12, 0],
+      strobes: [[-0.06, 0.18, -0.95], [-0.06, 0.18, 0.95], [-0.92, c + 0.5, 0]], landing: [1.05, 0.15, 0], props: [], gearPivot: [0.5, 0.16, 0], size: 0.8,
+    },
+  };
+}
+
+/** A big underwing turbofan on a pylon, with a dark intake and exhaust cone; its lip goes in the livery kit. */
+function bigEngine(k: Kit, lv: Kit, x0: number, x1: number, y: number, z: number, rad: number, wingY: number) {
+  k.box((x1 - x0) * 0.7, wingY - y - rad * 0.6, 0.03, (x0 + x1) / 2 + 0.04, y + rad * 0.6, z, NACELLE) // pylon
+    .part(cylX(rad, rad * 0.8, x0, x1, y, z, 12), NACELLE)
+    .part(cylX(rad * 0.82, rad * 0.82, x1, x1 + 0.015, y, z, 12), INTAKE)
+    .part(cylX(rad * 0.45, 0.001, x0 - 0.12, x0, y, z, 8), INTAKE); // exhaust cone
+  lv.part(cylX(rad * 1.04, rad * 1.04, x1 - 0.05, x1, y, z, 12), 0xffffff);
+}
+
+/** A 777-like twin-aisle wide-body: a fat fuselage on tall gear, long swept wings with two huge engines, a low tail. */
+function widebody(): TypeModel {
+  const c = 0.42, r = 0.25;
+  const k = new Kit(), lv = new Kit(), st = new Kit(), gk = new Kit();
+  k.part(cylX(r, r, -0.85, 1.85, c, 0, 16), BODY)
+    .part(cylX(0.06, r, 1.85, 2.34, c - 0.02, 0, 16), BODY)
+    .part(cylX(0.07, r, -1.56, -0.85, c + 0.07, 0, 16), BODY)
+    .box(2.5, 0.036, 2 * r + 0.004, 0.45, c + 0.06, 0, GLASS)
+    .box(0.13, 0.06, 0.4, 1.98, c + 0.05, 0, GLASS)
+    .box(0.75, 0.1, 0.42, 0.42, 0.26, 0, WING); // wing-to-body fairing
+  for (const side of [1, -1] as const) {
+    k.part(wing(side, 0.28, 0.95, 0.95, -0.18, 0.24, 0.18, 1.59, 0.12, 0.05), WING);
+    k.part(wing(side, c + 0.1, -1.04, 0.42, -1.4, 0.18, 0.06, 0.72, 0.05, 0.03), WING);
+    bigEngine(k, lv, 0.38, 1.0, 0.18, side * 0.6, 0.13, 0.3);
+  }
+  lv.part(fin(c + 0.2, 0.8, -1.0, 0.62, -1.42, 0.26, 0.04), 0xffffff);
+  st.box(3.0, 0.04, 2 * r + 0.006, 0.3, c - 0.07, 0, 0xffffff).box(2.6, 0.016, 2 * r + 0.008, 0.35, c - 0.02, 0, 0xffffff);
+  // gear: a twin-wheel nose leg and two six-wheel bogies
+  gk.cyl(0.016, 0.016, 0.3, 1.95, 0.05, 0, DARK, 5).part(wheelZ(0.045, 0.07, 1.95, 0.045, 0), DARK);
+  for (const s of [1, -1]) {
+    gk.cyl(0.022, 0.022, 0.32, 0, 0.06, s * 0.3, DARK, 5).box(0.34, 0.02, 0.02, 0, 0.06, s * 0.3, DARK);
+    for (const x of [-0.12, 0, 0.12]) gk.part(wheelZ(0.055, 0.14, x, 0.055, s * 0.3), DARK);
+  }
+  return {
+    body: k.build(), tail: lv.build(), stripe: st.build(), gear: gk.build(),
+    lights: {
+      navL: [-0.2, 0.42, -1.59], navR: [-0.2, 0.42, 1.59], navT: [-1.55, c + 0.1, 0], beacon: [0.4, c + r + 0.02, 0],
+      strobes: [[-0.2, 0.42, -1.59], [-0.2, 0.42, 1.59], [-1.55, c + 0.1, 0]], landing: [1.4, 0.3, 0], props: [], gearPivot: [0.9, 0.36, 0], size: 1.35,
+    },
+  };
+}
+
+/** A 747-like jumbo: the upper-deck hump over the nose, four engines under the wings, a low tail. */
+function jumbo(): TypeModel {
+  const c = 0.44, r = 0.26;
+  const k = new Kit(), lv = new Kit(), st = new Kit(), gk = new Kit();
+  k.part(cylX(r, r, -0.9, 1.95, c, 0, 16), BODY)
+    .part(cylX(0.07, r, 1.95, 2.46, c - 0.03, 0, 16), BODY)
+    .part(cylX(0.07, r, -1.64, -0.9, c + 0.07, 0, 16), BODY)
+    // the hump: an upper deck from the nose back over the wing root, faired in at both ends
+    .part(cylX(0.18, 0.18, 0.9, 1.95, c + 0.16, 0, 14), BODY)
+    .part(cylX(0.05, 0.18, 1.95, 2.3, c + 0.1, 0, 14), BODY)
+    .part(cylX(0.18, 0.04, 0.5, 0.9, c + 0.17, 0, 14), BODY)
+    .box(2.6, 0.036, 2 * r + 0.004, 0.4, c + 0.05, 0, GLASS)
+    .box(1.0, 0.03, 0.364, 1.4, c + 0.24, 0, GLASS)
+    .box(0.08, 0.035, 0.24, 2.08, c + 0.17, 0, GLASS)
+    .box(0.8, 0.1, 0.44, 0.45, 0.27, 0, WING);
+  for (const side of [1, -1] as const) {
+    k.part(wing(side, 0.3, 1.0, 1.0, -0.3, 0.22, 0.2, 1.59, 0.12, 0.05), WING);
+    k.part(wing(side, c + 0.1, -1.1, 0.45, -1.5, 0.2, 0.06, 0.78, 0.05, 0.03), WING);
+    bigEngine(k, lv, 0.48, 0.96, 0.2, side * 0.56, 0.095, 0.32);
+    bigEngine(k, lv, 0.04, 0.5, 0.25, side * 1.06, 0.09, 0.37);
+    lv.part(wing(side, 0.3 + 0.12, -0.28, 0.16, -0.36, 0.08, 1.59, 1.6, 0.14, 0.02), 0xffffff); // winglet
+  }
+  lv.part(fin(c + 0.2, 0.84, -1.05, 0.64, -1.5, 0.26, 0.04), 0xffffff);
+  st.box(3.1, 0.04, 2 * r + 0.006, 0.2, c - 0.08, 0, 0xffffff).box(1.05, 0.02, 0.368, 1.4, c + 0.2, 0, 0xffffff);
+  gk.cyl(0.016, 0.016, 0.32, 2.05, 0.05, 0, DARK, 5).part(wheelZ(0.045, 0.07, 2.05, 0.045, 0), DARK);
+  for (const s of [1, -1]) for (const z of [0.16, 0.38]) {
+    gk.cyl(0.02, 0.02, 0.32, z === 0.16 ? -0.15 : 0.05, 0.06, s * z, DARK, 5);
+    for (const x of [-0.07, 0.07]) gk.part(wheelZ(0.055, 0.12, x + (z === 0.16 ? -0.15 : 0.05), 0.055, s * z), DARK);
+  }
+  return {
+    body: k.build(), tail: lv.build(), stripe: st.build(), gear: gk.build(),
+    lights: {
+      navL: [-0.3, 0.44, -1.6], navR: [-0.3, 0.44, 1.6], navT: [-1.63, c + 0.1, 0], beacon: [0.4, c + r + 0.02, 0],
+      strobes: [[-0.3, 0.44, -1.6], [-0.3, 0.44, 1.6], [-1.63, c + 0.1, 0]], landing: [1.5, 0.3, 0], props: [], gearPivot: [0.9, 0.38, 0], size: 1.4,
+    },
+  };
+}
+
 interface TypeMeshes {
-  body: InstancedMesh; livery: InstancedMesh; gear: InstancedMesh;
+  body: InstancedMesh; tail: InstancedMesh; stripe: InstancedMesh; gear: InstancedMesh;
   props?: InstancedMesh; discs?: InstancedMesh;
   lights: LightLayout; n: number;
 }
@@ -221,7 +347,7 @@ export class PlanesView {
         this.group.add(mesh);
         return mesh;
       };
-      const t: TypeMeshes = { body: mk(model.body), livery: mk(model.livery), gear: mk(model.gear), lights: model.lights, n: 0 };
+      const t: TypeMeshes = { body: mk(model.body), tail: mk(model.tail), stripe: mk(model.stripe), gear: mk(model.gear), lights: model.lights, n: 0 };
       if (props) {
         // two crossed blades (four in all) and a translucent disc standing in for the blur
         const bk = new Kit();
@@ -234,7 +360,10 @@ export class PlanesView {
       }
       return t;
     };
-    this.types = { narrowbody: make(narrowbody(), false), turboprop: make(turboprop(), true), bizjet: make(bizjet(), false) };
+    this.types = {
+      turboprop: make(turboprop(), true), regional: make(regional(), false), narrowbody: make(narrowbody(), false),
+      widebody: make(widebody(), false), jumbo: make(jumbo(), false), bizjet: make(bizjet(), false),
+    };
 
     // light boxes (colour per instance), glow blobs and landing-light beams
     this.lightBoxes = new InstancedMesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial({ toneMapped: false }), MAX_PLANES * 10);
@@ -376,7 +505,7 @@ export class PlanesView {
       }
     }
     for (const type of Object.values(this.types)) {
-      for (const mesh of [type.body, type.livery, type.gear, type.props, type.discs]) {
+      for (const mesh of [type.body, type.tail, type.stripe, type.gear, type.props, type.discs]) {
         if (!mesh) continue;
         mesh.count = mesh === type.props || mesh === type.discs ? type.n * 2 : type.n;
         mesh.instanceMatrix.needsUpdate = true;
@@ -436,9 +565,15 @@ export class PlanesView {
     this.s.set(sc, sc, sc);
     this.m.compose(this.p, this.q, this.s);
     type.body.setMatrixAt(i, this.m);
-    type.livery.setMatrixAt(i, this.m);
-    type.body.setColorAt(i, this.col.copy(BODY_TINTS[bodyTintIndex(s.seed, BODY_TINTS.length)]).multiplyScalar(lift));
-    type.livery.setColorAt(i, this.col.copy(LIVERIES[liveryIndex(s.seed)]).multiplyScalar(lift));
+    type.tail.setMatrixAt(i, this.m);
+    type.stripe.setMatrixAt(i, this.m);
+    // the airline's livery as this airframe wears it: per-plane jitter and weathering (a private jet is plain)
+    const al = AIRLINE_COLORS[liveryIndex(s.seed)], wear = hash2(Math.floor(s.seed * 65536), 31) ** 2 * 0.4;
+    const biz = s.type === 'bizjet';
+    paint(this.col, (!biz && al.body) || BODY_TINTS[bodyTintIndex(s.seed, BODY_TINTS.length)], s.seed, 10, wear * 0.6);
+    type.body.setColorAt(i, this.col.multiplyScalar(lift));
+    type.tail.setColorAt(i, paint(this.col, al.tail, s.seed, 20, wear).multiplyScalar(lift));
+    type.stripe.setColorAt(i, paint(this.col, al.stripe, s.seed, 30, wear).multiplyScalar(lift));
 
     // landing gear folds up into the belly
     const gl = type.lights.gearPivot;

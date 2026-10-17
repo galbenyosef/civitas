@@ -61,20 +61,35 @@ The server derives its list from the finished terminals in the building index ev
 
 - **Tech.** Aviation (`tr4`, transport tier 4) needs Public works, 150 jobs filled and $6,000.
 - **Terminal.** It costs $6,000 and $140 a day in upkeep, and employs 28 ground crew at $22 a shift. Their early (05:00) and late (13:00) shifts and day check-in rotate.
-- **Landing fees.** Each touchdown credits the terminal's owner `LANDING_FEE` by plane type: turboprop $24, narrow-body $40, business jet $16.
+- **Landing fees.** Each touchdown credits the terminal's owner `LANDING_FEE` by plane type: turboprop $24, regional jet $32, narrow-body $40, wide-body $72, jumbo $90, business jet $16.
 - **Passengers.** `flightPassengers()` gives every flight its arriving and departing passengers from its seed. `Airports.onArrival` fires once per landing with them. Migration is the gateways card's job, marked `TODO(gateways)` in `server/src/sim/airports.ts`.
 
 ## Tooltips
 
 The terminal tooltip adds an Airport section, answered by the server: runway length, status (or why not operational), flights today with how many landed and departed, the next arrival and departure, gates in use, passengers today and landing fees today. Staff come from the usual workplace rows. A runway or taxiway tile's tooltip is worked out on the client from the same derivation: the terminal it belongs to, its length and its status.
 
+## The fleet
+
+`PLANE_TYPES` in `shared/src/flights.ts`; `render/planes.ts` gives each its own silhouette. Every model has its main gear (the origin) about 40% of its length ahead of the tail, as the ground footprint assumes.
+
+| Type | Length × span (tiles) | Silhouette | Seats | Runway |
+| --- | --- | --- | --- | --- |
+| turboprop | 2.0 × 2.1 | high wing, two propellers, T-tail | 68 | any |
+| regional | 2.5 × 1.9 | slim, low wing, two engines on the tail, T-tail | 90 | any |
+| narrowbody | 3.0 × 2.6 | low wing, two underwing engines, low tail | 174 | any |
+| widebody | 3.9 × 3.18 | twin-aisle fuselage on tall gear, two huge engines, six-wheel bogies | 310 | 16+ |
+| jumbo | 4.1 × 3.18 | upper-deck hump, four engines | 410 | 20+ |
+| bizjet | 1.3 × 1.2 | two engines on the tail, T-tail | 8 | any |
+
+`typeWeights(airport)` renormalises the types' shares over those whose `minRunway` the airport's runway meets, so the big jets only come to long runways (on a 24-tile runway: turboprop 22%, regional 18%, narrow-body 36%, wide-body 8%, jumbo 5%, business jet 11%). A long-nosed plane parks short of `STAND_OFFSET` (`standOffset(type)`) so its nose stops 0.2 tiles from the terminal front, and pushes back that much less. The runway, gate and ground-footprint reservations are unchanged and hold for the new sizes: a wide-body's span is chosen so it can stand beside a parked narrow-body at the next gate, but two big jets cannot stand side by side, and a parked one blocks the taxiway behind it, so the generator delays whoever would pass. `flights-check.ts` adds 18- and 24-tile airports, checks that no type flies from too short a runway and no nose reaches the terminal, and tallies the types over a month.
+
 ## Selecting a plane
 
 Clicking a plane selects it (hovering brightens it and shows a short tooltip), on the approach, on the ground or climbing out, and opens its panel (`client/src/vehicles.ts`). Nothing in it comes from the server. Everything follows from the flight, through `shared/src/crews.ts`.
 
-- **Who flies it.** The airline goes with the tail colour: `AIRLINES[liveryIndex(seed)]`, the same index `render/planes.ts` paints with. A business jet is a private charter with a registration instead. Every flight has an inbound number from its origin and an outbound one (the next number) to its destination. Origin and destination are fictional cities seeded per flight, usually the same city, sometimes another. Flight ids repeat between airports, so names are seeded from the id and the flight's variation seed together.
+- **Who flies it.** The airline goes with the livery: `AIRLINES[liveryIndex(seed)]` (`shared/src/crews.ts`) gives the name, code, tail colour (fin, winglets, engine lips), stripe colour (the cheat line) and, for a few airlines, a body colour, and `render/planes.ts` paints with the same index. Each airframe's paint is its own: the colours jitter a little in hue, saturation and lightness and weather by a per-flight amount. The airline is in the title of the tooltip and the panel and in the cockpit view's label. A business jet is a private charter with a registration instead. Every flight has an inbound number from its origin and an outbound one (the next number) to its destination. Origin and destination are fictional cities seeded per flight, usually the same city, sometimes another. Flight ids repeat between airports, so names are seeded from the id and the flight's variation seed together.
 - **The panel.** It shows the aircraft and seats, the two flights, the phase (on approach, landing, landing roll, taxiing, at the gate, pushing back, taking off, climbing out), altitude (the top of the glide path reads as 2,500 ft), speed in knots (each type's approach speed reads as 115-140 kt), the gate and the load.
-- **Crew.** A captain and a first officer, then cabin crew sized to the type: a narrow-body has 4 or 5 led by a purser, a turboprop 2, a business jet 0 or 1. Now and then there is a trainee. All of it is seeded per flight, and the crew stays with the plane through the turnaround.
+- **Crew.** A captain and a first officer, then cabin crew sized to the type: a jumbo has 11 to 14 led by a purser, a wide-body 8 to 10, a narrow-body 4 or 5, a regional jet 2 or 3, a turboprop 2, a business jet 0 or 1. Now and then there is a trainee. All of it is seeded per flight, and the crew stays with the plane through the turnaround.
 - **Passengers.** The count is `flightPassengers`, the arriving visitors until the gate, then the departing travellers. During the turnaround the cabin empties over its first third and boards over its second half. Names and seats (`flightPassenger`) are generated, filling the seat map in a per-flight shuffled order. They are visitors and travellers, not citizens: no citizen flies yet (the arrivals hook in `sim/airports.ts` is still unused). When the gateways card brings real travellers, they belong in this roster as clickable rows, like a train's riders.
 - **Cockpit view.** I or O puts the eye just ahead of the nose (`PlanesView.cockpitOf`). It takes the plane's full orientation, so the approach pitches nose-down onto the runway and the climb-out banks away. It looks a little down and sees further than the street view. The flight ends at the edge of the map, and the view fades out with it.
 

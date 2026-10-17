@@ -240,6 +240,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
   box-shadow: 0 6px 24px rgba(0,0,0,0.45); }
 #fpv.inset .fbody { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #fpv.inset .fbody > * { overflow: hidden; text-overflow: ellipsis; }
+#fpv .finst { position: absolute; pointer-events: none; text-shadow: none; }
+#fpv.inst.inset .fbody { padding-right: calc(var(--iw) * 0.5); }
+#fpv.inst.full .fbody { max-width: 270px; }
 #fpv.full { inset: 0; }
 #fpv.full .ftop { top: 40px; padding: 10px 14px; }
 #fpv.full .fname { font-size: 16px; }

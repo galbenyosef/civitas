@@ -50,22 +50,34 @@ export function trainCrew(lineId: number, train: number, freight: boolean, vehic
 
 // ---- planes -----------------------------------------------------------------------------------------
 
+export interface Airline {
+  name: string; code: string;
+  /** fin, winglets and engine lips */
+  tail: number;
+  /** the cheat line along the fuselage */
+  stripe: number;
+  /** the fuselage, white unless the airline paints it */
+  body?: number;
+}
 /**
- * Airlines, one per livery colour (render/planes.ts LIVERIES, same order), so a plane's tail tells you who flies it.
- * Fictional names and codes.
+ * Airlines and their liveries (render/planes.ts paints the tail, stripe and body with these), so a plane's tail tells
+ * you who flies it. Fictional names and codes.
  */
-export const AIRLINES: readonly { name: string; code: string }[] = [
-  { name: 'Crimson Air', code: 'CX' }, { name: 'Bluewater Airways', code: 'BW' }, { name: 'Tealwing', code: 'TW' },
-  { name: 'Sunset Express', code: 'SX' }, { name: 'Violet Air', code: 'VA' }, { name: 'Evergreen Air', code: 'EG' },
-  { name: 'Goldline', code: 'GL' }, { name: 'Northstar Airlines', code: 'NS' }, { name: 'Flamingo Air', code: 'FM' },
-  { name: 'Skylark Regional', code: 'SK' },
+export const AIRLINES: readonly Airline[] = [
+  { name: 'Crimson Air', code: 'CX', tail: 0xd7263d, stripe: 0x8c1422 }, { name: 'Bluewater Airways', code: 'BW', tail: 0x1b6ca8, stripe: 0x0f3d63 },
+  { name: 'Tealwing', code: 'TW', tail: 0x1f9d8b, stripe: 0xf2c14e }, { name: 'Sunset Express', code: 'SX', tail: 0xf08a24, stripe: 0xd7263d },
+  { name: 'Violet Air', code: 'VA', tail: 0x6a4c93, stripe: 0xc9a3e6 }, { name: 'Evergreen Air', code: 'EG', tail: 0x2d6a4f, stripe: 0x95d5b2 },
+  { name: 'Goldline', code: 'GL', tail: 0xf2c14e, stripe: 0x2b2f36 }, { name: 'Northstar Airlines', code: 'NS', tail: 0x2b2f36, stripe: 0xc0c6cc, body: 0xe4e8ec },
+  { name: 'Flamingo Air', code: 'FM', tail: 0xe05a9d, stripe: 0xf7b2d0 }, { name: 'Skylark Regional', code: 'SK', tail: 0x3aa0e6, stripe: 0x1b6ca8 },
+  { name: 'Harbour Air', code: 'HB', tail: 0x0b3954, stripe: 0xe8c547, body: 0xf3efe6 }, { name: 'Copperline', code: 'CL', tail: 0xb4652f, stripe: 0x5b3a29 },
 ];
 /** livery (and airline) index of a flight's variation seed: render/planes.ts colours the tail with the same */
 export const liveryIndex = (seed: number) => Math.floor(seed * 7919) % AIRLINES.length;
 /** body tint index (render/planes.ts BODY_TINTS) */
 export const bodyTintIndex = (seed: number, n: number) => Math.floor(seed * 977) % n;
 
-const CITIES = ['Port Aldry', 'Kestrel Bay', 'Marlow', 'Northgate', 'Valdera', 'Easthaven', 'Corran', 'Brightwater', 'Lindholm',
+/** fictional towns beyond the map that flights come from and go to (helicopters.ts names them too) */
+export const CITIES = ['Port Aldry', 'Kestrel Bay', 'Marlow', 'Northgate', 'Valdera', 'Easthaven', 'Corran', 'Brightwater', 'Lindholm',
   'Saltmere', 'Ardent Falls', 'Ravensport', 'Tolland', 'Mirabel', 'Glenrock', 'Westvale', 'Sorrento Point', 'Halvard',
   'Calder City', 'Fairhollow', 'New Bastia', 'Ostmark', 'Larkspur', 'Thornbury'];
 
@@ -100,7 +112,9 @@ export function flightManifest(f: Flight, arriving: number, departing: number): 
 }
 
 /** Cabin crew by type: what the seats need, give or take one per flight (organic rule). */
-const CABIN: Record<PlaneType, [number, number]> = { narrowbody: [4, 5], turboprop: [2, 2], bizjet: [0, 1] };
+const CABIN: Record<PlaneType, [number, number]> = { turboprop: [2, 2], regional: [2, 3], narrowbody: [4, 5], widebody: [8, 10], jumbo: [11, 14], bizjet: [0, 1] };
+/** seats across a row */
+const ACROSS: Record<PlaneType, number> = { turboprop: 4, regional: 4, narrowbody: 6, widebody: 9, jumbo: 10, bizjet: 2 };
 /** Captain and first officer, then the cabin led by a purser (or a lone flight attendant), sometimes a trainee. */
 export function flightCrew(f: Flight): CrewMember[] {
   const k = flightKey(f);
@@ -122,7 +136,7 @@ export function flightAboard(m: Pick<FlightManifest, 'arriving' | 'departing'>, 
 /** Passenger `i` (0-based seat order) of a flight's inbound or outbound leg: a visitor, not a citizen. */
 export function flightPassenger(f: Flight, leg: 'in' | 'out', i: number): { name: string; seat: string } {
   const k = flightKey(f) + (leg === 'in' ? 1 : 2);
-  const across = f.type === 'narrowbody' ? 6 : f.type === 'turboprop' ? 4 : 2;
+  const across = ACROSS[f.type];
   // seats fill in a per-flight shuffled order, not row by row
   const slot = (i * 7919 + Math.floor(hash2(k, 751) * 997)) % SEATS[f.type];
   const row = 1 + Math.floor(slot / across), letter = String.fromCharCode(65 + (slot % across));

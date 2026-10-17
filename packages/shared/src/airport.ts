@@ -54,8 +54,8 @@ export const RUNWAY_COST = 20;
 /** gate stands on the terminal apron (its recipe draws them at ±GATE_PITCH/2 from its centre line) */
 export const TERMINAL_GATES = 2;
 /** credited to the terminal's owner when a plane lands */
-export const LANDING_FEE: Record<PlaneType, number> = { turboprop: 24, narrowbody: 40, bizjet: 16 };
-export const SEATS: Record<PlaneType, number> = { turboprop: 68, narrowbody: 174, bizjet: 8 };
+export const LANDING_FEE: Record<PlaneType, number> = { turboprop: 24, regional: 32, narrowbody: 40, widebody: 72, jumbo: 90, bizjet: 16 };
+export const SEATS: Record<PlaneType, number> = { turboprop: 68, regional: 90, narrowbody: 174, widebody: 310, jumbo: 410, bizjet: 8 };
 
 /** Arrivals per game hour at the midday base rate, from the runway length: longer runways take more traffic. */
 export const flightsPerHourFor = (runwayLen: number) => (runwayLen >= 16 ? 1 : runwayLen >= 13 ? 0.8 : 0.6);

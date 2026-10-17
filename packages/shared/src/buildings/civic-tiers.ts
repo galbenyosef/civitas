@@ -156,7 +156,7 @@ export const communityHospital: KindDef = {
     designs: [
       { name: 'ward block across the back, an outpatients wing and an ambulance bay', height: 1.08, ops: [
         slab(3, 2, PAVING),
-        ...block(2.7, 0.92, 0.7, 0, -0.6, 'white', 'navy'), ...roofCross(0.8, 0.945, -0.6, 0.32), ...plant(-1.0, 0.945, -0.72, 3),
+        ...block(2.7, 0.92, 0.7, 0, -0.6, 'white', 'navy'), ...roofCross(0.8, 0.945, -0.6, 0.32), ...plant(-1.0, 0.945, -0.72, 3), ...helipad(-0.15, 0.945, -0.6, 0.27),
         ...block(1.0, 0.44, 0.6, 0.2, 0.05, 'pale', null),
         ['box', 0.6, 0.03, 0.34, 0.2, 0.3, 0.52, 'silver'], ['box', 0.36, 0.26, 0.02, 0.2, 0.02, 0.36, 'glass'],
         ['box', 0.6, 0.006, 0.64, -1.1, 0.02, 0.5, 'yellow'], ...ambulance(-1.22, 0.48), ...ambulance(-0.98, 0.56),

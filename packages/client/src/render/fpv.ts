@@ -6,6 +6,7 @@ import { hash2, type CitizenInfo } from '@msimcity/shared';
 import type { CitizensView } from './citizens';
 import { Interior, placeOf } from './interiors';
 import { sceneUniforms } from './materials';
+import { Instruments, type AircraftCal } from './instruments';
 
 export type FpvMode = 'off' | 'inset' | 'full';
 
@@ -41,6 +42,8 @@ export interface CabEye {
   dip?: number;
   /** cab sway amplitude (0 none) and a per-vehicle seed for its phase */
   sway?: number; seed?: number;
+  /** an aircraft: show the flight instruments (render/instruments.ts), calibrated to the game's speed and altitude scales */
+  instruments?: AircraftCal;
 }
 
 export interface FpvHooks {
@@ -86,6 +89,7 @@ export class Fpv {
   private hud: HTMLElement;
   private body: HTMLElement;
   private fade: HTMLElement;
+  private inst: Instruments;
   private hudKey = '';
   private hudAt = 0;
   // smoothed pose
@@ -126,6 +130,7 @@ export class Fpv {
       + `<div class="fbody"></div><div class="fhint">Esc to exit</div><div class="ffade"></div>`;
     this.body = this.hud.querySelector('.fbody')!;
     this.fade = this.hud.querySelector('.ffade')!;
+    this.inst = new Instruments(this.hud, this.fade);
     // between the canvas and the rest of the UI, so in full-window mode the panels stay clickable but the world does not
     document.body.insertBefore(this.hud, document.getElementById('ui'));
     this.hud.querySelector<HTMLElement>('#fpvClose')!.onclick = () => this.end();
@@ -223,6 +228,7 @@ export class Fpv {
     document.body.classList.toggle('fpv-full', mode === 'full');
     document.body.classList.toggle('fpv-on', mode !== 'off');
     this.hud.className = mode === 'off' ? 'hidden' : mode;
+    if (mode === 'off') this.inst.hide();
     const swap = this.hud.querySelector<HTMLElement>('#fpvSwap')!;
     swap.textContent = mode === 'full' ? '▣ inset' : '⤢ full';
     this.layout(true);
@@ -261,10 +267,13 @@ export class Fpv {
         this.lost = 0;
         this.ride(cab, now, dt);
         this.cabHud(now, cab);
+        this.instruments(cab, now, dt);
       }
       return;
     }
     this.fogFar = FOG_FAR;
+    this.inst.hide();
+    this.hud.classList.remove('inst');
     const eye = this.hooks.citizens.eyeOf(this.id);
     const hour = sceneUniforms.uHour.value;
     if (eye && !eye.travelling) this.idleSince += dt; else this.idleSince = 0;
@@ -386,6 +395,14 @@ export class Fpv {
   }
 
   // ---- HUD ----------------------------------------------------------------------------------
+
+  /** The flight instruments, for aircraft only; the `inst` class makes room for them in the text block. */
+  private instruments(cab: CabEye, now: number, dt: number) {
+    const on = !!cab.instruments;
+    if (this.hud.classList.contains('inst') !== on) this.hud.classList.toggle('inst', on);
+    const full = this.mode === 'full';
+    this.inst.update(cab, now, dt, full ? 'full' : 'inset', full ? this.winW : this.rect.w, full ? this.winH : this.rect.h, this.level);
+  }
 
   private cabHud(now: number, cab: CabEye) {
     const key = `${cab.label}|${cab.lines.join('|')}`;

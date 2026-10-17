@@ -1,5 +1,6 @@
 import type { KindDef, Op } from './schema';
 import { Zone } from './codes';
+import { helipad } from './tierkit';
 
 export const office: KindDef = {
   id: 'office', name: 'office', code: Zone.Office, family: 'office',
@@ -84,7 +85,7 @@ export const office: KindDef = {
         { name: 'wide slab on a podium with a helipad', height: 2.97, ops: [
           ['box', 0.9, 0.4, 0.9, 0, 0, 0, 'stone', true], ['box', 0.86, 2.4, 0.4, 0, 0.4, -0.1, 'glassDark', true],
           ['box', 0.88, 0.05, 0.44, 0, 2.8, -0.1, 'white'],
-          ['cyl', 0.14, 0.14, 0.02, 0.2, 2.85, -0.1, 'dark', 12], ['box', 0.2, 0.12, 0.2, -0.25, 2.85, -0.1, 'grey'],
+          ...helipad(0.2, 2.85, -0.1, 0.18), ['box', 0.2, 0.12, 0.2, -0.25, 2.85, -0.1, 'grey'],
         ] },
       ],
     },

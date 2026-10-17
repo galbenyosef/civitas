@@ -329,10 +329,17 @@ function fnv(h: number, a: ArrayLike<number> & { buffer: ArrayBufferLike; byteOf
 const FACADE_FIXED: Record<string, [number, string]> = {
   '1:1:0': [198, '15badaf1'], '1:1:1': [354, '1e05223f'], '1:2:0': [426, 'b8b45c0d'], '1:2:1': [528, 'e9fe6c01'], '1:3:1': [696, 'f0ee0933'],
 };
+/**
+ * Snapshot models deliberately changed since: their plain roof discs became real helipads (tierkit helipad: disc, ring
+ * and H), which shared/src/helipads.ts finds and helicopters land on. The office slab's pad keeps its place; the
+ * hospital's moves right and its roof cross left so the bigger pad fits. Heights are unchanged.
+ */
+const HELIPAD_FIXED: Record<string, [number, string]> = { '4:3:3': [756, '4280ad8e'], '7:1:0': [792, '8e57300a'] };
 let identical = 0, refixed = 0;
 for (const [key, height, oldVerts, oldHash] of OLD_MODELS) {
-  const [verts, hash] = FACADE_FIXED[key] ?? [oldVerts, oldHash];
-  if (FACADE_FIXED[key]) refixed++;
+  const fixed = FACADE_FIXED[key] ?? HELIPAD_FIXED[key];
+  const [verts, hash] = fixed ?? [oldVerts, oldHash];
+  if (fixed) refixed++;
   const v = now.find((m) => m.key === key);
   if (!v) { fail(`model ${key} missing`); continue; }
   let h = 2166136261;
@@ -340,10 +347,10 @@ for (const [key, height, oldVerts, oldHash] of OLD_MODELS) {
   eq(`model ${key} height`, v.height, height);
   eq(`model ${key} vertices`, v.geometry.attributes.position.count, verts);
   eq(`model ${key} geometry bytes`, h.toString(16), hash);
-  if (v.geometry.attributes.position.count === verts && h.toString(16) === hash && !FACADE_FIXED[key]) identical++;
+  if (v.geometry.attributes.position.count === verts && h.toString(16) === hash && !fixed) identical++;
 }
 const drafts = allDesigns().filter((d) => d.draft);
-console.log(`  ${identical}/${OLD_MODELS.length} models byte-identical to the old models.ts, ${refixed} deliberately re-snapshotted after facade fixes (${Object.keys(FACADE_FIXED).join(' ')}); ${drafts.length} draft design(s) built for the viewer only: ${drafts.map((d) => d.key).join(', ')}`);
+console.log(`  ${identical}/${OLD_MODELS.length} models byte-identical to the old models.ts, ${refixed} deliberately re-snapshotted after facade fixes (${Object.keys(FACADE_FIXED).join(' ')}) and helipads (${Object.keys(HELIPAD_FIXED).join(' ')}); ${drafts.length} draft design(s) built for the viewer only: ${drafts.map((d) => d.key).join(', ')}`);
 if (!drafts.length) fail('expected the kiosk draft');
 if (now.some((v) => drafts.some((d) => d.key === v.key))) fail('a draft leaked into the city batch');
 

@@ -6,7 +6,8 @@
  *   npx tsx packages/shared/scripts/flights-check.ts [fph] [days]
  */
 import {
-  TICKS_PER_DAY, TICKS_PER_HOUR, RUNWAY_WIDTH, footprintsOverlap, flightsAt, timetable, runwayEnds, gateCount, type Airport, type FlightState,
+  TICKS_PER_DAY, TICKS_PER_HOUR, RUNWAY_WIDTH, TERMINAL_OFFSET, PLANE_TYPES, PLANE_TYPE_NAMES, airportFrame, typeWeights,
+  footprintsOverlap, flightsAt, timetable, runwayEnds, gateCount, type Airport, type FlightState, type PlaneType,
   Zone, FRONT, placedFromDoor, terminalSpan, planRunway, TERMINAL_ROW, packTile, u16ToB64, i32ToB64, u8ToB64,
 } from '../src';
 import { World } from '../../server/src/world';
@@ -26,7 +27,11 @@ const airports: Airport[] = [
   { id: 2, x: -17, y: 90, dir: 3, gates: 2, runwayLen: 12, flightsPerHour: fph },
   { id: 3, x: 5, y: 5, dir: 2, gates: 5, runwayLen: 16, flightsPerHour: fph },
   { id: 4, x: 5, y: 5, dir: 1, gates: 1, runwayLen: 10, flightsPerHour: fph * 2 },
+  // long runways take the wide-bodies (16+) and the jumbo (20+)
+  { id: 5, x: -60, y: -30, dir: 0, gates: 2, runwayLen: 18, flightsPerHour: fph * 1.5 },
+  { id: 6, x: 200, y: 12, dir: 3, gates: 2, runwayLen: 24, flightsPerHour: fph * 2, apronU: -3 },
 ];
+const typesSeen = new Map<PlaneType, number>();
 
 // ---- airports from tiles: the server's and the client's code paths derive the identical descriptor --------------
 // Both call shared deriveAirports(); this builds a terminal and runway in a server World, mirrors its chunks into a
@@ -95,6 +100,8 @@ for (const ap of airports) {
     const iv = tt.flatMap((f) => [f.landing, f.takeoff]).sort((a, b) => a[0] - b[0]);
     for (let i = 1; i < iv.length; i++) if (iv[i][0] < iv[i - 1][1]) fail(`ap${ap.id} day${day} reserved runway intervals overlap at ${iv[i][0]}`);
     for (const f of tt) {
+      typesSeen.set(f.type, (typesSeen.get(f.type) ?? 0) + 1);
+      if (PLANE_TYPES[f.type].minRunway > ap.runwayLen) fail(`ap${ap.id}: a ${f.type} on a ${ap.runwayLen}-tile runway`);
       if (f.tEnd >= d0 + TICKS_PER_DAY) fail(`flight ${f.id} runs past midnight`);
       if (f.tApproach < d0 || (f.tApproach - d0) / TICKS_PER_HOUR < 4.9) fail(`flight ${f.id} before 05:00 (${hhmm(f.tApproach)})`);
     }
@@ -112,7 +119,12 @@ for (const ap of airports) {
       for (const s of out) {
         phasesSeen.set(s.phase, (phasesSeen.get(s.phase) ?? 0) + 1);
         if (s.y < 0.3) ground.push(s);
-        if (s.phase === 'dwell') perGate.set(s.gate, (perGate.get(s.gate) ?? 0) + 1);
+        if (s.phase === 'dwell') {
+          perGate.set(s.gate, (perGate.get(s.gate) ?? 0) + 1);
+          // the nose stops short of the terminal front, whatever the type
+          const fr = airportFrame(ap), noseV = (s.x - fr.cx) * fr.nx + (s.z - fr.cz) * fr.nz + PLANE_TYPES[s.type].nose;
+          if (noseV > TERMINAL_OFFSET - 0.1) fail(`ap${ap.id} t=${t}: ${s.type} ${s.id} noses into the terminal (v ${noseV.toFixed(2)})`);
+        }
         if (s.phase === 'approach' || s.phase === 'flare') {
           // within 8 tiles of touchdown
           if (s.y >= 0.01 && s.y < 1.3) onFinal++;
@@ -138,5 +150,10 @@ for (const ap of airports) {
     console.log(`  sampled ${TICKS_PER_DAY * 2} instants: max ${maxActive} planes at once, max ${maxRunway} on runway, ${groundSamples} ground pairs checked; phases seen: ${[...phasesSeen.keys()].join(' ')}`);
   }
 }
+// over a month at the long-runway airports every type turns up
+for (const ap of airports.filter((a) => a.runwayLen >= 20)) for (let d = days; d < days + 30; d++) for (const f of timetable(ap, d)) typesSeen.set(f.type, (typesSeen.get(f.type) ?? 0) + 1);
+console.log(`\ntypes flown (and a month more at the 20+ runways): ${PLANE_TYPE_NAMES.map((t) => `${t} ${typesSeen.get(t) ?? 0}`).join(', ')}`);
+for (const t of PLANE_TYPE_NAMES) if (!typesSeen.get(t)) fail(`no ${t} flew in a month`);
+console.log(`mix on a 12-tile runway: ${typeWeights({ runwayLen: 12 }).map(([t, w]) => `${t} ${(w * 100).toFixed(0)}%`).join(', ')}; on 24: ${typeWeights({ runwayLen: 24 }).map(([t, w]) => `${t} ${(w * 100).toFixed(0)}%`).join(', ')}`);
 console.log(failures ? `\n${failures} FAILURES` : '\nALL CHECKS PASSED');
 process.exit(failures ? 1 : 0);
