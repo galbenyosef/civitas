@@ -30,8 +30,8 @@ const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math
 
 // ---------------------------------------------------------------- the London Eye
 
-/** Rim lights, by night: mostly the usual blue and white, now and then a show colour (hashed per wheel and night). */
-const EYE_SHOWS = [0x3d8bff, 0x5aa0ff, 0x2f6dff, 0xdfe9ff, 0x3d8bff, 0x5aa0ff, 0xff4fa3, 0xb04dff, 0xff3b3b, 0x34d07a];
+/** Rim lights, by night: the usual blues and white, and on about one night in eight a show colour (hashed per wheel and night). */
+const EYE_USUAL = [0x3d8bff, 0x5aa0ff, 0x2f6dff, 0xcfe0ff], EYE_SHOWS = [0xff4fa3, 0xb04dff, 0xff3b3b, 0x34d07a];
 
 let eyeGeo: { rim: BufferGeometry; frame: BufferGeometry; capsule: BufferGeometry } | null = null;
 /** The wheel in its own frame: centred on the hub, in the x-y plane (the axle along z). */
@@ -102,7 +102,8 @@ function updateEye(e: EyeInst, t: number, night: number) {
   e.caps.instanceMatrix.needsUpdate = true;
   // lights: the rim's colour is chosen per wheel per night, and comes up at its own darkness
   const day = Math.floor((t - 12) / 24);
-  const show = EYE_SHOWS[Math.floor(hash2(e.seed + day * 7, 41) * EYE_SHOWS.length)];
+  const pick = hash2(e.seed + day * 7, 41), list = pick < 0.125 ? EYE_SHOWS : EYE_USUAL;
+  const show = list[Math.floor(hash2(e.seed + day * 7, 43) * list.length)];
   e.rimMat.emissive.setHex(show);
   const on = smooth(e.lit, e.lit + 0.25, night);
   e.rimMat.emissiveIntensity = 1.1 * on;
