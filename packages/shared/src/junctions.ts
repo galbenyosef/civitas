@@ -1,5 +1,6 @@
 import { isRoad, zoneOf, levelOf, underConstruction, terrainOf, Terrain } from './tile';
 import { Zone } from './buildings/codes';
+import { isBridgeAux, bridgeStepOk, BRIDGE_AUX } from './bridges';
 
 /**
  * Junction types beyond the give-way box and traffic lights (docs/structures.md capability E6, docs/traffic-tuning.md
@@ -30,6 +31,8 @@ export const isFlyoverAux = (a: number) => a === FLYOVER_EW || a === FLYOVER_NS;
 export const deckEW = (a: number) => a === FLYOVER_EW;
 /** Any junction byte: ring, island or flyover. */
 export const isJunctionAux = (a: number) => a >= RING_AUX && a <= FLYOVER_NS;
+/** Routers skip junctionStepOk for aux bytes below this: nothing under it (airfield paint) restricts a step. */
+export const STEP_RULE_AUX = BRIDGE_AUX;
 
 /**
  * Ring tile offsets from the island, in driving order: east, north-east, north, north-west, west, south-west, south,
@@ -43,10 +46,12 @@ export const islandOf = (x: number, y: number, a: number): [number, number] => [
 
 /**
  * May a vehicle step from road tile A to its neighbour B, having come into A by the step (pdx, pdy) ((0, 0) when
- * not known, e.g. the first tile of a search)? Round a ring only forwards; across a flyover only straight on.
+ * not known, e.g. the first tile of a search)? Round a ring only forwards; across a flyover only straight on; off a
+ * bridge deck only along it.
  */
 export function junctionStepOk(aux: (x: number, y: number) => number, ax: number, ay: number, bx: number, by: number, pdx: number, pdy: number): boolean {
   const a = aux(ax, ay);
+  if (isBridgeAux(a)) return bridgeStepOk(a, ax, ay, bx, by); // off a bridge deck only along it (shared/src/bridges.ts)
   if (a < RING_AUX) return true;
   if (isFlyoverAux(a)) return (pdx === 0 && pdy === 0) || (bx - ax === pdx && by - ay === pdy);
   if (!isRingAux(a)) return true;

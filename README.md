@@ -74,7 +74,7 @@ runs the Commons through a rush hour with any traffic tunable changed (`docs/tra
 | Context menu | right-**click** (press and release without dragging) a person, car, train, plane, building, road, track or land for the actions that exist for it: inspect, follow, first-person view, go to home or work, build priority, parcel settings, buy this tile, demolish (asks again to confirm, shows the cost). Greyed entries say why in a tooltip. Esc closes; also on the FPV inset. `client/src/contextmenu.ts` |
 | Zoom | mouse wheel |
 | Rotate / tilt | middle drag (or alt+drag) orbits around the point under the cursor; Q E / R F keys |
-| Tools | 1 select · 2 buy land · 3 road · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
+| Tools | 1 select · 2 buy land · 3 road (drag across water for a bridge) · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
 | Turn a footprint | Z turns the footprint of a building bigger than 1×1 anticlockwise, C clockwise, in quarter turns, while its tool is active (airport terminal, bus depot, rail halt and station). The choice sticks for that tool until you change it; before the first press the footprint faces a road by itself. The preview shows each tile's outline, an arrow from the door towards the road (green with a road, red without) and the building's marked parts (platform, apron, stands, vehicle gate); hovering a placed structure shows them faintly |
 | People and cars | hover anyone for who they are and what they are doing; click to select them in a side panel with a **follow** camera |
 | Trains and planes | hover a train or plane to highlight it; click to select it: a panel with its line or flight, what it is doing, speed, its crew and everyone on board (a train's riders are clickable citizens; plane passengers are visitors), and **follow**. `client/src/vehicles.ts`, docs/rail.md and docs/airport.md |
@@ -185,6 +185,12 @@ changing behaviour in game time.
   island, anticlockwise since traffic drives on the right, give way to the ring on
   entry, no lights) or a **flyover** (one road lifted over the other on a deck, no
   conflicts and no turns): `shared/src/junctions.ts`, aux bytes 0xf0–0xfa.
+  With Civil engineering (Transport tier 3) a road dragged straight across up to
+  12 tiles of water, from a road on one bank to dry land on the other, becomes a
+  **bridge** (stone arch, steel girder or suspension by span and hash; $120 a
+  deck tile): plain straight road to the traffic, nothing joins it from the side,
+  bulldozing any of it removes the whole bridge (`shared/src/bridges.ts`, aux
+  bytes 0xd8–0xdf, drawn by `client/src/render/bridges.ts`).
   Besides commuters the roads carry delivery trucks (industry → commerce, a
   fee per drop), visitors driving in from the edge of the network at peak
   hours, and, with the Patrols technology, police patrols, fire engines and

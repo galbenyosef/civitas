@@ -2,7 +2,7 @@ import {
   DEFAULT_TAX, Terrain, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, KIND_ID, KIND_NAMES, chunkKey, isBuildable, isRoad, packTile, terrainOf,
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
-  isMergedKind,
+  isMergedKind, planBridge, BridgeStyle,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS } from '../world';
 import { seedCity } from '../loadtest/cities';
@@ -128,6 +128,12 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
       const plan = j.tool === 'roundabout' ? planRoundabout(x, y, env) : planFlyover(x, y, env, j.deck ? j.deck === 'ew' : undefined);
       if (!plan.ok) { problems.push(`${s.id}: ${j.id} at ${at(j.at)}: ${plan.reason}`); continue; }
       w.placeJunction(plan.tiles!);
+    }
+    for (const b of s.bridges ?? []) { // road bridges, as the road tool lays them (shared/src/bridges.ts); one the town already has stands
+      const dx = Math.sign(b.to[0] - b.from[0]), dy = Math.sign(b.to[1] - b.from[1]), len = Math.abs(b.to[0] - b.from[0]) + Math.abs(b.to[1] - b.from[1]) + 1;
+      const plan = (dx && dy) ? { ok: false, reason: 'not a straight line' } : planBridge(b.from[0], b.from[1], dx || (dy ? 0 : 1), dy, len, env, b.style ? BridgeStyle[b.style] : undefined);
+      if (!plan.ok) { problems.push(`${s.id}: ${b.id} from ${at(b.from)} to ${at(b.to)}: ${plan.reason}`); continue; }
+      if (plan.tiles!.length) w.placeBridge(plan.tiles!);
     }
   }
   for (const pid of w.parcels.keys()) w.recountRoads(pid);

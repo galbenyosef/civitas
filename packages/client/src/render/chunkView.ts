@@ -4,6 +4,7 @@ import {
   isPartAux, isAnchorAux, partDx, partDy, auxOrientation, isMultiTile, placedFromAnchor, footprintOf, type Placed,
   isAirfieldAux, airfieldOrientation, airfieldRow, FRONT, isRailAux, railMask,
   isRingAux, ringPos, isArmPos, isIslandAux, isFlyoverAux, deckEW, RING_POS,
+  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, KIND_ID,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Cell, cellUV } from './atlas';
@@ -20,6 +21,8 @@ const CONCRETE = new Color(0x8e939b);
 // crane tint by build priority: paused, low, normal, high, urgent
 const CRANE_TINT = [new Color(0x55596a), new Color(0xb5aa88), new Color(0xffffff), new Color(0xffa060), new Color(0xff6a5a)];
 const UP = new Vector3(0, 1, 0);
+/** a bascule bridge span is drawn as the Tower Bridge landmark (render/bridges.ts draws its ramps) */
+const TOWER_BRIDGE_KIND = KIND_ID['tower-bridge'];
 
 const tmpC = new Color();
 let heatEnabled = false;
@@ -115,9 +118,19 @@ export class ChunkView {
       let cell: number;
       tmpC.setScalar(0.92 + 0.16 * h);
       const mask = (roadAt(x, z - 1) ? 1 : 0) | (roadAt(x + 1, z) ? 2 : 0) | (roadAt(x, z + 1) ? 4 : 0) | (roadAt(x - 1, z) ? 8 : 0);
-      this.roads.fill((road ? 16 : 0) | mask, i * 4, i * 4 + 4); // lets the shader place street lamps on this and neighbouring road tiles
+      // a bridge deck (shared/src/bridges.ts) is drawn over open water by render/bridges.ts, with its own lamps: no lamp
+      // pools from the ground shader on it or on the water round it
+      const deck = road && terrainOf(t) === Terrain.Water;
+      const deckAt = (dx: number, dz: number) => { const q = getTile(x + dx, z + dz); return q !== undefined && isRoad(q) && terrainOf(q) === Terrain.Water; };
+      const lampMask = mask & ~((deckAt(0, -1) ? 1 : 0) | (deckAt(1, 0) ? 2 : 0) | (deckAt(0, 1) ? 4 : 0) | (deckAt(-1, 0) ? 8 : 0));
+      this.roads.fill(deck ? 0 : (road ? 16 : 0) | lampMask, i * 4, i * 4 + 4); // lets the shader place street lamps on this and neighbouring road tiles
       let turn = 0; // quarter turns anticlockwise of a roundabout cell
-      if (road) {
+      if (deck) {
+        cell = Cell.Water;
+        tmpC.setScalar(0.96 + 0.08 * h);
+        const ba = chunk.aux[i];
+        if (isBridgeAux(ba) && bridgeStyle(ba) === BridgeStyle.Bascule && auxAt(x - (bridgeNS(ba) ? 0 : 1), z - (bridgeNS(ba) ? 1 : 0)) !== ba) this.bascule(items, x, z, ba, auxAt);
+      } else if (road) {
         cell = Cell.Road + mask;
         tmpC.setScalar(0.97 + 0.06 * h);
         // roundabouts and flyovers (shared/src/junctions.ts): the ring's own cells turned to face the island; a flyover shows the road beneath
@@ -231,6 +244,21 @@ export class ChunkView {
       items.push({ key: 'site', matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: WHITE });
       crane(0);
     }
+  }
+
+  /**
+   * Tower Bridge over a bascule span starting at (x, z): the landmark's model (shared/src/buildings/landmarks-london-2.ts,
+   * one tile wide and four long along its z) centred on the span, turned along it and stretched to its length.
+   */
+  private bascule(items: Placement[], x: number, z: number, a: number, auxAt: (x: number, y: number) => number) {
+    const ns = bridgeNS(a), dx = ns ? 0 : 1, dz = ns ? 1 : 0;
+    let len = 1;
+    while (len < 24 && auxAt(x + dx * len, z + dz * len) === a) len++;
+    const v = variant(TOWER_BRIDGE_KIND, 1, 0);
+    if (!v) return;
+    tmpP.set(x + (ns ? 0.5 : len / 2), 0, z + (ns ? len / 2 : 0.5));
+    tmpQ.setFromAxisAngle(UP, ns ? 0 : Math.PI / 2); tmpS.set(1, 1, len / 4);
+    items.push({ key: v.key, matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: WHITE });
   }
 
   /** Turn a tile's UVs by `r` quarter turns anticlockwise (seen from above, north up): corner k shows the cell's corner k + r. */

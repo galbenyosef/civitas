@@ -20,6 +20,7 @@ import { TrainsView } from './render/trains';
 import { RailClient, trainHtml } from './rail';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
+import { BridgeView } from './render/bridges';
 import { LandmarkMotion } from './render/landmarks';
 import { FootprintOverlay } from './render/footprint';
 import { Fpv, type CabEye } from './render/fpv';
@@ -136,8 +137,10 @@ const trains = new TrainsView();
 const rail = new RailClient(world);
 scene.add(trains.group, rail.group);
 const junctions = new JunctionView(world); scene.add(junctions.group); // roundabout islands, flyover decks and ramps
-citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz); // cars and walkers on a flyover deck and its ramps
+const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks, piers, towers and ramps (render/bridges.ts)
+citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz); // cars and walkers on a flyover deck or a bridge and their ramps
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
+landmarks.auxAt = (x, y) => world.auxAt(x, y); // a Tower Bridge span running on into the next chunk
 const airportParam = params.get('airport')?.split(',').map(Number);
 if (airportParam && airportParam.length >= 3 && airportParam.every((n) => Number.isFinite(n))) {
   planes.setPreviews([{ id: 1, x: airportParam[0], y: airportParam[1], dir: (airportParam[2] & 3) as 0 | 1 | 2 | 3, gates: airportParam[3] || 3, runwayLen: 12, flightsPerHour: airportParam[4] || 2 }]);
@@ -299,6 +302,7 @@ function dropView(key: string) {
   airfield.dropChunk(key);
   trains.dropChunk(key);
   junctions.dropChunk(key);
+  bridges.dropChunk(key);
   landmarks.dropChunk(key);
   world.dropChunk(key);
 }
@@ -308,6 +312,7 @@ setInterval(streamChunks, 300);
 const input = new Input(canvas, rig, {
   onToolChange: (t) => { ui.setTool(t); rectMesh.visible = false; updateStatus(); },
   ladderKey: (t) => ui.ladderKey(t), // 0, 8, 9, Y, P, G, V, B, L open their size picker on the size last used
+  isWater: (x, y) => { const t = world.getTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water; }, // the road tool bridges water (render/bridges.ts)
   onBuild: (tool, tiles) => {
     const rot = structureTool(tool) ? input.rotationOf(tool) : undefined; // the orientation chosen with Z/C, else the server faces a road itself
     net.send({ t: 'build', tool: tool as Tool, tiles, ...(rot !== undefined ? { rot } : {}), ...(DEV_TOOLS ? { dev: true } : {}) });
@@ -620,6 +625,11 @@ function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: n
     return p ? { x: p.ax, y: p.ay, w: p.w, h: p.h, verdict: v, placed: p } : { x: h[0], y: h[1], w: 1, h: 1, verdict: v };
   }
   if (input.tool === 'roundabout' || input.tool === 'flyover') return junctions.hoverArea(input.tool, h);
+  if (input.tool === 'road' && input.crossing) {
+    // a road dragged out over the water: the bridge it would make, bank to bank
+    const c = bridges.crossingPlan(input.crossing, DEV_TOOLS);
+    return { x: c.x, y: c.y, w: c.w, h: c.h, verdict: c.plan.ok ? { ok: true } as PlaceVerdict : { ok: false, reason: c.plan.reason ?? '' } };
+  }
   if (input.tool === 'runway') {
     const v = runwayVerdict(input.runwayLine ?? [h]);
     const r = v.rect;
@@ -664,6 +674,8 @@ function updateStatus() {
       s += v.ok ? ` · click to place${facing}` : ` · ${v.reason}${facing}`;
     }
     if (input.tool === 'rail') s += rail.status(input.railPath);
+    if (input.tool === 'road' && input.crossing) s += bridges.crossingStatus(input.crossing, DEV_TOOLS);
+    else if (input.tool === 'road' && terr === Terrain.Water && !isRoad(t)) s += ' · drag a road straight across from a road on the bank to bridge the water';
     if (input.tool === 'roundabout' || input.tool === 'flyover') s += junctions.status(input.tool, x, y);
     if (input.tool === 'runway') {
       const rv = runwayVerdict(input.runwayLine ?? [h]);
@@ -817,7 +829,7 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); trains.scanChunk(key, c); junctions.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (world.parcelsDirty) { parcelsView.rebuild(world.parcels.values(), world.players, world.me, selectedParcel); world.parcelsDirty = false; }
@@ -837,6 +849,7 @@ function frame(now: number) {
   airfield.frame();
   parks.frame(clock.day);
   landmarks.frame((vehTick * 24) / TICKS_PER_DAY);
+  bridges.frame(landmarks.fixedHours ?? (vehTick * 24) / TICKS_PER_DAY); // Tower Bridge's gates, on the lift schedule the leaves keep
   fpv.update(now, dt, routeInfo?.id === selectedCitizen ? routeInfo.route ?? null : null);
   if ((following || fpv.mode === 'full') && selectedCitizen) {
     const pos = citizens.positionOf(selectedCitizen);
@@ -881,7 +894,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { world, rig, input, net, views, lighting, buildings, landmarks, citizens, lights, liveTick, liveTickF, planes, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

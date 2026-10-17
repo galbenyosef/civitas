@@ -24,7 +24,7 @@ export interface TechNode {
   cost: number;
   requires: string[];
   condition: { counter: Counter; min: number };
-  /** feature ids this node opens: tool names, 'level2' ... 'level7', 'underground', 'signals', 'publicRoads', 'patrols', 'airport', 'runway', 'lines' (the transit Lines panel) */
+  /** feature ids this node opens: tool names, 'level2' ... 'level7', 'underground', 'signals', 'publicRoads', 'bridges', 'patrols', 'airport', 'runway', 'lines' (the transit Lines panel) */
   unlocks: string[];
   /**
    * The node cannot be earned or bought in a live game yet: its unlock rule is still to be decided, and this text
@@ -57,6 +57,7 @@ export const TECH: TechNode[] = [
   { id: 'tr2', track: 'transport', tier: 2, name: 'Traffic signals', blurb: 'Crossroads in your parcels get phased signals, roughly doubling what a busy junction can carry.', cost: 500, requires: ['tr1'], condition: { counter: 'housed', min: 100 }, unlocks: ['signals'] },
   { id: 'tr3', track: 'transport', tier: 3, name: 'Public works', blurb: 'Lay roads on unclaimed land to link your parcels to the wider world.', cost: 700, requires: ['tr2'], condition: { counter: 'housed', min: 150 }, unlocks: ['publicRoads'] },
   { id: 'tr7', track: 'transport', tier: 3, name: 'Junction design', blurb: 'Roundabouts and flyovers. A roundabout keeps traffic moving without lights: drivers give way to cars already on the ring. A flyover lifts one road over the other, so nothing crossing ever waits (but nobody can turn there).', cost: 1200, requires: ['tr2'], condition: { counter: 'roads', min: 120 }, unlocks: ['roundabout', 'flyover'] },
+  { id: 'tr8', track: 'transport', tier: 3, name: 'Civil engineering', blurb: 'Road bridges: drag a road straight across a river or lake, up to 12 tiles of water, landing on road at both banks. Short crossings get stone arches, longer ones steel girders or a suspension span.', cost: 1500, requires: ['tr3'], condition: { counter: 'housed', min: 180 }, unlocks: ['bridges'] },
   { id: 'tr4', track: 'transport', tier: 4, name: 'Aviation', blurb: 'An airport terminal and a runway behind it. Planes land on a daily timetable, every landing pays you a fee, and the ground crew work early and late shifts.', cost: 4500, requires: ['tr3'], condition: { counter: 'jobs', min: 200 }, unlocks: ['airport', 'runway'] },
   { id: 'tr5', track: 'transport', tier: 5, name: 'Public transport', blurb: 'Bus stops, a bus depot and the Lines panel: route buses round your stops, set a fare-paying timetable running from 05:30 to 00:30, and take cars off the road.', cost: 1000, requires: ['tr2'], condition: { counter: 'housed', min: 200 }, unlocks: ['busstop', 'busdepot', 'lines', 'parkride'] },
   { id: 'tr6', track: 'transport', tier: 6, name: 'Rail', blurb: 'Railway track, halts, stations and freight yards. Trains run your lines on a timetable from 05:00 to 01:00, 40 riders a carriage paying fares; a there-and-back line runs one train, a loop as many as fit. Freight yards load containers for freight lines.', cost: 3000, requires: ['tr5'], condition: { counter: 'jobs', min: 250 }, unlocks: ['rail', 'railhalt', 'railstation', 'freightyard'] },

@@ -579,7 +579,7 @@ export class UI {
     const row = (k: string, v: string | number) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
     const pct = Math.round(info.congestion * 100);
     const grade = pct < 15 ? 'flowing' : pct < 40 ? 'busy' : pct < 70 ? 'congested' : 'jammed';
-    let html = `<h3><span class="sw" style="background:#6b6f7a"></span>Road <span style="color:var(--muted);font-weight:400">${info.junction === 'none' ? '' : info.junction === 'signal' ? 'signalled junction' : info.junction === 'roundabout' ? 'roundabout' : info.junction === 'flyover' ? 'flyover' : 'junction'}</span></h3>`;
+    let html = `<h3><span class="sw" style="background:#6b6f7a"></span>${info.bridge ? 'Bridge' : 'Road'} <span style="color:var(--muted);font-weight:400">${info.bridge ? `${info.bridge.style}, ${info.bridge.span} tile${info.bridge.span === 1 ? '' : 's'} over the water` : info.junction === 'none' ? '' : info.junction === 'signal' ? 'signalled junction' : info.junction === 'roundabout' ? 'roundabout' : info.junction === 'flyover' ? 'flyover' : 'junction'}</span></h3>`;
     html += `<div class="sub">${info.parcel ? `${esc(info.parcel.name)} · ${esc(info.parcel.owner)}` : 'public road'}</div>`;
     html += `<div class="row"><span>Traffic</span><span class="${pct >= 40 ? 'bad' : ''}">${grade} (${pct}%)</span></div>`;
     html += `<div class="bar heat"><i style="width:${pct}%"></i></div>`;

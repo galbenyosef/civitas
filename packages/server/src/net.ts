@@ -6,6 +6,7 @@ import {
   u16ToB64, i32ToB64, u8ToB64, hasFeature, techFor, TECH_BY_ID, ALL_TECH_IDS, checkPurchase, ZONE_TOOLS, CIVIC_TOOLS, MANIFEST,
   isMultiTile, planStructure, planRunway, isAirfieldAux, RUNWAY_MAX, isRailAux, isRailStationKind, RAIL_DRAG_MAX, roadOverTrackProblem, CROSSING_COST, familyOf, subFor, kindManifest,
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
+  isBridgeAux, planBridge, joinsBridgeSide, BRIDGE_STYLE_NAMES, type BridgePlan,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
@@ -303,13 +304,29 @@ export class Net {
     const recount = new Set<number>();
     // zoning and parking lots go round roads and buildings instead of paving over them (counted for one toast)
     const paint = tool in TOOL_ZONE || tool === 'park';
-    let skipRoad = 0, skipBuilt = 0;
+    let skipRoad = 0, skipBuilt = 0, sideJoin = 0;
     const zonedAt: [number, number][] = [];
+    // the road tool over water lays bridges (shared/src/bridges.ts): runs of water tiles in drag order, after the land
+    const wet: [number, number][][] = [];
+    let lastWet = false;
     for (const pair of tiles.slice(0, 256)) {
       const x = Math.floor(Number(pair[0])), y = Math.floor(Number(pair[1]));
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
       const t = this.w.getTile(x, y);
-      if (!isBuildable(t)) continue;
+      if (!isBuildable(t)) {
+        if (tool === 'road') { if (!lastWet) wet.push([]); wet[wet.length - 1].push([x, y]); lastWet = true; }
+        else if (tool === 'bulldoze' && isBridgeAux(this.w.auxAt(x, y))) {
+          // a deck tile takes the whole bridge with it, for nothing back
+          const q = this.w.parcelAt(x, y);
+          if (q && !this.mayEdit(p, q.owner)) { this.toast(c, 'Not your land'); return; }
+          const touched = new Set<number>();
+          for (let d = -12; d <= 12; d++) for (const [qx, qy] of [[x + d, y], [x, y + d]]) { const q = this.w.parcelIdAt(qx, qy); if (q) touched.add(q); }
+          this.w.removeBridge(x, y);
+          for (const q of touched) recount.add(q);
+        }
+        continue;
+      }
+      lastWet = false;
       const parcel = this.w.parcelAt(x, y);
       const ownsIt = !!parcel && this.mayEdit(p, parcel.owner);
       let cost = 0;
@@ -339,6 +356,7 @@ export class Net {
         if (!ownsIt && parcel) { this.toast(c, 'Not your land'); return; }
         if (!parcel) { const pw = this.locked(p, 'publicRoads'); if (pw) { this.toast(c, `${pw} is needed to lay roads outside your own land`); return; } }
         if (isRoad(t)) continue;
+        if (joinsBridgeSide(x, y, this.auxFn)) { sideJoin++; continue; }
         const xing = roadOverTrackProblem(this.trackEnv, x, y);
         if (xing) { this.toast(c, xing); return; }
         cost = (parcel ? ROAD_COST : PUBLIC_ROAD_COST) + (isRailAux(this.w.auxAt(x, y)) ? CROSSING_COST : 0);
@@ -419,6 +437,14 @@ export class Net {
       }
       if (inner) this.toast(c, `Also zoned ${inner} lot${inner === 1 ? '' : 's'} in the middle of the block: the buildings beside ${inner === 1 ? 'it grow back into it' : 'them grow back into them'}`, 'info');
     }
+    for (const run of wet) {
+      if (p.money - spent < 0) break;
+      const r = this.bridge(c, run, tiles, dev, p.money - spent);
+      if (!r) continue;
+      spent += r.cost!;
+      for (let i = 0; i < r.tiles!.length; i += 3) { const q = this.w.parcelIdAt(r.tiles![i], r.tiles![i + 1]); if (q) recount.add(q); }
+    }
+    if (sideJoin) this.toast(c, 'No road may join a bridge from the side: bridges meet roads only at their ends');
     for (const id of recount) this.w.recountRoads(id);
     if (spent) this.w.credit(p.id, -spent, 'build');
     if (skipRoad || skipBuilt) {
@@ -432,6 +458,43 @@ export class Net {
       this.toast(c, "Nothing gets built without builders: place a builders' yard somewhere on the road network", 'info');
     }
   }
+
+  /**
+   * A bridge over one run of water tiles from a road drag (`run`, in drag order; `drag` is the whole message, for the
+   * way a one-tile run goes). Land as for roads: the player's own, or unclaimed with Public works. Lays the deck and
+   * returns the plan (the caller charges and recounts), or null with a toast.
+   */
+  private bridge(c: Client, run: [number, number][], drag: [number, number][], dev: boolean, budget: number): BridgePlan | null {
+    const p = c.player!;
+    if (!dev) { const need = this.locked(p, 'bridges'); if (need) { this.toast(c, `${need} is needed to bridge water`); return null; } }
+    const [x0, y0] = run[0];
+    let dx = 0, dy = 0;
+    if (run.length > 1) { dx = run[1][0] - x0; dy = run[1][1] - y0; }
+    else {
+      // one tile of water: the way the drag went through it, else whichever axis has road on both banks
+      const i = drag.findIndex((q) => Math.floor(Number(q[0])) === x0 && Math.floor(Number(q[1])) === y0);
+      const nb = drag[i + 1] ?? drag[i - 1];
+      if (nb) { dx = Math.abs(Math.floor(Number(nb[0])) - x0); dy = Math.abs(Math.floor(Number(nb[1])) - y0); }
+      if (dx + dy !== 1) { const ew = isRoad(this.w.getTile(x0 - 1, y0)) && isRoad(this.w.getTile(x0 + 1, y0)); dx = ew ? 1 : 0; dy = ew ? 0 : 1; }
+    }
+    for (let i = 1; i < run.length; i++) {
+      if (run[i][0] - run[i - 1][0] !== dx || run[i][1] - run[i - 1][1] !== dy) { this.toast(c, 'A bridge runs straight across the water: no bends or junctions on it'); return null; }
+    }
+    const pub = dev || !this.locked(p, 'publicRoads');
+    const plan = planBridge(x0, y0, dx, dy, run.length, {
+      tile: (x, y) => this.w.peekTile(x, y),
+      aux: this.auxFn,
+      land: (x, y) => { const q = this.w.parcelAt(x, y); return q ? (this.mayEdit(p, q.owner) ? null : 'Not your land') : pub ? null : 'Public works is needed to lay roads outside your own land'; },
+    });
+    if (!plan.ok) { this.toast(c, plan.reason ?? 'A bridge cannot go there'); return null; }
+    if (!plan.tiles!.length) return null;
+    if (budget < plan.cost!) { this.toast(c, `Need $${plan.cost} for that bridge`); return null; }
+    this.w.placeBridge(plan.tiles!);
+    this.w.bump(p.id, 'roads', plan.tiles!.length / 3);
+    this.toast(c, `${BRIDGE_STYLE_NAMES[plan.style!][0].toUpperCase()}${BRIDGE_STYLE_NAMES[plan.style!].slice(1)} built for $${plan.cost}: ${run.length} tile${run.length === 1 ? '' : 's'} over the water`, 'info');
+    return plan;
+  }
+  private auxFn = (x: number, y: number) => this.w.auxAt(x, y);
 
   /** Place a multi-tile kind with its door on (x, y); returns whether it was placed (the caller charges). */
   private placeStructure(c: Client, kind: number, x: number, y: number, budget: number, rot?: number): boolean {

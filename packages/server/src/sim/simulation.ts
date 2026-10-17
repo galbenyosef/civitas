@@ -9,7 +9,7 @@ import {
   type LeisureSpec, TRANSIT, stopModeOf, stopName, walkCost, BUS_DEPOT_KIND,
   SERVICE_RADIUS_OF, SERVICE_STRENGTH_OF, WORK_RATE_OF, PATROL_RATE_OF,
   GROW_FORMS, topLevelOf, firstLevelOf, isMergedKind, venueCapacityOf, isMultiTile, placedFromAnchor, planStructure, packTile, terrainOf,
-  zoneOf, isBuildable, underConstruction, isGatewayId, GATEWAY_OF, GATEWAY_WORDS,
+  zoneOf, isBuildable, underConstruction, isGatewayId, GATEWAY_OF, GATEWAY_WORDS, bridgeSpanAt, BRIDGE_STYLE_NAMES,
   type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
 } from '@msimcity/shared';
 import type { Building, Citizen, Leg, Mover, Vehicle, World, MergePlan } from '../world';
@@ -317,6 +317,8 @@ export class Simulation {
     if (info.junction === 'signal') { const ph = t.signalPhase(x, y); info.green = ph.green; info.amber = ph.amber; }
     const parcel = this.w.parcelAt(x, y);
     if (parcel) info.parcel = { name: parcel.name, owner: this.w.players.get(parcel.owner)?.name ?? parcel.owner };
+    const span = bridgeSpanAt(x, y, (bx, by) => this.w.auxAt(bx, by));
+    if (span) info.bridge = { style: BRIDGE_STYLE_NAMES[span.style], span: span.len };
     return info;
   }
   private *moversOn(x: number, y: number): Iterable<Mover> {

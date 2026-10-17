@@ -75,9 +75,10 @@ Code:
   London Eye facing them across the river, Buckingham Palace at the end of the Mall past St James's Park, the Tower of
   London on the river in the City and Tower Bridge beside it. `demo:check` fails a landmark that no city demo places.
   Tall placements are framed from further out on the tour.
-- **Tower Bridge stands on the river.** It replaces the Tower Bridge causeway: `seedLondon` turns the tiles of any
-  placement that would be river or causeway into land for it (only Tower Bridge's do), so that crossing carries no
-  traffic until road bridges exist; London Bridge, a block west, does.
+- **Tower Bridge is a real crossing.** The Landmarks section lays it as a bridge (`bridges`, a `DemoBridge` with
+  `style: 'Bascule'` and `landmark: 'tower-bridge'`) rather than placing the structure: a bascule span is drawn as the
+  landmark's model with its lifting leaves, and the traffic drives over it, waiting at the barriers while it lifts. A bridge's `landmark` counts as placed for
+  the landmark rule, and its tour stop frames the span.
 
 How the map is made:
 
@@ -87,9 +88,14 @@ How the map is made:
   blocks.
 - **River.** A Catmull-Rom curve through the points; a tile is water when its centre is within half the width of the
   curve. The width grows from 3.5 tiles upstream to 16 off the east edge.
-- **Bridges are causeways.** v1 has no bridge pieces and the road tool refuses water (docs/structures.md, E4), so each
-  named crossing turns the shortest run of water along a nearby grid line into grass with a road on it. No two bridges
-  share a line, and a run must be about as long as the river is wide.
+- **Bridges.** Each named crossing bridges the shortest run of water along a nearby grid line with a real road bridge
+  (shared/src/bridges.ts), laid through `planBridge` as the road tool lays it, in the style of the real one
+  (`BRIDGE_STYLES`): stone and iron arches (Richmond, Kew, Putney, Battersea, Vauxhall, Lambeth, Westminster,
+  Blackfriars), girders (Wandsworth, Waterloo, London Bridge, Blackwall), suspension spans (Hammersmith, Chelsea, the
+  7-tile Woolwich crossing) and Tower Bridge's bascules. No two bridges share a line, and a run must be about as long as
+  the river is wide. A grid road meeting a deck from the side on a ragged bank stops short of it, as the tool requires.
+  Southwark Bridge has no grid line of its own between Blackfriars and London Bridge, so it is left out. The 159 crosses
+  at Lambeth Bridge, the nearest to its Whitehall and Lambeth North stops.
 - **Roads.** The usual grid, every 5th row and column, except on water, inside parks, on the airfield and on the railway
   corridors. Each line runs in a one-tile corridor; where a grid road meets it at right angles with road on both sides
   (not at a corridor's end or corner, nor where a station or park stops the road) the road is kept and the track crosses

@@ -1,5 +1,6 @@
 import {
   DEFAULT_TAX, Terrain, Zone, KIND_ID, ALL_TECH_IDS, packTile, isRoad, levelOf, zoneOf, isGrowableId, familyOf, subFor, hash2, placedFromAnchor, planStructure, workOf,
+  planBridge, BridgeStyle, type BridgeStyleId,
   LONDON_MAP, THAMES, DOCKS, PLACES, PARKS, RESERVED, geoF, type Character, type DemoRect, type PlaceEnv,
 } from '@msimcity/shared';
 import { World, emptyStats } from '../world';
@@ -7,15 +8,15 @@ import { World, emptyStats } from '../world';
 /**
  * The London demo's town (docs/demo.md "London", shared/src/demo/london.ts): paints the map into a fresh World in
  * place of seedCity's districts. The river and docks are water; the roads are the usual grid (every 5th row and
- * column) except on water, in parks and on reserved land, with a causeway of road wherever a bridge crosses; each
+ * column) except on water, in parks and on reserved land, with a road bridge wherever a named crossing is; each
  * block is zoned by the character of the place nearest it, pre-built, with merged towers and works placed through
  * the shared placement rule where the character is dense; services and car parks sit on a regular grid as in every
  * seedCity district. Deterministic: hashes only, no randomness.
  *
- * Bridges are causeways: v1 has no bridge pieces and roads may not be built on water (docs/structures.md E4), so the
- * crossing's water tiles become grass with a road on them. A landmark placed across the river (Tower Bridge, standing in
- * place of its causeway until roads can cross water) keeps its footprint: those tiles become land for it to stand on,
- * neither water nor causeway.
+ * Bridges are real road bridges over the water (shared/src/bridges.ts), laid through planBridge as the road tool lays
+ * them, each in the style of the real one (BRIDGE_STYLES): stone and iron arches, girders, the suspension bridges at
+ * Hammersmith and Chelsea, and Tower Bridge as a bascule span, drawn as the landmark. A grid road that would meet a
+ * deck from the side on a ragged bank stops short of it, as the tool requires.
  *
  * Railway corridors are kept clear except where a grid road meets one at right angles with road on both sides: that
  * tile stays road, and the scenario's track drag crosses it as a level crossing (docs/rail.md "Level crossings"), so
@@ -75,17 +76,32 @@ export function londonWater(): Uint8Array {
 }
 
 /**
- * Bridge causeways: for each named crossing, the shortest run of water along a grid line near it (a column or a row,
- * within a block of the crossing) that has land at both ends and no other bridge uses. Returns tile indexes.
+ * The style of each named crossing, after the real bridge: arches for the stone and iron arch bridges, girders for the
+ * beam and box-girder ones, suspension where the real one hangs, Tower Bridge's bascules. Unnamed here: the tool's own
+ * choice from span and hash (chooseBridgeStyle).
  */
-export function londonBridges(water: Uint8Array): { name: string; tiles: number[] }[] {
-  const out: { name: string; tiles: number[] }[] = [];
+const BRIDGE_STYLES: Record<string, BridgeStyleId> = {
+  'Richmond Bridge': BridgeStyle.Arch, 'Kew Bridge': BridgeStyle.Arch, 'Chiswick Bridge': BridgeStyle.Arch,
+  'Hammersmith Bridge': BridgeStyle.Suspension, 'Putney Bridge': BridgeStyle.Arch, 'Wandsworth Bridge': BridgeStyle.Girder,
+  'Battersea Bridge': BridgeStyle.Arch, 'Chelsea Bridge': BridgeStyle.Suspension, 'Vauxhall Bridge': BridgeStyle.Arch,
+  'Lambeth Bridge': BridgeStyle.Arch, 'Westminster Bridge': BridgeStyle.Arch, 'Waterloo Bridge': BridgeStyle.Girder,
+  'Blackfriars Bridge': BridgeStyle.Arch, 'London Bridge': BridgeStyle.Girder,
+  'Tower Bridge': BridgeStyle.Bascule, 'Blackwall Tunnel': BridgeStyle.Girder, 'Woolwich Ferry': BridgeStyle.Suspension,
+};
+
+/**
+ * Bridges: for each named crossing, the shortest run of water along a grid line near it (a column or a row, within a
+ * block of the crossing) that has land at both ends and no other bridge uses. Returns tile indexes, low end first,
+ * and whether the run is a column (the deck runs north-south).
+ */
+export function londonBridges(water: Uint8Array): { name: string; tiles: number[]; ns: boolean }[] {
+  const out: { name: string; tiles: number[]; ns: boolean }[] = [];
   const wet = (x: number, y: number) => inMap(x, y) && water[idx(x, y)] === 1;
   const used = new Set<string>();
   for (const [lat, lon, w, name] of THAMES) {
     if (!name) continue;
     const [x, y] = geoF(lat, lon);
-    let best: number[] | null = null, bestKey = '';
+    let best: number[] | null = null, bestKey = '', bestNS = false;
     // candidate lines: the columns and rows within a block either side of the crossing
     for (const vertical of [true, false]) for (const off of [-5, 0, 5, 10]) {
       const line = Math.floor((vertical ? x : y) / 5) * 5 + off;
@@ -102,13 +118,13 @@ export function londonBridges(water: Uint8Array): { name: string; tiles: number[
         const landA = vertical ? inMap(line, a - 1) && !wet(line, a - 1) : inMap(a - 1, line) && !wet(a - 1, line);
         const landB = vertical ? inMap(line, b + 1) && !wet(line, b + 1) : inMap(b + 1, line) && !wet(b + 1, line);
         if (landA && landB && b - a + 2 >= w && (!best || b - a + 1 < best.length)) {
-          best = []; bestKey = key;
+          best = []; bestKey = key; bestNS = vertical;
           for (let v = a; v <= b; v++) best.push(vertical ? idx(line, v) : idx(v, line));
         }
         d = 7; break;
       }
     }
-    if (best) { out.push({ name, tiles: best }); used.add(bestKey); }
+    if (best) { out.push({ name, tiles: best, ns: bestNS }); used.add(bestKey); }
   }
   return out;
 }
@@ -192,7 +208,7 @@ const SERVICES: [number, number, string][] = [
   [6, 3, 'parking'], [13, 6, 'parking'], [4, 13, 'parking'], [18, 11, 'parking'],
 ];
 
-export interface LondonSeed { water: number; roads: number; causeways: number; crossings: number; lots: number; merged: number; parcels: number; stranded: number; problems: string[] }
+export interface LondonSeed { water: number; roads: number; bridges: number; crossings: number; lots: number; merged: number; parcels: number; stranded: number; problems: string[] }
 
 /**
  * Paint London into w for `owner` (every technology), parcels named after the nearest place. `keep` is land the
@@ -204,15 +220,15 @@ export function seedLondon(w: World, ownerId: string, keep: DemoRect[]): LondonS
   owner.tech = [...ALL_TECH_IDS];
   const water = londonWater();
   const bridges = londonBridges(water);
-  const causeway = new Uint8Array(MW * MH);
-  for (const b of bridges) for (const i of b.tiles) causeway[i] = 1;
+  const deck = new Uint8Array(MW * MH);
+  for (const b of bridges) for (const i of b.tiles) deck[i] = 1;
   const park = londonParks();
   const reserved = (x: number, y: number) => RESERVED.some((r) => inRect(r.rect, x, y)) || keep.some((r) => inRect(r, x, y));
-  const stats: LondonSeed = { water: 0, roads: 0, causeways: 0, crossings: 0, lots: 0, merged: 0, parcels: 0, stranded: 0, problems: [] };
+  const stats: LondonSeed = { water: 0, roads: 0, bridges: 0, crossings: 0, lots: 0, merged: 0, parcels: 0, stranded: 0, problems: [] };
   // a grid road over a railway corridor at right angles, with road on both sides: kept, for a level crossing. Never at
   // a corridor's ends or corners (the track turns or stops there) nor where a station or a park stops the road
   const corridors = RESERVED.filter((r) => !r.airfield);
-  const gridRoad = (x: number, y: number) => inMap(x, y) && isGridLine(x, y) && (causeway[idx(x, y)] === 1 || (!water[idx(x, y)] && !reserved(x, y) && park[idx(x, y)] < 0));
+  const gridRoad = (x: number, y: number) => inMap(x, y) && isGridLine(x, y) && (deck[idx(x, y)] === 1 || (!water[idx(x, y)] && !reserved(x, y) && park[idx(x, y)] < 0));
   const crossing = (x: number, y: number) => {
     const on = corridors.filter((r) => inRect(r.rect, x, y));
     if (on.length !== 1 || keep.some((r) => inRect(r, x, y))) return false;
@@ -240,9 +256,7 @@ export function seedLondon(w: World, ownerId: string, keep: DemoRect[]): LondonS
   const blockChar = new Map<number, Character>();
   for (let y = MY; y < MY + MH; y++) for (let x = MX; x < MX + MW; x++) {
     const i = idx(x, y);
-    const kept = keep.some((r) => inRect(r, x, y));
-    if (causeway[i] && !kept) { w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0)); stats.causeways++; continue; }
-    if (water[i] && !kept) { w.setTile(x, y, packTile(Terrain.Water, false, 0, 0)); stats.water++; continue; }
+    if (water[i]) { w.setTile(x, y, packTile(Terrain.Water, false, 0, 0)); stats.water++; continue; } // bridge decks go down below
     if (crossing(x, y)) { w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0)); stats.crossings++; continue; }
     if (reserved(x, y)) { w.setTile(x, y, packTile(Terrain.Grass, false, 0, 0)); continue; }
     if (park[i] >= 0) {
@@ -271,6 +285,19 @@ export function seedLondon(w: World, ownerId: string, keep: DemoRect[]): LondonS
     if (inner && (c === 'suburb' || c === 'outer') && zone === Zone.Residential) { w.setTile(x, y, packTile(Terrain.Grass, false, 0, 0)); continue; }
     w.setTile(x, y, packTile(Terrain.Grass, false, zone, inner ? 0 : lotLevel(c, zone, x, y)));
     stats.lots++;
+  }
+
+  // the bridges, as the road tool lays them: a grid road meeting a deck from the side on a ragged bank stops short of it
+  for (const b of bridges) {
+    const x0 = MX + (b.tiles[0] % MW), y0 = MY + Math.floor(b.tiles[0] / MW), dx = b.ns ? 0 : 1, dy = b.ns ? 1 : 0;
+    for (let k = 0; k < b.tiles.length; k++) for (const s of [-1, 1]) {
+      const sx = x0 + dx * k + dy * s, sy = y0 + dy * k + dx * s, t = w.getTile(sx, sy);
+      if (isRoad(t) && t !== undefined && (t & 3) !== Terrain.Water) w.setTile(sx, sy, packTile(Terrain.Grass, false, 0, 0));
+    }
+    const plan = planBridge(x0, y0, dx, dy, b.tiles.length, { tile: (x, y) => w.getTile(x, y), aux: (x, y) => w.auxAt(x, y), land: () => null }, BRIDGE_STYLES[b.name]);
+    if (!plan.ok) { stats.problems.push(`${b.name} at (${x0}, ${y0}): ${plan.reason}`); continue; }
+    w.placeBridge(plan.tiles!);
+    stats.bridges++;
   }
 
   // nothing may stand where no road reaches its door (nobody could ever get there): the parks' inner tiles stay open

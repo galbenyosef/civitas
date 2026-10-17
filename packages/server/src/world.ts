@@ -2,7 +2,7 @@ import {
   CHUNK_SIZE, Zone, KIND_COUNT, KIND_ID_COUNT, packTile, zoneOf, levelOf, isRoad, underConstruction, withLevel, withConstruction, withZone, withPriority, withProgress,
   capacity, chunkKey, tileKey, parseKey, localIndex, chunkOf, makeTerrainSampler, hash2, CAR_OWNERSHIP, CAR_OWNERSHIP_OFFICE,
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
-  isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS,
+  isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
   type LedgerCat, type LedgerDTO, ECONOMY_TUNING,
 } from '@msimcity/shared';
@@ -281,6 +281,7 @@ export class World {
     if (c.tiles[i] === packed) { if (subChanged && !c.aux[i]) this.syncBuilding(x, y, packed); return; }
     if (c.aux[i] && isStructureAux(c.aux[i]) && this.structureWrite(x, y, packed)) return;
     if (c.aux[i] && isJunctionAux(c.aux[i]) && !isRoad(packed)) this.removeJunction(x, y); // a ring or flyover tile dug up: the junction goes back to a crossroads
+    if (c.aux[i] && isBridgeAux(c.aux[i]) && !isRoad(packed)) this.setAux(x, y, 0); // a bridge deck tile taken away: open water again
     if (c.tiles[i] === packed) return;
     if (c.sub[i] && sub === undefined && (zoneOf(packed) !== zoneOf(c.tiles[i]) || isRoad(packed))) this.setSub(x, y, 0);
     if (isRoad(c.tiles[i]) !== isRoad(packed)) this.noteJobEdit(x, y);
@@ -386,6 +387,20 @@ export class World {
       if (isRoad(t) !== road || (!road && zoneOf(t) !== Zone.None)) this.setTile(x, y, packTile(terrainOf(t), road, 0, 0));
     }
     for (let i = 0; i < tiles.length; i += 4) { this.setAux(tiles[i], tiles[i + 1], tiles[i + 2]); this.onTileChanged?.(tiles[i], tiles[i + 1]); }
+  }
+  /** Lay a bridge's deck (shared/src/bridges.ts planBridge, already checked): `tiles` is the plan's flat [x, y, aux]. */
+  placeBridge(tiles: number[]) {
+    for (let i = 0; i < tiles.length; i += 3) {
+      const x = tiles[i], y = tiles[i + 1];
+      this.setAux(x, y, tiles[i + 2]);
+      this.setTile(x, y, packTile(Terrain.Water, true, 0, 0));
+    }
+  }
+  /** Take away the whole bridge one of whose deck tiles is (x, y): every deck tile of the span is open water again. */
+  removeBridge(x: number, y: number) {
+    const s = bridgeSpanAt(x, y, (tx, ty) => this.auxAt(tx, ty));
+    if (!s) return;
+    for (let i = 0; i < s.len; i++) this.setTile(s.x0 + s.dx * i, s.y0 + s.dy * i, packTile(Terrain.Water, false, 0, 0));
   }
   /**
    * Take away the roundabout or flyover at (x, y), any of its tiles: a flyover tile is a plain crossroads again; a
@@ -516,10 +531,11 @@ export class World {
     const id = this.parcelIdAt(x, y);
     return id ? this.parcels.get(id) : undefined;
   }
+  /** A road beside the lot. A bridge deck (road on water, shared/src/bridges.ts) is nobody's road access: it is entered only at its ends. */
   hasRoadAccess(x: number, y: number): boolean {
     for (const [dx, dy] of DIRS) {
       const t = this.peekTile(x + dx, y + dy);
-      if (t !== undefined && isRoad(t)) return true;
+      if (t !== undefined && isRoad(t) && (t & 3) !== Terrain.Water) return true;
     }
     return false;
   }

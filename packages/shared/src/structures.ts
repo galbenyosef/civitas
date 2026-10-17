@@ -12,7 +12,8 @@ import { Zone } from './buildings/codes';
  *   0x40 | r          anchor of a multi-tile structure; r (bits 0-1) is its orientation, bits 2-5 are 0
  *   0x80 | dy<<3 | dx part of a structure whose anchor is at (x - dx, y - dy); dx, dy 0-7
  *   0xc0-0xd7         airfield strip tiles (airport.ts)
- *   0xd8-0xff         free
+ *   0xd8-0xdf         bridge deck tiles (bridges.ts)
+ *   0xe0-0xef         railway track (rail.ts); 0xf0-0xfa roundabouts and flyovers (junctions.ts); 0xfb-0xff free
  *
  * The anchor is the footprint's min-x, min-y corner, so part offsets are never negative. Every tile of a
  * structure carries the same tile word (family code, level, construction bits) and the same sub byte (kind id,

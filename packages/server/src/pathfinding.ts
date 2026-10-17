@@ -1,4 +1,4 @@
-import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, RING_AUX } from '@msimcity/shared';
+import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS } from '@msimcity/shared';
 import { DIRS, tkey, type World } from './world';
 
 /** `a`: the tile's aux byte (roundabouts and flyovers restrict the steps out of it, shared/src/junctions.ts) */
@@ -15,11 +15,14 @@ function peek(w: World, x: number, y: number): number | undefined {
   peekedAux = c.aux[i];
   return c.tiles[i];
 }
-/** May a search go on from node n to its neighbour (nx, ny): round a ring only forwards, over a flyover only straight. */
+/** May a search go on from node n to its neighbour (nx, ny): round a ring only forwards, over a flyover only straight, off a bridge deck only along it. */
 function stepOk(w: World, n: Node, nx: number, ny: number): boolean {
-  if (n.a < RING_AUX) return true;
+  if (n.a < STEP_RULE_AUX) return true;
   return junctionStepOk((x, y) => w.auxAt(x, y), n.x, n.y, nx, ny, n.parent ? n.x - n.parent.x : 0, n.parent ? n.y - n.parent.y : 0);
 }
+
+/** Would the step (dx, ·) onto a tile with aux byte a come onto a bridge deck from the side? Decks are entered only at their ends. */
+const sideways = (a: number, dx: number) => isBridgeAux(a) && bridgeNS(a) === (dx !== 0);
 
 export interface PathResult { path: number[]; gx: number; gy: number }
 
@@ -52,7 +55,7 @@ export function findPath(
     for (const [dx, dy] of DIRS) {
       const nx = sx + dx, ny = sy + dy;
       const t = peek(w, nx, ny);
-      if (t !== undefined && isRoad(t)) {
+      if (t !== undefined && isRoad(t) && !sideways(peekedAux, dx)) {
         visited.add(tkey(nx, ny) + routeLayer(peekedAux, dx) * LAYER);
         queue.push({ x: nx, y: ny, parent: root, depth: 1, a: peekedAux });
       }
@@ -66,7 +69,7 @@ export function findPath(
       const nx = n.x + dx, ny = n.y + dy;
       const t = peek(w, nx, ny), a = peekedAux;
       const key = tkey(nx, ny) + routeLayer(a, dx) * LAYER;
-      if (visited.has(key) || !stepOk(w, n, nx, ny)) continue;
+      if (visited.has(key) || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
       if (isGoal(nx, ny)) return { path: unwind({ x: nx, y: ny, parent: n, depth: n.depth + 1, a }), gx: nx, gy: ny };
       if (t === undefined || !isRoad(t)) continue;
       visited.add(key);
@@ -112,7 +115,7 @@ export function findBest(
   else for (const [dx, dy] of DIRS) {
     const nx = sx + dx, ny = sy + dy;
     const t = peek(w, nx, ny);
-    if (t !== undefined && isRoad(t)) { visited.add(tkey(nx, ny) + routeLayer(peekedAux, dx) * LAYER); queue.push({ x: nx, y: ny, parent: root, depth: 1, a: peekedAux }); }
+    if (t !== undefined && isRoad(t) && !sideways(peekedAux, dx)) { visited.add(tkey(nx, ny) + routeLayer(peekedAux, dx) * LAYER); queue.push({ x: nx, y: ny, parent: root, depth: 1, a: peekedAux }); }
   }
   const early = maxScore !== Infinity || maxTotal !== Infinity;
   let expanded = 0;
@@ -125,7 +128,7 @@ export function findBest(
       const nx = n.x + dx, ny = n.y + dy;
       const t = peek(w, nx, ny), a = peekedAux;
       const key = tkey(nx, ny) + routeLayer(a, dx) * LAYER;
-      if (visited.has(key) || !stepOk(w, n, nx, ny)) continue;
+      if (visited.has(key) || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
       if (t === undefined || !isRoad(t)) { if (!goals.has(key)) { goals.add(key); consider(nx, ny, n); } continue; }
       visited.add(key);
       queue.push({ x: nx, y: ny, parent: n, depth: n.depth + 1, a });
@@ -210,7 +213,7 @@ export function findRoute(
   else for (let d = 0; d < 4; d++) {
     const nx = sx + DIRS[d][0], ny = sy + DIRS[d][1];
     const t = peek(w, nx, ny);
-    if (t === undefined || !isRoad(t)) continue;
+    if (t === undefined || !isRoad(t) || sideways(peekedAux, DIRS[d][0])) continue;
     const k = tkey(nx, ny) + routeLayer(peekedAux, DIRS[d][0]) * LAYER, c = cost(nx, ny);
     g.set(k, c); parent.set(k, start); dirIn.set(k, d); push(k, c + h(nx, ny));
   }
@@ -226,7 +229,7 @@ export function findRoute(
     const here = peek(w, x, y) === undefined ? 0 : peekedAux;
     for (let d = 0; d < 4; d++) {
       const nx = x + DIRS[d][0], ny = y + DIRS[d][1];
-      if (here >= RING_AUX && !junctionStepOk(auxFn, x, y, nx, ny, din >= 0 ? DIRS[din][0] : 0, din >= 0 ? DIRS[din][1] : 0)) continue;
+      if (here >= STEP_RULE_AUX && !junctionStepOk(auxFn, x, y, nx, ny, din >= 0 ? DIRS[din][0] : 0, din >= 0 ? DIRS[din][1] : 0)) continue;
       const t = peek(w, nx, ny);
       const nk = tkey(nx, ny) + routeLayer(peekedAux, DIRS[d][0]) * LAYER;
       if (nx === gx && ny === gy) {
@@ -237,7 +240,7 @@ export function findRoute(
         return { path, cost: gk + (goalRoad ? cost(gx, gy) : 1) };
       }
       if (closed.has(nk)) continue;
-      if (t === undefined || !isRoad(t)) continue;
+      if (t === undefined || !isRoad(t) || sideways(peekedAux, DIRS[d][0])) continue;
       const ng = gk + cost(nx, ny) + (din >= 0 && din !== d && k !== start ? turnCost : 0); // startDir restricts, it does not charge
       const old = g.get(nk);
       if (old !== undefined && old <= ng) continue;

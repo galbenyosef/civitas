@@ -236,6 +236,8 @@ export interface RoadInfo {
   amber?: boolean;
   kerbParked: number;
   parcel?: { name: string; owner: string };
+  /** on a bridge deck (shared/src/bridges.ts): its style name and length in tiles */
+  bridge?: { style: string; span: number };
 }
 
 /** Live detail for one person or vehicle. */

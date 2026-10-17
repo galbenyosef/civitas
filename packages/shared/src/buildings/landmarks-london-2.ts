@@ -393,16 +393,17 @@ export const buckinghamPalace: KindDef = {
  * two bascules of the central span are render/landmarks.ts's: they rise for ships on a schedule. `deckY` is the top of
  * the road, `hinge` where each bascule turns (the towers' inner faces), `leaf` a bascule's length, `width` its width.
  *
- * Interim (docs/buildings.md "Landmarks"): roads may not cross water yet, so the bridge is a structure standing on its
- * own tiles with a deck nobody drives; the London demo reclaims the river under it in place of the Tower Bridge
- * causeway. When road bridges arrive it becomes a real crossing.
+ * On a real crossing (shared/src/bridges.ts): a bascule-style road bridge is drawn as this model (chunkView, centred on
+ * the span and stretched to its length), with the bascules and ramps over its deck tiles, and the traffic drives it at
+ * `deckY`; that is how the London demo has it. Placed with its own tool it is still a structure on its own dry tiles
+ * whose deck nobody drives (docs/buildings.md "Landmarks").
  */
 export const TOWER_BRIDGE = { deckY: 0.25, hinge: 0.39, leaf: 0.39, width: 0.5, towerZ: 0.6 };
 const TBR = TOWER_BRIDGE;
 const TB_STONE = 0xd8d0bf, TB_BLUE = 0x86b2da, TB_SLATE = 0x4e5867;
 
 const towerBridgeOps = (): Op[] => {
-  const ops: Op[] = [['box', 0.96, 0.006, 3.96, 0, 0, 0, 0x2e74c9]];
+  const ops: Op[] = [];
   const D = TBR.deckY;
   // a sloping bar from (z0, y0) to (z1, y1) at x
   const bar = (x: number, z0: number, y0: number, z1: number, y1: number, t: number, c: Color): Op => {
@@ -460,7 +461,7 @@ export const towerBridge: KindDef = {
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', ...landmark,
   footprint: { w: 1, h: 4, door: [0, 3] },
   blurb: 'The Victorian bascule bridge by the Tower: two Gothic towers joined by high walkways, blue suspension chains, and a road that lifts in two halves to let tall ships through. Visitors cross the walkways for the view.',
-  howTo: 'One tile wide and four long, across the river with its door on the bank road at one end; the bascules rise for passing ships a few times a day. For now it stands on its own tiles and carries no traffic. London landmark: unlock rule to be decided.',
+  howTo: 'In the London demo it is a real crossing: a bascule road bridge over the Thames whose traffic waits at the barriers while the bascules rise for passing ships, a few times a day. Placed with its tool it is a 1×4 landmark on dry land, its door on the bank road at one end, whose deck carries no traffic. London landmark: unlock rule to be decided.',
   tool: { id: 'towerbridge', key: '', label: 'Tower Bridge', color: '#86b2da' },
   occupation: { ...library.occupation!, name: 'bridge master' },
   attrs: {

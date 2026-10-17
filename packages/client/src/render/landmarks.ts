@@ -3,7 +3,8 @@ import {
   Matrix4, Vector3, Quaternion, Color, Object3D,
 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CHUNK_SIZE, KIND_ID, Terrain, hash2, zoneOf, levelOf, kindIdOf, isRoad, terrainOf, isAnchorAux, auxOrientation, placedFromAnchor, FRONT } from '@msimcity/shared';
+import { CHUNK_SIZE, KIND_ID, Terrain, hash2, zoneOf, levelOf, kindIdOf, isRoad, terrainOf, isAnchorAux, auxOrientation, placedFromAnchor, FRONT, isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle,
+  basculeLiftAt, basculeOpen, basculeSeed, BASCULE_LIFT } from '@msimcity/shared';
 import { LONDON_EYE, BIG_BEN, TOWER_BRIDGE } from '@msimcity/shared/src/buildings/landmarks-london-2';
 import type { ClientChunk } from '../world';
 import { nightUniform } from './materials';
@@ -162,9 +163,6 @@ function updateClock(c: ClockInst, t: number, night: number) {
 
 // ---------------------------------------------------------------- Tower Bridge
 
-/** One lift: the leaves rise over RAISE hours, stand open for HOLD while the barge passes, and come down over RAISE. */
-const RAISE = 0.1, HOLD = 0.3, LIFT = 2 * RAISE + HOLD;
-
 let leafGeo: { deck: BufferGeometry; girders: BufferGeometry; rails: BufferGeometry } | null = null;
 let bargeGeo: { hull: BufferGeometry; rig: BufferGeometry; sails: BufferGeometry } | null = null;
 /** A bascule leaf in its hinge's frame: reaching from the hinge towards -z, its road on top at y = 0. */
@@ -211,29 +209,16 @@ function makeBridge(seed: number, river: boolean): BridgeInst {
   return { kind: 'bridge', root, leaves, barge, river, seed };
 }
 
-/** The lift under way at game time t (hours since day 0): its start, or NaN. Each bridge lifts 0-3 times a day between 7 and 21. */
-function liftAt(seed: number, t: number): number {
-  const day = Math.floor(t / 24);
-  for (const d of [day, day - 1]) {
-    const n = Math.floor(hash2(seed + d * 13, 7) * 3.6);
-    for (let k = 0; k < n; k++) {
-      const start = d * 24 + 7 + 14 * hash2(seed + d * 31 + k * 5, 19);
-      if (t >= start && t < start + LIFT) return start;
-    }
-  }
-  return NaN;
-}
-
+/** The leaves follow the shared lift schedule (shared/src/bridges.ts basculeLiftAt), the one the server's barriers keep. */
 function updateBridge(b: BridgeInst, t: number) {
-  const start = liftAt(b.seed, t), u = t - start;
-  const open = Number.isNaN(start) ? 0 : u < RAISE ? smooth(0, RAISE, u) : u < RAISE + HOLD ? 1 : 1 - smooth(RAISE + HOLD, LIFT, u);
-  const angle = open * (80 * Math.PI) / 180;
+  const start = basculeLiftAt(b.seed, t), u = t - start;
+  const angle = basculeOpen(b.seed, t) * (80 * Math.PI) / 180;
   for (const l of b.leaves) l.rotation.x = angle;
   // the barge comes down the river while the leaves rise and is through before they fall (only where there is a river)
   b.barge.visible = b.river && !Number.isNaN(start);
   if (b.barge.visible) {
     const dir = hash2(b.seed + Math.floor(start * 10), 3) < 0.5 ? 1 : -1;
-    b.barge.position.set(dir * (-3 + (6 * u) / LIFT), 0.004, 0.05 * dir);
+    b.barge.position.set(dir * (-3 + (6 * u) / BASCULE_LIFT), 0.004, 0.05 * dir);
     b.barge.rotation.y = dir > 0 ? 0 : Math.PI;
   }
 }
@@ -265,6 +250,7 @@ export class LandmarkMotion {
     const x0 = c.cx * CHUNK_SIZE, z0 = c.cy * CHUNK_SIZE;
     for (let i = 0; i < c.tiles.length; i++) {
       const a = c.aux[i];
+      if (isBridgeAux(a) && bridgeStyle(a) === BridgeStyle.Bascule && isRoad(c.tiles[i])) { this.bascule(c, i, a, insts, roots); continue; }
       if (!a || !isAnchorAux(a)) continue;
       const t = c.tiles[i];
       if (isRoad(t) || levelOf(t) === 0) continue;
@@ -280,12 +266,35 @@ export class LandmarkMotion {
       const wet = (dx: number, dy: number) => { const w = getTile(mx + dx, my + dy); return w !== undefined && terrainOf(w) === Terrain.Water; };
       const px = -fy, py = fx, reach = Math.floor((px ? p.w : p.h) / 2) + 1;
       const river = wet(px * reach, py * reach) && wet(-px * reach, -py * reach);
-      for (const inst of make(kind, x * 7919 + z * 104729, river)) { root.add(inst.root); insts.push(inst); }
+      for (const inst of make(kind, basculeSeed(x, z), river)) { root.add(inst.root); insts.push(inst); }
       roots.push(root);
       this.group.add(root);
     }
     if (insts.length) this.perChunk.set(key, { insts, roots });
   }
+
+  /**
+   * A bascule bridge span (shared/src/bridges.ts) is Tower Bridge on a real road crossing (chunkView draws the model,
+   * render/bridges.ts the ramps): its leaves and barge from the span's first deck tile, centred on the span and turned
+   * along it, stretched to its length as the model is. The river is always there.
+   */
+  private bascule(c: ClientChunk, i: number, a: number, insts: Inst[], roots: Object3D[]) {
+    const x = c.cx * CHUNK_SIZE + (i % CHUNK_SIZE), z = c.cy * CHUNK_SIZE + Math.floor(i / CHUNK_SIZE);
+    const ns = bridgeNS(a), dx = ns ? 0 : 1, dz = ns ? 1 : 0;
+    const at = (tx: number, tz: number) => { const lx = tx - c.cx * CHUNK_SIZE, lz = tz - c.cy * CHUNK_SIZE; return lx >= 0 && lz >= 0 && lx < CHUNK_SIZE && lz < CHUNK_SIZE ? c.aux[lz * CHUNK_SIZE + lx] : this.auxAt(tx, tz); };
+    if (at(x - dx, z - dz) === a) return; // not the span's first tile
+    let len = 1;
+    while (len < 24 && at(x + dx * len, z + dz * len) === a) len++;
+    const root = new Group();
+    root.position.set(x + (ns ? 0.5 : len / 2), 0, z + (ns ? len / 2 : 0.5));
+    root.quaternion.setFromAxisAngle(UP, ns ? 0 : Math.PI / 2);
+    root.scale.set(1, 1, len / 4);
+    for (const inst of make(BRIDGE_KIND, basculeSeed(x, z), true)) { root.add(inst.root); insts.push(inst); }
+    roots.push(root);
+    this.group.add(root);
+  }
+  /** aux bytes beyond the chunk being scanned (a span running into the next chunk); 0 where not loaded */
+  auxAt: (x: number, y: number) => number = () => 0;
 
   dropChunk(key: string) {
     const c = this.perChunk.get(key);

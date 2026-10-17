@@ -9,6 +9,7 @@ import { techFor, TRACK_NAMES } from '../tech';
 import { RUNWAY_COST, RUNWAY_MIN, RUNWAY_MAX, TERMINAL_ROW } from '../airport';
 import { RAIL_COST, CROSSING_COST } from '../rail';
 import { ROUNDABOUT_COST, FLYOVER_COST } from '../junctions';
+import { BRIDGE_TILE_COST, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES, BridgeStyle } from '../bridges';
 import { LONDON_SECTIONS, LONDON_TOUR, LONDON_VIEW } from './london';
 
 /**
@@ -51,6 +52,12 @@ export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 
 export interface DemoRunway { id: string; from: DemoXY; to: DemoXY }
 /** railway track: each drag as a player makes it (rail.ts trackDragPath: the longer axis first, one corner) */
 export interface DemoTrack { id: string; name: string; drags: readonly (readonly [DemoXY, DemoXY])[] }
+/**
+ * A road bridge (bridges.ts planBridge) whose deck runs from `from` to `to`, both water tiles in a line, with road on
+ * the banks beyond them. `style` forces the style (else the tool's choice); `landmark` is the catalogue landmark a
+ * bascule span is drawn as (Tower Bridge), which then counts as placed in the city's demo.
+ */
+export interface DemoBridge { id: string; name: string; from: DemoXY; to: DemoXY; style?: keyof typeof BridgeStyle; landmark?: string }
 /** a roundabout or flyover clicked on the junction `at` (junctions.ts); a flyover's deck carries the `deck` road */
 export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: DemoXY; deck?: 'ew' | 'ns' }
 export interface DemoLine {
@@ -82,6 +89,7 @@ export interface DemoSection {
   runways?: DemoRunway[];
   tracks?: DemoTrack[];
   junctions?: DemoJunction[];
+  bridges?: DemoBridge[];
   lines?: DemoLine[];
   blocks?: DemoBlock[];
 }
@@ -332,6 +340,13 @@ const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
     facts: [['Tool', 'Flyover (no key), click a crossroads'], ['Footprint', 'the crossing tile, ramps on the tiles either side'], ['Needs', 'four roads meeting, plain straight road either side of the deck'], ['Technology', techLine('flyover')], ['Cost', `${money(FLYOVER_COST)}, swapping the deck is free`]],
   },
 };
+/** A bridge on the tour (not a tool of its own: the road tool lays it over water). */
+const BRIDGE_CAPTION: Caption = {
+  title: 'Bridge',
+  what: 'A road bridge over the water. To the traffic it is plain straight road, cars and walkers both ways; nothing joins it from the side and nobody parks on it. Short crossings are mostly stone arches, middling ones arches or steel girders, long ones mostly suspension spans.',
+  how: `Drag a road straight out from a road on one bank across the water to the far bank (Civil engineering): the bridge goes down when the drag reaches dry land in line, up to ${BRIDGE_MAX_SPAN} tiles of water. Both ends land on road; bends and junctions on the water are refused. Bulldozing any of the deck takes the whole bridge away.`,
+  facts: [['Tool', 'Road (3), drag across the water'], ['Needs', 'road on both banks in line, open water between'], ['Technology', techLine('bridges')], ['Cost', `${money(BRIDGE_TILE_COST)} a tile of deck`]],
+};
 const LINE_CAPTIONS: Record<TransitMode | 'freight', Omit<Caption, 'title'>> = {
   bus: {
     what: 'A bus line: the owner\'s stops in calling order, run there and back (or as a loop) by buses from a depot, one bus per driver on shift, 05:30 to 00:30. Riders whose car is at home weigh it against walking and driving, wait at the stop and pay $2 a ride to the owner.',
@@ -459,6 +474,18 @@ export function demoTour(id: DemoId): TourStop[] {
         out.push({ id: sid, ...base, ...SURFACE_CAPTIONS[j.tool], ...framing(area[0], area[1], area[2], area[3], 0, 0.8), rect: j.tool === 'roundabout' ? [j.at[0] - 1, j.at[1] - 1, 3, 3] : [j.at[0], j.at[1], 1, 1], inspect: j.tool === 'roundabout' ? [j.at[0] + 1, j.at[1]] : j.at });
         continue;
       }
+      const br = s.bridges?.find((q) => q.id === sid);
+      if (br) {
+        const box = bbox([br.from, br.to]), ns = box[2] === 1;
+        const span = ns ? box[3] : box[2], area = ns ? [box[0], box[1] - 1, 1, span + 2] as const : [box[0] - 1, box[1], span + 2, 1] as const;
+        const k = br.landmark ? kindManifest(kindIdOf(br.landmark)) : undefined;
+        const style = BRIDGE_STYLE_NAMES[BridgeStyle[br.style ?? 'Arch']];
+        // a landmark bridge reads as the landmark (its blurb) and works as any bridge (no staff, no visitors)
+        const c = k ? { ...BRIDGE_CAPTION, what: k.blurb ?? BRIDGE_CAPTION.what } : BRIDGE_CAPTION;
+        const facts: [string, string][] = [['Span', `${span} tiles of water, ${br.style ? style : 'the tool\'s choice of style'}`], ...c.facts];
+        out.push({ id: sid, ...base, ...c, title: br.name, facts, ...framing(area[0], area[1], area[2], area[3], ns ? 1 : 0, k ? 1.2 : 0.8), kind: k?.kindId, rect: area, inspect: br.from });
+        continue;
+      }
       const l = s.lines?.find((q) => q.id === sid);
       if (l) {
         const mode = l.freight ? 'freight' : l.mode;
@@ -491,10 +518,14 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
     for (const r of s.runways ?? []) dup(r.id);
     for (const t of s.tracks ?? []) dup(t.id);
     for (const j of s.junctions ?? []) dup(j.id);
+    for (const b of s.bridges ?? []) dup(b.id);
     for (const l of s.lines ?? []) dup(l.id);
   }
-  // landmarks (docs/buildings.md "Landmarks") stand in their own city's demo (the London ones in London), not the showcase
-  const inCity = new Set(DEMOS.filter((d) => d.id !== 'showcase').flatMap((d) => demoSections(d.id).flatMap((s) => (s.placements ?? []).map((p) => p.kind))));
+  // landmarks (docs/buildings.md "Landmarks") stand in their own city's demo (the London ones in London), not the showcase;
+  // a landmark drawn over a bridge (Tower Bridge) is placed by laying that bridge
+  const inCity = new Set(DEMOS.filter((d) => d.id !== 'showcase').flatMap((d) => demoSections(d.id).flatMap((s) => [
+    ...(s.placements ?? []).map((p) => p.kind), ...(s.bridges ?? []).flatMap((b) => (b.landmark ? [b.landmark] : [])),
+  ])));
   for (const k of manifest) {
     if (k.draft || !k.tool) continue;
     if (k.landmark) {

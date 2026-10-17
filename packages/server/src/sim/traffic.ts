@@ -1,7 +1,7 @@
 import {
   DRIVE_SPEED, MIN_GAP, LANE_OFFSET, SIDEWALK_OFFSET, VEHICLE_LEN, VEHICLE_WIDTH, TRAFFIC_TUNING as TT,
   VehicleClass, isRoad, hasFeature, signalTiming, signalPhaseOf, signalArms, signalledArms, type SignalPhase,
-  isJunctionAux, isRingAux, isFlyoverAux, islandOf, ringPos, isArmPos, RING_POS, isCrossing,
+  isJunctionAux, isRingAux, isFlyoverAux, islandOf, ringPos, isArmPos, RING_POS, isCrossing, isBridgeAux, isDeck, bridgeStyle, BridgeStyle, basculeBarrierAt,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
@@ -16,6 +16,8 @@ const RIGHT = [2, 3, 1, 0], LEFT = [3, 2, 0, 1], OPP = [1, 0, 3, 2];
 const isEW = (d: number) => d < 2;
 /** what a level crossing adds to a road tile's cost for the router: the expected wait for the barriers */
 const CROSSING_DELAY = 1.5;
+/** what a bascule bridge's deck tile adds to a road tile's cost while it is lifting (shared/src/bridges.ts) */
+const BASCULE_UP_COST = 25;
 
 interface Cong { v: number; at: number }
 interface Junction { signal: boolean; ver: number; deg: number; pid: number; offset: number; period: number; act?: Actuation }
@@ -189,7 +191,10 @@ export class Traffic {
   private junctions = new Map<number, Junction>();
   /** roundabout and flyover aux bytes by road tile (shared/src/junctions.ts), 0 for none; dropped with the degree cache */
   private jaux = new Map<number, number>();
-  /** level crossings by road tile (shared/src/rail.ts isCrossing): 1 for a crossing, 0 for none; dropped with the degree cache */
+  /**
+   * level crossings by road tile (shared/src/rail.ts isCrossing): 1 for a crossing, 2 for a bascule bridge's deck (its
+   * barriers close round each lift, shared/src/bridges.ts), 0 for none; dropped with the degree cache
+   */
   private xing = new Map<number, number>();
   /** barrier state per crossing for the tick under way */
   private bars = new Map<number, boolean>();
@@ -273,7 +278,9 @@ export class Traffic {
     let c = 1 + TT.congestionWeight * this.congestionAt(x, y);
     if (this.degreeOf(x, y) >= 3) c += 0.6;
     if ((this.w.kerb.get(k) ?? 0) > 0) c += 0.5;
-    if (this.isCrossingAt(x, y)) c += CROSSING_DELAY;
+    // a level crossing: the expected wait for its barriers. A bascule lifts only a few times a day: nothing, but while it
+    // is up, a detour (drivers held at it past the stuck limit re-route round it)
+    if (this.isCrossingAt(x, y)) c += this.xing.get(k) === 1 ? CROSSING_DELAY : this.barrierDownAt(x, y) ? BASCULE_UP_COST : 0;
     return c;
   }
   pathCost(path: number[], from: number): number {
@@ -306,22 +313,31 @@ export class Traffic {
     if (a === undefined) { a = this.w.auxAt(x, y); if (!isJunctionAux(a)) a = 0; this.jaux.set(k, a); }
     return a;
   }
-  /** Is (x, y) a level crossing (a road tile with straight track over it, shared/src/rail.ts)? */
+  /**
+   * Is (x, y) a level crossing (a road tile with straight track over it, shared/src/rail.ts)? A bascule bridge's deck
+   * tile counts as one: barriers on its approaches close while it lifts.
+   */
   isCrossingAt(x: number, y: number): boolean {
     const k = tkey(x, y);
     let v = this.xing.get(k);
-    if (v === undefined) { v = isCrossing(this.w.peekTile(x, y), this.w.auxAt(x, y)) ? 1 : 0; this.xing.set(k, v); }
-    return v === 1;
+    if (v === undefined) {
+      const t = this.w.peekTile(x, y), a = this.w.auxAt(x, y);
+      v = isCrossing(t, a) ? 1 : isDeck(t, a) && bridgeStyle(a) === BridgeStyle.Bascule ? 2 : 0;
+      this.xing.set(k, v);
+    }
+    return v !== 0;
   }
   /** Are the barriers of the crossing (x, y) down this tick? */
   barrierDownAt(x: number, y: number): boolean {
-    if (!this.barrier) return false;
+    const bascule = this.xing.get(tkey(x, y)) === 2;
+    if (!this.barrier && !bascule) return false;
     if (this.barsTick !== this.w.tick) { this.bars.clear(); this.barsTick = this.w.tick; }
     const k = tkey(x, y);
     let v = this.bars.get(k);
-    if (v === undefined) { v = this.barrier(x, y); this.bars.set(k, v); }
+    if (v === undefined) { v = bascule ? basculeBarrierAt(x, y, this.auxFn, this.w.tick) : this.barrier!(x, y); this.bars.set(k, v); }
     return v;
   }
+  private auxFn = (x: number, y: number) => this.w.auxAt(x, y);
   /** Barriers down at the crossing (x, y), or at a crossing straight after it heading d (side-by-side tracks are crossed in one go)? */
   private crossingClosed(x: number, y: number, d: number): boolean {
     for (let i = 0; i < 4 && this.isCrossingAt(x, y); i++, x += DIRS[d][0], y += DIRS[d][1]) if (this.barrierDownAt(x, y)) return true;
@@ -330,10 +346,12 @@ export class Traffic {
   /** Walking from (x0, y0) to (x1, y1) onto a level crossing whose barriers are down? Walkers wait at the edge (simulation.walkOn). */
   barrierAhead(x0: number, y0: number, x1: number, y1: number): boolean {
     const mx = Math.floor((x0 + x1) / 2), my = Math.floor((y0 + y1) / 2);
+    // a walker caught on a bascule span when the barriers close walks on off it, as a car drives off
+    if (this.isCrossingAt(Math.floor(x0), Math.floor(y0)) && this.xing.get(tkey(Math.floor(x0), Math.floor(y0))) === 2) return false;
     return this.isCrossingAt(mx, my) && this.barrierDownAt(mx, my) && !(x0 > mx + 0.02 && x0 < mx + 0.98 && y0 > my + 0.02 && y0 < my + 0.98);
   }
-  /** No car is left at the kerb of a roundabout, a flyover or a level crossing. */
-  kerbless(x: number, y: number): boolean { return !!this.junctionAux(x, y) || this.isCrossingAt(x, y); }
+  /** No car is left at the kerb of a roundabout, a flyover, a level crossing or a bridge. */
+  kerbless(x: number, y: number): boolean { return !!this.junctionAux(x, y) || this.isCrossingAt(x, y) || isBridgeAux(this.w.auxAt(x, y)); }
   /** Speed factor for a turn through tile (x, y): 0.6 at a plain junction; on a roundabout 1 round a corner, TRAFFIC_TUNING.ringSlow on or off at an arm. */
   private turnSlow(x: number, y: number) {
     const a = this.junctionAux(x, y);

@@ -23,6 +23,7 @@ export * from './flights';
 export * from './airport';
 export * from './rail';
 export * from './junctions';
+export * from './bridges';
 export * from './transit';
 export * from './crews';
 export * from './gateways';

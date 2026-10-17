@@ -51,7 +51,7 @@ export const THAMES: ThamesPoint[] = [
   [51.4810, -0.1730, 4, 'Battersea Bridge'],
   [51.4845, -0.1500, 4, 'Chelsea Bridge'],
   [51.4880, -0.1270, 4, 'Vauxhall Bridge'],
-  [51.4945, -0.1230, 4],
+  [51.4945, -0.1230, 4, 'Lambeth Bridge'],
   [51.5008, -0.1218, 4, 'Westminster Bridge'],
   [51.5085, -0.1165, 4, 'Waterloo Bridge'],
   [51.5095, -0.1040, 4, 'Blackfriars Bridge'],
@@ -379,14 +379,12 @@ export const LONDON_SECTIONS: DemoSection[] = [
       fit('one-canada-square', 'one-canada-square', 51.5049, -0.0195, 'W'),
       // the second five (buildings/landmarks-london-2.ts): Parliament on the river south of Westminster Bridge, Big Ben at
       // the bridge end; the Eye across the river on the South Bank; the Palace at the end of the Mall past St James's
-      // Park; the Tower by the river in the City. Tower Bridge stands in place of its causeway east of the Tower: roads
-      // cannot cross water yet, so the seeder reclaims the river under it (server/src/demo/london.ts) and the traffic
-      // crosses at London Bridge, a block west
+      // Park; the Tower by the river in the City. Tower Bridge (below, `bridges`) is a real road bridge east of the Tower,
+      // a bascule span drawn as the landmark
       fit('parliament', 'parliament', 51.4962, -0.1338, 'N'),
       fit('london-eye', 'london-eye', 51.5033, -0.1098, 'W'),
       fit('buckingham-palace', 'buckingham-palace', 51.5014, -0.1419, 'E'),
       fit('tower-of-london', 'tower-of-london', 51.5081, -0.0759, 'N'),
-      { id: 'tower-bridge', kind: 'tower-bridge', door: [5, 0], rot: 2 },
       fit('palladium', 'theatre', 51.5140, -0.1350, 'E'),
       fit('lyceum', 'theatre', 51.5110, -0.1200, 'N'),
       fit('donmar', 'studio-theatre', 51.5130, -0.1260, 'W'),
@@ -401,6 +399,8 @@ export const LONDON_SECTIONS: DemoSection[] = [
       fit('copper-box', 'leisure-centre', 51.5470, -0.0220, 'W'),
       fit('o2-arena', 'arena', 51.4999, 0.0211, 'W'),
     ],
+    // the seeder bridges every named crossing (server/src/demo/london.ts); Tower Bridge is the landmark among them
+    bridges: [{ id: 'tower-bridge', name: 'Tower Bridge', from: [5, 0], to: [5, 3], style: 'Bascule', landmark: 'tower-bridge' }],
   },
   {
     id: 'london-rail', name: 'Rail and Heathrow',
@@ -437,7 +437,7 @@ export const LONDON_SECTIONS: DemoSection[] = [
   },
   {
     id: 'london-buses', name: 'Buses',
-    blurb: 'The 25 along Oxford Street to Whitechapel, the 159 over Westminster Bridge to Brixton and the D3 round the Isle of Dogs, from three garages.',
+    blurb: 'The 25 along Oxford Street to Whitechapel, the 159 over Lambeth Bridge to Brixton and the D3 round the Isle of Dogs, from three garages.',
     placements: [
       fit('victoria-garage', 'bus-depot', 51.4930, -0.1450, 'N'),
       fit('stockwell-garage', 'bus-depot', 51.4740, -0.1180, 'E'),

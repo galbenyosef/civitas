@@ -1,4 +1,4 @@
-import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, isMultiTile, trackDragPath, type KindToolId } from '@msimcity/shared';
+import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, isMultiTile, trackDragPath, BRIDGE_MAX_SPAN, type KindToolId } from '@msimcity/shared';
 import type { CameraRig } from './camera';
 import { Vector3 } from 'three';
 
@@ -33,7 +33,16 @@ export interface InputCallbacks {
   onKey(code: string): void;
   /** a shortcut key of a size ladder (client/src/picker.ts): the size to select instead (the last one used), or undefined */
   ladderKey?(tool: ToolId): ToolId | undefined;
+  /** whether a tile is water (the road tool bridges it: see Input.crossing); unloaded tiles count as dry */
+  isWater?(x: number, y: number): boolean;
 }
+
+/**
+ * A road drag out over water (shared/src/bridges.ts): `from` is the last dry tile before it, (dx, dy) the way the
+ * bridge goes. Nothing is sent while the cursor is over the water; once it reaches dry land on the far side, in line,
+ * the whole straight run and the far bank go in one message. Released over the water, or turned back, nothing is built.
+ */
+export interface Crossing { from: [number, number]; dx: number; dy: number }
 
 /** Mouse/keyboard handling: camera control, painting tools and land selection. */
 export class Input {
@@ -55,6 +64,9 @@ export class Input {
   private orbiting = false;
   private pivot = new Vector3();
   painting = false;
+  /** a road drag out over the water, until it reaches the far bank */
+  crossing: Crossing | null = null;
+  private lastDry: [number, number] | null = null;
   private painted = new Set<string>();
   private lastPaint: [number, number] | null = null;
   private buyStart: [number, number] | null = null;
@@ -85,6 +97,7 @@ export class Input {
     this.buyStart = null; this.buyRect = null; this.painting = false;
     this.runwayStart = null; this.runwayLine = null;
     this.railStart = null; this.railPath = null;
+    this.crossing = null; this.lastDry = null;
     this.cb.onToolChange(t);
   }
 
@@ -124,7 +137,7 @@ export class Input {
     if (this.tool === 'buy') { this.buyStart = tile; this.buyRect = { x: tile[0], y: tile[1], w: 1, h: 1 }; return; }
     if (this.tool === 'runway') { this.runwayStart = tile; this.runwayLine = [tile]; return; }
     if (this.tool === 'rail') { this.railStart = tile; this.railPath = [tile]; return; }
-    this.painting = true; this.painted.clear(); this.lastPaint = null;
+    this.painting = true; this.painted.clear(); this.lastPaint = null; this.crossing = null; this.lastDry = null;
     this.paint(tile);
   };
 
@@ -153,7 +166,11 @@ export class Input {
       this.cb.onHover(tile);
     }
     if (!tile) return;
-    if (this.painting && !structureTool(this.tool) && this.tool !== 'roundabout' && this.tool !== 'flyover') this.paint(tile); // junction tools: one click, one junction
+    if (this.painting && !structureTool(this.tool) && this.tool !== 'roundabout' && this.tool !== 'flyover') {
+      const was = this.crossing;
+      this.paint(tile); // junction tools: one click, one junction
+      if (was !== this.crossing) this.cb.onHover(tile); // a crossing began or ended: the status line follows
+    }
     if (this.buyStart) {
       const [sx, sy] = this.buyStart;
       let x0 = Math.min(sx, tile[0]), y0 = Math.min(sy, tile[1]);
@@ -173,7 +190,9 @@ export class Input {
     this.railStart = null; this.railPath = null;
     this.buyStart = null; this.buyRect = null;
     this.runwayStart = null; this.runwayLine = null;
-    this.painting = false; this.panning = false;
+    const crossed = !!this.crossing;
+    this.painting = false; this.panning = false; this.crossing = null; this.lastDry = null;
+    if (crossed) this.cb.onHover(this.hover); // the status line drops the bridge preview
     if (this.orbiting) { this.orbiting = false; this.canvas.style.cursor = ''; }
   };
 
@@ -201,26 +220,63 @@ export class Input {
 
   /** Paint a tile, filling the straight line from the previous paint so fast drags leave no gaps. */
   private paint(tile: [number, number]) {
-    const tiles: [number, number][] = [];
-    const push = (x: number, y: number) => {
-      const k = `${x},${y}`;
-      if (this.painted.has(k)) return;
-      this.painted.add(k); tiles.push([x, y]);
-    };
+    const line: [number, number][] = [];
     if (this.lastPaint) {
       let [x0, y0] = this.lastPaint;
       const [x1, y1] = tile;
       const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
       let err = dx + dy;
       for (let guard = 0; guard < 512; guard++) {
-        push(x0, y0);
+        line.push([x0, y0]);
         if (x0 === x1 && y0 === y1) break;
         const e2 = 2 * err;
         if (e2 >= dy) { err += dy; x0 += sx; }
         if (e2 <= dx) { err += dx; y0 += sy; }
       }
-    } else push(tile[0], tile[1]);
+    } else line.push(tile);
     this.lastPaint = tile;
+    const tiles: [number, number][] = [];
+    const push = (t: [number, number]) => {
+      const k = `${t[0]},${t[1]}`;
+      if (this.painted.has(k)) return;
+      this.painted.add(k); tiles.push(t);
+    };
+    // a crossing goes whole, bank to bank (the server checks the run between them), even where this drag has been before
+    if (this.tool === 'road' && this.cb.isWater) this.bridging(line, (t, whole) => { if (whole) { this.painted.add(`${t[0]},${t[1]}`); tiles.push(t); } else push(t); });
+    else for (const t of line) push(t);
     if (tiles.length) this.cb.onBuild(this.tool, tiles);
+  }
+
+  /**
+   * A stretch of the road tool's drag with water taken out, except a whole straight crossing (see Crossing) once the
+   * drag reaches the far bank: the water run and the bank tile, then the rest of the drag. Sees every tile of the line,
+   * painted before or not, so going back over the same water still makes a crossing.
+   */
+  private bridging(tiles: [number, number][], out: (t: [number, number], whole: boolean) => void) {
+    const wet = this.cb.isWater!;
+    for (const t of tiles) {
+      if (wet(t[0], t[1])) {
+        if (!this.crossing && this.lastDry) {
+          // out over the water: the bridge goes the way the drag stepped off the bank (the wet way, if it stepped diagonally)
+          const [fx, fy] = this.lastDry;
+          let dx = Math.sign(t[0] - fx), dy = Math.sign(t[1] - fy);
+          if (dx && dy) { if (wet(fx + dx, fy)) dy = 0; else dx = 0; }
+          if (dx || dy) this.crossing = { from: [fx, fy], dx, dy };
+        }
+        continue;
+      }
+      const c = this.crossing;
+      if (c) {
+        this.crossing = null;
+        // the far bank along the bridge's line: commit once the drag is at or past it
+        const run: [number, number][] = [];
+        let [x, y] = c.from;
+        for (let i = 0; i <= BRIDGE_MAX_SPAN; i++) { x += c.dx; y += c.dy; if (!wet(x, y)) break; run.push([x, y]); }
+        const along = (t[0] - c.from[0]) * c.dx + (t[1] - c.from[1]) * c.dy;
+        if (run.length && !wet(x, y) && along >= run.length + 1) for (const q of [c.from, ...run, [x, y] as [number, number]]) out(q, true);
+      }
+      out(t, false);
+      this.lastDry = t;
+    }
   }
 }
