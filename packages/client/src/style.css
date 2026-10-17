@@ -243,6 +243,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
 #fpv .finst { position: absolute; pointer-events: none; text-shadow: none; }
 #fpv.inst.inset .fbody { padding-right: calc(var(--iw) * 0.5); }
 #fpv.inst.full .fbody { max-width: 270px; }
+/* the demo tour's name tags are placed for the overhead camera, so in the full-window view they would float in the sky */
+body.fpv-full #tourLabels { display: none !important; }
 #fpv.full { inset: 0; }
 #fpv.full .ftop { top: 40px; padding: 10px 14px; }
 #fpv.full .fname { font-size: 16px; }

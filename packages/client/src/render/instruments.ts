@@ -17,6 +17,8 @@ export interface AircraftCal {
   ticksPerSec: number;
   /** the game tick (fractional) the pose was drawn at; when given, speeds are distance over ticks elapsed, so a clock resync, a pause or a speed change never reads as a burst of speed */
   tick?: number;
+  /** the vehicle's own speed reading, in knots: shown while the game clock is stopped or frozen (a paused game, a debug tick), when no motion can be measured */
+  knots?: number;
   /** how far the eye sits above the aircraft's own altitude, in tiles, so the gate reads 0 ft rather than the cockpit's height */
   eyeAbove: number;
 }
@@ -104,6 +106,7 @@ export class Instruments {
     // game ticks passed since the last frame: from the pose's own tick when it has one, else from real time at the current rate
     const ticks = cal.tick !== undefined ? (this.haveTick ? cal.tick - this.ltick : 0) : dt * cal.ticksPerSec;
     if (cal.tick !== undefined) { this.ltick = cal.tick; this.haveTick = true; }
+    if (ticks <= 1e-4 && cal.knots !== undefined && dt > 1e-4) this.kt += (cal.knots - this.kt) * (1 - Math.exp(-dt / 0.7));
     if (this.have && dt > 1e-4 && ticks > 1e-4 && ticks < 40 && cal.ktPerTile > 0) {
       const perTick = 1 / ticks;
       const vx = (x - this.lx) * perTick, vy = (y - this.ly) * perTick, vz = (z - this.lz) * perTick;
