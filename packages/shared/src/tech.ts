@@ -24,7 +24,7 @@ export interface TechNode {
   cost: number;
   requires: string[];
   condition: { counter: Counter; min: number };
-  /** feature ids this node opens: tool names, 'level2' ... 'level7', 'underground', 'signals', 'publicRoads', 'bridges', 'patrols', 'airport', 'runway', 'lines' (the transit Lines panel) */
+  /** feature ids this node opens: tool names, 'level2' ... 'level7', 'underground', 'signals', 'publicRoads', 'bridges', 'patrols', 'airport', 'runway', 'lines' (the transit Lines panel), 'ferry' (river bus lines, docs/boats.md) */
   unlocks: string[];
   /**
    * The node cannot be earned or bought in a live game yet: its unlock rule is still to be decided, and this text
@@ -61,6 +61,10 @@ export const TECH: TechNode[] = [
   { id: 'tr4', track: 'transport', tier: 4, name: 'Aviation', blurb: 'An airport terminal and a runway behind it. Planes land on a daily timetable, every landing pays you a fee, and the ground crew work early and late shifts.', cost: 4500, requires: ['tr3'], condition: { counter: 'jobs', min: 200 }, unlocks: ['airport', 'runway'] },
   { id: 'tr5', track: 'transport', tier: 5, name: 'Public transport', blurb: 'Bus stops, a bus depot and the Lines panel: route buses round your stops, set a fare-paying timetable running from 05:30 to 00:30, and take cars off the road.', cost: 1000, requires: ['tr2'], condition: { counter: 'housed', min: 200 }, unlocks: ['busstop', 'busdepot', 'lines', 'parkride'] },
   { id: 'tr6', track: 'transport', tier: 6, name: 'Rail', blurb: 'Railway track, halts, stations and freight yards. Trains run your lines on a timetable from 05:00 to 01:00, 40 riders a carriage paying fares; a there-and-back line runs one train, a loop as many as fit. Freight yards load containers for freight lines.', cost: 3000, requires: ['tr5'], condition: { counter: 'jobs', min: 250 }, unlocks: ['rail', 'railhalt', 'railstation', 'freightyard'] },
+  // boats and harbours (docs/boats.md section 5): the jetty, marina and fishing harbour, then ferry piers, then the seaport
+  { id: 'tr10', track: 'transport', tier: 4, name: 'Harbours', blurb: 'Jetties, marinas and fishing harbours, built with their back rows over the water. Pleasure boats are based at jetties and marinas, and trawlers land their catch at the fish quay.', cost: 1800, requires: ['tr8'], condition: { counter: 'housed', min: 250 }, unlocks: ['jetty', 'marina', 'fishharbour'] },
+  { id: 'tr11', track: 'transport', tier: 6, name: 'River buses', blurb: 'Ferry piers and river bus lines: catamarans call at your piers on a timetable, and riders pay fares as on the trains.', cost: 2500, requires: ['tr5', 'tr10'], condition: { counter: 'jobs', min: 250 }, unlocks: ['ferrypier', 'ferry'] },
+  { id: 'tr12', track: 'transport', tier: 7, name: 'Seaport', blurb: 'A cargo port on open water that reaches the sea: container ships, coasters and barges bring imports and take your exports, and ferries bring newcomers.', cost: 9000, requires: ['tr10', 'zon2'], condition: { counter: 'jobs', min: 500 }, unlocks: ['cargoport'] },
   { id: 'tr9', track: 'transport', tier: 7, name: 'Underground railway', blurb: 'Metro entrances and station halls with platforms bored under the street. Click the entrances in the Lines panel to run a metro line: the tunnel is bored for you, and trains run from 05:00 to 01:00 in twin bores, never in traffic.', cost: 8000, requires: ['tr6', 'con3'], condition: { counter: 'jobs', min: 600 }, unlocks: ['metro', 'metroentrance', 'metrostation'] },
   // civic: services
   { id: 'civ1', track: 'civic', tier: 1, name: 'Emergency services', blurb: 'Police and fire stations, with police boxes, neighbourhood posts and fire posts to fill the gaps. Covered homes tolerate higher taxes and grow faster.', cost: 400, requires: [], condition: { counter: 'housed', min: 20 }, unlocks: ['police', 'fire', 'policebox', 'policepost', 'firepost'] },

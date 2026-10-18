@@ -11,6 +11,7 @@ import { terminal } from './terminal';
 import { railHalt, railStation, freightYard } from './rail';
 import { motorwayStub } from './motorway';
 import { metroEntrance, metroStation } from './metro';
+import { HARBOURS } from './harbour';
 import { CIVIC_TIERS } from './civic-tiers';
 import { PARKING_TIERS } from './parking';
 import { LEISURE_TIERS } from './leisure-tiers';
@@ -27,6 +28,8 @@ import { LONDON_LANDMARKS } from './landmarks-london';
  * compiled.ts and recipes.ts. Add a family file and list its kinds here.
  */
 const BASE: KindDef[] = [residential, commercial, industrial, office, police, fire, hospital, yard, parking, park, cinema, theatre, sports, library, terminal, busDepot, busStop, railHalt, railStation, freightYard, motorwayStub, metroEntrance, metroStation,
+  // harbours (docs/boats.md section 5): kind ids 24-28, back rows over water
+  ...HARBOURS,
   // size ladders (groups.ts): the smaller and bigger rungs around the kinds above
   ...CIVIC_TIERS, ...PARKING_TIERS, ...LEISURE_TIERS,
   // merged lots (zones.ts): bigger zone kinds that growth assembles from neighbouring lots

@@ -16,6 +16,7 @@ export * from './tiers';
 export * from './zones';
 export { GROUPS, GROUP_BY_ID, type GroupDef } from './buildings/groups';
 export * from './structures';
+export * from './harbours';
 export * from './buildings/compiled';
 export { PALETTE, WINDOW_CLASSES, type PaletteName, type WindowClass } from './buildings/palette';
 export type { KindManifest, LevelManifest, DesignManifest, Attributes, Family, CompiledRecipe, CompiledOp } from './buildings/schema';

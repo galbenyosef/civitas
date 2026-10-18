@@ -7,7 +7,7 @@
  *     geometry bytes as the old models.ts produced,
  *  3. the committed compiled.ts / recipes.ts are up to date,
  *  4. validation rejects the mistakes it is meant to catch,
- *  5-7. leisure, footprints and airfields,
+ *  5-7. leisure, footprints, harbours (wet footprints, docs/boats.md section 5) and airfields,
  *  8. sub-kinds (docs/sub-kinds.md): kind id / family code / sub byte round trips, id-indexed tables and wrappers.
  *  9. size ladders (groups.ts, tiers.ts): the original kinds keep their behaviour as one rung each, tiers scale, every rung places.
  * 10. merged lots (zones.ts): the bigger zone kinds growth assembles, their level ranges, capacity per tile, tech and rotations.
@@ -32,6 +32,8 @@ import { buildModels, allVariants, allDesigns } from '../../client/src/render/mo
 import { LEISURE_CODES, leisureAt, leisureSpecs, isLeisure } from '../src/leisure';
 import { Win } from '../../client/src/render/materials';
 import * as S from '../src/structures';
+import * as H from '../src/harbours';
+import { mapByte, MapClass } from '../src/worldmap';
 import * as A from '../src/airport';
 import * as F from '../src/flights';
 import { RECIPES } from '../src/buildings/recipes';
@@ -48,6 +50,20 @@ import { windowCollisions, windowRects, isFeature, CELL } from '../src/buildings
 import type { CompiledOp, Op } from '../src/buildings/schema';
 import { LEGACY_WINDOW_COLLISIONS } from './window-baseline';
 import { EXTRA_DESIGNS } from '../src/buildings/designs/index';
+
+/**
+ * Harbours (docs/boats.md section 5): paint the water a wet kind placed at door (x, y) facing r needs (its wet rows and
+ * the fairway band behind) into a scratch grid, so "clear land beside a road" checks work for every kind.
+ */
+function paintWater(grid: Map<string, number>, kind: number, x: number, y: number, r: number) {
+  const spec = S.wetOf(kind);
+  if (!spec) return;
+  const p = S.placedFromDoor(kind, x, y, r), fp = S.footprintOf(kind);
+  for (let ly = -S.fairwayDepth(spec.fairwayClearance); ly < spec.wet; ly++) for (let lx = 0; lx < fp.w; lx++) {
+    const [tx, ty] = S.footprintTile(p, lx, ly);
+    grid.set(`${tx},${ty}`, T.packTile(T.Terrain.Water, false, 0, 0));
+  }
+}
 
 // ---- Captured from tile.ts / occupations.ts / models.ts on 2026-10-16, before the catalogue existed.
 // Rows are kind codes 0-15, columns levels 0-7, exactly what the old functions returned.
@@ -470,6 +486,7 @@ section('footprints');
       const env = (): S.PlaceEnv => ({ tile: (x, y) => grid.get(`${x},${y}`) ?? T.packTile(0, false, 0, 0), aux: () => 0, sub: () => 0, land: () => null });
       const [fx, fy] = S.FRONT[r];
       grid.set(`${10 + fx},${10 + fy}`, road);
+      paintWater(grid, m.kindId, 10, 10, r);
       const v = S.planStructure(m.kindId, 10, 10, env(), r);
       if (!v.ok) { fail(`${m.id} r${r}: forced rotation refused on clear land: ${v.reason}`); continue; }
       const p = v.placed;
@@ -488,10 +505,11 @@ section('footprints');
       }
       // a forced layout blocked by a building is refused for its tiles, not its facing
       const far = p.r === 0 ? [p.ax, p.ay] : [p.ax + p.w - 1, p.ay + p.h - 1];
+      const farWas = grid.get(`${far[0]},${far[1]}`); // a harbour's wet tile is water (paintWater)
       grid.set(`${far[0]},${far[1]}`, T.packTile(0, false, T.Zone.Police, 1));
       eq(`${m.id} r${r}: a building under any tile refuses the forced layout`, S.planStructure(m.kindId, 10, 10, env(), r).ok, false);
       // invalid rot values fall back to automatic facing
-      grid.delete(`${far[0]},${far[1]}`);
+      if (farWas === undefined) grid.delete(`${far[0]},${far[1]}`); else grid.set(`${far[0]},${far[1]}`, farWas);
       for (const bogus of [-1, 4, 1.5, Number.NaN]) eq(`${m.id}: rot ${bogus} is ignored`, S.planStructure(m.kindId, 10, 10, env(), bogus).ok, auto.ok);
       // marks turn with the footprint: all inside the placed rectangle, the door mark on the door tile facing the road
       const marks = S.placedMarks(p);
@@ -565,6 +583,98 @@ section('footprints');
   expectError('mark deeper than the footprint', (c) => { const f = c.find((k) => k.footprint)!.footprint!; f.marks = [{ kind: 'apron', at: { edge: 'back', depth: f.h + 1 } }]; }, /depth \d+ is outside/);
   expectError('rotation key Z is reserved', (c) => { c[1].tool!.key = 'z'; }, /reserved/);
   expectError('rotation key C is reserved', (c) => { c[1].tool!.key = 'C'; }, /reserved/);
+}
+
+// ---------------------------------------------------------------- 6b. harbours: wet footprints (docs/boats.md section 5)
+section('harbours');
+{
+  const IDS: Record<string, number> = { jetty: 24, marina: 25, 'fishing-harbour': 26, 'ferry-pier': 27, 'cargo-port': 28 };
+  const ROLE: Record<string, string> = { jetty: 'jetty', marina: 'marina', 'fishing-harbour': 'fishing', 'ferry-pier': 'pier', 'cargo-port': 'port' };
+  const NODE: Record<string, string> = { jetty: 'tr10', marina: 'tr10', 'fishing-harbour': 'tr10', 'ferry-pier': 'tr11', 'cargo-port': 'tr12' };
+  eq('wet kinds are the five harbours', MANIFEST.filter((m) => S.wetOf(m.kindId)).map((m) => m.id).sort(), Object.keys(IDS).sort());
+  const water = T.packTile(T.Terrain.Water, false, 0, 0), grass = T.packTile(0, false, 0, 0), road = T.packTile(0, true, 0, 0);
+  const deck = T.packTile(T.Terrain.Water, true, 0, 0), DECK_AUX = 0xd8;
+  eq('a bridge deck is open water to boats, a pontoon is not', [S.isOpenWaterTile(water, 0), S.isOpenWaterTile(deck, DECK_AUX), S.isOpenWaterTile(water, S.partAux(1, 0)), S.isOpenWaterTile(grass, 0), S.isOpenWaterTile(undefined, 0)], [true, true, false, false, false]);
+  for (const [id, kind] of Object.entries(IDS)) {
+    const m = MANIFEST.find((k) => k.id === id)!;
+    eq(`${id}: kind id`, [(KIND_ID as Record<string, number>)[id], m.code], [kind, T.Zone.Hub]);
+    eq(`${id}: harbour role`, H.HARBOUR_OF[kind]?.role, ROLE[id]);
+    eq(`${id}: unlocked by ${NODE[id]}`, techFor(m.tool!.id)?.id, NODE[id]);
+    const spec = S.wetOf(kind)!, fp = S.footprintOf(kind), depth = S.fairwayDepth(spec.fairwayClearance);
+    eq(`${id}: wet rows behind a dry door row`, spec.wet >= 1 && spec.wet <= fp.h - 1, true);
+    for (let r = 0; r < 4; r++) {
+      const grid = new Map<string, number>(), aux = new Map<string, number>();
+      const env = (land: (x: number, y: number) => string | null = () => null): S.PlaceEnv => ({
+        tile: (x, y) => grid.get(`${x},${y}`) ?? grass, aux: (x, y) => aux.get(`${x},${y}`) ?? 0, sub: () => 0, land,
+      });
+      grid.set(`${10 + S.FRONT[r][0]},${10 + S.FRONT[r][1]}`, road);
+      paintWater(grid, kind, 10, 10, r);
+      const v = S.planStructure(kind, 10, 10, env(), r);
+      if (!v.ok) { fail(`${id} r${r}: refused on its water: ${v.reason}`); continue; }
+      const p = v.placed;
+      const at = (lx: number, ly: number) => S.footprintTile(p, lx, ly).join(',');
+      const refused = (what: string, key: string, word: number, pattern: RegExp, a = 0) => {
+        const was = grid.get(key);
+        grid.set(key, word); if (a) aux.set(key, a);
+        const q = S.planStructure(kind, 10, 10, env(), r);
+        if (!q.ok && pattern.test(q.reason)) passes++; else fail(`${id} r${r}: ${what}: expected ${pattern}, got ${q.ok ? 'ok' : q.reason}`);
+        if (was === undefined) grid.delete(key); else grid.set(key, was);
+        aux.delete(key);
+      };
+      refused('a dry back row', at(fp.w - 1, 0), grass, /must stand on open water/);
+      refused('a road on the wet row', at(0, spec.wet - 1), deck, /must stand on open water/, DECK_AUX);
+      refused('another structure on the wet row', at(0, 0), water, /must stand on open water/, S.partAux(1, 1));
+      refused('a wet quay', at(fp.w - 1, spec.wet), water, /must stand on dry land/);
+      refused(`a fairway narrower than ${S.FAIRWAY_WORDS[spec.fairwayClearance]}`, at(0, -depth), grass, /water behind it/);
+      refused('a pontoon in the fairway', at(fp.w - 1, -1), water, /water behind it/, S.partAux(0, 0));
+      // a bridge deck in the fairway is open water, and the water beyond the band is not asked for
+      grid.set(at(0, -1), deck); aux.set(at(0, -1), DECK_AUX);
+      eq(`${id} r${r}: a bridge deck in the fairway is fine`, S.planStructure(kind, 10, 10, env(), r).ok, true);
+      grid.set(at(0, -1), water); aux.delete(at(0, -1));
+      eq(`${id} r${r}: wet rows need the player's land too`, S.planStructure(kind, 10, 10, env((x, y) => (`${x},${y}` === at(0, 0) ? 'Not your land' : null)), r).ok, false);
+      eq(`${id} r${r}: the fairway is public water`, S.planStructure(kind, 10, 10, env((x, y) => (`${x},${y}` === at(0, -1) ? 'Not your land' : null)), r).ok, true);
+      // automatic facing finds the side with the water behind, wherever else there are roads
+      for (const [dx, dy] of S.FRONT) {
+        const x = 10 + dx, y = 10 + dy, k = `${x},${y}`;
+        if (!grid.has(k) && (x < p.ax || y < p.ay || x >= p.ax + p.w || y >= p.ay + p.h)) grid.set(k, road);
+      }
+      const auto = S.planStructure(kind, 10, 10, env());
+      eq(`${id} r${r}: automatic facing turns its back to the water`, auto.ok && auto.placed.r, r);
+      // geometry helpers: tile <-> local round trips, wet tiles, the quay with water behind, the fairway behind the back row
+      let trips = 0, wet = 0;
+      for (let ly = -2; ly < fp.h; ly++) for (let lx = 0; lx < fp.w; lx++) {
+        const [x, y] = S.footprintTile(p, lx, ly), [bx, by] = S.footprintLocal(p, x, y);
+        if (bx === lx && by === ly) trips++;
+        if (S.isWetTile(p, x, y)) wet++;
+      }
+      eq(`${id} r${r}: footprintLocal inverts footprintTile`, trips, (fp.h + 2) * fp.w);
+      eq(`${id} r${r}: wet tiles are the back rows`, wet, spec.wet * fp.w);
+      const quay = S.quayTiles(p);
+      eq(`${id} r${r}: the quay is dry with water behind every tile`, quay.every(([x, y], lx) => !S.isWetTile(p, x, y) && T.isBuildable(grid.get(`${x},${y}`) ?? grass)
+        && grid.get(at(lx, spec.wet - 1)) === water), true);
+      const fw = S.fairwayTiles(p);
+      eq(`${id} r${r}: the fairway touches the back row from outside`, fw.every(([x, y], lx) => {
+        const [bx, by] = S.footprintTile(p, lx, 0);
+        return Math.abs(x - bx) + Math.abs(y - by) === 1 && (x < p.ax || y < p.ay || x >= p.ax + p.w || y >= p.ay + p.h);
+      }), true);
+      // berths: over the wet rows (the ferry pier's in the row behind it), each boat length inside the footprint's width
+      const berths = H.placedBerths(p);
+      eq(`${id} r${r}: berths`, berths.length, H.HARBOUR_OF[kind]!.berths.length);
+      const bad = berths.filter((b, i) => {
+        const slot = H.HARBOUR_OF[kind]!.berths[i];
+        const [lx, ly] = S.footprintLocal(p, Math.floor(b.x), Math.floor(b.y));
+        const along = slot.dir & 1 ? slot.x : slot.y, room = slot.dir & 1 ? fp.w : spec.wet;
+        const water = id === 'ferry-pier' ? ly === -1 : ly >= 0 && ly < spec.wet;
+        return !water || lx < 0 || lx >= fp.w || along - slot.len / 2 < -1e-6 || along + slot.len / 2 > room + 1e-6 || b.dir !== ((slot.dir + r) & 3);
+      });
+      eq(`${id} r${r}: every berth on the water and inside the footprint's width`, bad.map((b) => b.label), []);
+    }
+    // the world map reads a wet structure tile as water
+    eq(`${id}: map byte of a wet tile`, mapByte(T.packTile(T.Terrain.Water, false, T.Zone.Hub, 1), S.partAux(0, 0)) & 15, MapClass.Water);
+  }
+  expectError('wet rows on the door row', (c) => { c.find((k) => k.id === 'jetty')!.footprint!.wet = 2; }, /footprint wet must be an integer 1-1/);
+  expectError('a fairway class without wet rows', (c) => { const f = c.find((k) => k.id === 'rail-halt')!.footprint!; f.fairwayClearance = 2; }, /fairwayClearance must be 1-3/);
+  expectError('a fairway class out of range', (c) => { c.find((k) => k.id === 'marina')!.footprint!.fairwayClearance = 4; }, /fairwayClearance must be 1-3/);
 }
 
 // ---------------------------------------------------------------- 7. airfields (runway aux bytes, shared/src/airport.ts)
@@ -729,6 +839,7 @@ section('groups and tiers');
         const ok = [0, 1, 2, 3].filter((r) => {
           const grid = new Map<string, number>();
           grid.set(`${10 + S.FRONT[r][0]},${10 + S.FRONT[r][1]}`, T.packTile(0, true, 0, 0));
+          paintWater(grid, k.kindId, 10, 10, r);
           return S.planStructure(k.kindId, 10, 10, { tile: (x, y) => grid.get(`${x},${y}`) ?? T.packTile(0, false, 0, 0), aux: () => 0, sub: () => 0, land: () => null }, r).ok;
         });
         eq(`${k.id}: places in every rotation`, ok, [0, 1, 2, 3]);

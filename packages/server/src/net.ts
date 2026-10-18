@@ -2,7 +2,7 @@ import type { Conn, ConnSource } from './transport';
 import {
   CHUNK_SIZE, START_MONEY, LAND_PRICE_PER_TILE, MAX_PARCEL_EDGE, ROAD_COST, PUBLIC_ROAD_COST, ZONE_COST,
   BULLDOZE_COST, MAX_SUBS, MAX_TAX, DEFAULT_TAX, Zone, CitizenState, CIVIC_COST, workOf, KIND_NAMES, TRAFFIC_EVERY,
-  isRoad, isBuildable, isGrowable, zoneOf, levelOf, terrainOf, packTile, chunkKey, chunkOf, parseKey, packCitizenFlags, localIndex,
+  isRoad, isBuildable, isGrowable, zoneOf, levelOf, terrainOf, packTile, chunkKey, chunkOf, parseKey, packCitizenFlags, localIndex, isStructureAux,
   u16ToB64, i32ToB64, u8ToB64, hasFeature, techFor, TECH_BY_ID, ALL_TECH_IDS, checkPurchase, ZONE_TOOLS, CIVIC_TOOLS, MANIFEST,
   isMultiTile, planStructure, planRunway, isAirfieldAux, RUNWAY_MAX, isRailAux, isRailStationKind, RAIL_DRAG_MAX, roadOverTrackProblem, CROSSING_COST, familyOf, subFor, kindManifest,
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
@@ -396,7 +396,9 @@ export class Net {
       const x = Math.floor(Number(pair[0])), y = Math.floor(Number(pair[1]));
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
       const t = this.w.getTile(x, y);
-      if (!isBuildable(t)) {
+      // a harbour's wet tiles (docs/boats.md section 5) are bulldozed like any structure tile: the water stays
+      const wetPart = tool === 'bulldoze' && isStructureAux(this.w.auxAt(x, y));
+      if (!isBuildable(t) && !wetPart) {
         if (tool === 'road') { if (!lastWet) wet.push([]); wet[wet.length - 1].push([x, y]); lastWet = true; }
         else if (tool === 'bulldoze' && isBridgeAux(this.w.auxAt(x, y))) {
           // a deck tile takes the whole bridge with it, for nothing back

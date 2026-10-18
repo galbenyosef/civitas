@@ -185,7 +185,8 @@ export function compileCatalogue(kinds: KindDef[], helperModels: HelperModel[]):
       tool: k.tool ? { ...k.tool, cost: flags.growable ? ZONE_COST : levels[0].cost } : undefined,
       tech: kindTech ? [kindTech.id] : [],
       occupation: k.occupation, attrs: { ...(k.attrs ?? {}) }, tints: k.tints, lotTint: k.lotTint, levels,
-      footprint: fp ? { w: fp.w, h: fp.h, door: [fp.door[0], fp.door[1]], ...(fp.marks?.length ? { marks: JSON.parse(JSON.stringify(fp.marks)) } : {}) } : undefined, draft: k.draft || undefined,
+      footprint: fp ? { w: fp.w, h: fp.h, door: [fp.door[0], fp.door[1]], ...(fp.marks?.length ? { marks: JSON.parse(JSON.stringify(fp.marks)) } : {}),
+        ...(fp.wet ? { wet: fp.wet, fairwayClearance: fp.fairwayClearance ?? 1 } : {}) } : undefined, draft: k.draft || undefined,
       group: k.group, tier: k.tier, blurb: k.blurb, howTo: k.howTo,
       ...(k.landmark ? { landmark: true } : {}), ...(k.tags?.length ? { tags: [...k.tags] } : {}),
     });

@@ -385,6 +385,79 @@ schedule.
 Kinds stay `draft: true` until the scenario subtask places them, because `demo:check` fails any placeable kind that the
 showcase does not place.
 
+### Built: B2, harbour kinds and wet footprints (2026-10-18)
+
+- **Kinds.** `shared/src/buildings/harbour.ts` holds the five kinds, ids 24-28, all `draft: true`, with the footprints,
+  staff, numbers and attributes of the table above and one placeholder design each. They form a draft size ladder,
+  **Harbours** (`group: 'harbour'`, `draft: true` in `groups.ts`): jetty 1, ferry pier 2, marina 3, fishing harbour 4,
+  cargo port 5. So the tool bar shows one Harbours button with a picker (with `?dev`), and `buildings:check` holds the
+  numbers to the ladder rules: staff, cost and build work never shrink up it. Tool ids are `jetty`, `marina`,
+  `fishharbour`, `ferrypier` and `cargoport`, with no shortcut keys.
+- **Attributes.** Each kind has `harbour` (`jetty`, `marina`, `fishing`, `pier` or `port`), and the marina has
+  `berthFee: 4`. The cargo port carries `gateway: 'sea'`, `gatewayModes`, `arrivalsPerHour: 6` and `needsWater`, so
+  `GATEWAY_OF[28]` exists now. The server opens it like any staffed gate until B4 adds the sea-route condition.
+- **Footprints.** `Footprint.wet` (1 to h - 1) and `Footprint.fairwayClearance` (1 narrow, 2 river, 3 open) are in
+  `schema.ts`. They are validated, copied into the manifest's footprint, and read through `WET_OF[kindId]` in
+  `structures.ts`.
+- **Placement.** `checkPlaced` hands wet kinds to `checkWet`:
+  - the wet rows must be water with no road and no aux byte;
+  - the other rows must be dry and clear, as before;
+  - every footprint tile must be on land the player may use.
+  - The quay then has water behind every tile.
+  - **The fairway.** Read literally, "clearance c along its whole width" can never hold for a row touching the
+    harbour, because the harbour's own wet tiles become land. So placement asks for a band of
+    `fairwayDepth(c) = 2c - 1` rows of open water (`isOpenWaterTile`: water with no aux byte, or a bridge deck) behind
+    the whole back edge: 1 row for narrow water, 3 for river, 5 for open. The band's row c - 1 then has clearance c or
+    more once the harbour stands. The fairway is public water, so there is no land rule.
+  - Automatic facing needs no change: only a side with water behind passes. The refusals read "A marina's back 2 rows
+    must stand on open water, the front on the bank", "... must stand on dry land ..." and "A fishing harbour needs
+    river water behind it: 3 rows of open water along its whole back edge".
+- **Geometry helpers** (`structures.ts`):
+  - `footprintTile(p, lx, ly)` and its inverse `footprintLocal(p, x, y)`: ly 0 is the back row, and ly -1 is the row
+    behind it;
+  - `footprintPoint(p, px, py)`, in mark and berth units (`placedMarks` now uses it);
+  - `isWetTile`, `quayTiles` and `fairwayTiles(p, row)`.
+- **Berths.** `BerthSlot` and `HARBOUR_BERTHS` are in `harbour.ts`, in footprint units (x 0..w, y 0..h, y = h the front):
+  - the jetty has 2 slots, either side of the planks;
+  - the marina has 10 bow-in slots, A1-A5 and B1-B5, either side of the spine;
+  - the fishing harbour has 3 trawler slots along the quay;
+  - the ferry pier has one 2-tile slot at y = -0.5, the row outside;
+  - the cargo port has a big berth (5 tiles) and a small one (3).
+
+  `shared/src/harbours.ts` (exported from the index) gives `HARBOUR_OF[kindId]` (`role`, `wet`, `fairwayClearance`,
+  `berths`), `HARBOUR_KIND[role]`, `isHarbourId` and `placedBerths(p)`. `placedBerths` returns the world centre, the
+  bow's `dir` (FRONT index) and `angle`, `len` and `mode` of each berth.
+- **Marks.** `MarkKind` gains `'quay'` (pale stone) and `'berth'` (blue). The preview shows each kind's berths as a band
+  over the wet rows, its quay tiles, and the pier's berth line on its back edge.
+- **Water stays water.** These parts already kept the terrain bits:
+  - `World.placeStructure`;
+  - the mirroring in `structureWrite`;
+  - `removeStructure`.
+
+  `net.ts` now lets the bulldozer reach a wet structure tile, which used to be skipped as water, so bulldozing a harbour
+  by any tile leaves open water. `chunkView` draws water, not paving or dirt, under a structure tile whose terrain is
+  water, and `mapByte` reads such a tile as water.
+- **Tech.** `tr10` Harbours, `tr11` River buses and `tr12` Seaport are as tabled. `tr11` also unlocks the feature
+  `'ferry'`, for B5's lines.
+- **Checks.** `buildings:check` has a "harbours" section. For every kind and rotation it checks:
+  - the refusals: a dry back row, a deck or another structure on a wet row, a wet quay, a narrow fairway, a pontoon in
+    the fairway, and a wet tile on someone else's land;
+  - what is allowed: a bridge deck in the fairway, and the fairway on public water;
+  - that automatic facing turns the harbour's back to the water;
+  - that the tile helpers round-trip;
+  - the quay and fairway geometry;
+  - that every berth lies on the water within the footprint's width;
+  - the map byte.
+
+  The footprint and ladder sections paint each kind's water before they test it.
+- **Live test.** The worktree server and Vite placed all five by the build message, on seed 4242's shore near
+  (124, -93), facing automatically. The wet tiles kept their water; the sites, then the finished models, drew over it.
+  Bulldozing the marina and the jetty by a wet tile gave open water back, with no aux or sub bytes.
+- **For B7.** Only `harbour.ts` designs change. Recipe z runs from -h/2 at the back, so the wet rows are z < -h/2 + wet.
+  The water surface is y = 0. Keep the berths clear of the models. The viewer's turntable shows no water under the wet
+  rows.
+- **For B8.** Drop `draft` on the five kinds and on the `harbour` group.
+
 ## 6. The simulation
 
 ### 6.1 What is scheduled and what is simulated
@@ -698,7 +771,7 @@ There are eight subtasks, about 5 hours of agent time, in four waves. Each runs 
 | # | Title | Model | Depends on | Parallel-safe with | Size | Files | Hot spots |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | B1 | Waterways: nav grid, clearance, lanes, `waterGeometry`, bridge clearance | opus | — | B2 | M (30 min) | new `shared/src/waterways.ts`; `bridges.ts` (`BRIDGE_CLEARANCE`, `bridgeChannel`); new `shared/scripts/boats-check.ts` (lanes) | `shared/src/index.ts` (one export line) |
-| B2 | Harbour kinds (ids 24-28, drafts, one placeholder design each), wet footprints, placement, tech | opus | — | B1 | M (35 min) | new `buildings/harbour.ts`; `schema.ts`; catalogue registration; `structures.ts` `checkPlaced`; `tech.ts`; `chunkView.ts` (water under wet tiles); `worldmap.ts` (`mapClassOf`) | `compiled.ts` (generated: re-run `buildings:compile` on merge); `chunkView.ts` |
+| B2 | Harbour kinds (ids 24-28, drafts, one placeholder design each), wet footprints, placement, tech. **Built** (section 5) | opus | — | B1 | M (35 min) | new `buildings/harbour.ts`; `schema.ts`; catalogue registration; `structures.ts` `checkPlaced`; `tech.ts`; `chunkView.ts` (water under wet tiles); `worldmap.ts` (`mapClassOf`) | `compiled.ts` (generated: re-run `buildings:compile` on merge); `chunkView.ts` |
 | B3 | Boat types and the schedule: `BOAT_TYPES`, `boatTimetable`, berth and bascule booking, `boatsAt`, names and crews | opus | B1 (B2's ids by `KIND_ID`) | B5, B7 | L (45 min) | new `shared/src/boats.ts`; `boats-check.ts` (schedule sections) | `boats-check.ts` (append sections) |
 | B4 | Server harbours: lanes on change, sea gates, `harbours` message, fishing and port economy, `shipBerthed`, `inspectBoat`, tooltips, load test | opus | B1, B2, B3 | B6 | L (50 min) | new `server/src/sim/harbours.ts`; `simulation.ts` (`dispatch` `to`, export point); `gateways.ts`; `world.ts`, `snapshot.ts` (`seaGates`); `game.ts`; `net.ts`; `protocol.ts`; new `loadtest/boats.ts` | `net.ts`, `protocol.ts`, `game.ts` (also B5); `simulation.ts` |
 | B5 | Ferries: the `'ferry'` mode, `Ferry extends Timetabled`, `routeWater`, `FERRY_TIMING`, berth offsets, `ferryLines`, the lines editor | opus | B1, B2 | B3, B7 | M (35 min) | `shared/src/transit.ts`; `rail.ts` (`ferry`, `RiverBus`, geometry dispatch); new `server/src/sim/ferry.ts`; `game.ts`; `net.ts`; `protocol.ts`; `client/src/lines.ts`; `showcase.ts` (`LINE_MODES` todo) | `rail.ts`; `net.ts`, `protocol.ts`, `game.ts` (also B4: append-only hunks); `showcase.ts` (also B8) |

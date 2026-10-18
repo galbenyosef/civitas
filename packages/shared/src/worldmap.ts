@@ -40,7 +40,8 @@ export function mapByte(tile: number, aux: number): number {
   if (isRailAux(aux)) return MapClass.Track;
   if (isAirfieldAux(aux)) return MapClass.Airfield;
   const z = zoneOf(tile);
-  if (z === 0) return terrainClass(terrainOf(tile));
+  // a harbour's wet rows (docs/boats.md section 5) read as the water they stand on
+  if (z === 0 || terrainOf(tile) === Terrain.Water) return terrainClass(terrainOf(tile));
   return (ZONE_CLASS[z] ?? MapClass.Civic) | (levelOf(tile) << 4) | (underConstruction(tile) ? 0x80 : 0);
 }
 export const mapClassOf = (b: number) => b & 15;

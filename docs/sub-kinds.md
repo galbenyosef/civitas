@@ -46,12 +46,13 @@ Because base ids equal codes, everything already stored by kind code stays valid
 | 21 | motorway connection (README "Gateways") | 15 |
 | 22 | metro entrance, a 1×1 stair kiosk (docs/underground.md) | 15 |
 | 23 | metro station, a 2×1 hall (docs/underground.md) | 15 |
+| 24-28 | jetty, marina, fishing harbour, ferry pier, cargo port: harbours with their back rows over water (docs/boats.md section 5) | 15 |
 | 70-74 | terrace row, mid-rise apartments, perimeter block, residential tower, tower estate (merged lots, docs/buildings.md) | 1 |
 | 75-78 | high-street parade, department store, shopping centre, hotel tower | 2 |
 | 79-81 | business centre, office tower, corporate headquarters | 4 |
 | 82-85 | workshop row, distribution centre, factory complex, heavy plant | 3 |
 
-Ids 24-39 are left for the transport cards; the size ladders took 40-69 in one block so each family's rungs sit together, and the merged zone lots took 70-89 (70-85 used). `KIND_ID` in `compiled.ts` maps catalogue string ids to kind ids (`KIND_ID['bus-depot'] === 16`) for code that means one exact kind.
+Ids 24-28 are the harbours, 29-31 are reserved for a sea lock, a boatyard and a lifeboat station (docs/boats.md), and 32-39 are left for the transport cards; the size ladders took 40-69 in one block so each family's rungs sit together, and the merged zone lots took 70-89 (70-85 used). `KIND_ID` in `compiled.ts` maps catalogue string ids to kind ids (`KIND_ID['bus-depot'] === 16`) for code that means one exact kind.
 
 ## The catalogue
 

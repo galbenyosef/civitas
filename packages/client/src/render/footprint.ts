@@ -4,6 +4,7 @@ import { FRONT, placedMarks, type MarkKind, type Placed, type PlacedMark } from 
 /** Colour of each mark kind in the footprint overlay; the door's is green or red by whether a road is in front. */
 export const MARK_COLOR: Record<MarkKind, number> = {
   door: 0x3ddc84, gate: 0xff9f1c, platform: 0x4aa3ff, apron: 0xb4bcc8, stand: 0xffd23f, dock: 0x2ec4b6,
+  quay: 0xd9d2c3, berth: 0x1e90ff,
 };
 const GOOD = 0x3ddc84, BAD = 0xff4d44, LINE = 0xffffff;
 const Y_FILL = 0.046, Y_LINE = 0.052, Y_MARK = 0.058;

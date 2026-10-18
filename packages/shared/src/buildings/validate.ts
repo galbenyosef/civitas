@@ -214,6 +214,9 @@ export function validateCatalogue(kinds: KindDef[], helpers: HelperModel[]): str
         if (k.tool) errs.push(`${w}: a merged zone kind is grown, not placed; it takes no tool`);
       } else if (f.w * f.h > 1 && !k.flags?.civic) errs.push(`${w}: only civic kinds placed by a player, or growable sub-kinds a zone grows into by merging lots, can be bigger than 1×1`); // a civic car park (parking + civic) is built by builders like any structure
       if (f && f.marks !== undefined) errs.push(...footprintMarkErrors(f, w));
+      // harbours (docs/boats.md section 5): back rows over water, the door row on land, and a fairway width class
+      if (f && f.wet !== undefined && !(Number.isInteger(f.wet) && f.wet >= 1 && f.wet <= f.h - 1)) errs.push(`${w}: footprint wet must be an integer 1-${f.h - 1} (back rows over water; the door row stays on land)`);
+      if (f && f.fairwayClearance !== undefined && (f.wet === undefined || !intIn(f.fairwayClearance, 1, 3))) errs.push(`${w}: footprint fairwayClearance must be 1-3 (narrow, river, open) and needs wet`);
     }
     if (k.draft !== undefined && typeof k.draft !== 'boolean') errs.push(`${w}: draft must be true or false`);
     if (k.tags !== undefined && (!Array.isArray(k.tags) || k.tags.some((t) => typeof t !== 'string' || !/^[a-z][a-z0-9-]*$/.test(t)) || new Set(k.tags).size !== k.tags.length)) errs.push(`${w}: tags must be distinct lower-case words ('london')`);
@@ -268,7 +271,7 @@ export function validateCatalogue(kinds: KindDef[], helpers: HelperModel[]): str
 }
 
 /** Mark kinds a footprint may declare (schema.ts MarkKind). */
-export const MARK_KINDS = ['door', 'gate', 'platform', 'apron', 'stand', 'dock'] as const;
+export const MARK_KINDS = ['door', 'gate', 'platform', 'apron', 'stand', 'dock', 'quay', 'berth'] as const;
 export const MARK_EDGES = ['front', 'back', 'left', 'right'] as const;
 
 /** Problems with a footprint's `marks`: known kinds, tiles inside the footprint, edge ranges along the edge. */

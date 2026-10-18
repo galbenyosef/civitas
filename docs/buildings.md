@@ -16,6 +16,7 @@ Every building kind is data. One file per kind family under `packages/shared/src
 | `terminal.ts` | The airport terminal (8×7), the worked example of a multi-tile structure (docs/airport.md) |
 | `rail.ts` | The rail halt (4×2), rail station (6×3) and freight yard (6×3): transport-hub sub-kinds with a platform or loading dock along the back row (docs/rail.md) |
 | `motorway.ts` | The motorway connection (2×3, kind id 21): the road gateway newcomers, leavers, visitors and inter-city freight use (README "Gateways") |
+| `harbour.ts` | The harbours (kind ids 24-28): jetty, marina, fishing harbour, ferry pier and cargo port, transport-hub sub-kinds whose back rows stand over water (`footprint.wet`), their berth slots (`HARBOUR_BERTHS`) and the draft Harbours ladder (docs/boats.md section 5) |
 | `metro.ts` | The metro entrance (1×1, kind id 22) and metro station (2×1, kind id 23): the surface half of an underground station, whose platform is a run of tiles in the under layer beneath the door; the "Underground" ladder, drafts until the Showcase and London place them (docs/underground.md) |
 | `residential-merged.ts`, `commercial-merged.ts`, `office-merged.ts`, `industrial-merged.ts`, `zonekit.ts` | Merged lots: the bigger zone kinds growth assembles from neighbouring lots (see "Merged lots"), and the recipe parts they are drawn with |
 | `block-interior.ts` | Block interiors: the deep plots that grow back into a block's landlocked middle and the communal garden (see "Block interiors") |
@@ -287,6 +288,7 @@ footprint: { w: 2, h: 2, door: [0, 1] },
 | `w`, `h` | Size in tiles, 1 to 8 each, before rotation: `w` along x, `h` along z (the depth back from the road) |
 | `door` | The tile the simulation knows the building by, `[dx, dy]` from the back-left corner. It must be on the front row (`dy = h - 1`), because the front faces the road the door touches |
 | `marks` | Optional. Significant parts drawn in the placement preview and on hover (below) |
+| `wet`, `fairwayClearance` | Optional, harbours only (docs/boats.md section 5). `wet` is how many back rows stand over water (1 to h - 1); they must be open water on the player's land and the rest dry, so the last dry row is a quay. `fairwayClearance` (1 narrow, 2 river, 3 open) asks for 1, 3 or 5 rows of open water behind the whole back edge. `chunkView` draws water under the wet rows, and bulldozing leaves the water |
 
 ### Footprint marks
 
@@ -302,7 +304,7 @@ footprint: { w: 8, h: 7, door: [4, 6], marks: [
 
 | Field | Meaning |
 | --- | --- |
-| `kind` | `door`, `gate`, `platform`, `apron`, `stand` or `dock`; picks the colour (door green/red, gate orange, platform blue, apron grey, stand yellow, dock teal) |
+| `kind` | `door`, `gate`, `platform`, `apron`, `stand`, `dock`, `quay` or `berth`; picks the colour (door green/red, gate orange, platform blue, apron grey, stand yellow, dock teal, quay pale stone, berth blue) |
 | `at` | A tile `[dx, dy]`, or `{ edge: 'front' \| 'back' \| 'left' \| 'right', from?, to?, depth? }`: a strip along an edge. `from` and `to` are tile indexes along that edge, inclusive, default the whole edge. `depth` is how many tiles it reaches inward; leave it out for a thin line on the boundary |
 | `label` | Short text shown on hover (in the preview every label shows; over a placed structure only the mark under the cursor) |
 
@@ -374,6 +376,7 @@ A building family can come in sizes. Kinds with the same `group` form a **ladder
 | Theatres | studio theatre (1×1) · theatre (the original) · opera house (3×3) |
 | Sport | sports hall (the original) · leisure centre with a pool (2×2) · arena (3×3) · stadium with floodlights (4×4) |
 | Libraries | library (the original) · central library (2×2) · museum (3×2) |
+| Harbours (draft) | jetty (1×2) · ferry pier (2×2) · marina (4×4) · fishing harbour (4×3) · cargo port (8×6), each with its back rows over water (docs/boats.md section 5) |
 
 Every rung of a ladder shares its family code, so the simulation treats it as part of the same service: a GP surgery takes doctor's visits and counts as hospital cover, a police box sends patrols, a handyman's builders look for sites. What changes per rung is data:
 

@@ -249,10 +249,20 @@ export interface Footprint {
   w: number; h: number; door: [number, number];
   /** significant parts drawn in the placement preview and on hover (docs/buildings.md); a door mark is implied from `door` */
   marks?: FootprintMark[];
+  /**
+   * Harbours (docs/boats.md section 5): how many back rows stand over water, 1 to h - 1. Those rows must be open water
+   * on the player's land and the rest dry; the last dry row is the quay, with water behind every tile of it.
+   */
+  wet?: number;
+  /**
+   * With `wet`: the width class the water behind the back edge must have, 1 narrow, 2 river, 3 open. Placement wants
+   * 2 × fairwayClearance - 1 rows of open water behind the whole back edge (structures.ts `fairwayProblem`).
+   */
+  fairwayClearance?: number;
 }
 
 /** What a footprint mark stands for; decides its colour in the preview. */
-export type MarkKind = 'door' | 'gate' | 'platform' | 'apron' | 'stand' | 'dock';
+export type MarkKind = 'door' | 'gate' | 'platform' | 'apron' | 'stand' | 'dock' | 'quay' | 'berth';
 export type MarkEdge = 'front' | 'back' | 'left' | 'right';
 /**
  * A significant part of a footprint, in unrotated footprint coordinates (x 0..w across, y 0..h with y = h the front, the

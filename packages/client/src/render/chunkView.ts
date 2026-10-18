@@ -141,6 +141,10 @@ export class ChunkView {
           turn = p >> 1;
         } else if (ja && isFlyoverAux(ja)) cell = Cell.Road + (deckEW(ja) ? 5 : 10);
         else if (ja && isRailAux(ja)) { cell = Cell.Crossing; turn = railMask(ja) === 10 ? 1 : 0; } // a level crossing (shared/src/rail.ts)
+      } else if (building && terrainOf(t) === Terrain.Water) {
+        // a harbour's wet rows (docs/boats.md section 5): open water under the pontoons and quays the model draws
+        cell = Cell.Water;
+        tmpC.setScalar(0.96 + 0.08 * h);
       } else if (building) {
         if (code === Zone.Parking) { cell = Cell.Pavement; tmpC.setScalar(0.62 + 0.06 * h); }
         else if (code === Zone.Yard || (uc && level === 0)) cell = Cell.Dirt;
