@@ -1,6 +1,10 @@
 import { PerspectiveCamera, Vector3, Plane, Raycaster, Vector2 } from 'three';
 
-const PITCH_MIN = 0.18, PITCH_MAX = 1.5, DIST_MIN = 6, DIST_MAX = 220;
+const PITCH_MIN = 0.18, PITCH_MAX = 1.5, DIST_MIN = 6;
+/** the 3D view's furthest zoom; zooming out past it opens the world map (docs/world-map.md) */
+export const DIST_MAX = 220;
+/** the world map: straight down (as near as lookAt allows), and how far out it zooms; zooming in below MAP_DIST_MIN returns to 3D */
+export const MAP_PITCH = 1.565, MAP_DIST_MIN = 150, MAP_DIST_MAX = 6000;
 
 /** Orbit-style rig looking at a point on the ground plane; pan/zoom/rotate. */
 export class CameraRig {
@@ -9,6 +13,12 @@ export class CameraRig {
   yaw = Math.PI / 4;
   pitch = 0.95;
   dist = 48;
+  /** the world map is up: the zoom range is MAP_DIST_MIN-ish to MAP_DIST_MAX (main.ts and mapmode.ts switch it) */
+  mapMode = false;
+  /** zoom-out asked for past DIST_MAX in 3D, as a summed log factor (reset by any zoom in); main.ts opens the map past a threshold */
+  overZoom = 0;
+  /** zoom-in asked for below MAP_DIST_MIN on the map, likewise; it returns to 3D */
+  underZoom = 0;
   private plane = new Plane(new Vector3(0, 1, 0), 0);
   private ray = new Raycaster();
   private ndc = new Vector2();
@@ -39,7 +49,16 @@ export class CameraRig {
     this.target.addScaledVector(this.right(), -dx * s);
     this.target.addScaledVector(this.forward(), dy * s);
   }
-  zoom(factor: number) { this.dist = Math.min(DIST_MAX, Math.max(DIST_MIN, this.dist * factor)); }
+  zoom(factor: number) {
+    const want = this.dist * factor;
+    if (this.mapMode) {
+      this.underZoom = factor < 1 && want < MAP_DIST_MIN ? this.underZoom - Math.log(factor) : 0;
+      this.dist = Math.min(MAP_DIST_MAX, Math.max(MAP_DIST_MIN * 0.8, want));
+      return;
+    }
+    this.overZoom = factor > 1 && want > DIST_MAX ? this.overZoom + Math.log(factor) : 0;
+    this.dist = Math.min(DIST_MAX, Math.max(DIST_MIN, want));
+  }
   /** Zoom keeping the ground point under a screen position where it is (the cursor); plain zoom over the sky. */
   zoomAt(factor: number, px: number, py: number, w: number, h: number) {
     this.update(); this.camera.updateMatrixWorld();

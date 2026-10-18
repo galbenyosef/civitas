@@ -89,6 +89,8 @@ interface Deps {
   onFly: () => void;
   /** the underground view (main.ts setUnder), on at a stop with `view: 'under'` (a metro line) and off again after it */
   setUnder?: (on: boolean) => void;
+  /** the world map (mapmode.ts), on at a stop with `view: 'map'` and off again after it; the tour flies the camera itself */
+  setMap?: (on: boolean) => void;
 }
 
 export class TourPanel {
@@ -116,6 +118,8 @@ export class TourPanel {
   private ro = false;
   /** a read-only showcase (main.ts, from the welcome): no Reset demo (the server would refuse it) */
   set readOnly(on: boolean) { if (on !== this.ro) { this.ro = on; this.render(); } }
+  /** likewise the world map */
+  private map = false;
 
   constructor(private d: Deps) {
     this.stops = demoTour(d.demo);
@@ -175,8 +179,9 @@ export class TourPanel {
     this.d.onFly();
     this.fly = instant ? null : { at: performance.now(), from: { x: r.target.x, z: r.target.z, dist: r.dist, yaw: r.yaw, pitch: r.pitch }, to: s };
     if (instant) this.place(s, 1);
-    const under = s.view === 'under';
+    const under = s.view === 'under', map = s.view === 'map';
     if (under !== this.under) { this.d.setUnder?.(under); this.under = under; }
+    if (map !== this.map) { this.d.setMap?.(map); this.map = map; }
     this.live = null;
     this.autoAt = performance.now() + (instant ? 0 : FLY_S * 1000) + DWELL_S * 1000;
     if (!this.open) this.setOpen(true); else this.show();

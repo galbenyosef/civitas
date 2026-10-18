@@ -47,6 +47,16 @@ export interface InputCallbacks {
   ladderKey?(tool: ToolId): ToolId | undefined;
   /** whether a tile is water (the road tool bridges it: see Input.crossing); unloaded tiles count as dry */
   isWater?(x: number, y: number): boolean;
+  /** the world map (mapmode.ts): while it is up it takes the left button, the wheel zooms about the cursor, and the view does not turn */
+  map?: MapInput;
+}
+/** What the world map does with the pointer (canvas pixels): a left press, drag and release (a click or a pan or a split cut), and hover. */
+export interface MapInput {
+  active(): boolean;
+  down(px: number, py: number, shift: boolean): void;
+  move(px: number, py: number, dx: number, dy: number): void;
+  up(px: number, py: number): void;
+  hover(px: number, py: number): void;
 }
 
 /**
@@ -150,10 +160,12 @@ export class Input {
     if (k.has('KeyS') || k.has('ArrowDown')) this.rig.target.addScaledVector(this.rig.forward(), -speed);
     if (k.has('KeyA') || k.has('ArrowLeft')) this.rig.target.addScaledVector(this.rig.right(), -speed);
     if (k.has('KeyD') || k.has('ArrowRight')) this.rig.target.addScaledVector(this.rig.right(), speed);
-    if (k.has('KeyQ')) this.rig.rotate(1.6 * dt);
-    if (k.has('KeyE')) this.rig.rotate(-1.6 * dt);
-    if (k.has('KeyR')) this.rig.rotate(0, 1.2 * dt);
-    if (k.has('KeyF')) this.rig.rotate(0, -1.2 * dt);
+    if (!this.onMap) { // the map stays north-up: no turning or tilting
+      if (k.has('KeyQ')) this.rig.rotate(1.6 * dt);
+      if (k.has('KeyE')) this.rig.rotate(-1.6 * dt);
+      if (k.has('KeyR')) this.rig.rotate(0, 1.2 * dt);
+      if (k.has('KeyF')) this.rig.rotate(0, -1.2 * dt);
+    }
     // + / - (and Page Up / Down) zoom about the view centre
     const zin = k.has('Equal') || k.has('NumpadAdd') || k.has('PageUp'), zout = k.has('Minus') || k.has('NumpadSubtract') || k.has('PageDown');
     if (zin !== zout) { this.zoomAt = null; this.pend.zoom += (zin ? -1.4 : 1.4) * dt; }
@@ -187,8 +199,14 @@ export class Input {
     // zoom is not zeroed here: take() hands over the last sliver whole, so a notch adds up to exactly its zoom
   }
 
+  /** a left press on the world map, until it is released */
+  private mapDrag = false;
+  private get onMap() { return !!this.cb.map?.active(); }
+
   private down = (e: PointerEvent) => {
     this.canvas.setPointerCapture(e.pointerId);
+    if (this.onMap && e.button === 0) { this.mapDrag = true; this.cb.map!.down(e.offsetX, e.offsetY, e.shiftKey); return; }
+    if (this.onMap && e.button === 1) return; // the map stays north-up
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       // orbit around the ground point under the cursor; fall back to the view centre over the sky
       const hit = this.rig.groundAt(e.offsetX, e.offsetY, this.canvas.clientWidth, this.canvas.clientHeight, this.pivot);
@@ -209,6 +227,8 @@ export class Input {
   };
 
   private move = (e: PointerEvent) => {
+    if (this.mapDrag) { this.cb.map!.move(e.offsetX, e.offsetY, e.movementX, e.movementY); return; }
+    if (this.onMap && !this.panning) { this.cb.map!.hover(e.offsetX, e.offsetY); return; }
     if (this.orbiting) { this.rig.orbitAround(this.pivot, -e.movementX * 0.006, e.movementY * 0.005); return; }
     const sd = this.selectDown;
     if (sd) {
@@ -254,6 +274,7 @@ export class Input {
   };
 
   private up = (e: PointerEvent) => {
+    if (this.mapDrag) { this.mapDrag = false; this.cb.map!.up(e.offsetX, e.offsetY); return; }
     const sd = this.selectDown;
     this.selectDown = null;
     if (sd) {
@@ -288,7 +309,7 @@ export class Input {
       this.zoomAt = { x: e.offsetX, y: e.offsetY };
       return;
     }
-    if (e.altKey) {
+    if (e.altKey && !this.onMap) { // the map stays north-up: Alt+scroll does what plain scroll does
       this.setPivot(e.offsetX, e.offsetY, e.timeStamp);
       this.pend.yaw += dx * 0.006;
       this.pend.pitch -= dy * 0.005;
@@ -324,7 +345,7 @@ export class Input {
     if (e.scale > 0 && g.scale > 0) this.pend.zoom += Math.log(g.scale / e.scale);
     g.scale = e.scale;
     if (!g.armed && Math.abs(e.rotation) > 8) { g.armed = true; g.rot = e.rotation; }
-    if (g.armed) {
+    if (g.armed && !this.onMap) {
       this.gPivotAt = performance.now(); // pivot is fixed for the gesture
       this.pend.yaw += (e.rotation - g.rot) * Math.PI / 180; // Safari's rotation is clockwise-positive; clockwise turns the view that way
       g.rot = e.rotation;
@@ -336,6 +357,8 @@ export class Input {
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return; // typing
     this.keys.add(e.code);
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.code === 'Tab') e.preventDefault(); // the world map's key, not the browser's focus
+    if (this.onMap) { this.cb.onKey(e.code); return; } // tools wait for the 3D view
     const key = e.key.toLowerCase();
     if ((key === 'z' || key === 'c') && structureTool(this.tool)) {
       // turn the footprint a quarter: Z anticlockwise, C clockwise (1×1 tools ignore both)

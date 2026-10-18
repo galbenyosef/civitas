@@ -69,8 +69,9 @@ export class ParcelsView {
     };
     const byOwner = new Map<string, ParcelDTO[]>();
     let selected: ParcelDTO | null = null;
-    for (const p of parcels) {
-      const color = new Color(players.get(p.owner)?.color ?? 0xffffff);
+    const all = [...parcels];
+    for (const p of all) {
+      const color = new Color(p.color ?? players.get(p.owner)?.color ?? 0xffffff); // a colour given on the world map, else the owner's
       const mine = p.owner === me;
       if (p.id === selectedId) selected = p;
       quad(fp, fc, p.x, p.y, p.x + p.w, p.y + p.h, 0.012, color, p.id === selectedId ? 0.16 : mine ? 0.09 : 0.045);
@@ -79,7 +80,8 @@ export class ParcelsView {
       l.push(p);
     }
     for (const [owner, list] of byOwner) ribbon(unionOutline(list), 0.11, 0.025, new Color(players.get(owner)?.color ?? 0xffffff));
-    if (selected) ribbon(unionOutline([selected]), 0.2, 0.027, new Color(0xffffff));
+    // the selected parcel, or the whole estate it is in (docs/world-map.md)
+    if (selected) { const g = selected.group; ribbon(unionOutline(g === undefined ? [selected] : all.filter((q) => q.group === g)), 0.2, 0.027, new Color(0xffffff)); }
     for (const [mesh, pos, col] of [[this.fills, fp, fc], [this.ribbons, rp, rc]] as const) {
       const g = new BufferGeometry();
       g.setAttribute('position', new Float32BufferAttribute(pos, 3));

@@ -68,6 +68,7 @@ function seededOf(w: World, airports: Airports, sim: Simulation): SeededDemo {
     airports: airports.airports,
     busTurns: [...w.transitLines.values()].filter((l) => l.mode === 'bus').map((l) => ({ number: l.number, turns: sim.buses.plan(l).turns })),
     lines: [...w.transitLines.values()].map((l) => ({ mode: l.mode, number: l.number, stops: l.stops.map((s): [number, number] => [s.x, s.y]) })),
+    parcels: [...w.parcels.values()].map((p) => ({ id: p.id, name: p.name, group: p.group })),
   };
 }
 

@@ -40,6 +40,7 @@ import { ChartsPanel } from './charts';
 import { PerfHud } from './render/perfhud';
 import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered, serverConfig } from './worlds';
 import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, type DemoInfo } from './tour';
+import { MapMode } from './mapmode';
 
 // ---- renderer & scene ---------------------------------------------------------------------
 const canvas = document.getElementById('c') as HTMLCanvasElement;
@@ -239,13 +240,13 @@ net.on('aux', (m) => world.applyAux(m.u));
 net.on('sub', (m) => world.applySub(m.u));
 net.on('under', (m) => world.applyUnder(m.u));
 net.on('tiles', (m) => world.applyTiles(m.u));
-net.on('parcels', (m) => { world.applyParcels(m.parcels, m.removed); lights.invalidate(); refreshPanel(); });
+net.on('parcels', (m) => { world.applyParcels(m.parcels, m.removed); lights.invalidate(); refreshPanel(); mapMode.parcelsChanged(); });
 net.on('players', (m) => {
   lights.invalidate();
   world.applyPlayers(m.players);
   onlineCount = m.players.filter((p) => p.online).length;
   const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger); ui.setLocks(me.tech); ui.showTech(me); devPanel?.sync(!!me.devUnlimited); }
-  world.parcelsDirty = true; refreshPanel();
+  world.parcelsDirty = true; refreshPanel(); mapMode.parcelsChanged();
 });
 net.on('citizens', (m) => citizens.update(m.c, performance.now()));
 // bus lines (client/src/lines.ts): the lines chip and panel, ribbons while it is open, and each bus's livery
@@ -336,7 +337,7 @@ function streamChunks() {
   if (!net.connected) return;
   const win = streamWindow();
   const want = new Set<string>();
-  for (let cy = win.cy0; cy <= win.cy1; cy++) for (let cx = win.cx0; cx <= win.cx1; cx++) want.add(chunkKey(cx, cy));
+  if (!mapMode.on) for (let cy = win.cy0; cy <= win.cy1; cy++) for (let cx = win.cx0; cx <= win.cx1; cx++) want.add(chunkKey(cx, cy));
   const add: [number, number][] = [], drop: [number, number][] = [];
   for (const k of want) if (!subscribed.has(k)) { subscribed.add(k); add.push(parseKey(k)); }
   for (const k of subscribed) if (!want.has(k)) { subscribed.delete(k); drop.push(parseKey(k)); dropView(k); }
@@ -360,8 +361,27 @@ function dropView(key: string) {
 }
 setInterval(streamChunks, 300);
 
+// ---- the world map (mapmode.ts, docs/world-map.md): Tab, the map chip, or zooming out past the 3D limit ----------
+const mapMode = new MapMode({
+  net, world, rig, canvas, mount: document.getElementById('ui')!,
+  toast: (k, msg) => ui.toast(k, msg), status: (t) => ui.setStatus(t),
+  onToggle: (on) => {
+    if (on) {
+      // the 3D tools, panels and tooltips wait; no chunk is streamed while the map is up
+      input.setTool('select'); input.hover = null;
+      closeBuilding(false); selectedParcel = 0; world.parcelsDirty = true; refreshPanel();
+      if (fpv.mode !== 'off') fpv.end();
+      clearTimeout(tipTimer); clearInterval(tipRefresh); tipTile = null; tipAgent = 0; ui.hideTip();
+    }
+    streamChunks();
+  },
+});
+mapMode.onView = (x, y) => { following = false; rig.target.set(x, 0, y); };
+document.getElementById('mapBtn')?.addEventListener('click', () => mapMode.toggle());
+
 // ---- input ------------------------------------------------------------------------------------
 const input = new Input(canvas, rig, {
+  map: mapMode,
   onToolChange: (t) => { ui.setTool(t); rectMesh.visible = false; updateStatus(); toolUnder(t); },
   ladderKey: (t) => ui.ladderKey(t), // 0, 8, 9, Y, P, G, V, B, L open their size picker on the size last used
   isWater: (x, y) => { const t = world.getTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water; }, // the road tool bridges water (render/bridges.ts)
@@ -407,7 +427,9 @@ const input = new Input(canvas, rig, {
   },
   onHover: (tile) => { updateStatus(); hoverAt(tile); },
   onKey: (code) => {
-    if (code === 'Escape' && selectedBuilding) closeBuilding();
+    if (mapMode.on) { if (code === 'Tab') mapMode.toggle(); else if (code === 'Escape') mapMode.escape(); return; }
+    if (code === 'Tab') mapMode.toggle();
+    else if (code === 'Escape' && selectedBuilding) closeBuilding();
     else if (code === 'KeyH') setHeat(!ChunkView.heatOn);
     else if (code === 'KeyN') setUnder(!underground.on);
     else if (code === 'KeyT') { ui.toggleTech(); ui.showTech(world.myPlayer); }
@@ -942,7 +964,12 @@ function frame(now: number) {
   last = now;
   input.update(dt);
   tour?.frame(dt); // the tour's camera flight, before the rig places the camera
+  mapMode.frameCamera(dt);
   rig.update();
+  // zooming out past the 3D limit opens the map; zooming in below the map's returns to 3D
+  if (!mapMode.on && rig.overZoom > 0.3 && !tour?.flying) mapMode.set(true);
+  else if (mapMode.on && rig.underZoom > 0.15) mapMode.set(false);
+  if (mapMode.on) { mapMode.frame(now); renderer.render(mapMode.view.scene, rig.camera); return; }
   adaptQuality(dt);
 
   underground.frame(dt, renderer);
@@ -1030,7 +1057,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { mapMode, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------
@@ -1058,7 +1085,7 @@ if (demoParam) {
   reviveDemo(demoParam, net);
   tour = new TourPanel({
     demo: demoParam, net, rig, scene, buildingHtml: (info) => ui.buildingHtml(info, 'h3'),
-    chipMount: document.getElementById('techBtn')!, onFly: () => { following = false; }, setUnder: (on) => setUnder(on),
+    chipMount: document.getElementById('techBtn')!, onFly: () => { following = false; }, setUnder: (on) => setUnder(on), setMap: (on) => mapMode.set(on, false),
   });
   (window as any).msc.tour = tour;
 }

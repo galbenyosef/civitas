@@ -1,6 +1,6 @@
 import { KIND_ID, MANIFEST, type KindToolId } from '../buildings/compiled';
 import { MOTORWAY_KIND } from '../gateways';
-import { ZONE_COST } from '../constants';
+import { ZONE_COST, MAX_PARCEL_EDGE } from '../constants';
 import type { KindManifest } from '../buildings/schema';
 import type { Tool } from '../protocol';
 import { STOP_KINDS, TRANSIT, type TransitMode } from '../transit';
@@ -77,7 +77,10 @@ export interface DemoBridge { id: string; name: string; from: DemoXY; to: DemoXY
 /** a roundabout or flyover clicked on the junction `at` (junctions.ts); a flyover's deck carries the `deck` road */
 export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: DemoXY; deck?: 'ew' | 'ns' }
 /** A tour stop on something that is neither a kind nor a drag (a level crossing, the river): its caption is SPOT_CAPTIONS[spot]. */
-export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' }
+/** `view`: the tour turns the underground view ('under') or the world map ('map', docs/world-map.md) on at this stop */
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' }
+/** Land parcels (by their `land` names, any section's) combined into one estate by the players' rule (parcelops.ts planCombine) */
+export interface DemoEstate { name: string; lands: readonly string[] }
 export interface DemoLine {
   id: string; mode: TransitMode; number: number; colour: number;
   /** stops in calling order: bus stop tiles or station doors */
@@ -119,6 +122,7 @@ export interface DemoSection {
   lines?: DemoLine[];
   blocks?: DemoBlock[];
   spots?: DemoSpot[];
+  estates?: DemoEstate[];
 }
 export interface DemoDef {
   id: DemoId; name: string; blurb: string;
@@ -393,7 +397,11 @@ export const SECTIONS: DemoSection[] = [
     spots: [
       { id: 'river', spot: 'river', name: 'The river', rect: [-20, RIVER_ROWS[0], 51, RIVER_ROWS[1] - RIVER_ROWS[0] + 1] },
       { id: 'level-crossing', spot: 'level-crossing', name: 'Level crossing', rect: [-20, 38, 1, 1], inspect: [-30, 35] },
+      // the whole town from above, on the world map
+      { id: 'world-map', spot: 'world-map', name: 'World map', rect: [-60, -60, 130, 140], view: 'map' },
     ],
+    // the railway land and the quarter beyond it: together 70×26, past the 48-tile parcel edge, so an estate (not a merge)
+    estates: [{ name: 'Riverside estate', lands: ['South railway', 'Riverside'] }],
   },
 ];
 
@@ -415,7 +423,7 @@ export const TOUR: string[] = [
   'library', 'central-library', 'museum',
   'airport', 'runway',
   'block-estate', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
-  'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3',
+  'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3', 'world-map',
   'ind-plant', 'ind-works', 'ind-row', 'ind-depot', 'com-centre', 'com-parade', 'com-store', 'com-hotel',
   'off-tower', 'off-hq', 'off-centre', 'res-estate', 'res-terrace', 'res-midrise', 'res-tower', 'res-block',
 ];
@@ -500,7 +508,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'cab-office': {
     title: 'Cab office',
@@ -543,6 +551,12 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     what: 'Helicopters land on the helipads drawn on buildings: air ambulances at the hospitals, the police helicopter at police headquarters, executive flights on the tallest offices (the headquarters and the office tower across the river), and the royal flight at Buckingham Palace in the London demo. The timetable is worked out from the pads alone, so everyone sees the same flights.',
     how: 'Nothing to build: a hospital, police headquarters or tall office whose design has a pad brings its service. Hover a helicopter for its callsign and errand, click it for its crew, and press I or O to ride in the cockpit.',
     facts: [['Air ambulance', '2-5 flights a pad a day, some go on to a second hospital'], ['Police', '2-3 a day, an hour or more on the pad'], ['Executive', '1-3 a day, some hop between towers'], ['Royal', 'Buckingham Palace (London demo)']],
+  },
+  'world-map': {
+    title: 'The world map',
+    what: 'The whole world from above, flat and north-up: land use in colour (homes green, shops blue, industry amber, offices violet, civic red, darker where buildings are taller), every owner\'s land outlined in their colour with their name, estates and parcels named, and the bus, rail and underground lines drawn in theirs. It streams no buildings or people, only a small land-use summary of each changed part of the world, so it stays quick however big the world grows. The railway land and the quarter beyond the river are one estate here: two parcels managed as one.',
+    how: `Tab, the map chip, or zoom out past the 3D view's limit; zoom back in to return. Drag to pan, click a parcel for its area, buildings, population, jobs and book value. On your own land: shift-click neighbouring parcels and Combine them (a pair that makes a rectangle of up to ${MAX_PARCEL_EDGE} a side merges, the rest become one estate sharing name, colour and tax rate), Split one along a line you drag, rename it or give it a colour.`,
+    facts: [['Key', 'Tab (or the map chip; Esc leaves)'], ['Combine', `rectangles up to ${MAX_PARCEL_EDGE} a side merge; the rest form an estate`], ['Split', 'a straight cut; both parts keep dry land; never through a building'], ['Book value', 'land, roads, zoning, building work and civic prices']],
   },
   'tube-crossover': {
     title: 'Under Waterloo',
@@ -594,8 +608,8 @@ export interface TourStop {
   /** the tile to ask the server about for live stats */
   inspect?: DemoXY;
   line?: { mode: TransitMode; number: number; colour: number };
-  /** 'under': the tour turns the underground view on at this stop (a metro line, a spot under ground) */
-  view?: 'under';
+  /** 'under': the tour turns the underground view on at this stop (a metro line, a spot under ground); 'map': the world map */
+  view?: 'under' | 'map';
 }
 
 const kindIdOf = (s: string): number => (KIND_ID as Record<string, number>)[s] ?? 0;
@@ -720,7 +734,9 @@ export function demoTour(id: DemoId): TourStop[] {
       const sp = s.spots?.find((q) => q.id === sid);
       if (sp) {
         const [x, y, w, h] = sp.rect;
-        out.push({ id: sid, ...base, ...SPOT_CAPTIONS[sp.spot], title: sp.name, ...framing(x, y, w, h, 0, w * h === 1 ? 0.8 : 0.5), rect: sp.rect, inspect: sp.inspect, view: sp.view });
+        // the map looks straight down, north up, from far enough to take in the rect (camera.ts MAP_PITCH)
+        const cam = sp.view === 'map' ? { focus: [x + w / 2, y + h / 2] as [number, number], dist: Math.max(w, h) * 1.9, yaw: 0, pitch: 1.565 } : framing(x, y, w, h, 0, w * h === 1 ? 0.8 : 0.5);
+        out.push({ id: sid, ...base, ...SPOT_CAPTIONS[sp.spot], title: sp.name, ...cam, rect: sp.view === 'map' ? undefined : sp.rect, inspect: sp.inspect, view: sp.view });
         continue;
       }
       const l = s.lines?.find((q) => q.id === sid);
@@ -757,6 +773,8 @@ export interface SeededDemo {
   busTurns: readonly { number: number; turns: readonly number[] }[];
   /** every saved line: its mode (freight lines are 'rail') and its stops (bus stop tiles, station doors) */
   lines: readonly { mode: TransitMode; number: number; stops: readonly DemoXY[] }[];
+  /** every parcel: its name and the estate it is in (docs/world-map.md) */
+  parcels: readonly { id: number; name: string; group?: number }[];
 }
 
 /**
@@ -870,6 +888,10 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
     id: spot, caption: `a ${name.toLowerCase()} at (${x}, ${y}) (a mobile-job base)`, tour: spot,
     seeded: (d) => anyTile(d, (tx, ty, t, a) => tx === x && ty === y && mobileRoleAt(spot, x, y, t, a)),
   })),
+  // ---- the world map (docs/world-map.md): its tour stop, and an estate (two parcels combined) for it to show
+  { id: 'world-map', caption: 'the world map over the whole town, with an estate of combined parcels', tour: 'world-map',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'world-map' && sp.view === 'map')) && ss.some((s) => s.estates?.length),
+    seeded: (d) => { const n = new Map<number, number>(); for (const p of d.parcels) if (p.group !== undefined) n.set(p.group, (n.get(p.group) ?? 0) + 1); return [...n.values()].some((k) => k >= 2); } },
   { id: 'metro-crossover', caption: 'a metro crossover (one line\'s tunnel straight across another\'s)', tour: 'tube-crossover', demo: 'london',
     rule: 'the showcase runs one underground line; lines cross in London, where the Tube\'s Central, Northern and Jubilee lines meet',
     seeded: (d) => anyTile(d, (_x, _y, _t, _a, u) => isTunnel(u) && !isPlatform(u) && underMask(u) === 15) },

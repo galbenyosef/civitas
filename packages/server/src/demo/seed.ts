@@ -167,6 +167,14 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
     }
   }
   for (const pid of w.parcels.keys()) w.recountRoads(pid);
+  // estates (docs/world-map.md): land parcels combined by the players' rule, then named
+  for (const s of sections) for (const e of s.estates ?? []) {
+    const ids = e.lands.map((name) => [...w.parcels.values()].find((p) => p.name === name)?.id);
+    if (ids.some((id) => id === undefined)) continue; // a demo without one of the lands (the transport demo has no riverside)
+    const r = w.combineParcels(ids as number[], isDemoOwner);
+    if (typeof r === 'string') { problems.push(`${s.id}: estate ${e.name}: ${r}`); continue; }
+    for (const id of ids) { const p = w.parcels.get(id!); if (p) p.name = e.name; }
+  }
   return problems;
 }
 
