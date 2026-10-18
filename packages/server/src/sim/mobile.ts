@@ -10,6 +10,7 @@ import { dirBetween } from './traffic';
 import { busLegs, type BusNet } from './busroute';
 import { indicatorOf } from './indicators';
 import { ageOf } from './life';
+import { SchoolBuses } from './schoolbus';
 
 /**
  * Mobile jobs (docs/mobile-jobs.md): the roaming-worker framework. A worker on shift at their base (or at home, for
@@ -107,6 +108,8 @@ export class Mobile {
   private byWorker = new Map<number, Unit>();
   private nextId = FLEET_ID_BASE;
   private services: FleetService[] = [];
+  /** the school bus service (sim/schoolbus.ts), registered here so the simulation needs no hook for it */
+  readonly schoolBuses: SchoolBuses;
   /** workers on shift now (state Work) by fleet kind, refreshed every INDEX_EVERY ticks */
   private shift = new Map<number, Citizen[]>();
   /** each citizen's road role, cached against their workplace (kind, tile) and cleared once a game day */
@@ -119,6 +122,7 @@ export class Mobile {
 
   constructor(private w: World, private traffic: Traffic) {
     this.net = { w, depot: null, cost: (x, y) => traffic.cost(x, y), degree: (x, y) => traffic.degreeOf(x, y), crossing: (x, y) => traffic.isCrossingAt(x, y) };
+    this.register(this.schoolBuses = new SchoolBuses(w, this));
   }
   register(svc: FleetService) { this.services.push(svc); }
 
@@ -214,11 +218,12 @@ export class Mobile {
       ...this.w.moverDefaults(c.id), // the driver's own style
     };
     v.halt = -1;
-    v.cls = kind === FleetKind.Bicycle || kind === FleetKind.Moped ? BIKE_CLASS : kind === FleetKind.CourierVan ? VehicleClass.Van : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? VehicleClass.Truck : VehicleClass.Sedan;
+    v.cls = kind === FleetKind.Bicycle || kind === FleetKind.Moped ? BIKE_CLASS : kind === FleetKind.CourierVan ? VehicleClass.Van : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? VehicleClass.Truck : kind === FleetKind.SchoolBus ? VehicleClass.Bus : VehicleClass.Sedan;
     if (kind === FleetKind.Bicycle) { v.speedMul *= FOOD.bicycleSpeed; v.gapMul *= 0.7; }
     else if (kind === FleetKind.Moped) { v.speedMul *= FOOD.mopedSpeed; v.gapMul *= 0.8; }
     else if (kind === FleetKind.Sweeper) v.speedMul *= REFUSE.sweeperSpeed;
     else if (kind === FleetKind.BinLorry) v.gapMul *= 1.2;
+    else if (kind === FleetKind.SchoolBus) v.gapMul *= 1.2;
     const day = Math.floor(this.w.tick / DAY);
     const u: Unit = { v, kind, worker: c.id, crew, base, stops, phase: 'pull', dwellUntil: 0, home: false, loaded: false, working: false, ending: false, endAt: 0, svc, task, day, jobs: 0, money: 0 };
     resetTrail(v, from[0], from[1]);

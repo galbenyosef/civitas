@@ -26,7 +26,7 @@ export interface TechNode {
   cost: number;
   requires: string[];
   condition: { counter: Counter; min: number };
-  /** feature ids this node opens: tool names, 'level2' ... 'level7', 'underground', 'signals', 'publicRoads', 'bridges', 'patrols', 'airport', 'runway', 'lines' (the transit Lines panel), 'ferry' (river bus lines, docs/boats.md) */
+  /** feature ids this node opens: tool names, 'policy-*' (the education policies, policies.ts), 'level2' ... 'level7', 'underground', 'signals', 'publicRoads', 'bridges', 'patrols', 'airport', 'runway', 'lines' (the transit Lines panel), 'ferry' (river bus lines, docs/boats.md) */
   unlocks: string[];
   /**
    * The node cannot be earned or bought in a live game yet: its unlock rule is still to be decided, and this text
@@ -83,9 +83,9 @@ export const TECH: TechNode[] = [
   { id: 'cul5', track: 'culture', tier: 5, name: 'Landmarks', blurb: 'An opera house, a stadium with floodlights and a botanical garden: places people cross the city for.', cost: 5000, requires: ['cul4', 'con2'], condition: { counter: 'jobs', min: 500 }, unlocks: ['opera', 'stadium', 'botanic'] },
   // education (docs/education.md section 6): nursery to research institute. The pupils and graduates counters are filled by the schools simulation (E3); until then edu4 and edu5 cannot be earned.
   { id: 'edu1', track: 'education', tier: 1, name: 'Schools', blurb: 'Nurseries and primary schools: children of three to eleven learn near home, and their parents like a good school close by.', cost: 500, requires: ['civ1'], condition: { counter: 'housed', min: 60 }, unlocks: ['nursery', 'primary'] },
-  { id: 'edu2', track: 'education', tier: 2, name: 'Secondary education', blurb: 'Academies for eleven to sixteen: GCSEs, a big catchment, and a pool of teenagers who go on to further study.', cost: 1200, requires: ['edu1'], condition: { counter: 'housed', min: 200 }, unlocks: ['secondary'] },
-  { id: 'edu3', track: 'education', tier: 3, name: 'Further education', blurb: 'Sixth-form colleges for A-levels and further-education colleges for trades and adult courses: the skilled workforce offices and factories ask for.', cost: 1800, requires: ['edu2', 'zon2'], condition: { counter: 'jobs', min: 150 }, unlocks: ['sixthform', 'fecollege'] },
-  { id: 'edu4', track: 'education', tier: 4, name: 'Higher education', blurb: 'A university campus with halls of residence: degrees for your own school leavers, students from far away, and the best-paid graduates.', cost: 4500, requires: ['edu3', 'con2'], condition: { counter: 'pupils', min: 150 }, unlocks: ['university', 'halls'] },
+  { id: 'edu2', track: 'education', tier: 2, name: 'Secondary education', blurb: 'Academies for eleven to sixteen: GCSEs, a big catchment, and a pool of teenagers who go on to further study.', cost: 1200, requires: ['edu1'], condition: { counter: 'housed', min: 200 }, unlocks: ['secondary', 'policy-meals', 'policy-buses'] },
+  { id: 'edu3', track: 'education', tier: 3, name: 'Further education', blurb: 'Sixth-form colleges for A-levels and further-education colleges for trades and adult courses: the skilled workforce offices and factories ask for.', cost: 1800, requires: ['edu2', 'zon2'], condition: { counter: 'jobs', min: 150 }, unlocks: ['sixthform', 'fecollege', 'policy-learning', 'policy-apprentice'] },
+  { id: 'edu4', track: 'education', tier: 4, name: 'Higher education', blurb: 'A university campus with halls of residence: degrees for your own school leavers, students from far away, and the best-paid graduates.', cost: 4500, requires: ['edu3', 'con2'], condition: { counter: 'pupils', min: 150 }, unlocks: ['university', 'halls', 'policy-fees'] },
   { id: 'edu5', track: 'education', tier: 5, name: 'Research', blurb: 'A research institute of glass and steel labs: postgraduates, the finest jobs in town, and offices that want to be near it.', cost: 7000, requires: ['edu4', 'zon3'], condition: { counter: 'graduates', min: 200 }, unlocks: ['research'] },
   // London landmarks (buildings/landmarks-london.ts, docs/buildings.md "Landmarks"): real buildings, tagged 'london'. How a
   // live game earns them is still to be decided, so the node is `locked`: only sandboxes and dev clients place them.

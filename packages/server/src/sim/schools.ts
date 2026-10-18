@@ -1,6 +1,6 @@
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, WALK_SPEED, CitizenState, LifeStage, capacityOf, familyOf, hash2, mod, tileKey,
-  EDU, STAGES, Study, EduLevel, EduTrack, EduResult, EDU_NURSERY, EDU_DROPPED, EDU_HOMEWARD, SCHOOL_SPECS, schoolTakes, studyForAge, logEdu,
+  EDU, POLICY, hasPolicy, STAGES, Study, EduLevel, EduTrack, EduResult, EDU_NURSERY, EDU_DROPPED, EDU_HOMEWARD, SCHOOL_SPECS, schoolTakes, studyForAge, logEdu,
   type SchoolSpec, type SchoolInfo,
 } from '@msimcity/shared';
 import { tkey, type Building, type Citizen, type World } from '../world';
@@ -68,6 +68,8 @@ interface School {
   start: number; end: number;
   /** the latest results day (game week), its results and drop-outs since, and the waiting list at the last admissions */
   year: number; passed: number; failed: number; dropped: number; waiting: number;
+  /** the owner of the school's parcel and the education policies they have on (shared/src/policies.ts), refreshed by the census */
+  owner: string | undefined; meals: boolean; fees: boolean;
 }
 
 export class Schools {
@@ -242,7 +244,7 @@ export class Schools {
         s = {
           b, spec, pupils: 0, present: 0, staff: 0, teachers: 0, postgrads: 0, needed: 0, needPg: 0, staffing: 0, quality: -1,
           start: EDU.startFrom + EDU.startSpan * hash2(b.x * 7 + 3, b.y * 11 + 5), end: EDU.endFrom + EDU.endSpan * hash2(b.x * 5 + 1, b.y * 13 + 7),
-          year: -1, passed: 0, failed: 0, dropped: 0, waiting: 0,
+          year: -1, passed: 0, failed: 0, dropped: 0, waiting: 0, owner: undefined, meals: false, fees: false,
         };
         this.schools.set(k, s);
       }
@@ -292,6 +294,9 @@ export class Schools {
       s.staffing = Math.min(s.needed ? s.teachers / s.needed : 1, s.needPg ? s.postgrads / s.needPg : 1);
       if (s.quality < 0) s.quality = this.qualityNow(s);
       const pid = w.parcelIdAt(s.b.x, s.b.y), o = w.parcels.get(pid)?.owner;
+      s.owner = o;
+      const pol = o ? w.players.get(o)?.policies : undefined;
+      s.meals = hasPolicy(pol, 'meals'); s.fees = hasPolicy(pol, 'fees');
       if (o && s.pupils) pupils.set(o, (pupils.get(o) ?? 0) + s.pupils);
       let ps = schoolsOf.get(pid);
       if (!ps) schoolsOf.set(pid, (ps = [0, 0]));
@@ -338,11 +343,16 @@ export class Schools {
       if (results) { s.year = week; s.passed = 0; s.failed = 0; s.dropped = 0; } // the tooltip shows the latest results day
     }
     const nextYear = (week + 1) * WEEK;
+    const meals = new Map<string, number>(), fees = new Map<string, number>();
     for (const c of w.citizens.values()) {
       if (!c.study) continue;
       const s = this.schoolOf(c);
       if (!s) { this.leave(c, EduResult.Left); continue; }
       if (schoolDay) c.due++;
+      if (s.owner) { // the owner's policies, billed below: free school meals feed the pupils, tuition fees pay (or, off, a grant)
+        if (s.meals && schoolDay && c.study <= Study.SixthForm) { c.health = Math.min(100, c.health + POLICY.mealsHealth); meals.set(s.owner, (meals.get(s.owner) ?? 0) + 1); }
+        if (c.study === Study.Degree || c.study === Study.Postgrad) fees.set(s.owner, (fees.get(s.owner) ?? 0) + (s.fees ? POLICY.feePerStudent : -POLICY.grantPerStudent));
+      }
       const spec = STAGES[c.study];
       if (c.study >= Study.SixthForm && c.due >= EDU.dropOutAfter && c.att / c.due < EDU.dropOutBelow && Math.random() < EDU.dropOutPerDay) {
         c.eduBits |= EDU_DROPPED; s.dropped++; this.events.dropOuts++; this.lifeEvents.dropOuts++;
@@ -354,6 +364,8 @@ export class Schools {
       const leaving = c.study <= Study.SixthForm ? (nextYear - c.born) / WEEK >= spec.ages[1] : c.due >= spec.days;
       if (leaving) this.result(c, s);
     }
+    for (const [o, n] of meals) w.credit(o, -n * POLICY.mealsPerPupil, 'upkeep');
+    for (const [o, v] of fees) w.credit(o, v, 'fees');
     if (mod(day, WEEK) === 0) this.admit();
   }
 
@@ -362,7 +374,7 @@ export class Schools {
     const spec = STAGES[c.study];
     let r: number = EduResult.Left;
     if (c.due > 0) {
-      const bonus = c.study === Study.Primary && (c.eduBits & EDU_NURSERY) ? EDU.nurseryBonus : 0;
+      const bonus = (c.study === Study.Primary && (c.eduBits & EDU_NURSERY) ? EDU.nurseryBonus : 0) + (s.meals ? EDU.mealsBonus : 0);
       r = c.att / c.due < EDU.minAttend ? (c.study === Study.Nursery ? EduResult.Left : EduResult.Failed) // a nursery year is no exam
         : Math.random() >= spec.pass * s.quality * (1 + bonus) ? EduResult.Failed : EduResult.Passed;
     }
@@ -391,7 +403,7 @@ export class Schools {
   private goOn(c: Citizen, study: number) {
     let best: School | undefined, bd = Infinity;
     for (const s of this.schools.values()) {
-      if (!schoolTakes(s.spec, study) || s.spec.places <= 0 || s.pupils >= this.admitting(s)) continue;
+      if (!schoolTakes(s.spec, study) || s.spec.places <= 0 || s.pupils >= this.admitting(s) || this.deterred(c, s, study)) continue;
       const d = Math.abs(s.b.x - c.hx) + Math.abs(s.b.y - c.hy);
       if ((s.spec.catchment > 0 && d > s.spec.catchment) || d >= bd) continue;
       best = s; bd = d;
@@ -460,11 +472,13 @@ export class Schools {
   enrolAt(c: Citizen, b: Building, study: number): boolean {
     let s = this.schools.get(tkey(b.x, b.y));
     if (!s || s.b !== b) { this.census(); s = this.schools.get(tkey(b.x, b.y)); }
-    if (!s || !schoolTakes(s.spec, study) || s.pupils >= this.admitting(s)) return false;
+    if (!s || !schoolTakes(s.spec, study) || s.pupils >= this.admitting(s) || this.deterred(c, s, study)) return false;
     if (c.study) this.leave(c, EduResult.Left);
     this.enrol(c, s, study);
     return true;
   }
+  /** Tuition fees on at a university turn a stable share of would-be students away (the same people each time, by id). */
+  private deterred(c: Citizen, s: School, study: number) { return s.fees && study >= Study.Degree && hash2(c.id, 249) < POLICY.feeDeter; }
   /** A place at s: the school's timetable in the free shift fields, its door as the commute's destination. */
   private enrol(c: Citizen, s: School, study: number) {
     c.study = study; c.sx = s.b.x; c.sy = s.b.y; c.att = 0; c.due = 0; c.eduBits &= ~EDU_HOMEWARD;
@@ -479,6 +493,19 @@ export class Schools {
     c.cycle = WEEKDAYS; c.phase = 0;
     if (c.state === S.Home) this.host.scheduleNext(c);
   }
+
+  // ---- policy hooks for the other phases (docs/education.md section 16) ----
+
+  /**
+   * Whether pupil c is on free school meals now (their school's owner has the policy on). E4 reads it for the parents'
+   * "free school meals" mood: `POLICY.mealsMood` for a household with a pupil for whom this is true.
+   */
+  onMeals(c: Citizen): boolean { return !!c.study && !!this.schools.get(tkey(c.sx, c.sy))?.meals; }
+  /**
+   * The multiplier on a graduate's chance of leaving town from the tuition-fees policy of the owner of their home:
+   * `POLICY.feeDrainMul` with fees on, else 1. E4 multiplies it into the brain-drain check in lifeFamily.
+   */
+  drainMul(c: Citizen): number { return this.w.ownerHasPolicy(c.hx, c.hy, 'fees') ? POLICY.feeDrainMul : 1; }
 
   // ---- inspection -----------------------------------------------------------------------------------------------
 

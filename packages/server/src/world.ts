@@ -4,7 +4,7 @@ import {
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
-  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate, type EduFields,
+  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate, type EduFields, hasPolicy, type PolicyId,
 } from '@msimcity/shared';
 import { LIFE, stageFor } from './sim/life';
 import type { GoalState } from './goals';
@@ -57,6 +57,8 @@ export interface Player {
   ledger?: LedgerDTO;
   /** onboarding goals and hints (goals.ts); saved with the player, absent in older saves */
   onboarding?: GoalState;
+  /** education policies switched on (shared policies.ts); saved with the player, absent in older saves */
+  policies?: string[];
 }
 
 /** Anything that moves along a path; drivers also live in a traffic lane. */
@@ -828,7 +830,7 @@ export class World {
   /** `ledger`: include the day's money ledger (net.ts sends it once a game hour, not with every money change) */
   playerDTO(p: Player, online: boolean, ledger = false): PlayerDTO {
     return {
-      id: p.id, name: p.name, color: p.color, money: Math.round(p.money * 100) / 100, online, tech: [...p.tech], progress: { ...p.progress }, devUnlimited: p.devUnlimited || undefined,
+      id: p.id, name: p.name, color: p.color, money: Math.round(p.money * 100) / 100, online, tech: [...p.tech], policies: [...(p.policies ?? [])], progress: { ...p.progress }, devUnlimited: p.devUnlimited || undefined,
       ledger: ledger ? this.ledgerDTO(p) : undefined,
     };
   }
@@ -842,6 +844,11 @@ export class World {
     const L = (p.ledger ??= { day: this.day, today: {}, yesterday: {} });
     if (L.day !== this.day) { L.yesterday = L.day === this.day - 1 ? L.today : {}; L.today = {}; L.day = this.day; }
     return L;
+  }
+  /** Whether the owner of the parcel at a tile has an education policy on (unclaimed land: no). */
+  ownerHasPolicy(x: number, y: number, id: PolicyId): boolean {
+    const parcel = this.parcelAt(x, y);
+    return hasPolicy(this.players.get(parcel?.owner ?? '')?.policies, id);
   }
   /** Raise a player's progress counter (peak-style counters pass the current value). */
   bump(playerId: string | undefined, counter: Counter, amount: number, peak = false) {

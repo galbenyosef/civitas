@@ -11,7 +11,7 @@ import type { Occupation } from './occupations';
  */
 
 /** The vehicle a mobile worker drives (wire bits 19-22). 0: not a fleet vehicle. */
-export const FleetKind = { None: 0, Taxi: 1, PrivateHire: 2, Bicycle: 3, Moped: 4, CourierVan: 5, BinLorry: 6, Sweeper: 7, TradesVan: 8 } as const;
+export const FleetKind = { None: 0, Taxi: 1, PrivateHire: 2, Bicycle: 3, Moped: 4, CourierVan: 5, BinLorry: 6, Sweeper: 7, TradesVan: 8, SchoolBus: 9 } as const;
 export type FleetKindId = typeof FleetKind[keyof typeof FleetKind];
 
 /** Agent flag bits (protocol.ts packCitizenFlags; net.ts ORs them in): fleet kind in 19-22, loaded in 23, working in 24. */
@@ -33,10 +33,10 @@ export const BIKE_CLASS = 4;
 
 /** What each fleet vehicle is called, and the job of whoever drives it. */
 export const FLEET_LABEL: Record<number, string> = {
-  1: 'taxi', 2: 'private hire car', 3: 'delivery bicycle', 4: 'delivery moped', 5: 'courier van', 6: 'bin lorry', 7: 'street sweeper', 8: 'trades van',
+  1: 'taxi', 2: 'private hire car', 3: 'delivery bicycle', 4: 'delivery moped', 5: 'courier van', 6: 'bin lorry', 7: 'street sweeper', 8: 'trades van', 9: 'school bus',
 };
 export const FLEET_JOB: Record<number, string> = {
-  1: 'taxi driver', 2: 'private-hire driver', 3: 'delivery rider', 4: 'delivery rider', 5: 'parcel courier', 6: 'refuse collector', 7: 'street sweeper driver', 8: 'tradesperson',
+  1: 'taxi driver', 2: 'private-hire driver', 3: 'delivery rider', 4: 'delivery rider', 5: 'parcel courier', 6: 'refuse collector', 7: 'street sweeper driver', 8: 'tradesperson', 9: 'school bus driver',
 };
 
 /** Who works on the road, and how many (shares are hash-seeded per lot or per citizen). */
@@ -57,6 +57,22 @@ export const MOBILE = {
   wasteDepotShare: 0.08,
   binCrewShare: 0.5,
   sweeperShare: 0.12,
+  /** staff of a secondary school who drive its school bus (docs/education.md section 16): a school of 24 has two or three */
+  schoolBusShare: 0.08,
+};
+
+/** School buses (sim/schoolbus.ts), the policy of shared/src/policies.ts. Hours of day; distances in Manhattan tiles. */
+export const SCHOOLBUS = {
+  /** pupils living further than this from their school are collected (nearer, they walk) */
+  minDist: 12,
+  seats: 40,
+  maxStops: 12,
+  /** the most tiles (Manhattan) a round may cover, school to the stops and back: a bus covers about a tenth of a tile a tick on its stops (measured, loadtest/policies.ts), so a round is one neighbourhood and is back before the bell */
+  maxTour: 30,
+  /** the morning round may leave between these hours, on a school day (the driver's shift starts at 04:30) */
+  from: 4.75, until: 6.5,
+  /** ticks at the kerb, and for each pupil who gets on */
+  dwell: 3, perPupil: 1,
 };
 
 /** Taxis and private hire (sim/taxis.ts). Ticks unless noted; money in dollars. */
@@ -152,7 +168,7 @@ export const COURIER = {
 // ---- roles ---------------------------------------------------------------------------------------------------------
 
 const COMMERCIAL = KIND_ID.commercial, COM_DEEP = KIND_ID['com-deep'], COM_PARADE = KIND_ID['com-parade'], COM_CENTRE = KIND_ID['com-centre'];
-const IND_DEPOT = KIND_ID['ind-depot'];
+const IND_DEPOT = KIND_ID['ind-depot'], SECONDARY = KIND_ID['secondary-school'];
 
 /** Is this 1×1 commercial lot a cab office? A tile hash, so the sign (names.ts) and the server agree. */
 export const isCabOffice = (kindId: number, x: number, y: number) => kindId === COMMERCIAL && hash2(x * 23 + 9, y * 19 + 4) < MOBILE.cabShare;
@@ -204,6 +220,7 @@ export function mobileRole(kindId: number, level: number, wx: number, wy: number
     const r = hash2(id, 437);
     return r < MOBILE.binCrewShare ? { kind: FleetKind.BinLorry, fromHome: false } : r < MOBILE.binCrewShare + MOBILE.sweeperShare ? { kind: FleetKind.Sweeper, fromHome: false } : null;
   }
+  if (kindId === SECONDARY && hash2(id, 441) < MOBILE.schoolBusShare) return { kind: FleetKind.SchoolBus, fromHome: false };
   if (INDUSTRIAL_IDS[kindId] === 1 && hash2(id, 439) < MOBILE.courierShare && isCourierDepot(kindId, level, wx, wy)) return { kind: FleetKind.CourierVan, fromHome: false };
   return null;
 }
@@ -220,6 +237,8 @@ export const FLEET_ROTA: Record<number, Occupation> = {
   [FleetKind.Bicycle]: occ('delivery rider', [{ start: 11, hours: 4, weight: 0.3 }, { start: 17, hours: 6, weight: 0.5 }, { start: 11, hours: 10, weight: 0.2 }]),
   [FleetKind.Moped]: occ('delivery rider', [{ start: 11, hours: 4, weight: 0.25 }, { start: 17, hours: 6, weight: 0.5 }, { start: 11, hours: 10, weight: 0.25 }]),
   [FleetKind.CourierVan]: occ('parcel courier', [{ start: 8, hours: 8, weight: 0.8 }, { start: 10, hours: 8, weight: 0.2 }], [[1, 1, 1, 1, 1, 1, 0], [1, 1, 1, 1, 1, 0, 0], [0, 1, 1, 1, 1, 1, 0]]),
+  // a school bus driver works the school week (Monday to Friday, fixed), from before the first pupil is up (04:30)
+  [FleetKind.SchoolBus]: { name: 'school bus driver', shifts: [{ start: 4.5, hours: 11, weight: 1 }], cycles: [[1, 1, 1, 1, 1, 0, 0]], rotate: false, kind: 0 },
   [FleetKind.BinLorry]: occ('refuse collector', [{ start: 6, hours: 8, weight: 1 }], [[1, 1, 1, 1, 1, 0, 0]]),
   [FleetKind.Sweeper]: occ('street sweeper driver', [{ start: 6, hours: 8, weight: 0.7 }, { start: 14, hours: 8, weight: 0.3 }], [[1, 1, 1, 1, 1, 0, 0]]),
 };

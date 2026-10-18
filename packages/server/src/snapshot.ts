@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, eduDefaults, type TransitLine, type SeaGate } from '@msimcity/shared';
+import { CHUNK_SIZE, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, eduDefaults, isPolicyId, type TransitLine, type SeaGate } from '@msimcity/shared';
 import { World, emptyProgress, lifeDefaults, type Citizen, type Parcel, type Player, type Site } from './world';
 import { LIFE, seededAge, ageOf } from './sim/life';
 import { historyOf, type HistoryJSON } from './history';
@@ -70,7 +70,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   if (!readableVersion(snap.version)) return null;
   const w = new World(snap.seed);
   w.nextId = snap.nextId; w.day = snap.day; w.tick = snap.tick;
-  for (const p of snap.players) w.players.set(p.id, { ...p, tech: p.tech ?? [], progress: { ...emptyProgress(), ...(p.progress ?? {}) } });
+  for (const p of snap.players) w.players.set(p.id, { ...p, tech: p.tech ?? [], progress: { ...emptyProgress(), ...(p.progress ?? {}) }, policies: p.policies?.filter(isPolicyId) });
   for (const p of snap.parcels) w.parcels.set(p.id, p);
   const N = CHUNK_SIZE * CHUNK_SIZE;
   for (const c of snap.chunks) {

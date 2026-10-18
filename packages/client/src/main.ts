@@ -41,6 +41,7 @@ import { ContextMenu } from './contextmenu';
 import { Onboarding } from './onboarding';
 import { LinesPanel } from './lines';
 import { ChartsPanel } from './charts';
+import { PolicyPanel } from './policies';
 import { PerfHud } from './render/perfhud';
 import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered, serverConfig } from './worlds';
 import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, type DemoInfo } from './tour';
@@ -235,6 +236,7 @@ net.on('welcome', (m) => {
   ui.setWho(me.name, me.color);
   ui.setMoney(me.money, me.ledger);
   ui.setLocks(me.tech);
+  policies.show(me);
   ui.hideLogin();
   if (startShot) { rig.setShot(startShot); startShot = null; } // the opening shot, once
   for (const key of [...views.keys()]) dropView(key);
@@ -260,7 +262,7 @@ net.on('players', (m) => {
   lights.invalidate();
   world.applyPlayers(m.players);
   onlineCount = m.players.filter((p) => p.online).length;
-  const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger); ui.setLocks(me.tech); ui.showTech(me); devPanel?.sync(!!me.devUnlimited); }
+  const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger); ui.setLocks(me.tech); ui.showTech(me); policies.show(me); devPanel?.sync(!!me.devUnlimited); }
   world.parcelsDirty = true; refreshPanel(); mapMode.parcelsChanged();
 });
 net.on('citizens', (m) => citizens.update(m.c, performance.now()));
@@ -268,6 +270,8 @@ net.on('citizens', (m) => citizens.update(m.c, performance.now()));
 const lines = new LinesPanel(net, world, (kind, msg) => ui.toast(kind, msg), liveTick);
 // city history charts (charts.ts, docs/charts.md): the charts chip, the ` key, and a click on the population or treasury figure
 const charts = new ChartsPanel(net);
+/** the education policies (policies.ts); opening it closes the tech tree, which sits in the same place */
+const policies = new PolicyPanel(document.getElementById('policies')!, document.getElementById('policiesBtn')!, (id, on) => net.send({ t: 'setPolicy', id, on }), DEV_TOOLS);
 ui.onOpenChart = (id) => charts.show(id);
 charts.me = () => world.myPlayer;
 lines.onLivery = (pairs, colours) => citizens.setLivery(pairs, colours);
@@ -470,7 +474,7 @@ const input = new Input(canvas, rig, {
     else if (code === 'Escape' && selectedBuilding) closeBuilding();
     else if (code === 'KeyH') setHeat(!ChunkView.heatOn);
     else if (code === 'KeyN') setUnder(!underground.on);
-    else if (code === 'KeyT') { ui.toggleTech(); ui.showTech(world.myPlayer); }
+    else if (code === 'KeyT') { ui.toggleTech(); ui.showTech(world.myPlayer); policies.toggle(false); }
   },
 });
 
@@ -532,7 +536,8 @@ function platformAt(kind: number, h: [number, number], p: Placed | undefined, ro
   const r = p?.r ?? rot ?? 0;
   return planPlatform(kind, p ? p.doorX : h[0], p ? p.doorY : h[1], (r & 1) === 0, { tile: (x, y) => world.getTile(x, y), under: (x, y) => world.underAt(x, y) });
 }
-document.getElementById('techBtn')!.onclick = () => { ui.toggleTech(); ui.showTech(world.myPlayer); };
+document.getElementById('techBtn')!.onclick = () => { ui.toggleTech(); ui.showTech(world.myPlayer); policies.toggle(false); };
+document.getElementById('policiesBtn')!.onclick = () => { ui.toggleTech(false); policies.toggle(); policies.show(world.myPlayer); };
 ui.setHeat(false);
 /** Fold fresh traffic bytes into the chunk views and the parked-car instances. */
 function applyTrafficUpdates() {

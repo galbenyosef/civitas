@@ -6,7 +6,8 @@ import { LAMP, lampLenses } from './headlights';
 /**
  * The vehicles of mobile workers (docs/mobile-jobs.md, shared/src/fleet.ts): taxis with a roof sign lit while for hire,
  * private-hire cars with a small lit badge, delivery bicycles and mopeds with a box and a rider who steps off at the
- * door, courier vans, bin lorries that lift a wheelie bin at each stop, street sweepers with a flashing beacon. Drawn
+ * door, courier vans, bin lorries that lift a wheelie bin at each stop, street sweepers with a flashing beacon, yellow school
+ * buses (the School buses policy, docs/education.md section 16) with hazard beacons while they take pupils on. Drawn
  * for render/citizens.ts, which owns the agents, picking and the follow camera; every instance varies by its id
  * (paint, brand, bin colour, the lift's timing), as everything in the city does.
  */
@@ -111,6 +112,20 @@ function sweeper(): BufferGeometry {
   for (const [x, z] of [[0.1, 0.09], [-0.12, 0.09], [0.1, -0.09], [-0.12, -0.09]]) k.wheel(0.035, 0.03, x, 0.035, z, 0x151515);
   return lampLenses(k.build());
 }
+/** a school bus, VEHICLE_LEN[3] long like a service bus: chrome yellow with a black rail and a lit sign (the instance colour only dims the paint a little) */
+function schoolBus(): BufferGeometry {
+  const k = new Kit();
+  k.box(0.6, 0.18, 0.19, 0, 0.05, 0, 0xf2b705)                                    // body
+    .box(0.6, 0.016, 0.194, 0, 0.1, 0, 0x1c1c1c)                                  // black rub rail
+    .box(0.52, 0.065, 0.196, -0.015, 0.145, 0, 0x2a3546)                          // window band
+    .box(0.6, 0.02, 0.19, 0, 0.23, 0, 0xd9a004)                                   // roof, a shade down so the sun does not bleach it
+    .box(0.02, 0.09, 0.17, 0.295, 0.13, 0, 0x2a3546)                              // windscreen
+    .box(0.012, 0.03, 0.12, 0.302, 0.2, 0, 0xffe680, LAMP.sign)                   // sign, lit after dark
+    .box(0.02, 0.02, 0.04, 0.3, 0.07, 0.075, 0xfff2b0, LAMP.head).box(0.02, 0.02, 0.04, 0.3, 0.07, -0.075, 0xfff2b0, LAMP.head)
+    .box(0.015, 0.02, 0.04, -0.3, 0.07, 0.075, 0xd62020, LAMP.tail).box(0.015, 0.02, 0.04, -0.3, 0.07, -0.075, 0xd62020, LAMP.tail);
+  for (const [x, z] of [[0.19, 0.1], [-0.17, 0.1], [0.19, -0.1], [-0.17, -0.1]]) k.wheel(0.045, 0.035, x, 0.045, z, 0x151515);
+  return lampLenses(k.build());
+}
 /** an amber beacon on the roof of a sweeper or bin lorry, flashing in its own rhythm */
 function beacon(): BufferGeometry { return new Kit().box(0.022, 0.02, 0.022, 0, 0, 0, 0xffffff).build(); }
 
@@ -150,13 +165,13 @@ class Part {
   }
 }
 
-export type FleetBody = 'sedan' | 'van' | 'truck' | null;
+export type FleetBody = 'sedan' | 'van' | 'truck' | 'bus' | null;
 
 export class FleetMeshes {
   private parts: Part[] = [];
   private cab: Part; private sign: Part; private badge: Part;
   private bike: Part; private moped: Part; private rider: Part; private box: Part; private person: Part;
-  private van: Part; private lorry: Part; private bin: Part; private sweeper: Part; private beacon: Part;
+  private van: Part; private lorry: Part; private bin: Part; private sweeper: Part; private beacon: Part; private schoolBus: Part;
   private m = new Matrix4(); private l = new Matrix4(); private q = new Quaternion(); private p = new Vector3(); private s = new Vector3(1, 1, 1);
   private axisY = new Vector3(0, 1, 0); private axisZ = new Vector3(0, 0, 1);
 
@@ -177,20 +192,22 @@ export class FleetMeshes {
     this.bin = add(wheelieBin(), vm, 300);
     this.sweeper = add(sweeper(), vm, 300, true);
     this.beacon = add(beacon(), glow, 600);
+    this.schoolBus = add(schoolBus(), vm, 300, true);
   }
   begin() { for (const p of this.parts) p.begin(); }
   end() { for (const p of this.parts) p.end(); }
 
   /** The existing body whose beams, blinker positions and eye height fit a fleet kind (render/citizens.ts tables). */
   static body(kind: number): FleetBody {
-    return kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 'sedan' : kind === FleetKind.CourierVan || kind === FleetKind.TradesVan ? 'van' : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? 'truck' : null;
+    return kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 'sedan' : kind === FleetKind.CourierVan || kind === FleetKind.TradesVan ? 'van' : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? 'truck' : kind === FleetKind.SchoolBus ? 'bus' : null;
   }
   /** Eye height for the first-person view, tile units. */
-  static eye(kind: number): number { return kind === FleetKind.Bicycle || kind === FleetKind.Moped ? 0.14 : kind === FleetKind.BinLorry ? 0.24 : kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 0.16 : 0.21; }
+  static eye(kind: number): number { return kind === FleetKind.Bicycle || kind === FleetKind.Moped ? 0.14 : kind === FleetKind.BinLorry || kind === FleetKind.SchoolBus ? 0.24 : kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 0.16 : 0.21; }
   /** A body colour for the dashboard of the first-person view. */
   static color(kind: number, id: number): number {
     if (kind === FleetKind.Taxi) return TAXI_PAINT[Math.floor(hash2(id, 3) * TAXI_PAINT.length)].getHex();
     if (kind === FleetKind.BinLorry) return 0xf2f2ee;
+    if (kind === FleetKind.SchoolBus) return 0xf2b705;
     return kind === FleetKind.PrivateHire ? CAR_PAINT[Math.floor(hash2(id, 3) * CAR_PAINT.length)].getHex() : 0xf4f4f2;
   }
 
@@ -250,6 +267,10 @@ export class FleetMeshes {
         }
         return;
       }
+      case FleetKind.SchoolBus:
+        body(this.schoolBus, tmpC.setScalar(0.86 + 0.14 * hash2(id, 5))); // some buses are fresher from the paint shop than others
+        if (working) { this.flash(id, now, 0.27, 0.245, 0.07); this.flash(id + 1, now, -0.27, 0.245, -0.07); } // hazards while pupils get on
+        return;
       case FleetKind.Sweeper:
         body(this.sweeper, tmpC.setHex(hash2(id, 5) < 0.5 ? 0xf2a33a : 0xf5f5f0));
         this.flash(id, now, 0.1, 0.17, 0);

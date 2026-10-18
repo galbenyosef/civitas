@@ -7,9 +7,10 @@ import { MANIFEST, LEDGER_LABELS, type KindToolId, type LedgerDTO, type LedgerCa
 import { FLEET_LABEL } from '@msimcity/shared';
 import { WEEKDAY_NAMES } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
+import { POLICIES } from '@msimcity/shared';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
-const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐' };
+const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌' };
 
 /** Tool bar groups: land and roads first, then the catalogue kinds by what they are, bulldoze last. */
 const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
@@ -798,6 +799,7 @@ export class UI {
         html += `<div class="node ${state}">
           <div class="nhead"><b>${esc(t.name)}</b><span class="cost">${have ? 'unlocked' : `$${t.cost}`}</span></div>
           <div class="blurb">${esc(t.blurb)}</div>
+          ${policiesOf(t)}
           ${have ? '' : t.locked ? `<div class="cond">${esc(t.locked)}</div>` : `<div class="cond">${esc(describeCondition(t))}<span>${cur} / ${t.condition.min}</span></div><div class="bar"><i style="width:${pct}%"></i></div>`}
           ${!have && !prereqOk ? `<div class="cond">needs ${t.requires.filter((r) => !me.tech.includes(r)).map((r) => esc(TECH_BY_ID.get(r)?.name ?? r)).join(', ')}</div>` : ''}
           ${!have ? `<button class="unlock" data-id="${t.id}" ${canBuy ? '' : 'disabled'}>${t.locked ? 'Locked' : earned && prereqOk ? (me.money >= t.cost ? 'Unlock' : 'Not enough money') : 'Not yet'}</button>` : ''}
@@ -819,4 +821,9 @@ const SHORT_EDU: Record<number, string> = {
   106: 'at the university', 107: 'at the research institute', 108: 'in halls of residence',
 };
 const shortKind = (k: number) => SHORT[k] ?? SHORT_EDU[k] ?? KIND_NAMES[k];
+/** the education policies a tech node opens, for its card in the tech tree (shared/src/policies.ts) */
+const policiesOf = (t: { unlocks: string[] }) => {
+  const names = POLICIES.filter((p) => t.unlocks.includes(p.feature)).map((p) => p.name);
+  return names.length ? `<div class="pol">Policies: ${names.join(', ')}</div>` : '';
+};
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);

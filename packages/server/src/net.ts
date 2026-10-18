@@ -21,6 +21,7 @@ import type { Ferry } from './sim/ferry';
 import { Onboarding } from './goals';
 import { historyOf, type History } from './history';
 import { MapSummaries } from './worldmap';
+import { setPolicy } from './policies';
 
 interface Client {
   conn: Conn; player: Player | null; subs: Set<string>; lastHint: number;
@@ -157,6 +158,7 @@ export class Net {
         return this.send(c, { t: 'citizen', id: Number(m.id), info });
       }
       case 'unlock': return this.unlock(c, String(m.id));
+      case 'setPolicy': { const r = setPolicy(this.w, c.player, String(m.id), m.on === true); return this.toast(c, r.msg, r.ok ? 'info' : undefined); }
       case 'dev': return this.dev(c, m.action, m.on);
       case 'sites': return this.siteList(c, m.id);
       case 'priority': return this.setPriority(c, m.x, m.y, m.priority);

@@ -8,7 +8,7 @@ recommended answers (A to every question). **E2 (the institutions catalogue, sec
 and so is **E3 (the schools simulation, section 13)**: children are admitted, walk (or are taken) to school, attend, sit
 results and move up a stage. **E8 (the Showcase and London, section 14)** is built too: every kind stands in the Showcase
 and the four London universities are landmarks. **E7 (the city views, section 15)** is built: history series, the Charts panel's Education tab, parcel
-attainment, the education overlay, the citizen's timeline, the school tooltip and the student look.
+attainment, the education overlay, the citizen's timeline, the school tooltip and the student look. **E6 (policies, the Policies panel and school buses, section 16)** is built too.
 
 Code this touches: `shared/src/education.ts` (new: levels, stages, tables), `shared/src/buildings/education.ts` (new:
 the kinds), `server/src/sim/schools.ts` (new: admissions, attendance, graduation), hooks in
@@ -470,7 +470,7 @@ is no crime model (police coverage only), so there is no link until there is one
 | E3 | **Built.** **Schools sim.** `sim/schools.ts`: admissions batches, the pupil timetable on the commute machinery, attendance, weekly rollover, graduation and drop-out, escorts via carpool, the `school` inspect block, `lifeEvents` | opus | sim/schools.ts, simulation.ts (Home branch, `endShift`, `newDay`, describe), carpool.ts | E1, E2 | L |
 | E4 | **Jobs, wages, migration.** Skill gate in `findJob`, `jobMisses` by level, `Building.qualified`, wage multipliers, `EDU.match` tilt, brain drain, happiness parts; tuning runs | opus | simulation.ts (`findJob`, `hire`, `payWage`, `lifeFamily`), life.ts, gateways.ts | E1 (runs beside E3) | M |
 | E5 | **Higher and adult education.** University intake via gateways, halls of residence, families moving in, FE courses, evening classes (`errand` 2), apprenticeships, research ambition | opus | gateways.ts, simulation.ts (`spawn`, `arriveVia`, `ambition`), sim/schools.ts | E3, E4 | L |
-| E6 | **Policies and the tree UI.** `policies.ts`, `Player.policies`, `setPolicy` intent, Policies panel, Education track in the tech panel; school buses as FleetKind 9 (the server part goes to opus) | sonnet (+ opus for `mobile.ts`) | policies.ts, net.ts, ui.ts, fleet.ts, sim/mobile.ts | E2; the effects need E3 | M |
+| E6 | **Built.** **Policies and the tree UI.** `policies.ts`, `Player.policies`, `setPolicy` intent, Policies panel, Education track in the tech panel; school buses as FleetKind 9 (the server part goes to opus) | sonnet (+ opus for `mobile.ts`) | policies.ts, net.ts, ui.ts, fleet.ts, sim/mobile.ts | E2; the effects need E3 | M |
 | E7 | **Built.** **City views.** History series and the Education tab funnel; `ParcelStats` fields; heat overlay; citizen timeline; school tooltip; student look in people.ts | sonnet | history.ts, charts.ts, main.ts, chunkView.ts, ui.ts, render/people.ts | E3 | M |
 | E8 | **Built.** **Showcase and London.** Placements and tour stops, registry entries, London universities 111-114 and `lnd2` | sonnet | demo/showcase.ts, demo/london.ts, landmarks-london-3.ts, tech.ts | E2 (E3 for the seeded tests) | M |
 
@@ -866,3 +866,84 @@ enrolled by `Study` (`study`). Citizens moving in or out (`mig`) are left out. I
 while nothing is built, a hand-enrolled student shows in the university series, their parcel's `grads` and the owner's `myGrads`
 count a graduate, and a save from before the series loads with the new ones empty and filling on the next hours.
 
+
+## 16. Built: E6, policies, the Policies panel and school buses
+
+Built 2026-10-18 on branch `edu-e6`. Five switches a player turns on for the schools on their own parcels, a panel for them, and
+the school bus (`FleetKind` 9). Verified by `npx tsx packages/server/src/loadtest/policies.ts` (34 of 34 checks, about 80 s).
+
+### The policies (`shared/src/policies.ts`, exported from `@msimcity/shared`)
+
+- `POLICIES` (`PolicyDef`: id, name, blurb, `feature`, `setup`, `runs`, `effects`, `live`), `POLICY_BY_ID`, `isPolicyId`,
+  `hasPolicy(list, id)`, and the tunables `POLICY` (costs and effect sizes, all dollars per game day). Ids: `meals`, `buses`,
+  `learning`, `apprentice`, `fees`.
+- **Opened by tech.** The `unlocks` of `edu2` gained `policy-meals` and `policy-buses`, `edu3` `policy-learning` and
+  `policy-apprentice`, `edu4` `policy-fees` (`hasFeature(tech, def.feature)`). The tech panel lists the policies a node opens.
+- **State.** `Player.policies?: string[]` (`server/src/world.ts`; saved with the player, optional, unknown ids dropped on load in
+  `snapshot.ts`, so old saves load and the format stays 8) and `PlayerDTO.policies?: string[]`. `World.ownerHasPolicy(x, y, id)`
+  asks whether the owner of the parcel at a tile has one on: this is how any sim code reads a policy.
+- **The intent.** `{ t: 'setPolicy', id, on }` (`protocol.ts`, handled in `net.ts` by `setPolicy` in `server/src/policies.ts`).
+  Refused with a toast for an unknown id, for a technology not unlocked, and (to enact) for a treasury under the one-off fee
+  (`setup`: meals 120, buses 150, learning 200, apprentice 200, fees 300, ledger `other`). Turning one on twice charges nothing,
+  turning one off is free, a read-only showcase refuses it with every other change.
+- **Running costs** are charged where the effect happens, to the owner of the school's parcel (`upkeep` in the ledger, fees in
+  `fees`).
+
+### What each one does now
+
+| Policy | Live in E6 | Left to a later phase |
+| --- | --- | --- |
+| Free school meals | `Schools.result`: `+EDU.mealsBonus` pass chance for pupils of the owner's schools. `Schools.midnight`: each school day $0.4 per pupil at school (nursery to sixth form), and each pupil's health +0.3 | the parents' "free school meals" mood (+2): **E4** calls `schools.onMeals(pupil)` from `happinessParts` and adds `POLICY.mealsMood` |
+| School buses | `sim/schoolbus.ts` (below); $15 per bus that runs | primary schools and the afternoon round |
+| Adult learning | the switch, its fee, `live: false` (the panel says "Effect still to come"; a `?dev` client can enact it) | **E5**: FE courses and evening classes read `w.ownerHasPolicy(school.x, school.y, 'learning')`, charge `POLICY.learnerPerDay` per learner to the school's owner, and flip `live` to true in `policies.ts` |
+| Apprenticeships | the switch, its fee, `live: false` | **E5**: `w.ownerHasPolicy(workplace.x, workplace.y, 'apprentice')`, up to `POLICY.apprenticeShare` of the staff train, the owner pays `POLICY.apprenticeWageShare` of the wage, then `live: true` |
+| Tuition fees | university parcel owner: +$2 per student a day with it on, a $1 grant paid per student with it off (`fees` in the ledger, daily, Degree and Postgrad); with it on a stable `POLICY.feeDeter` (30%, by citizen id hash) of would-be students are turned away in `goOn` and `enrolAt` | "more graduates leave town": **E4** multiplies the brain-drain leaving chance by `schools.drainMul(c)` (`POLICY.feeDrainMul` 1.5 with fees on at the owner of c's home, else 1) |
+
+`Schools` keeps `owner`, `meals` and `fees` on each school record, refreshed by the census (hourly). Hooks for E4: `schools.onMeals(c)`
+and `schools.drainMul(c)`. Hooks for E5: `World.ownerHasPolicy` and the constants in `POLICY`.
+
+### School buses (`FleetKind.SchoolBus` 9)
+
+- **Role.** `mobileRole` (`shared/src/fleet.ts`) makes `MOBILE.schoolBusShare` (8%) of a secondary school's staff its bus drivers
+  (hash 441): two or three of 24, working a fixed Monday to Friday from 04:30 (`FLEET_ROTA`). They are drivers whether or not
+  the policy is on; with it off they wait at the school and nothing is charged. `FLEET_LABEL` 'school bus', `FLEET_JOB` 'school bus
+  driver', `SCHOOLBUS` holds the tunables. The vehicle class is `VehicleClass.Bus`.
+- **Service.** `server/src/sim/schoolbus.ts` (`SchoolBuses implements FleetService`), registered by the `Mobile` constructor
+  (`mobile.schoolBuses`) so `simulation.ts` needed no change; `mobile.ts` otherwise gained only the bus class and gap. Between
+  04:45 and 06:30 on a school day a free driver of a school whose owner has School buses on takes the school's one bus out:
+  the secondary pupils still at home who live more than 12 tiles away are grouped by the kerb in front of their home, out to
+  the farthest stop that a 30-tile round (`SCHOOLBUS.maxTour`: measured in the probe a bus covers about a tenth of a tile a tick on its
+  stops, so a round of 30 tiles takes some three hours and is back before the bell; it is one neighbourhood) allows, the nearest stops on from there, at most 40 seats and 12 stops, the school last.
+  The owner pays $15 when it leaves.
+- **Boarding is a state change, not a ride.** A pupil who gets on is put in the Work state with the bell as the end of their day
+  (as if they had arrived early; their citizen is not drawn on the road and their own panel says they are at school), and is set
+  down at the school door when the bus arrives, is taken off the road, or comes back. The bus's panel lists them as riders
+  (`aboard`), and `u.loaded` is on while there is someone aboard. A pupil whose day has already ended when the bus gets in is
+  counted in `stats.late`.
+- **Not built** (a hook each): the afternoon round (call `board` for a school's pupils at the bell and `deliver` at their homes),
+  and the under-8s of a primary school, which `Schools.setOff` still counts as `missed` when nobody can take them.
+- **Probe result** (`policies.ts`, seed 1, 8 days): 6 drivers among the staff of 4 secondary schools, 6 rounds carrying 11
+  pupils (the 30-tile budget keeps a round to one neighbourhood, so few live far enough out and near enough together), all 11 set down at
+  school before the bell, $90 charged, one bus out at a time.
+- **Client** (`client/src/render/fleet.ts`): a chrome-yellow bus with a black rail, a lit front sign after dark and a hint of
+  per-instance paint wear, amber hazard beacons while pupils get on (`working`); `FleetMeshes.body` 'bus' (beams and blinkers as
+  a service bus), eye height 0.24; the vehicle panel icon is the bus emoji.
+
+### The panel (`client/src/policies.ts`)
+
+A card for each policy (name, state, blurb, what it costs to run, its effects, a switch) in the tech tree's look. The chip
+"policies" (no key: every letter is taken by a tool, the camera or a panel) appears with the first technology that opens one, shows how many are in force, and opening it closes the tech
+tree. A card is locked with "needs ..." until its node is bought, disabled with "Need $X" when the treasury is short, and shows
+"Effect still to come" for a policy whose `live` is false (a `?dev` client may enact it anyway). The tech panel already listed
+every track, so the Education track appears there from E2; E6 widened its grid to six columns (140 px) so the track sits in the
+first row, and each node lists the policies it opens.
+
+### The probe (`npx tsx packages/server/src/loadtest/policies.ts`)
+
+Part A drives `setPolicy` through `createGame` with a fake connection: no technology, an unknown id, a missing `on`, short of the
+fee, the wrong node, a first enactment, `PlayerDTO.policies`, switching on twice, two on and one off, a sandbox player (all five),
+a spectator (refused), one education node per policy, and saves (policies round-trip, junk ids dropped, an old save without them
+loads and runs). Part B runs the 2×2 test city of the schools probe for `--days` with meals, buses and fees on: buses ran and
+every rider was set down, the owner paid $15 a bus, meals were billed exactly pupils fed × $0.4, fees paid and (after switching
+off at day 5) a grant was charged, the hashed 30% were turned away from the university, the E4 hooks answer, and with buses off
+no round is sent. `--save FILE --until 2.2` writes a Wednesday 05:00 world with the policies on, for a live look.

@@ -52,6 +52,8 @@ export interface PlayerDTO {
   /** unlocked technology ids and the counters the tree's conditions read */
   tech: string[];
   progress: Record<string, number>;
+  /** the education policies switched on (policies.ts); absent from older servers */
+  policies?: string[];
   /** dev servers only */
   devUnlimited?: boolean;
   /** money in and out by game day (World.credit); sent at most once a game hour, absent in between (keep the last one) */
@@ -480,6 +482,8 @@ export type ClientMsg =
   /** `route` asks for the trail taken and the route ahead (the selected agent; hovers leave it off) */
   | { t: 'inspectCitizen'; id: number; route?: boolean }
   | { t: 'unlock'; id: string }
+  /** switch an education policy (policies.ts) on or off for the schools on your parcels */
+  | { t: 'setPolicy'; id: string; on: boolean }
   /** dev servers only (ignored in production): unlimited funds toggle, a cash grant, or every technology */
   | { t: 'dev'; action: 'unlimited' | 'money' | 'tech'; on?: boolean }
   | { t: 'ping'; n: number }
