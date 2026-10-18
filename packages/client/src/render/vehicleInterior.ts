@@ -426,7 +426,7 @@ export interface HelmFeed {
   knots: number; vmax: number;
   /** compass heading, degrees (0 north: -z), and the rate of turn, positive to starboard, -1..1 */
   heading: number; turn: number;
-  /** the hull's colour for an open helm's bow, 0xrrggbb */
+  /** the hull's colour, 0xrrggbb */
   hull: number;
   /** per-boat variation seed, 0..1 */
   seed: number;
@@ -461,16 +461,7 @@ export class HelmCab {
   private paint(f: HelmFeed, w: number, h: number) {
     const c = this.L.b;
     c.clearRect(0, 0, w, h);
-    if (!f.wheelhouse) {
-      // an open helm: the foredeck running away to the bow, and the tiller's stub
-      const deck = vgrad(c, h * 0.7, h, rgb(f.hull, 1.05), rgb(f.hull, 0.6));
-      c.beginPath(); c.moveTo(w * 0.28, h); c.lineTo(w * 0.47, h * 0.8); c.quadraticCurveTo(w * 0.5, h * 0.76, w * 0.53, h * 0.8); c.lineTo(w * 0.72, h); c.closePath();
-      c.fillStyle = deck; c.fill();
-      c.strokeStyle = 'rgba(255,255,255,0.4)'; c.lineWidth = Math.max(1.5, h * 0.006); c.stroke();
-      c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = Math.max(1, h * 0.004);
-      c.beginPath(); c.moveTo(w * 0.5, h * 0.78); c.lineTo(w * 0.5, h); c.stroke();
-      return;
-    }
+    if (!f.wheelhouse) return; // an open helm has nothing painted: the real foredeck is in the view, and the tiller is drawn on the front layer
     const frame = rgb(WHEELHOUSE_FRAMES[Math.floor(f.seed * WHEELHOUSE_FRAMES.length) % WHEELHOUSE_FRAMES.length]), edge = 'rgba(255,255,255,0.14)';
     const topY = h * 0.09, deskY = h * 0.7, px = w * 0.035;
     c.beginPath(); c.rect(0, 0, w, h);
@@ -503,8 +494,8 @@ export class HelmCab {
       const bx = w * 0.84, by = h * 1.02, a = -1.15 + this.turn * 0.5;
       c.strokeStyle = '#7a5530'; c.lineWidth = Math.max(3, h * 0.022); c.lineCap = 'round';
       c.beginPath(); c.moveTo(bx, by); c.lineTo(bx + Math.cos(a) * h * 0.36, by + Math.sin(a) * h * 0.36); c.stroke(); c.lineCap = 'butt';
-      c.fillStyle = 'rgba(255,255,255,0.6)'; c.font = `600 ${Math.max(7, h * 0.03)}px ${MONO}`; c.textAlign = 'left'; c.textBaseline = 'middle';
-      c.fillText(`${Math.round(this.kn)} kt`, w * 0.04, h * 0.94);
+      c.fillStyle = 'rgba(255,255,255,0.7)'; c.font = `600 ${Math.max(7, h * 0.03)}px ${MONO}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(`${Math.round(this.kn)} kt`, w * 0.5, h * 0.95);
       return;
     }
     const deskY = h * 0.7;

@@ -1,9 +1,9 @@
 import {
-  BOAT_TYPES, boatName, boatOwner, boatOperator, boatCrew, fishingReg, catchOf, callCargo, hoursFished,
-  type BoatState, type BoatHarbour, type BoatPhase, type CrewMember, type Voyage,
+  BOAT_TYPES, boatName, boatOwner, boatOperator, boatCrew, ferryCrew, fishingReg, catchOf, callCargo, hoursFished,
+  type BoatState, type BoatHarbour, type BoatPhase, type CrewMember, type Voyage, type BoatInfo,
 } from '@msimcity/shared';
 import type { CabEye } from './render/fpv';
-import type { HelmPose } from './render/boats';
+import type { HelmPose, FerryInfo } from './render/boats';
 
 /**
  * The tooltip and panel of a boat (docs/boats.md section 7): what it is, who owns it, what it is doing and who is aboard.
@@ -24,7 +24,8 @@ const PHASE_LABEL: Record<BoatPhase, string> = {
   moored: 'moored', unberthing: 'casting off', underway: 'under way', fishing: 'trawling', waiting: 'waiting for the lifting bridge', berthing: 'coming alongside', alongside: 'alongside',
 };
 /** what a boat is doing, in a line */
-export function boatDoing(s: BoatState, h: BoatHarbour | undefined, tick: number): string {
+export function boatDoing(s: BoatState, h: BoatHarbour | undefined, tick: number, ferry?: FerryInfo): string {
+  if (ferry) { const pier = ferry.line.names[ferry.stop] ?? 'the pier'; return ferry.phase === 'dwell' ? `alongside at ${pier}, boarding` : `sailing to ${pier}`; }
   const port = h?.name ?? 'the harbour', v = s.voyage;
   switch (s.phase) {
     case 'moored': return `moored at ${port}`;
@@ -56,37 +57,53 @@ function returning(v: Voyage, tick: number, phase: BoatPhase = 'fishing'): boole
   return at >= 0 && tick >= at;
 }
 
-const lineName = (s: BoatState) => boatOperator(s.type, s.seed);
-export function boatTitle(s: BoatState) {
+const operatorOf = (s: BoatState) => boatOperator(s.type, s.seed);
+const lineName = (f: FerryInfo) => (f.line.name === `Line ${f.line.number}` ? `Line ${f.line.number}` : `${f.line.number} ${f.line.name}`);
+export function boatTitle(s: BoatState, ferry?: FerryInfo) {
+  if (ferry) return `<span class="sw" style="background:#${ferry.line.color.toString(16).padStart(6, '0')}"></span>${esc(lineName(ferry))} <span style="color:var(--muted);font-weight:400">river bus ${ferry.train + 1}</span>`;
   return `⛵ ${esc(boatName(s.type, s.seed))} <span style="color:var(--muted);font-weight:400">${esc(BOAT_TYPES[s.type].name)}</span>`;
 }
-/** the plain name, for the first-person view's title */
-export const boatLabel = (s: BoatState) => `${boatName(s.type, s.seed)} · ${BOAT_TYPES[s.type].name}`;
+
+/** What else is known about a boat: a river bus's line (render/boats.ts ferryOf), the server's answer to `inspectBoat`. */
+export interface BoatCtx { ferry?: FerryInfo; info?: BoatInfo | null }
 
 /** A boat's hover tooltip. */
-export function boatTipHtml(s: BoatState, h: BoatHarbour | undefined, tick: number): string {
-  let html = `<h3>${boatTitle(s)}</h3><div class="sub">${esc(boatDoing(s, h, tick))}</div>`;
-  const reg = s.type === 'trawler' ? fishingReg(h?.name, h?.id ?? 0, s.seed) : null;
-  html += row('Owner', esc(lineName(s)?.name ?? boatOwner(s.type, s.seed, h?.name)));
-  if (reg) html += row('Registration', esc(reg));
+export function boatTipHtml(s: BoatState, h: BoatHarbour | undefined, tick: number, ctx: BoatCtx = {}): string {
+  let html = `<h3>${boatTitle(s, ctx.ferry)}</h3><div class="sub">${esc(boatDoing(s, h, tick, ctx.ferry))}</div>`;
+  if (ctx.ferry) html += row('Line', esc(lineName(ctx.ferry))) + row('Calls at', esc(ctx.ferry.line.names.join(' · ')));
+  else {
+    html += row('Owner', esc(operatorOf(s)?.name ?? boatOwner(s.type, s.seed, h?.name)));
+    if (s.type === 'trawler') html += row('Registration', esc(fishingReg(h?.name, h?.id ?? 0, s.seed)));
+  }
   if (s.speed > 0.005) html += row('Speed', `${boatKnots(s.speed)} kt${s.astern ? ' astern' : ''}`);
   html += `<div class="clickhint">click for the crew and the wheelhouse view</div>`;
   return html;
 }
 
+/** A trawler's crew from the server: real citizens, clickable, with the generated roles (skipper, mate, deckhands) in order. */
+const citizenRows = (people: { id: number; name: string }[], roles: CrewMember[]) =>
+  people.map((p, i) => `<div class="person" data-cid="${p.id}" title="click to select ${esc(p.name)}"><span class="pname">${esc(p.name)}</span><span class="prel">${esc(roles[i]?.role ?? 'deckhand')}</span></div>`).join('');
+
 /** The selected boat's panel. */
-export function boatPanelHtml(s: BoatState, h: BoatHarbour | undefined, tick: number, knots: number, crewOverride?: CrewMember[]): string {
-  const spec = BOAT_TYPES[s.type], v = s.voyage, op = lineName(s);
-  let html = `<h3>${boatTitle(s)}</h3><div class="sub">${esc(boatDoing(s, h, tick))}</div>`;
+export function boatPanelHtml(s: BoatState, h: BoatHarbour | undefined, tick: number, knots: number, ctx: BoatCtx = {}): string {
+  const spec = BOAT_TYPES[s.type], v = s.voyage, op = operatorOf(s), f = ctx.ferry;
+  let html = `<h3>${boatTitle(s, f)}</h3><div class="sub">${esc(boatDoing(s, h, tick, f))}</div>`;
   html += row('Vessel', `${spec.name} · ${metres(spec.len)} m`);
-  html += row(op ? 'Operator' : 'Owner', esc(op?.name ?? boatOwner(s.type, s.seed, h?.name)));
-  if (s.type === 'trawler') html += row('Registration', esc(fishingReg(h?.name, h?.id ?? 0, s.seed)));
-  html += row(v?.kind === 'call' ? 'Calling at' : 'Home port', esc(h?.name ?? 'the harbour'));
+  if (f) {
+    html += row('Line', esc(lineName(f)));
+    html += row('Calls at', esc(f.line.names.join(' · ')));
+    html += row(f.phase === 'dwell' ? 'Alongside at' : 'Next pier', esc(f.line.names[f.stop] ?? '—'));
+  } else {
+    html += row(op ? 'Operator' : 'Owner', esc(op?.name ?? boatOwner(s.type, s.seed, h?.name)));
+    if (s.type === 'trawler') html += row('Registration', esc(fishingReg(h?.name ?? ctx.info?.harbourName, h?.id ?? 0, s.seed)));
+    html += row(v?.kind === 'call' ? 'Calling at' : 'Home port', esc(h?.name ?? ctx.info?.harbourName ?? 'the harbour'));
+  }
   html += row('Speed', knots > 0 ? `${knots} kt${s.astern ? ' astern' : ''}` : s.phase === 'waiting' ? 'holding' : 'stopped');
   if (v) {
     if (v.kind === 'fishing') {
       html += row('Fishing', `${hoursFished(v).toFixed(1)} h at the grounds${tick < fishedAt(v) ? ' (planned)' : ''}`);
       html += row('Catch', returning(v, tick) || s.phase === 'alongside' ? `${catchOf(v)} boxes` : 'not yet landed');
+      if (ctx.info?.landedToday) html += row('Landed today', `${ctx.info.landedToday} boxes`);
     } else if (v.kind === 'call') {
       const c = callCargo(v);
       if (c.imports) html += row('Cargo', `${c.imports} ${s.type === 'containerShip' ? 'containers to land' : 'boxes to land'}`);
@@ -94,19 +111,20 @@ export function boatPanelHtml(s: BoatState, h: BoatHarbour | undefined, tick: nu
     }
   }
   if (s.lights.nav || s.lights.anchor) html += row('Lights', s.lights.trawling ? 'trawling: green over white' : s.lights.nav ? 'red to port, green to starboard' : 'anchor light');
-  const crew = crewOverride ?? boatCrew(s.type, s.seed, v?.id ?? 0);
-  html += `<div class="sect">Crew (${crew.length})</div>${crewRows(crew)}`;
+  const crew = f ? ferryCrew(f.line.id, f.train, tick) : boatCrew(s.type, s.seed, v?.id ?? 0);
+  html += `<div class="sect">Crew (${ctx.info?.crew?.length || crew.length})</div>`;
+  html += ctx.info?.crew?.length ? citizenRows(ctx.info.crew, crew) : crewRows(crew);
   return html;
 }
 
 /** The selected boat's wheelhouse for the first-person view: the eye as the renderer drew it, with its HUD lines and console feed. */
-export function boatCab(key: string, s: BoatState, h: BoatHarbour | undefined, tick: number, pose: HelmPose, hull: number, turn: number): CabEye {
+export function boatCab(key: string, s: BoatState, h: BoatHarbour | undefined, tick: number, pose: HelmPose, hull: number, turn: number, ferry?: FerryInfo): CabEye {
   const spec = BOAT_TYPES[s.type], kn = boatKnots(s.speed);
   const bearing = (Math.atan2(Math.cos(s.h), -Math.sin(s.h)) * 180) / Math.PI;
   return {
     key, x: pose.x, y: pose.y, z: pose.z, q: pose.q,
-    label: `${boatName(s.type, s.seed)} · ${pose.wheelhouse ? 'wheelhouse' : 'at the helm'}`,
-    lines: [boatDoing(s, h, tick), `${kn} kt${s.astern ? ' astern' : ''}`],
+    label: `${ferry ? lineName(ferry) : boatName(s.type, s.seed)} · ${pose.wheelhouse ? 'wheelhouse' : 'at the helm'}`,
+    lines: [boatDoing(s, h, tick, ferry), `${kn} kt${s.astern ? ' astern' : ''}`],
     fogFar: 60, dip: 0.05, sway: 0.5 + 0.5 * (1 - Math.min(1, spec.len / 2)), seed: s.seed,
     helm: { kind: 'helm', wheelhouse: pose.wheelhouse, knots: kn, vmax: boatKnots(spec.speed), heading: (bearing + 360) % 360, turn: Math.max(-1, Math.min(1, turn / 0.3)), hull, seed: s.seed },
   };

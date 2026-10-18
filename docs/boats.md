@@ -1067,6 +1067,86 @@ The view is a new `client/src/render/boats.ts`, `BoatsView`. It is owned by `mai
   - container stacks, a gatehouse, and gantry cranes on quay rails.
 - **Debugging.** `window.msc.boats` has `debugTick`, `at(tick)` and `findPhase(phase, from, type)`, as in helicopters.
 
+### 7.1 Built: B6, boat rendering (2026-10-18)
+
+Section 7 is built in `client/src/render/boats.ts` (`BoatsView`), `render/boatModels.ts` (the geometry), `boatPanel.ts`
+(tooltip, panel and the wheelhouse's `CabEye`) and `render/boatsMock.ts` (dev only). `main.ts` owns the view beside
+`helis`. Checked by eye on a scratch lake city, not by a script.
+
+- **Models.** Every `BoatType` has one, built from lofted hulls (`stations`, `hullBand`, `deckFace`) and `Kit` boxes
+  and cylinders; the part under the waterline is drawn too, since the ground hides it. Per type there is one
+  `InstancedMesh` for each of: `hull` and `accent` (white, tinted per boat), `works` (own colours), `glass` (lit at
+  night), each `sails` piece (tinted, with its own pivot), an optional `opt` part (a flybridge, deck cranes) and the
+  load variants (`cargo`: the barge's heaps and boxes, the coaster's deck containers, four laden-ness variants of the
+  container ship, each box coloured by hash). The sailing barge keeps the landmark's look. `BoatModel` also has the nav
+  light positions, the wheelhouse eye and the deck height (`free`, for fenders).
+  - 14 types: dinghy, motor cruiser (flybridge on 40%), sailboat (main and jib), narrowboat (lined panels, name board,
+    chimney), trawler (wheelhouse, gantry, nets, fish boxes), river bus (catamaran), ro-ro ferry, barge, sailing barge
+    (main, topsail, staysail, mizzen), coaster (two deck cranes on 55%), container ship (deckhouse, funnel, mast), tug
+    (tyre fenders), police launch and fire boat (unscheduled, but drawn if they appear).
+- **Liveries.** Ships, coasters, barges and tugs are painted by `boatOperator(type, seed)` (`hull`, `funnel`); the
+  rest by tables per type (dinghy hulls and sails, boot stripes, yacht hulls, narrowboat cabins, trawler hulls). Every
+  colour gets hue, saturation and lightness jitter and weathering (`paint`), as the helicopters' do.
+- **Organic variation, per boat from its seed:** paint and wear, sail tone, heave period and amplitude, roll and pitch
+  phase, where it lies at its berth (lateral and along, and yaw), 2-4 fenders a side in a hashed colour, cabin light
+  (warm or pale, and lit at all on only half the small boats), whether a sailboat motors this trip (30%, per voyage),
+  a flybridge or cranes, and which load a ship carries.
+- **Motion.**
+  - Heave is `heave × (sin + 0.35 sin 1.73)` from `BOAT_TYPES[type].heave`; pitch and roll amplitude follow from it and
+    the hull's size, a third as much when moored. Underway the bow lifts with speed (`TRIM`), and a motor boat banks into
+    a turn (`BANK`, from the smoothed rate of turn, which `BoatsView` keeps per boat).
+  - **Sails.** The day's wind is a hash of the day (`windOf`: direction, strength). A sailing boat heels to leeward by
+    `HEEL × strength × sin(wind relative to the bow)`, its sails swing out by the same angle (the jib three quarters as far),
+    and they hoist and furl over a couple of seconds as the boat leaves and reaches its berth.
+  - `boatsAt` already has the keep-to-starboard offset, so the view adds none. A boat at a gate scales to `fade` and
+    sinks a little.
+- **Wakes.** One instanced canvas-textured V quad per moving boat behind its stern (astern it swaps ends with the bow
+  wave), 1.6 to 4.8 boat lengths long by speed, capped at 9 tiles, and a bow-wave quad. Both fade by speed through a
+  per-instance `aFade` attribute (a small `onBeforeCompile` on a `MeshBasicMaterial`). Moored boats have none.
+- **Lights.** Instanced glow points as in `helicopters.ts`: red to port (`-z`), green to starboard, white masthead and
+  stern while `lights.nav`; one white all-round light for an anchored boat; green over white and deck floods while
+  trawling; warm floods at work; a flashing blue on the launches. Windows light at night per boat. The glow is faint by
+  day and swells at night.
+- **Picking.** `pick` projects each boat's middle and bow and takes the nearest within its own on-screen half length
+  (13 px at least). Hover (`boatTipHtml`), click (panel, `VehicleSel` `{ kind: 'boat', id }`) and right-click (the
+  context menu's Inspect, Follow, Wheelhouse view) are wired in `main.ts` and `contextmenu.ts`, after helicopters.
+- **Panel** (`boatPanelHtml`). Name, type and length, owner or operator (`boatOwner`, `boatOperator`), a trawler's
+  `fishingReg`, home port or the port it calls at, speed in knots (1 tile a tick is 63), what it is doing
+  (`boatDoing`: "heading for the fishing grounds", "alongside at X, working cargo", "waiting for the lifting bridge"), the
+  catch or cargo of the voyage, its lights, and the crew. `inspectBoat` is sent once a second for the selected boat;
+  the answer replaces a trawler's generated hands with its real citizens (clickable rows) and adds what it landed today.
+  Not seen live: that answer (the scratch world has no staffed harbour, so no trawler has a payroll crew).
+- **Wheelhouse view.** `BoatsView.helmPose()` is the eye as drawn this frame (the model's `eye` through the boat's own
+  heave, pitch and roll), turned into a `CabEye` by `boatCab` with `helm: HelmFeed`. `vehicleInterior.ts` `HelmCab` paints
+  window frames with mullions and a console (compass card turning with the heading, a radar sweep, a speed readout, twin
+  throttle levers and a wheel that turns with the rate of turn); open boats (dinghy, sailboat, narrowboat) get a
+  tiller and a readout only. The boat's own windows and lights are left out of its own view.
+- **Ferries.** `BoatsView.setFerryLines(lines)` (called from the `ferryLines` handler) runs each running line's
+  `railService` and draws its boats as river buses in the line's colour: `trainsAt` and `trainPoses`, the bow turned
+  to the way the boat goes, alongside while dwelling and under way while running. Their ids start at `FERRY_ID_BASE`
+  (2e9) plus line × 64 + boat, `ferryOf(id)` says which line and stop, and their panel shows the line, its piers, the
+  next call and `ferryCrew`. Not drawn: the riders (they come with `inspectTrain`, which the panel does not ask).
+  `BoatsView.sources` takes any other `(tick, out) => void` that appends `BoatState`s.
+- **The barge hand-off.** `LandmarkMotion.bargeHidden(seed, day)` is set to `BoatsView.liftBooked`, which asks
+  `boatLifts(harbours, day)` (cached per list and day); a span with a real boat booked in its lifts that day shows no
+  decorative barge. Not seen live yet: the scratch world has no bascule bridge (B8's London and showcase do).
+- **The harbour list.** `net.on('harbours')` calls `setHarbours(list, true)`, which also stops the dev mock. The
+  mock (`HarbourMock`, `?dev` only) finds the harbours in the loaded chunks (built or still sites), takes each one's
+  fairway row (two rows out for a marina or a jetty, so sailboats have river water), declares a made-up gate where a
+  lake is not open water, and derives the lanes on this client's own tiles with `deriveHarbourLanes`. It waits for a
+  quiet 2.5 s of loaded chunks before it works, and the server's list wins as soon as it has any harbour in it.
+- **Debugging.** `msc.boats`: `debugTick`, `at(tick)`, `findPhase(phase, from, type)`, `states`, `counts()`, `sources`,
+  `helmPose()`, `stateOf(id)`; `msc.boatMock` (`gates`, `notes`).
+- **Measured** (62 boats at once: 50 synthetic on a ring of the lake, in every type, and the 12 the mock marina and
+  fishing harbours hold; Chrome on Metal, 1400 × 900).
+  - `BoatsView.frame` (schedule, matrices, colours, lights): 0.31 ms a frame.
+  - Draw cost: 66 more draw calls (85 against 19) and 94,000 more triangles; a render took 0.84 ms with the boats and
+    0.67 ms without (`gl.finish` after each, 70 renders). The page held 55 fps with them and 60 without (the display's
+    cap); the worst frame in the 4 s was a first-sight shader compile.
+- **Left for later.** Boats in the minimap and the world map; a spray or foam line down the hull; the police and fire
+  launches' scheduling (B3 leaves them out); riders on a river bus's panel; a bascule's leaves tilted for a passing tall
+  boat (B8 checks the lift passages).
+
 ## 8. London and the showcase
 
 **London** (`shared/src/demo/london.ts` and `londonMap.ts`):
@@ -1201,7 +1281,7 @@ There are eight subtasks, about 5 hours of agent time, in four waves. Each runs 
 | B3 | Boat types and the schedule: `BOAT_TYPES`, `boatTimetable`, berth and bascule booking, `boatsAt`, names and crews | opus | B1 (B2's ids by `KIND_ID`) | B5, B7 | L (45 min) | new `shared/src/boats.ts`; `boats-check.ts` (schedule sections) | `boats-check.ts` (append sections) |
 | B4 | Server harbours: lanes on change, sea gates, `harbours` message, fishing and port economy, `shipBerthed`, `inspectBoat`, tooltips, load test. **Built** (section 6.6) | opus | B1, B2, B3 | B6 | L (50 min) | new `server/src/sim/harbours.ts`; `simulation.ts` (`dispatch` `to`, export point); `gateways.ts`; `world.ts`, `snapshot.ts` (`seaGates`); `game.ts`; `net.ts`; `protocol.ts`; new `loadtest/boats.ts` | `net.ts`, `protocol.ts`, `game.ts` (also B5); `simulation.ts` |
 | B5 | Ferries: the `'ferry'` mode, `Ferry extends Timetabled`, `routeWater`, `FERRY_TIMING`, berth offsets, `ferryLines`, the lines editor. **Built** (section 6.2) | opus | B1, B2 | B3, B7 | M (35 min) | `shared/src/transit.ts`; `rail.ts` (`ferry`, `RiverBus`, geometry dispatch); new `server/src/sim/ferry.ts`; `game.ts`; `net.ts`; `protocol.ts`; `client/src/lines.ts`; `showcase.ts` (`LINE_MODES` todo) | `rail.ts`; `net.ts`, `protocol.ts`, `game.ts` (also B4: append-only hunks); `showcase.ts` (also B8) |
-| B6 | Boat rendering: models, liveries, motion, sails, wakes, lights, moored boats, picking, panels, helm FPV, barge hand-off | sonnet | B3 (B5 for ferries; mock until merged) | B4 | L (50 min) | new `client/src/render/boats.ts`; `vehicles.ts`; `main.ts`; `vehicleInterior.ts`; `fpv.ts` (`CabEye.helm`); `landmarks.ts` | `main.ts`; `vehicles.ts` |
+| B6 | Boat rendering: models, liveries, motion, sails, wakes, lights, moored boats, picking, panels, helm FPV, barge hand-off. **Built** (section 7.1) | sonnet | B3 (B5 for ferries; mock until merged) | B4 | L (50 min) | new `client/src/render/boats.ts`; `vehicles.ts`; `main.ts`; `vehicleInterior.ts`; `fpv.ts` (`CabEye.helm`); `landmarks.ts` | `main.ts`; `vehicles.ts` |
 | B7 | Harbour models: two designs per kind (pontoons, jetty, market hall, pier, cranes and stacks); channel-aware arches and piers in `render/bridges.ts`. **Built** (section 5) | sonnet | B2 | B3, B5 | S (25 min) | `buildings/harbour.ts` (designs only); `render/bridges.ts` (`bridgeChannel`) | `compiled.ts` (re-run compile) |
 | B8 | Scenarios and checks: showcase `harbour` section, registry, tour, London (gates, piers, RB1, St Katharine, port), seeder `seaGates`, `demo:check` report, drafts off, `LINE_MODES.ferry = true` | opus | all | — | L (45 min) | `showcase.ts`; `london.ts`; `londonMap.ts` (`DOCKS`); `server/src/demo/seed.ts`; `demo/check.ts`; `harbour.ts` (draft flags) | `showcase.ts`; London's `startHash` changes (reset the demos) |
 

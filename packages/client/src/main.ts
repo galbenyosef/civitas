@@ -1,7 +1,7 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   CHUNK_SIZE, LAND_PRICE_PER_TILE, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO,
+  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
@@ -16,7 +16,7 @@ import { TrafficLights } from './render/signals';
 import { ParksView } from './render/parks';
 import { PlanesView } from './render/planes';
 import { HelicoptersView } from './render/helicopters';
-import { BoatsView } from './render/boats';
+import { BoatsView, FERRY_ID_BASE } from './render/boats';
 import { HarbourMock } from './render/boatsMock';
 import { boatTipHtml, boatPanelHtml, boatCab, boatKnots } from './boatPanel';
 import { AirfieldView } from './render/airfield';
@@ -200,6 +200,8 @@ let selectedCitizen = 0;
 let following = false;
 /** the selected train or plane (vehicles.ts); exclusive with selectedCitizen */
 let selectedVehicle: VehicleSel | null = null;
+/** the server's last answer about the selected boat (a trawler's crew of citizens, what it landed) */
+let boatInfo: BoatInfo | null = null;
 /** the server's last full answer about the selected train */
 let trainInfo: TrainInfo | null = null;
 const ui = new UI({
@@ -299,6 +301,13 @@ net.on('ferryLines', (m) => {
   ferryMeta.clear();
   for (const l of m.lines) ferryMeta.set(l.id, l);
   lines.setFerryLines(m.lines);
+  boats.setFerryLines(m.lines); // the river buses sail them (render/boats.ts)
+});
+// the harbours with their lanes (server sim/harbours.ts): every boat but the river buses sails them; the list replaces the ?dev mock for good
+net.on('harbours', (m) => { if (m.list.length || !boatMock) boats.setHarbours(m.list, true); }); // with ?dev and none built yet, the mock keeps the boats
+net.on('boat', (m) => {
+  const v = selectedVehicle;
+  if (v?.kind === 'boat' && m.id === v.id) { boatInfo = m.info; showBoatPanel(); }
 });
 lines.onUnder = (on) => { if (on) { if (!underground.on) setUnder(true, true); } else if (underAuto) setUnder(false); }; // a metro line being edited shows the tunnels
 net.on('sitelist', (m) => {
@@ -595,7 +604,7 @@ function manifestOf(airport: number, f: Flight): FlightManifest {
   if (!m) { const p = flightPassengers(f); m = flightManifest(f, p.arriving, p.departing); if (manifests.size > 64) manifests.clear(); manifests.set(k, m); }
   return m;
 }
-function clearVehicle() { selectedVehicle = null; trainInfo = null; trains.selected = null; planes.selected = null; helis.selected = null; boats.selected = null; }
+function clearVehicle() { selectedVehicle = null; trainInfo = null; boatInfo = null; trains.selected = null; planes.selected = null; helis.selected = null; boats.selected = null; }
 function selectVehicle(v: VehicleSel | null) {
   selectedCitizen = 0; citizens.selected = 0; routeInfo = null; routeView.clear(); ui.markPerson(0);
   following = false;
@@ -615,7 +624,7 @@ function refreshVehicle() {
   if (v?.kind === 'train') { if (net.connected) net.send({ t: 'inspectTrain', line: v.line, train: v.train, full: true }); if (!trainInfo) showTrainPanel(); }
   else if (v?.kind === 'plane') showPlanePanel();
   else if (v?.kind === 'heli') showHeliPanel();
-  else if (v?.kind === 'boat') showBoatPanel();
+  else if (v?.kind === 'boat') { if (net.connected && v.id < FERRY_ID_BASE) net.send({ t: 'inspectBoat', id: v.id }); showBoatPanel(); }
 }
 setInterval(refreshVehicle, 1000);
 function showTrainPanel() {
@@ -657,7 +666,7 @@ function showBoatPanel() {
   if (v?.kind !== 'boat') return;
   const s = boats.stateOf(v.id);
   if (!s) { selectVehicle(null); ui.toast('info', 'That boat has gone out of sight'); return; }
-  ui.showVehicle(vehicleKey(v), boatPanelHtml(s, boats.harbourOf(s.harbour), boats.lastTick, boatKnots(s.speed)), following, fpv.mode);
+  ui.showVehicle(vehicleKey(v), boatPanelHtml(s, boats.harbourOf(s.harbour), boats.lastTick, boatKnots(s.speed), { ferry: boats.ferryOf(s.id), info: boatInfo }), following, fpv.mode);
 }
 /** The selected vehicle's cab for the first-person view, from the pose drawn this frame. */
 function cabEye(): CabEye | null {
@@ -693,7 +702,7 @@ function cabEye(): CabEye | null {
   }
   if (v.kind === 'boat') {
     const s = boats.stateOf(v.id), pose = boats.helmPose();
-    return s && pose ? boatCab(vehicleKey(v), s, boats.harbourOf(s.harbour), boats.lastTick, pose, boats.hullOf(v.id), boats.turnOf(v.id)) : null;
+    return s && pose ? boatCab(vehicleKey(v), s, boats.harbourOf(s.harbour), boats.lastTick, pose, boats.hullOf(v.id), boats.turnOf(v.id), boats.ferryOf(s.id)) : null;
   }
   const hit = planes.stateOf(v.airport, v.flight);
   if (!hit) return null;
@@ -914,7 +923,7 @@ function hoverBoat(id: number) {
   boats.hover = id;
   const s = boats.stateOf(id);
   if (!s) { ui.hideTip(); return; }
-  ui.showHtmlTip(boatTipHtml(s, boats.harbourOf(s.harbour), boats.lastTick));
+  ui.showHtmlTip(boatTipHtml(s, boats.harbourOf(s.harbour), boats.lastTick, { ferry: boats.ferryOf(s.id) }));
   ui.moveTip(mouse.x, mouse.y);
 }
 let tipHeli: number | null = null;

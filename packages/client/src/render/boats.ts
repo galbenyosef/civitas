@@ -3,8 +3,8 @@ import {
   Quaternion, Euler, Vector3, Color, AdditiveBlending, CanvasTexture, LinearFilter, type Camera, type Texture,
 } from 'three';
 import {
-  TICKS_PER_DAY, BOAT_TYPES, boatsAt, boatLifts, boatOperator, hash2,
-  type BoatState, type BoatType, type BoatHarbour, type BoatPhase, type Voyage,
+  TICKS_PER_DAY, BOAT_TYPES, boatsAt, boatLifts, boatOperator, hash2, railService, trainsAt, trainPoses,
+  type BoatState, type BoatType, type BoatHarbour, type BoatPhase, type Voyage, type FerryLineDTO, type RailService, type TrainState, type VehiclePose,
 } from '@msimcity/shared';
 import { vehicleMaterial, sceneUniforms } from './materials';
 import { boatModel, type BoatModel } from './boatModels';
@@ -62,7 +62,7 @@ function paint(out: Color, base: number, k: number, salt: number, wear: number):
   out.setHex(base).offsetHSL((hash2(k, salt) - 0.5) * 0.02, (hash2(k, salt + 1) - 0.5) * 0.08, (hash2(k, salt + 2) - 0.5) * 0.06);
   return out.lerp(GRIME, wear * 0.45).multiplyScalar(1 - wear * 0.2);
 }
-function makeLivery(s: BoatState): Livery {
+function makeLivery(s: BoatState, line?: FerryLineDTO): Livery {
   const k = Math.floor(s.seed * 65536), r = (n: number) => hash2(k, n);
   const wear = r(41) ** 2 * 0.35;
   let hull = 0xf1efe8, accent = 0xffffff, sail = 0xf4f2ea;
@@ -72,7 +72,7 @@ function makeLivery(s: BoatState): Livery {
     case 'sailboat': hull = hex(YACHT_HULLS, r(1)); accent = hull === 0xf1efe8 ? hex([0x1d2b4f, 0x7a1f3a, 0x2f5d3a], r(3)) : 0xf1efe8; sail = r(2) < 0.7 ? 0xf4f2ea : 0xe6dcc0; break;
     case 'narrowboat': hull = 0x1d1f22; accent = hex(CABINS, r(1)); break;
     case 'trawler': hull = hex(TRAWLER_HULLS, r(1)); accent = 0xf2f0ea; break;
-    case 'riverBus': { const l = BUS_LINES[Math.floor(r(1) * 2)]; hull = l[0]; accent = l[1]; break; }
+    case 'riverBus': { const l = BUS_LINES[Math.floor(r(1) * 2)]; hull = line ? line.color : l[0]; accent = line ? 0xf2f0ea : l[1]; break; }
     case 'sailingBarge': hull = 0x1b1c1f; sail = 0x9a4527; break;
     case 'policeLaunch': hull = 0x1b3f8c; accent = 0xf2c91e; break;
     case 'fireBoat': hull = 0xc4302b; accent = 0xf2f0ea; break;
@@ -168,6 +168,11 @@ interface TypeSet {
   hull: Slot; accent: Slot | null; works: Slot; glass: Slot | null;
   sails: Slot[]; opt: Slot | null; cargo: (Slot | null)[];
 }
+/** Boat ids from here up are river buses (ferry lines run as rail services: shared/src/ferry.ts); the id is this plus line * 64 + boat. */
+export const FERRY_ID_BASE = 2_000_000_000;
+/** Where a river bus is in its line, as drawn last frame (panels). */
+export interface FerryInfo { line: FerryLineDTO; train: number; stop: number; phase: 'dwell' | 'run' }
+
 /** the wheelhouse eye as drawn this frame: where it is and how the boat is turned */
 export interface HelmPose { x: number; y: number; z: number; q: Quaternion; wheelhouse: boolean }
 
@@ -189,6 +194,10 @@ export class BoatsView {
   /** boats other than the harbours' (river buses on ferry lines, B5) add their states here */
   sources: ((tick: number, out: BoatState[]) => void)[] = [];
   private byId = new Map<number, BoatState>();
+  private ferries: { dto: FerryLineDTO; svc: RailService }[] = [];
+  private ferryById = new Map<number, FerryInfo>();
+  private ferryTmp: TrainState[] = [];
+  private poseTmp: VehiclePose[] = [];
   private harbourById = new Map<number, BoatHarbour>();
   private recs = new Map<number, Rec>();
   private picks: number[] = [];
@@ -252,6 +261,35 @@ export class BoatsView {
     return ts;
   }
 
+  /**
+   * The river bus lines (the server's `ferryLines`): each running line's boats sail its rail service (B5, shared/src/ferry.ts)
+   * along the water route, drawn here as river buses. A boat dwelling at a pier lies alongside, one running is under way.
+   */
+  setFerryLines(lines: FerryLineDTO[]) {
+    this.ferries = lines.filter((l) => l.route && l.status === 'running').map((dto) => ({ dto, svc: railService(dto, dto.route!) }));
+    for (const id of [...this.recs.keys()]) if (id >= FERRY_ID_BASE) this.recs.delete(id);
+  }
+  private ferryStates(tick: number, out: BoatState[]) {
+    this.ferryById.clear();
+    for (const { dto, svc } of this.ferries) {
+      for (const st of trainsAt(svc, tick, this.ferryTmp)) {
+        const pose = trainPoses(svc, st, this.poseTmp)[0];
+        if (!pose) continue;
+        const id = FERRY_ID_BASE + dto.id * 64 + st.train, dwell = st.phase === 'dwell';
+        this.ferryById.set(id, { line: dto, train: st.train, stop: st.stop, phase: st.phase });
+        // the bow points the way the boat goes (a pose faces up the route: a boat coming home runs the other way)
+        const h = st.dir > 0 ? pose.h : pose.h + Math.PI;
+        out.push({
+          id, voyage: null, type: 'riverBus', seed: hash2(dto.id, st.train + 31), harbour: -1, berth: -1, phase: dwell ? 'alongside' : 'underway', x: pose.x, z: pose.z, h,
+          speed: dwell ? 0 : st.v, astern: false, fade: 1, lane: -1, s: st.s, dir: st.dir,
+          lights: { nav: !dwell, anchor: false, trawling: false, deck: false, accommodation: true },
+        });
+      }
+    }
+  }
+  /** a river bus's line and where it is, or undefined for any other boat */
+  ferryOf(id: number): FerryInfo | undefined { return this.ferryById.get(id); }
+
   /** The bascule lifts with a real boat booked on `day`, for hiding the landmark's decorative barge: is `seed` a span of them? */
   liftBooked(seed: number, day: number): boolean {
     if (!this.harbours.length) return false;
@@ -276,6 +314,7 @@ export class BoatsView {
     this.byId.clear();
     this.states.length = 0;
     if (this.harbours.length) boatsAt(this.harbours, t, this.states);
+    if (this.ferries.length) this.ferryStates(t, this.states); else this.ferryById.clear();
     for (const src of this.sources) src(t, this.states);
     const day = Math.floor(t / TICKS_PER_DAY), wind = windOf(day);
     for (const s of this.states) {
@@ -304,7 +343,7 @@ export class BoatsView {
   /** the dynamic state of a boat (turn rate, sail), created with its livery on first sight */
   private rec(s: BoatState, time: number, t: number): Rec {
     let r = this.recs.get(s.id);
-    if (!r) { r = { h: s.h, t, turn: 0, sail: s.phase === 'underway' || s.phase === 'fishing' ? 1 : 0, yaw: 0, liv: makeLivery(s), seen: time }; this.recs.set(s.id, r); }
+    if (!r) { r = { h: s.h, t, turn: 0, sail: s.phase === 'underway' || s.phase === 'fishing' ? 1 : 0, yaw: 0, liv: makeLivery(s, this.ferryById.get(s.id)?.line), seen: time }; this.recs.set(s.id, r); }
     r.seen = time;
     return r;
   }
@@ -361,7 +400,8 @@ export class BoatsView {
     ts.works.mesh.setMatrixAt(i, this.m); ts.works.mesh.setColorAt(i, this.col.setScalar(lift));
     if (ts.glass) {
       const lit = night * (L.lit || s.lights.accommodation ? 1 : 0);
-      ts.glass.mesh.setMatrixAt(i, this.m);
+      // riding this boat: its windows would hang in front of the eye as dark panes, so they are left out of its own view
+      ts.glass.mesh.setMatrixAt(i, this.cabView && s.id === this.selected ? this.tmp.makeScale(0, 0, 0) : this.m);
       ts.glass.mesh.setColorAt(i, this.col.copy(GLASS_DAY).lerp(L.warm, lit).multiplyScalar(lift * (1 + 0.5 * lit)));
     }
     md.sails.forEach((sd, k) => {
