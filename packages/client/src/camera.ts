@@ -69,4 +69,38 @@ export class CameraRig {
     return this.ray.ray.intersectPlane(this.plane, out);
   }
   resize(aspect: number) { this.camera.aspect = aspect; this.camera.updateProjectionMatrix(); }
+
+  /** Put the camera on a shot (CameraShot); the parts it leaves out stay as they are. */
+  setShot(s: CameraShot) {
+    if (s.x !== undefined && s.y !== undefined) this.target.set(s.x, 0, s.y);
+    if (s.dist !== undefined) this.dist = Math.min(DIST_MAX, Math.max(DIST_MIN, s.dist));
+    if (s.yaw !== undefined) this.yaw = (s.yaw * Math.PI) / 180;
+    if (s.pitch !== undefined) this.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, (s.pitch * Math.PI) / 180));
+    this.update();
+  }
+  /** This view as a shot string, "x,y,dist,yaw,pitch" (degrees), plus ",hour" when one is given: what DEFAULT_VIEW takes. */
+  shotString(hour?: number) {
+    const r = (v: number, d = 1) => String(Math.round(v * 10 ** d) / 10 ** d);
+    const yaw = ((((this.yaw * 180) / Math.PI) % 360) + 360) % 360;
+    return [r(this.target.x), r(this.target.z), r(this.dist), r(yaw), r((this.pitch * 180) / Math.PI), ...(hour !== undefined ? [r(hour, 2)] : [])].join(',');
+  }
+}
+
+/**
+ * A camera shot: the ground point looked at (tile x, y), the distance, the orbit angle and the tilt in degrees (yaw 0 looks
+ * north from the south, 90 looks west from the east; pitch 90 is straight down) and, optionally, a frozen hour of the day.
+ * From the URL (`?at=x,y&dist=n&yaw=deg&pitch=deg&hour=h`) or from the server's DEFAULT_VIEW ("x,y,dist,yaw,pitch[,hour]").
+ */
+export interface CameraShot { x?: number; y?: number; dist?: number; yaw?: number; pitch?: number; hour?: number }
+/** "x,y,dist,yaw,pitch[,hour]" as a shot; null when it is not five or six numbers */
+export function parseShot(s: string | undefined): CameraShot | null {
+  const v = (s ?? '').split(',').map((p) => Number(p.trim()));
+  if ((v.length !== 5 && v.length !== 6) || !v.every(Number.isFinite)) return null;
+  return { x: v[0], y: v[1], dist: v[2], yaw: v[3], pitch: v[4], ...(v.length === 6 ? { hour: v[5] } : {}) };
+}
+/** the URL's camera parameters as a shot, or null when it has none */
+export function urlShot(params: URLSearchParams): CameraShot | null {
+  const at = params.get('at')?.split(',').map(Number), num = (k: string) => (params.get(k) !== null && Number.isFinite(Number(params.get(k))) ? Number(params.get(k)) : undefined);
+  const s: CameraShot = { ...(at && at.length === 2 && at.every(Number.isFinite) ? { x: at[0], y: at[1] } : {}), dist: num('dist'), yaw: num('yaw'), pitch: num('pitch') };
+  return s.x !== undefined || s.dist !== undefined || s.yaw !== undefined || s.pitch !== undefined ? s : null;
 }

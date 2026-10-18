@@ -1,13 +1,13 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   CHUNK_SIZE, LAND_PRICE_PER_TILE, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo,
+  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
 import { mountLocalUi, localLogin, addPlayOffline, registerServiceWorker } from './local/ui';
 import { ClientWorld } from './world';
-import { CameraRig } from './camera';
+import { CameraRig, parseShot, urlShot, type CameraShot } from './camera';
 import { ChunkView } from './render/chunkView';
 import { ParcelsView } from './render/parcels';
 import { CitizensView } from './render/citizens';
@@ -38,8 +38,8 @@ import { Onboarding } from './onboarding';
 import { LinesPanel } from './lines';
 import { ChartsPanel } from './charts';
 import { PerfHud } from './render/perfhud';
-import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered } from './worlds';
-import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel } from './tour';
+import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered, serverConfig } from './worlds';
+import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, type DemoInfo } from './tour';
 
 // ---- renderer & scene ---------------------------------------------------------------------
 const canvas = document.getElementById('c') as HTMLCanvasElement;
@@ -86,11 +86,10 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// ---- url params: ?name= skips login, ?at=x,y&dist=n places the camera, ?hour=h freezes lighting ---
+// ---- url params: ?name= skips login, ?at=x,y&dist=n&yaw=deg&pitch=deg places the camera (camera.ts CameraShot), ?hour=h freezes lighting ---
 const params = new URLSearchParams(location.search);
-const at = params.get('at')?.split(',').map(Number);
-if (at && at.length === 2 && at.every(Number.isFinite)) rig.target.set(at[0], 0, at[1]);
-if (params.get('dist')) rig.dist = Number(params.get('dist'));
+let startShot: CameraShot | null = urlShot(params);
+if (startShot) rig.setShot(startShot);
 if (params.get('hour')) { lighting.mode = 'fixed'; lighting.fixedHour = Number(params.get('hour')); }
 // ?fx=0|1|2 pins shadow quality; otherwise it adapts to frame time
 const fxParam = params.get('fx');
@@ -107,8 +106,20 @@ function adaptQuality(dt: number) {
 }
 
 // ---- networking ---------------------------------------------------------------------------
+// a public showcase (docs/demo.md "A public showcase"): the server says whether it is read-only (SPECTATE) and which demo a bare
+// page opens (DEFAULT_DEMO); asked before anything connects. A local game or a ?ws= server elsewhere has no such answer.
+const showcase = __LOCAL_ONLY__ || params.has('local') || params.get('ws') ? {} : await serverConfig();
+if (showcase.spectate) document.body.classList.add('spectate'); // no tool bar flashing up before the welcome confirms it
+// DEFAULT_VIEW: the opening shot of a bare page (no camera parameters, no ?demo=, ?city=: the world DEFAULT_DEMO or the live one), its hour
+// only when there is no ?hour; put on again at the first welcome, after a demo's tour has placed the camera on its welcome stop
+if (!startShot && !params.get('demo') && !params.get('city')) {
+  startShot = parseShot(showcase.defaultView);
+  if (startShot) rig.setShot(startShot);
+  if (startShot?.hour !== undefined && !params.get('hour')) { lighting.mode = 'fixed'; lighting.fixedHour = startShot.hour; }
+}
+const defaultDemo = !params.get('demo') && !params.get('city') && isDemoId(showcase.defaultDemo) ? showcase.defaultDemo : null;
 // a demo map (?demo=<id>, tour.ts) is reached through this server's /demo-ws/<id>, which pipes to the demo's process
-const demoParam = demoOf(params);
+const demoParam = demoOf(params) ?? defaultDemo;
 /** the guided tour, in a demo */
 let tour: TourPanel | null = null;
 const wsUrl = params.get('ws') ? `ws://${params.get('ws')}` : demoParam ? demoWsUrl(demoParam) : (import.meta.env.VITE_WS_URL
@@ -191,6 +202,12 @@ net.onStatus = (ok) => { ui.setConn(ok); if (!ok) subscribed.clear(); };
 net.on('welcome', (m) => {
   world.me = m.you;
   world.sandbox = !!m.sandbox;
+  // a read-only showcase (SPECTATE): only looking; the tool bar, the tech chip, Reset demo and the menu's changes go (style.css body.spectate)
+  world.spectate = !!m.spectate;
+  document.body.classList.toggle('spectate', world.spectate);
+  input.readOnly = world.spectate;
+  if (world.spectate) input.setTool('select');
+  if (tour) tour.readOnly = world.spectate;
   world.applyPlayers(m.players);
   world.applyParcels(m.parcels);
   const me = world.myPlayer!;
@@ -198,6 +215,7 @@ net.on('welcome', (m) => {
   ui.setMoney(me.money, me.ledger);
   ui.setLocks(me.tech);
   ui.hideLogin();
+  if (startShot) { rig.setShot(startShot); startShot = null; } // the opening shot, once
   for (const key of [...views.keys()]) dropView(key);
   subscribed.clear();
   streamChunks();
@@ -1007,14 +1025,15 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------
 ui.setConn(false);
 // a local game that just replaced itself (load, import, new game) reloads straight back in; otherwise ?name= or the join form
 const rejoin = local && (() => { try { const r = sessionStorage.getItem(AUTOJOIN); sessionStorage.removeItem(AUTOJOIN); return r ? localStorage.getItem('msimcity.name') : null; } catch { return null; } })();
-const autoName = params.get('name') || rejoin;
+// a read-only showcase has nothing to own, so a visitor joins at once under a made-up name
+const autoName = params.get('name') || rejoin || (showcase.spectate ? `Visitor ${1000 + Math.floor(Math.random() * 9000)}` : null);
 // test cities (worlds.ts): `?ws=host:port&city=n` connects to one, `?city=n` alone starts it first; the perf readout (M, or the top-bar chip) is always on there
 const cityParam = testCityOf(params);
 const viaWs = !!params.get('ws');
@@ -1030,7 +1049,7 @@ if (local) {
 }
 if (cityParam) { showCityBanner(cityParam, params, hud); reviveCity(cityParam, net); }
 if (demoParam) {
-  showDemoBanner(demoParam, params, hud);
+  showDemoBanner(demoParam, params, hud, !!showcase.spectate, !showcase.defaultDemo);
   reviveDemo(demoParam, net);
   tour = new TourPanel({
     demo: demoParam, net, rig, scene, buildingHtml: (info) => ui.buildingHtml(info, 'h3'),
@@ -1038,9 +1057,23 @@ if (demoParam) {
   });
   (window as any).msc.tour = tour;
 }
+/**
+ * A showcase visitor joins without the form, so the join card says what it is waiting for instead (a demo's first fill
+ * takes minutes); returns the demo-start progress callback.
+ */
+function waitingCard() {
+  const form = document.getElementById('loginForm')!;
+  form.querySelector('p')!.textContent = 'A read-only showcase: look around, follow anyone, take the guided tour.';
+  for (const el of form.querySelectorAll<HTMLElement>('#nameInput, #worlds')) el.style.display = 'none';
+  const b = form.querySelector<HTMLButtonElement>('button[type=submit]')!;
+  const what = demoParam ? DEMO_BY_ID.get(demoParam)?.name ?? 'the demo' : 'the city';
+  b.disabled = true; b.textContent = `Opening ${what}…`;
+  return (d: DemoInfo | null) => { b.textContent = d?.status === 'starting' && d.fill !== undefined ? `Building ${what}… ${Math.round(d.fill * 100)}%` : `Opening ${what}…`; };
+}
 async function connect(name: string) {
   if (local) { net.connect(name); void local.pause(false); return; }
-  if (demoParam && !viaWs && !(await startDemo(demoParam))) { ui.toast('error', 'The demo did not start'); return; }
+  const progress = showcase.spectate ? waitingCard() : undefined;
+  if (demoParam && !viaWs && !(await startDemo(demoParam, progress))) { ui.toast('error', 'The demo did not start'); return; }
   if (cityParam && !viaWs) { // ?city=n alone: bring the city up, then point the socket at it
     ui.toast('info', `Starting test city ${cityParam}×${cityParam}…`);
     if (!(await startCity(cityParam))) { ui.toast('error', 'The test city did not start'); return; }

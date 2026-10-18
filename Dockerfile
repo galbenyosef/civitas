@@ -11,6 +11,8 @@ RUN npm run build
 
 FROM node:20-alpine
 WORKDIR /app
+# Demo worlds go beside the world file, under /data/demos/. A read-only public showcase sets SPECTATE=1 and
+# DEFAULT_DEMO=<id> (e.g. london) when it runs the image (docs/demo.md, "A public showcase").
 ENV NODE_ENV=production PORT=8080 WORLD_FILE=/data/world.json
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules

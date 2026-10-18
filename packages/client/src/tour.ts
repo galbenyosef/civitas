@@ -61,13 +61,15 @@ export function reviveDemo(id: DemoId, net: NetClient) {
     void post(id, 'start');
   };
 }
-export function showDemoBanner(id: DemoId, params: URLSearchParams, mount: HTMLElement) {
+/** `readOnly`: a read-only showcase (SPECTATE); `home`: offer the way back to the live world (not where DEFAULT_DEMO sends a bare page here) */
+export function showDemoBanner(id: DemoId, params: URLSearchParams, mount: HTMLElement, readOnly = false, home = true) {
   const back = new URLSearchParams(params);
   back.delete('demo'); back.delete('ws');
   const el = document.createElement('div');
   el.id = 'cityBanner';
   el.className = 'demo';
-  el.innerHTML = `${DEMO_BY_ID.get(id)?.name ?? 'Demo'}: a sandbox, not the live world · <a href="${location.pathname}?${back.toString()}">back to the live world</a>`;
+  el.innerHTML = `${DEMO_BY_ID.get(id)?.name ?? 'Demo'}: ${readOnly ? 'a read-only showcase · look around, follow anyone, take the tour' : 'a sandbox, not the live world'}`
+    + (home ? ` · <a href="${location.pathname}?${back.toString()}">back to the live world</a>` : '');
   mount.appendChild(el);
 }
 
@@ -111,6 +113,9 @@ export class TourPanel {
   private tmp = new Vector3();
   /** the tour turned the underground view on, so it turns it off again at the next stop */
   private under = false;
+  private ro = false;
+  /** a read-only showcase (main.ts, from the welcome): no Reset demo (the server would refuse it) */
+  set readOnly(on: boolean) { if (on !== this.ro) { this.ro = on; this.render(); } }
 
   constructor(private d: Deps) {
     this.stops = demoTour(d.demo);
@@ -140,7 +145,7 @@ export class TourPanel {
       else if (act === 'prev') this.go(this.i - 1);
       else if (act === 'auto') { this.auto = !this.auto; this.autoAt = performance.now() + (this.fly ? FLY_S * 1000 : 0) + DWELL_S * 1000; this.render(); }
       else if (act === 'close') this.setOpen(false);
-      else if (act === 'reset') void this.reset();
+      else if (act === 'reset' && !this.ro) void this.reset();
     });
     this.el.addEventListener('change', (e) => {
       const sel = e.target as HTMLSelectElement;
@@ -266,7 +271,7 @@ export class TourPanel {
       <h3><span class="sw" style="background:${swatch}"></span>${esc(s.title)}</h3>
       <div class="tbody">
         ${s.what ? `<p class="twhat">${esc(s.what)}</p>` : ''}
-        ${s.how ? `<p class="thow"><b>How to build it.</b> ${esc(s.how)}</p>` : ''}
+        ${s.how && !(this.ro && s.id === 'welcome') ? `<p class="thow"><b>How to build it.</b> ${esc(s.how)}</p>` : ''}
         <table class="tfacts">${s.facts.map(([a, b]) => `<tr><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join('')}</table>
         <div class="tlive"></div>
       </div>
@@ -275,7 +280,7 @@ export class TourPanel {
         <button class="chip${this.auto ? ' on' : ''}" data-act="auto">${this.auto ? 'Autoplay on' : 'Autoplay'}</button>
         <button class="chip" data-act="next">Next ›</button>
         <select data-act="jump" title="Jump to a stop">${options}</select>
-        <button class="chip treset" data-act="reset" title="Put the town back exactly as it was first seeded">Reset demo</button>
+        ${this.ro ? '' : '<button class="chip treset" data-act="reset" title="Put the town back exactly as it was first seeded">Reset demo</button>'}
       </div>`;
     this.renderLive();
     for (const c of this.chips) c.el.classList.toggle('on', c.i === this.i);

@@ -17,8 +17,10 @@ export class ClientWorld {
   /** per chunk: cars parked at the kerb of each road tile (absent when none) */
   kerb = new Map<string, Uint8Array>();
 
-  /** whether this player may edit land owned by `owner` (the server's rule: their own, or anyone's in a sandbox) */
-  mayEdit(owner: string) { return owner === this.me || this.sandbox; }
+  /** a read-only showcase (SPECTATE on the server, from the welcome): nothing may be changed, a sandbox included */
+  spectate = false;
+  /** whether this player may edit land owned by `owner` (the server's rule: their own, or anyone's in a sandbox; nobody's in a showcase) */
+  mayEdit(owner: string) { return !this.spectate && (owner === this.me || this.sandbox); }
 
   putChunk(dto: ChunkDTO) {
     const N = CHUNK_SIZE * CHUNK_SIZE;

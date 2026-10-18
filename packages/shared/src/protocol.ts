@@ -368,6 +368,14 @@ export interface TechDTO { id: string; track: string; tier: number; name: string
 /** kind: kind id */
 export interface SiteDTO { x: number; y: number; kind: number; level: number; target: number; done: number; total: number; builders: number; priority: number; created: number }
 
+/**
+ * `GET /api/config` on a main server: how the deployment is run, read by the page before it joins (docs/demo.md,
+ * "A public showcase"). `spectate`: SPECTATE=1, the whole deployment is read-only (each world says so again in its
+ * welcome, and refuses every intent that changes it). `defaultDemo`: DEFAULT_DEMO=<id>, a page opened without
+ * `?demo=`, `?ws=` or `?city=` goes to that demo instead of the live world. `defaultView`: DEFAULT_VIEW, the camera's opening shot.
+ */
+export interface ServerConfig { spectate?: boolean; defaultDemo?: string; /** DEFAULT_VIEW: the opening camera shot for a page with no camera parameters, "x,y,dist,yaw,pitch[,hour]" (yaw and pitch in degrees; client camera.ts) */ defaultView?: string }
+
 export type ClientMsg =
   | { t: 'hello'; name: string }
   | { t: 'inspect'; x: number; y: number; full?: boolean }
@@ -404,7 +412,7 @@ export type ClientMsg =
   | { t: 'hist'; open: boolean };
 
 export type ServerMsg =
-  | { t: 'welcome'; you: string; seed: number; day: number; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
+  | { t: 'welcome'; you: string; seed: number; day: number; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
   | { t: 'chunk'; chunk: ChunkDTO }
   /** flat quads: x, y, packedTile, parcelId */
   | { t: 'tiles'; u: number[] }

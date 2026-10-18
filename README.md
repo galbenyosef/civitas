@@ -35,6 +35,18 @@ Dev knobs: `SIM_STEPS=10` fast-forwards (ten simulation ticks per interval),
 `SEED_BUILT=3` starts a new world with the Commons already built to that level,
 and a file named `RESET` next to the world file makes the next start discard it.
 Client: `VITE_WS_URL` to point at a server on another host, or `?ws=host:port`. `TEST_CITY_BASE_PORT` (default 8100) moves the test-city ports.
+A public showcase (`docs/demo.md`, "A public showcase"): `SPECTATE=1` makes the whole deployment read-only for every client, the
+live world and every demo child alike (the children inherit it). The server refuses every intent that changes the world with a
+"Read-only showcase" toast (a whitelist in `net.ts`, `READ_ONLY`: subscriptions, inspects, the lines list, the charts), and
+the HTTP API refuses demo stop and reset and test-city start and stop (403); starting a demo still works, as that is how a
+visitor gets in. The page hides the tool bar, the treasury, the tech tree, Reset demo and the context menu's changes, and joins
+at once as a made-up "Visitor 1234" instead of showing the join form. `DEFAULT_DEMO=<id>` (e.g. `london`) sends a page opened
+without `?demo=`, `?ws=` or `?city=` to that demo instead of the live world, and the server starts it as it starts. The page
+reads both from `GET /api/config`; each world also says `spectate` in its welcome. Without them nothing changes.
+`DEFAULT_VIEW="x,y,dist,yaw,pitch[,hour]"` (yaw and pitch in degrees, the hour freezes the lighting) is the camera's opening
+shot on a bare page (no camera parameters, no `?demo=` or `?city=`: the `DEFAULT_DEMO` or the live world), also through
+`/api/config`, so it can be retuned on a running deployment by changing the env and restarting. `msc.viewString()` in the
+browser console gives the current view in that form (with the hour when the lighting is frozen, `?hour=` or the light chip).
 Test cities (dev servers only, not with `NODE_ENV=production`): the join form lists the live world and pre-built
 1×1, 2×2, 3×3, 4×4, 6×6 and 8×8 district cities (about 950 people per district, level 3, every tech) so you can watch where
 the simulation slows down. Choosing one starts it as a child server process (same entry, port 8100+n, world file
@@ -83,7 +95,7 @@ runs the Commons through a rush hour with any traffic tunable changed (`docs/tra
 | First person | with someone selected, **FPV** in the panel or I opens a 16:9 inset (bottom right) from their eyes, **full** or O fills the window (Esc leaves); the view follows their heading and leans into corners, walkers bob, drivers sway, and it ends when they go indoors or arrive. With a train selected it rides in the driver's cab, with a plane in the cockpit. `render/fpv.ts` |
 | Overlays | H tints roads by congestion (green → red); T opens the technology tree; M shows the perf readout |
 | Bus lines | the top-bar **lines** chip: make a line from your stops (click them in order), number, colour, loop or there and back, buses per line; ribbons show the lines while it is open. `client/src/lines.ts`, `docs/transit.md` |
-| Debug | `?dev` shows draft kinds in the tool bar (a dev server accepts them, also on unclaimed land) and, on a dev server, skips technology locks, `?airport=x,y,dir[,gates[,fph]]` previews planes at a placeholder airfield on open land, `?name=…` skips the login form, `?at=x,y&dist=n` positions the camera, `?hour=h` freezes lighting, `?fx=0..2` pins shadow quality, `window.msc` exposes client state |
+| Debug | `?dev` shows draft kinds in the tool bar (a dev server accepts them, also on unclaimed land) and, on a dev server, skips technology locks, `?airport=x,y,dir[,gates[,fph]]` previews planes at a placeholder airfield on open land, `?name=…` skips the login form, `?at=x,y&dist=n&yaw=deg&pitch=deg` positions the camera (yaw 0 looks north, 90 west; pitch 90 straight down), `msc.viewString()` prints the view as a `DEFAULT_VIEW` string, `?hour=h` freezes lighting, `?fx=0..2` pins shadow quality, `window.msc` exposes client state |
 
 Buy land by dragging a rectangle. Your first parcel can go anywhere; every
 later purchase must share an edge with land you already own (touching at a

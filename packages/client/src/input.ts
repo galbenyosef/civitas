@@ -126,7 +126,10 @@ export class Input {
   rotationOf(tool: string): number | undefined { return this.rotations.get(tool); }
   setRotation(tool: string, r: number) { this.rotations.set(tool, r & 3); }
 
+  /** a read-only showcase (main.ts, from the welcome): only the select tool, whatever the keys or panels ask for */
+  readOnly = false;
   setTool(t: ToolId) {
+    if (this.readOnly && t !== 'select') t = 'select';
     if (this.tool === t) return;
     this.tool = t;
     this.buyStart = null; this.buyRect = null; this.painting = false;
@@ -329,7 +332,7 @@ export class Input {
       return;
     }
     const tool = TOOL_KEYS[key];
-    if (tool) this.setTool(this.cb.ladderKey?.(tool) ?? tool);
+    if (tool && !this.readOnly) this.setTool(this.cb.ladderKey?.(tool) ?? tool);
     if (e.code === 'Escape') this.setTool('select');
     this.cb.onKey(e.code);
   };

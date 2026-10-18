@@ -1,6 +1,6 @@
 import './worlds.css';
 import type { NetClient } from './net';
-import { DEMO_BY_ID, type DemoId } from '@msimcity/shared';
+import { DEMO_BY_ID, type DemoId, type ServerConfig } from '@msimcity/shared';
 import { demoList, startDemo, type DemoInfo } from './tour';
 
 /**
@@ -26,6 +26,14 @@ export function apiBase(): string {
   if (env) return env.replace(/^ws/, 'http');
   const host = location.port === '5173' ? `${location.hostname}:8080` : location.host;
   return `${location.protocol}//${host}`;
+}
+
+/** How the deployment is run (`GET /api/config`: SPECTATE, DEFAULT_DEMO; docs/demo.md "A public showcase"); empty when the server has no answer. */
+export async function serverConfig(): Promise<ServerConfig> {
+  try {
+    const r = await fetch(`${apiBase()}/api/config`, { cache: 'no-store', signal: AbortSignal.timeout(4000) }); // the page waits for this: never for long
+    return r.ok ? ((await r.json()) as ServerConfig) : {};
+  } catch { return {}; }
 }
 
 /** The test city this page is connected to (`?city=n`, or inferred from a `?ws=host:8100+n`), or 0 for the live world. */

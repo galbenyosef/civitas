@@ -254,6 +254,8 @@ body.fpv-full #tourLabels { display: none !important; }
 #fpv.full .fhint { display: block; position: absolute; right: 16px; bottom: 18px; padding: 5px 10px; border-radius: 999px; background: rgba(0,0,0,0.38); opacity: 0.85; pointer-events: none; }
 #fpv.full .ffade { display: block; position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
 body.fpv-full #tools, body.fpv-full #picker, body.fpv-full #help, body.fpv-full #status, body.fpv-full #panel, body.fpv-full #tech, body.fpv-full #tip, body.fpv-full #cpanel { display: none !important; }
+/* a read-only showcase (SPECTATE on the server, main.ts): nothing to build, buy, unlock or spend */
+body.spectate #tools, body.spectate #picker, body.spectate #money, body.spectate #techBtn, body.spectate #tech, body.spectate #devBtn, body.spectate #devPanel { display: none !important; }
 
 /* footprint labels: door, gate, platform, apron, stand and dock marks of a structure being placed or hovered (render/footprint.ts) */
 #markLabels { position: fixed; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }

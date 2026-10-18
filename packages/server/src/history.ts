@@ -49,6 +49,8 @@ export class History {
     if (!p) { p = { rings: new Rings(PLAYER_KEYS), day: -1, lastIn: 0, lastOut: 0, inH: zeros(), outH: zeros() }; this.players.set(id, p); }
     return p;
   }
+  /** drop a player's series (a spectator's, net.ts, when they leave: nothing of theirs is kept) */
+  forget(id: string) { this.players.delete(id); this.lastPlayer.delete(id); }
   playerRings(id: string): Rings | null { return this.players.get(id)?.rings ?? null; }
   /** the newest hourly values for a player (an empty list before they have a sample) */
   playerSample(id: string): ArrayLike<number> { return this.lastPlayer.get(id) ?? new Float64Array(PLAYER_KEYS.length); }

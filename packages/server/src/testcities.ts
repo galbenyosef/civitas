@@ -42,10 +42,13 @@ const PER_DISTRICT = 950;
 const IDLE_MS = Number(process.env.TEST_CITY_IDLE_MS ?? 10 * 60_000);
 const POLL_MS = Number(process.env.TEST_CITY_POLL_MS ?? 2_000);
 
+/** what a read-only showcase (SPECTATE) answers to a demo stop or reset, or a test-city start or stop */
+const READ_ONLY_REFUSAL = 'Read-only showcase: demos cannot be stopped or reset here';
+
 export type CityStatus = 'stopped' | 'starting' | 'running' | 'stopping';
 /** what a test-city child reports on /healthz */
 export interface ChildHealth {
-  ok: boolean; pid?: number; districts?: number; demo?: string; startHash?: string; ready?: boolean;
+  ok: boolean; pid?: number; districts?: number; demo?: string; startHash?: string; ready?: boolean; spectate?: boolean;
   chunks?: number; citizens?: number; clients?: number; day?: number; dayFrac?: number;
   fill?: { tick: number; of: number; pop: number };
   tickAvg?: number; tickP95?: number; tickMax?: number;
@@ -87,9 +90,10 @@ export class TestCities {
   private adopted: Promise<void>;
   /**
    * @param entry the server entry script to spawn, @param staticDir the built client the children serve,
-   * @param cities offer test cities (dev servers), @param demoDir where demo worlds, snapshots and logs go
+   * @param cities offer test cities (dev servers), @param demoDir where demo worlds, snapshots and logs go,
+   * @param spectate a read-only showcase (index.ts SPECTATE): demos may be started (that is how a visitor gets in), nothing else
    */
-  constructor(private opts: { entry: string; staticDir: string; dataDir: string; cwd: string; cities: boolean; demoDir: string }) {
+  constructor(private opts: { entry: string; staticDir: string; dataDir: string; cwd: string; cities: boolean; demoDir: string; spectate?: boolean }) {
     if (opts.cities) for (const n of TEST_CITY_SIZES) this.entries.set(n, { n, proc: null, pid: null, status: 'stopped', health: null, idleSince: null, startedAt: 0 });
     for (const d of DEMOS) this.entries.set(d.slot, { n: d.slot, demo: d.id, proc: null, pid: null, status: 'stopped', health: null, idleSince: null, startedAt: 0 });
     this.timer = setInterval(() => { void this.poll(); }, POLL_MS);
@@ -141,7 +145,12 @@ export class TestCities {
       const r = listed.get(e.n);
       const h = await this.fetchHealth(e.n);
       const live = this.isOurs(e, h) && h!.pid && alive(h!.pid) && (!r || r.pid === h!.pid);
-      if (live) {
+      if (live && !!h!.spectate !== !!this.opts.spectate) { // left by a server run the other way (SPECTATE on or off): it must not be adopted as it is
+        console.log(`${this.label(e)}: running child (pid ${h!.pid}) is ${h!.spectate ? '' : 'not '}read-only, unlike this server; stopping it`);
+        try { process.kill(h!.pid!, 'SIGTERM'); } catch { /* gone */ }
+        const t0 = Date.now();
+        while (alive(h!.pid!) && Date.now() - t0 < 60_000) await sleep(250);
+      } else if (live) {
         Object.assign(e, { proc: null, pid: h!.pid!, status: h!.ready ? 'running' : 'starting', health: h, idleSince: null, startedAt: r?.startedAt ?? Date.now() });
         console.log(`${this.label(e)}: adopted running child (pid ${e.pid}, port ${TEST_CITY_BASE_PORT + e.n})`);
       } else if (r) console.log(`${this.label(e)}: dropped stale registry entry (pid ${r.pid})`);
@@ -187,10 +196,11 @@ export class TestCities {
     mkdirSync(this.opts.dataDir, { recursive: true });
     if (e.demo) mkdirSync(this.opts.demoDir, { recursive: true });
     const env: NodeJS.ProcessEnv = { ...process.env };
-    for (const k of ['SIM_STEPS', 'SEED_BUILT', 'SEED', 'PARENT_PID', 'CITY_DISTRICTS', 'DEMO', 'DEMO_SNAPSHOT']) delete env[k];
+    for (const k of ['SIM_STEPS', 'SEED_BUILT', 'SEED', 'PARENT_PID', 'CITY_DISTRICTS', 'DEMO', 'DEMO_SNAPSHOT', 'SPECTATE']) delete env[k];
     Object.assign(env, {
       PORT: String(TEST_CITY_BASE_PORT + n), HOST: '0.0.0.0', WORLD_FILE: this.worldFile(n), STATIC_DIR: this.opts.staticDir,
       ...(e.demo ? { DEMO: e.demo, DEMO_SNAPSHOT: this.snapshotFile(e.demo) } : { CITY_DISTRICTS: String(n) }),
+      ...(this.opts.spectate ? { SPECTATE: '1' } : {}), // a read-only showcase is read-only in every child world too
     });
     // Detached into its own process group (a Ctrl-C on the dev stack must not reach it; this server stops it on purpose)
     // and writing to a file, not a pipe, so it can outlive this process without hitting EPIPE.
@@ -209,6 +219,13 @@ export class TestCities {
     this.persist();
     console.log(`${this.label(e)}: starting on port ${TEST_CITY_BASE_PORT + n} (pid ${proc.pid}, log ${this.logFile(n)})`);
     return e;
+  }
+
+  /** Start a demo by id once any surviving children have been adopted (index.ts: DEFAULT_DEMO is started with the server). */
+  async startDemo(id: DemoId) {
+    await this.adopted;
+    const d = DEMO_BY_ID.get(id);
+    if (d) this.start(d.slot);
   }
 
   /**
@@ -322,6 +339,7 @@ export class TestCities {
       const e = dm ? list.find((x) => x.demo === dm[1]) : undefined;
       if (!dm || req.method !== 'POST') { send(404, { error: 'POST /api/demos/<id>/start, /stop or /reset' }); return true; }
       if (!e) { send(404, { error: `no demo called ${dm[1]}` }); return true; }
+      if (this.opts.spectate && dm[2] !== 'start') { send(403, { error: READ_ONLY_REFUSAL }); return true; }
       void this.adopted.then(() => {
         if (dm[2] === 'stop') this.stop(e); else if (dm[2] === 'reset') void this.reset(e); else this.start(e.n);
         send(200, this.demoView(e));
@@ -337,6 +355,7 @@ export class TestCities {
     if (!m || req.method !== 'POST') { send(404, { error: 'POST /api/test-cities/<n>/start' }); return true; }
     const e = this.entries.get(Number(m[1]));
     if (!e || e.demo) { send(404, { error: `no ${m[1]}×${m[1]} test city` }); return true; }
+    if (this.opts.spectate) { send(403, { error: READ_ONLY_REFUSAL }); return true; }
     void this.adopted.then(() => { if (m[2] === 'stop') this.stop(e); else this.start(e.n); send(200, this.view(e)); });
     return true;
   }

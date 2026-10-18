@@ -45,7 +45,16 @@ export interface GameConfig {
   devTools: boolean;
   /** a sandbox (a test city or a demo map): every technology and an endless treasury for whoever joins, no onboarding goals */
   sandbox: boolean;
+  /** a read-only showcase (SPECTATE=1, docs/demo.md "A public showcase"): only the READ_ONLY intents are answered, every other one
+   *  is refused with a toast; no onboarding, and a visitor's player record goes again when they leave */
+  spectate?: boolean;
 }
+/**
+ * What a spectator may still ask: looking, never changing. A whitelist, so an intent added to ClientMsg later is refused in
+ * spectate mode until it is listed here. (hello and ping are answered before this, as for everyone.)
+ */
+const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist']);
+const SPECTATE_REFUSAL = 'Read-only showcase: you can look around, but nothing can be changed here';
 const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) => k.tool!.id));
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
 
@@ -81,9 +90,11 @@ export class Net {
   accepting = true;
   /** onboarding goals and advisor hints (goals.ts); none in test cities and demos */
   private onboarding: Onboarding | null;
+  /** spectate: player records made by a visitor's hello, removed when the last socket with that player closes */
+  private visitors = new Set<string>();
 
   constructor(private w: World, private sim: Simulation, source: ConnSource, private cfg: GameConfig) {
-    this.onboarding = this.cfg.sandbox ? null : new Onboarding(w, sim.traffic);
+    this.onboarding = this.cfg.sandbox || this.cfg.spectate ? null : new Onboarding(w, sim.traffic);
     source.onConnection((conn) => {
       if (!this.accepting) { conn.close(1013, 'starting'); return; }
       const c: Client = { conn, player: null, subs: new Set(), lastHint: 0, builderHint: -Infinity, builtSeen: -1, builtMoved: 0 };
@@ -93,7 +104,7 @@ export class Net {
         try { msg = JSON.parse(data); } catch { return; }
         try { this.handle(c, msg); } catch (e) { console.error('handler error', e); }
       });
-      conn.onClose(() => { this.clients.delete(c); this.w.playersDirty = true; });
+      conn.onClose(() => { this.clients.delete(c); this.w.playersDirty = true; if (c.player) this.leave(c.player.id); });
     });
   }
 
@@ -120,6 +131,7 @@ export class Net {
     if (m.t === 'hello') return this.hello(c, m.name);
     if (m.t === 'ping') return this.send(c, { t: 'pong', n: m.n });
     if (!c.player) return;
+    if (this.cfg.spectate && !READ_ONLY.has(m.t)) return this.toast(c, SPECTATE_REFUSAL);
     switch (m.t) {
       case 'sub': return this.subscribe(c, m.chunks);
       case 'unsub': for (const [cx, cy] of m.chunks) c.subs.delete(chunkKey(cx, cy)); return;
@@ -179,8 +191,9 @@ export class Net {
     if (!name) return this.toast(c, 'Name required');
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     if (id === 'sys') return this.toast(c, 'That name is reserved');
+    if (this.cfg.spectate && !this.w.players.has(id)) this.visitors.add(id);
     c.player = this.w.getOrCreatePlayer(id, name, START_MONEY);
-    if (this.cfg.sandbox) { // a test city is a sandbox: every technology and an endless treasury for whoever joins
+    if (this.cfg.sandbox && !this.cfg.spectate) { // a test city is a sandbox: every technology and an endless treasury for whoever joins
       c.player.tech = [...new Set([...c.player.tech, ...ALL_TECH_IDS])];
       c.player.devUnlimited = true;
       c.player.money = Math.max(c.player.money, DEV_FUNDS);
@@ -188,7 +201,7 @@ export class Net {
     }
     this.w.playersDirty = true;
     this.send(c, {
-      t: 'welcome', you: c.player.id, seed: this.w.seed, day: this.w.day, ...(this.cfg.sandbox ? { sandbox: true } : {}),
+      t: 'welcome', you: c.player.id, seed: this.w.seed, day: this.w.day, ...(this.cfg.sandbox ? { sandbox: true } : {}), ...(this.cfg.spectate ? { spectate: true } : {}),
       players: this.playerDTOs(true),
       parcels: [...this.w.parcels.values()].map((p) => this.w.parcelDTO(p)),
     });
@@ -196,6 +209,15 @@ export class Net {
     if (this.rail) this.send(c, { t: 'railLines', lines: this.rail.dtos() });
     if (this.metro) { this.send(c, { t: 'metroLines', lines: this.metro.dtos() }); if (this.metro.loads.length) this.send(c, { t: 'metroLoads', l: this.metro.loads }); }
     c.goalsSig = undefined; this.goals(c);
+  }
+
+  /** Spectate: a visitor's player record (made by their hello) goes when their last socket closes, so a public showcase's saves do not
+   *  fill up with everyone who ever looked. A record that was there before they came is never touched. */
+  private leave(id: string) {
+    if (!this.visitors.has(id) || this.isOnline(id)) return;
+    this.visitors.delete(id);
+    this.w.players.delete(id);
+    historyOf(this.w).forget(id);
   }
 
   /** The player's goals when they changed (or a goal was just completed), measured afresh (goals.ts). */

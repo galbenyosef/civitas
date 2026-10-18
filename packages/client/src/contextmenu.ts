@@ -58,6 +58,8 @@ export interface MenuModel { title: string; sub?: string; swatch?: string; group
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const money = (n: number) => `$${n.toLocaleString('en-US')}`;
 const MARGIN = 8;
+/** entries that change the world: left out in a read-only showcase (world.spectate) */
+const CHANGES = new Set(['demolish', 'raise', 'lower', 'pause', 'buy']);
 
 /** The right-click menu: a small list of the actions that exist for whatever was clicked, each greyed out with its reason when it cannot be done. */
 export class ContextMenu {
@@ -186,7 +188,13 @@ export class ContextMenu {
 
   // ---- what each target offers ---------------------------------------------------------------
 
+  /** The menu for the target; in a read-only showcase without the entries that change something (they would only be refused). */
   private build(): MenuModel {
+    const m = this.model0();
+    if (this.d.world.spectate) m.groups = m.groups.map((g) => g.filter((it) => !CHANGES.has(it.key))).filter((g) => g.length);
+    return m;
+  }
+  private model0(): MenuModel {
     const t = this.target!;
     switch (t.k) {
       case 'agent': return this.agentModel(t.id);

@@ -206,6 +206,8 @@ export class LinesPanel {
 
   /** the lines this player may edit: their own, or every line in a sandbox */
   private mine() { return this.lines.filter((l) => this.world.mayEdit(l.owner)); }
+  /** the lines the panel lists: the ones this player may edit, or every line, to look at, in a read-only showcase */
+  private listed() { return this.world.spectate ? this.lines : this.mine(); }
 
   private startDraft(l?: LineInfo) {
     if (l) this.draft = { id: l.id, number: l.number, colour: l.colour, loop: l.loop, vehicles: l.vehicles, stops: l.stops.map((s) => ({ ...s })), mode: l.mode, name: l.name };
@@ -225,6 +227,7 @@ export class LinesPanel {
     const act = t.dataset.act!, id = Number(t.dataset.id);
     const d = this.draft;
     if (act === 'close') this.toggle(false);
+    else if (this.world.spectate) return; // a read-only showcase: the panel only lists the lines
     else if (act === 'new') {
       const me = this.world.myPlayer;
       if (me && !hasFeature(me.tech, 'lines') && !me.devUnlimited) { this.toast('error', `${techFor('lines')?.name ?? 'Public transport'} is needed before you can run bus lines (T for the tech tree)`); return; }
@@ -252,18 +255,19 @@ export class LinesPanel {
     const d = this.draft;
     let html = `<div class="lhead"><h3>${d ? (d.id ? `Edit line ${d.number}` : 'New line') : 'Lines'}</h3><button class="chip" data-act="close" title="close">✕</button></div>`;
     if (!d) {
-      const mine = this.mine();
-      if (!mine.length) html += `<div class="lempty">No lines yet. Place bus stops beside plain stretches of road (Bus stop tool), a bus depot nearby (its staff drive the buses), then make a line here.</div>`;
+      const mine = this.listed(), ro = this.world.spectate;
+      if (!mine.length && ro) html += `<div class="lempty">No lines run here.</div>`;
+      else if (!mine.length) html += `<div class="lempty">No lines yet. Place bus stops beside plain stretches of road (Bus stop tool), a bus depot nearby (its staff drive the buses), then make a line here.</div>`;
       for (const l of mine) {
         const ok = l.status === 'running';
         html += `<div class="lrow"><div class="ltop">${lineBadge(l.number, l.colour)}<span class="lname">${l.mode === 'metro' ? `underground · ${l.name ? `${esc(l.name)} · ` : ''}` : l.mode === 'rail' ? (isFreightYardKind(this.world.kindIdAt(l.stops[0].x, l.stops[0].y)) ? 'freight · ' : 'rail · ') : ''}${l.loop ? 'loop' : 'there and back'} · ${l.stops.length} ${l.mode === 'bus' ? 'stops' : 'stations'}</span>
-          <button class="chip" data-act="edit" data-id="${l.id}">edit</button><button class="chip" data-act="delete" data-id="${l.id}" title="delete">✕</button></div>
+          ${ro ? '' : `<button class="chip" data-act="edit" data-id="${l.id}">edit</button><button class="chip" data-act="delete" data-id="${l.id}" title="delete">✕</button>`}</div>
           <div class="lstat"><span class="${ok ? '' : 'bad'}">${esc(l.status)}</span> · ${VEHICLE[l.mode]?.[1] ?? 'vehicles'} ${l.inService}/${l.vehicles}</div>
           <div class="lstat">riders ${l.ridersToday} today, ${l.ridersYesterday} yesterday · fares $${Math.round(l.faresToday)}</div>
           <div class="lstops">${l.stops.map((s, i) => `<span title="${l.stopBoardings[i] ?? 0} boarded today">${esc(this.nameOf(s.x, s.y))}</span>`).join(' → ')}${l.loop ? ' ↺' : ' ⇄'}</div></div>`;
       }
-      html += `<button class="chip lnew" data-act="new">+ new line</button>`;
-      html += `<div class="lhint">Fares $${TRANSIT.fare} a ride (children free, retirees half) go to you. Buses run ${hm(TRANSIT.serviceStart * TICKS_PER_HOUR)}–${hm(TRANSIT.serviceEnd * TICKS_PER_HOUR)}, one per driver on shift at your depot. Trains run 05:00–01:00 on your track between your rail stations (click stations instead of stops); click freight yards for a freight line, which carries industry's containers instead of passengers. Underground lines run on tunnels the server bores between your underground stations (click those instead): the view drops below ground while you edit.</div>`;
+      if (!ro) html += `<button class="chip lnew" data-act="new">+ new line</button>`;
+      if (!ro) html += `<div class="lhint">Fares $${TRANSIT.fare} a ride (children free, retirees half) go to you. Buses run ${hm(TRANSIT.serviceStart * TICKS_PER_HOUR)}–${hm(TRANSIT.serviceEnd * TICKS_PER_HOUR)}, one per driver on shift at your depot. Trains run 05:00–01:00 on your track between your rail stations (click stations instead of stops); click freight yards for a freight line, which carries industry's containers instead of passengers. Underground lines run on tunnels the server bores between your underground stations (click those instead): the view drops below ground while you edit.</div>`;
     } else {
       html += `<div class="lform">
         <label>Number <input name="number" type="number" min="1" max="999" value="${d.number}"></label>
@@ -320,7 +324,7 @@ export class LinesPanel {
     this.editRibbon.hide(); this.failRibbon.hide();
     this.yShift = 0;
     if (!this.open) return;
-    const mine = this.mine();
+    const mine = this.listed();
     mine.forEach((l, i) => {
       if (this.draft?.id === l.id) return;
       if (l.mode === 'metro') return; // its tunnel is drawn, in the line's colour, by the underground view

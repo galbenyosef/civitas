@@ -42,6 +42,9 @@ Each demo runs as its own process on `8100 + slot`, where the slot is 90 for the
 | `POST /api/demos/<id>/start` | starts the demo; a no-op when it is running |
 | `POST /api/demos/<id>/stop` | stops it; it saves on the way out |
 | `POST /api/demos/<id>/reset` | **Reset demo**, below |
+| `GET /api/config` | how the deployment is run: `{ spectate?, defaultDemo?, defaultView? }` (below, "A public showcase") |
+
+With `SPECTATE=1` stop and reset answer 403 with the reason; start still works.
 
 ### Reset demo
 
@@ -54,6 +57,58 @@ After its first fill, a demo child saves its world and copies it to `data/demos/
 The town comes back exactly as first built, citizens included. The world save does not keep per-day counters, so after a reset, or any restart from a saved world, the tooltips' today and yesterday counts (visits, riders, flights, containers) start from zero and fill as the day runs. The people, vehicles, trains and planes are moving from the first tick. Only a first fill arrives with a whole day counted. Without a snapshot, for example after an interrupted first fill, reset removes the world so the demo seeds again.
 
 The town is deterministic as well. The seeder uses fixed coordinates and a fixed terrain seed. While a demo is seeded and filled, `Math.random` is a seeded generator (`seededRandom`), so a fresh seeding gives the same town. The child reports a hash of every modified chunk's tile words, aux, sub and under bytes (tunnels and platforms), the station names and the transit lines (with their names) as `startHash` on `/healthz` and `/api/demos`.
+
+### A public showcase
+
+Two environment variables on the main server turn a deployment into a read-only showcase of one demo (the public one
+is London at civitas.reneo.app, from the Dockerfile's image):
+
+- `SPECTATE=1` makes everything read-only for every client: the live world and every demo child. The world launcher
+  sets `SPECTATE=1` in each child's environment (`TestCities.start`), and a child left running by a server started
+  the other way is stopped rather than adopted (`/healthz` reports `spectate`). The server is the authority:
+  `net.ts` answers only the intents in `READ_ONLY` (hello and ping, chunk subscriptions, the inspects of buildings,
+  roads, people and trains, a parcel's build list, the lines list and the charts) and refuses everything else
+  (building, bulldozing, buying, parcel settings, build priority, lines, technology, dev actions, onboarding) with a
+  toast, "Read-only showcase: you can look around, but nothing can be changed here". It is a whitelist, so a new
+  intent is refused until it is listed. There are no onboarding goals, a sandbox's grant of every technology and
+  endless funds is not made, and the player record a visitor's hello makes is removed when their last socket
+  closes, so the save does not collect everyone who ever looked. On the HTTP API, demo stop and reset and test-city
+  start and stop answer 403; starting a demo is allowed, since that is how a visitor gets in.
+- `DEFAULT_DEMO=<id>` sends a page opened without `?demo=`, `?ws=` or `?city=` to that demo instead of the live world,
+  and the main server starts that demo as it starts, so the town is filled before the first visitor arrives.
+- `DEFAULT_VIEW="x,y,dist,yaw,pitch[,hour]"` is the camera's opening shot on such a bare page: the tile looked at,
+  the distance, the orbit angle and the tilt in degrees (yaw 0 looks north from the south, 90 looks west from the east;
+  pitch 90 is straight down, 10 is near the horizon) and, optionally, an hour that freezes the lighting (the light chip
+  lets it run again). The page puts the camera there at once and again when it joins, after the tour has placed it on
+  its welcome stop. It is sent in `/api/config`, so it is retuned on a running deployment by changing the env and
+  restarting the container, without a rebuild. To frame a shot by hand, open the demo, set the time with `?hour=` (or
+  the light chip), move the camera and run `msc.viewString()` in the browser console: it prints the view in this form.
+  The same shot works as URL parameters, `?demo=london&at=x,y&dist=n&yaw=deg&pitch=deg&hour=h`.
+  For London `DEFAULT_VIEW=-2,-1,45,35,28,10.5` looks north-west over the Thames at mid-morning: the Shard in front,
+  the Gherkin and the City behind it, the Tower and Tower Bridge to the right, Parliament and the London Eye up river.
+
+The page asks `GET /api/config` before it connects (`{ "spectate": true, "defaultDemo": "london", "defaultView": "…" }`) and each world
+says `spectate: true` in its welcome. In a showcase the page skips the join form: it joins as a made-up "Visitor
+1234", and while the demo starts the join card shows "Building London… 42%" instead of the name field (no world
+picker, no Play offline). Once joined, the tool bar, the treasury, the tech tree chip, Reset demo and the context
+menu's changes (demolish, buy, build sooner, later, pause) are hidden, tool keys do nothing, the parcel panel has no
+tax slider or name field and the lines panel lists every line without edit buttons. The camera, hover tooltips, the
+building, person and vehicle panels, follow, first-person view, the congestion and perf overlays, the underground view,
+the charts and the guided tour all work. The banner reads "London: a read-only showcase" and, with `DEFAULT_DEMO`
+set, offers no way back to the live world. Other demos stay reachable by URL (`?demo=showcase`); test cities stay
+dev-only (`NODE_ENV=production` has none).
+
+The demo worlds live beside the world file: with the Dockerfile's `WORLD_FILE=/data/world.json` they are
+`/data/demos/demo-<id>.json`, the first fill's snapshot `demo-<id>.seed.json` and the child's log `demo-<id>.log`;
+`/data/test-cities/running.json` lists the children. The children's ports are 20 above `PORT` plus the slot (8194
+for London with `PORT=8080`; `TEST_CITY_BASE_PORT` moves them), inside the container only.
+
+Sizing, measured 2026-10-18 on the dev Mac (12 cores, shared with other agents, load average 13-33, so a dedicated
+host does better): London's cold start, seeding and filling with nobody waiting, took 455 s from the server's start to
+`running` (the fill itself 450 s, 31,200 citizens); a start from its saved world took 10 s. Running with one visitor the
+London child holds about 1.1-1.2 GB resident and uses about half a core (the simulation runs whether anyone watches;
+tick average 100-170 ms under that load); the main server with the live world about 150 MB. On disk London is a
+42 MB world plus a 42 MB seed snapshot, so allow about 100 MB of `/data` for it, more for each other demo started.
 
 ## London
 

@@ -5,7 +5,7 @@ import { existsSync, renameSync, unlinkSync, readFileSync, copyFileSync } from '
 import { networkInterfaces } from 'node:os';
 import { join, extname, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TICK_MS, DEMO_TOWN, isDemoId } from '@msimcity/shared';
+import { TICK_MS, DEMO_TOWN, isDemoId, type ServerConfig } from '@msimcity/shared';
 import { World } from './world';
 import { createGame, tuneEconomy } from './game';
 import { WsSource } from './transport-ws';
@@ -38,6 +38,18 @@ const DEMO = isDemoId(process.env.DEMO) ? process.env.DEMO : null;
 const DEMO_SNAPSHOT = process.env.DEMO_SNAPSHOT;
 /** a child world (test city or demo): saves on stop and after its fill, not every 30 s, and stops itself when idle */
 const CHILD = CITY > 0 || DEMO !== null;
+/** A public showcase (docs/demo.md, "A public showcase"). SPECTATE=1 makes this server read-only for every client: the game refuses every
+ *  intent that changes the world (net.ts READ_ONLY), and the world launcher every demo stop, reset and test-city start or stop. The
+ *  children inherit it with the rest of the environment (testcities.ts), so every demo is read-only too. DEFAULT_DEMO=<id> sends a page
+ *  opened without ?demo=, ?ws= or ?city= to that demo instead of the live world (the client reads both from /api/config), and starts it
+ *  with this server so the first visitor does not wait for its fill. */
+const SPECTATE = ['1', 'true', 'yes'].includes((process.env.SPECTATE ?? '').toLowerCase());
+const DEFAULT_DEMO = isDemoId(process.env.DEFAULT_DEMO) ? process.env.DEFAULT_DEMO : null;
+/** DEFAULT_VIEW="x,y,dist,yaw,pitch[,hour]": the camera's opening shot for a page with no camera parameters (yaw and pitch in degrees,
+ *  the hour freezes the lighting; client camera.ts CameraShot), through /api/config, so a deployment can retune it without a rebuild */
+const DEFAULT_VIEW = /^\s*-?[\d.]+(\s*,\s*-?[\d.]+){4,5}\s*$/.test(process.env.DEFAULT_VIEW ?? '') ? process.env.DEFAULT_VIEW!.replace(/\s+/g, '') : null;
+if (process.env.DEFAULT_VIEW && !DEFAULT_VIEW) console.error(`DEFAULT_VIEW=${process.env.DEFAULT_VIEW} is not x,y,dist,yaw,pitch[,hour]; ignored`);
+if (process.env.DEFAULT_DEMO && !DEFAULT_DEMO) console.error(`DEFAULT_DEMO=${process.env.DEFAULT_DEMO} is not a demo; the page opens the live world`);
 
 // ---- world ---------------------------------------------------------------------
 let seedBuilt = Number(process.env.SEED_BUILT ?? 0) | 0;
@@ -72,7 +84,7 @@ if (world) {
 const http = createServer((req, res) => void serve(req, res));
 /** the game (game.ts): simulation, airports, rail and the protocol, here over WebSockets on the http port. Draft kinds and
  *  dev actions on a non-production server; a test city or demo is a sandbox (all tech, endless funds, no onboarding). */
-const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD }, SIM_STEPS);
+const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD, spectate: SPECTATE }, SIM_STEPS);
 const { sim, airports, rail, net, tickWin } = game;
 if (DEMO && needsFill) { // the second half of seeding needs the simulation: bus stops, track and every line
   const problems = seedDemoNetwork(world, sim, rail, DEMO);
@@ -85,7 +97,7 @@ let ready = !needsFill;
 let fillProgress: { tick: number; of: number; pop: number } | undefined;
 /** the live server's test-city launcher (dev only; a test city itself has none) */
 const testCities = worldLauncherAvailable() // demos on every main server, test cities on dev servers only
-  ? new TestCities({ entry: fileURLToPath(import.meta.url), staticDir: STATIC, dataDir: join(dirname(DATA), 'test-cities'), cwd: join(here, '..'), cities: testCitiesAvailable(), demoDir: join(dirname(DATA), 'demos') })
+  ? new TestCities({ entry: fileURLToPath(import.meta.url), staticDir: STATIC, dataDir: join(dirname(DATA), 'test-cities'), cwd: join(here, '..'), cities: testCitiesAvailable(), demoDir: join(dirname(DATA), 'demos'), spectate: SPECTATE })
   : null;
 
 const MIME: Record<string, string> = {
@@ -97,9 +109,14 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({
       ok: true, chunks: world!.chunks.size, citizens: world!.citizens.size, clients: net.connections,
-      pid: process.pid, day: world!.day, dayFrac: sim.dayFrac, ready, ...(CITY ? { districts: CITY } : {}), ...(DEMO ? { demo: DEMO, startHash } : {}), ...(fillProgress && !ready ? { fill: fillProgress } : {}),
+      pid: process.pid, day: world!.day, dayFrac: sim.dayFrac, ready, ...(CITY ? { districts: CITY } : {}), ...(DEMO ? { demo: DEMO, startHash } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(fillProgress && !ready ? { fill: fillProgress } : {}),
       ...(net.tickStats ? { tickAvg: net.tickStats.avg, tickP95: net.tickStats.p95, tickMax: net.tickStats.max } : {}),
     }));
+  }
+  if (req.url?.split('?')[0] === '/api/config') {
+    const cfg: ServerConfig = { ...(SPECTATE ? { spectate: true } : {}), ...(DEFAULT_DEMO && !CHILD ? { defaultDemo: DEFAULT_DEMO } : {}), ...(DEFAULT_VIEW && !CHILD ? { defaultView: DEFAULT_VIEW } : {}) };
+    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
+    return res.end(JSON.stringify(cfg));
   }
   if (testCities?.handle(req, res)) return;
   if (['/api/test-cities', '/api/demos'].includes(req.url?.split('?')[0] ?? '')) { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); return res.end('{"available":false}'); }
@@ -146,7 +163,8 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => {
 
 http.listen(PORT, HOST, async () => {
   const lan = Object.values(networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal && !i.address.startsWith('169.254.'))?.address;
-  console.log(`civitas server listening on http://${lan ?? HOST}:${PORT}  (ws same port)`);
+  console.log(`civitas server listening on http://${lan ?? HOST}:${PORT}  (ws same port)${SPECTATE ? ', read-only (SPECTATE)' : ''}${DEFAULT_DEMO && !CHILD ? `, default demo ${DEFAULT_DEMO}` : ''}`);
+  if (DEFAULT_DEMO && testCities) void testCities.startDemo(DEFAULT_DEMO);
   if (needsFill && DEMO) {
     net.accepting = false;
     const t0 = performance.now();
