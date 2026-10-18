@@ -12,6 +12,7 @@ export type CtxTarget =
   | { k: 'train'; line: number; train: number }
   | { k: 'plane'; airport: number; flight: number }
   | { k: 'heli'; flight: number }
+  | { k: 'boat'; id: number }
   | { k: 'tile'; x: number; y: number }
   | { k: 'cab' };
 
@@ -201,6 +202,7 @@ export class ContextMenu {
       case 'train': return this.vehicleModel({ kind: 'train', line: t.line, train: t.train });
       case 'plane': return this.vehicleModel({ kind: 'plane', airport: t.airport, flight: t.flight });
       case 'heli': return this.vehicleModel({ kind: 'heli', flight: t.flight });
+      case 'boat': return this.vehicleModel({ kind: 'boat', id: t.id });
       case 'cab': return this.cabModel();
       case 'tile': return this.tileModel(t.x, t.y);
     }
@@ -246,12 +248,12 @@ export class ContextMenu {
     const pick = () => { if (!sel) d.selectVehicle(v); };
     const follow = d.following() && sel;
     return {
-      title: v.kind === 'train' ? `Train ${v.train + 1}` : v.kind === 'plane' ? `Flight` : 'Helicopter',
-      sub: v.kind === 'train' ? `line ${v.line}` : v.kind === 'plane' ? `airport ${v.airport}` : 'helicopter flight',
+      title: v.kind === 'train' ? `Train ${v.train + 1}` : v.kind === 'plane' ? `Flight` : v.kind === 'boat' ? 'Boat' : 'Helicopter',
+      sub: v.kind === 'train' ? `line ${v.line}` : v.kind === 'plane' ? `airport ${v.airport}` : v.kind === 'boat' ? 'afloat' : 'helicopter flight',
       groups: [[
         { key: 'inspect', label: sel ? 'Inspecting' : 'Inspect', on: sel, run: () => d.selectVehicle(v), disabled: sel ? 'Already selected' : undefined },
         { key: 'follow', label: follow ? 'Stop following' : 'Follow', on: follow, run: () => { pick(); d.follow(!follow); } },
-        ...this.fpvItems(sel, pick).map((it) => ({ ...it, label: it.label.replace('First-person', 'Cab').replace('Leave first-person view', 'Leave cab view') })),
+        ...this.fpvItems(sel, pick).map((it) => ({ ...it, label: it.label.replace('First-person', v.kind === 'boat' ? 'Wheelhouse' : 'Cab').replace('Leave first-person view', v.kind === 'boat' ? 'Leave wheelhouse view' : 'Leave cab view') })),
       ], ...(sel ? [[{ key: 'deselect', label: 'Deselect', run: () => d.deselect() }]] : [])],
     };
   }

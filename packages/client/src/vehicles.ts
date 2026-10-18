@@ -10,8 +10,8 @@ import { consistText } from './rail';
  * containers come from the server (an `inspectTrain` with `full`, only for the selected train); a plane's passengers are
  * generated from its flight.
  */
-export type VehicleSel = { kind: 'train'; line: number; train: number } | { kind: 'plane'; airport: number; flight: number } | { kind: 'heli'; flight: number };
-export const vehicleKey = (v: VehicleSel) => (v.kind === 'train' ? `t${v.line}:${v.train}` : v.kind === 'plane' ? `p${v.airport}:${v.flight}` : `h${v.flight}`);
+export type VehicleSel = { kind: 'train'; line: number; train: number } | { kind: 'plane'; airport: number; flight: number } | { kind: 'heli'; flight: number } | { kind: 'boat'; id: number };
+export const vehicleKey = (v: VehicleSel) => (v.kind === 'train' ? `t${v.line}:${v.train}` : v.kind === 'plane' ? `p${v.airport}:${v.flight}` : v.kind === 'boat' ? `b${v.id}` : `h${v.flight}`);
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]!));

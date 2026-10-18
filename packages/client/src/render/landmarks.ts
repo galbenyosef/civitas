@@ -210,12 +210,13 @@ function makeBridge(seed: number, river: boolean): BridgeInst {
 }
 
 /** The leaves follow the shared lift schedule (shared/src/bridges.ts basculeLiftAt), the one the server's barriers keep. */
-function updateBridge(b: BridgeInst, t: number) {
+function updateBridge(b: BridgeInst, t: number, hidden: ((seed: number, day: number) => boolean) | null) {
   const start = basculeLiftAt(b.seed, t), u = t - start;
   const angle = basculeOpen(b.seed, t) * (80 * Math.PI) / 180;
   for (const l of b.leaves) l.rotation.x = angle;
   // the barge comes down the river while the leaves rise and is through before they fall (only where there is a river)
-  b.barge.visible = b.river && !Number.isNaN(start);
+  // a span with real boats booked into its lifts (render/boats.ts, shared boatLifts) hands over to them
+  b.barge.visible = b.river && !Number.isNaN(start) && !(hidden && hidden(b.seed, Math.floor(t / 24)));
   if (b.barge.visible) {
     const dir = hash2(b.seed + Math.floor(start * 10), 3) < 0.5 ? 1 : -1;
     b.barge.position.set(dir * (-3 + (6 * u) / BASCULE_LIFT), 0.004, 0.05 * dir);
@@ -228,8 +229,8 @@ function updateBridge(b: BridgeInst, t: number) {
 type Inst = EyeInst | ClockInst | BridgeInst;
 const make = (kind: number, seed: number, river: boolean): Inst[] =>
   kind === EYE_KIND ? [makeEye(seed)] : kind === BIGBEN_KIND ? [makeClock(seed)] : kind === BRIDGE_KIND ? [makeBridge(seed, river)] : [];
-function update(i: Inst, t: number, night: number) {
-  if (i.kind === 'eye') updateEye(i, t, night); else if (i.kind === 'clock') updateClock(i, t, night); else updateBridge(i, t);
+function update(i: Inst, t: number, night: number, hidden: ((seed: number, day: number) => boolean) | null = null) {
+  if (i.kind === 'eye') updateEye(i, t, night); else if (i.kind === 'clock') updateClock(i, t, night); else updateBridge(i, t, hidden);
 }
 
 /** The kinds with moving or lit parts. */
@@ -304,13 +305,16 @@ export class LandmarkMotion {
     this.perChunk.delete(key);
   }
 
+  /** is this bascule span's decorative barge replaced by a real boat on this day? (set by main from BoatsView.liftBooked) */
+  bargeHidden: ((seed: number, day: number) => boolean) | null = null;
+
   /** pins the game time the landmarks show (debugging and screenshots: `msc.landmarks.fixedHours = 31.2`); null follows the clock */
   fixedHours: number | null = null;
 
   frame(hours: number) {
     if (this.fixedHours !== null) hours = this.fixedHours;
     const night = nightUniform.value;
-    for (const c of this.perChunk.values()) for (const i of c.insts) update(i, hours, night);
+    for (const c of this.perChunk.values()) for (const i of c.insts) update(i, hours, night, this.bargeHidden);
   }
 }
 

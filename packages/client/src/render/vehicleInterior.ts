@@ -414,3 +414,154 @@ export class TrainCab {
     c.strokeStyle = 'rgba(255,255,255,0.3)'; c.lineWidth = Math.max(1, h * 0.003); c.stroke();
   }
 }
+
+// ---- boats -------------------------------------------------------------------------------------------------
+
+/** What a wheelhouse needs, set on `CabEye.helm` by whoever builds the eye (main.ts). */
+export interface HelmFeed {
+  kind: 'helm';
+  /** a wheelhouse with windows all round; otherwise an open helm, which shows only the bow and the tiller */
+  wheelhouse: boolean;
+  /** speed through the water, knots, and the type's cruising speed */
+  knots: number; vmax: number;
+  /** compass heading, degrees (0 north: -z), and the rate of turn, positive to starboard, -1..1 */
+  heading: number; turn: number;
+  /** the hull's colour for an open helm's bow, 0xrrggbb */
+  hull: number;
+  /** per-boat variation seed, 0..1 */
+  seed: number;
+}
+const WHEELHOUSE_FRAMES = [0x1d2a2e, 0x2b2420, 0x23272d, 0x2d3326];
+
+/** A wheelhouse: window frames with mullions, a console with a wheel, a compass, a radar, a speed readout and throttle levers. */
+export class HelmCab {
+  private L: Layers;
+  private wheel = 0; private lever = 0; private kn = 0; private turn = 0; private ready = false;
+  private open = false;
+
+  constructor(parent: HTMLElement, before: Element | null) { this.L = new Layers(parent, before); }
+
+  hide() { if (this.L.on) { this.L.hide(); this.ready = false; } }
+
+  update(f: HelmFeed, now: number, dt: number, w: number, h: number, level: number) {
+    if (w < 150 || h < 80) { this.hide(); return; }
+    this.open = !f.wheelhouse;
+    const fy = h * 0.6;
+    if (this.L.place(w, h, level, 0, fy, w, h - fy, f.seed, f.wheelhouse ? 1 : 0)) this.paint(f, w, h);
+    if (!this.ready) { this.kn = f.knots; this.turn = f.turn; this.lever = clamp(f.knots / Math.max(1, f.vmax), 0, 1); this.ready = true; }
+    else if (dt > 0) {
+      this.kn += (f.knots - this.kn) * (1 - Math.exp(-dt / 0.5));
+      this.turn += (f.turn - this.turn) * (1 - Math.exp(-dt / 0.4));
+      this.lever += (clamp(f.knots / Math.max(1, f.vmax), 0, 1) - this.lever) * (1 - Math.exp(-dt / 0.8));
+    }
+    this.wheel += (clamp(this.turn, -1, 1) * 1.6 - this.wheel) * (1 - Math.exp(-dt / 0.3));
+    this.draw(f, now, w, h);
+  }
+
+  private paint(f: HelmFeed, w: number, h: number) {
+    const c = this.L.b;
+    c.clearRect(0, 0, w, h);
+    if (!f.wheelhouse) {
+      // an open helm: the foredeck running away to the bow, and the tiller's stub
+      const deck = vgrad(c, h * 0.7, h, rgb(f.hull, 1.05), rgb(f.hull, 0.6));
+      c.beginPath(); c.moveTo(w * 0.28, h); c.lineTo(w * 0.47, h * 0.8); c.quadraticCurveTo(w * 0.5, h * 0.76, w * 0.53, h * 0.8); c.lineTo(w * 0.72, h); c.closePath();
+      c.fillStyle = deck; c.fill();
+      c.strokeStyle = 'rgba(255,255,255,0.4)'; c.lineWidth = Math.max(1.5, h * 0.006); c.stroke();
+      c.strokeStyle = 'rgba(0,0,0,0.25)'; c.lineWidth = Math.max(1, h * 0.004);
+      c.beginPath(); c.moveTo(w * 0.5, h * 0.78); c.lineTo(w * 0.5, h); c.stroke();
+      return;
+    }
+    const frame = rgb(WHEELHOUSE_FRAMES[Math.floor(f.seed * WHEELHOUSE_FRAMES.length) % WHEELHOUSE_FRAMES.length]), edge = 'rgba(255,255,255,0.14)';
+    const topY = h * 0.09, deskY = h * 0.7, px = w * 0.035;
+    c.beginPath(); c.rect(0, 0, w, h);
+    c.moveTo(px, deskY); c.lineTo(px + w * 0.02, topY + h * 0.02); c.lineTo(w - px - w * 0.02, topY + h * 0.02); c.lineTo(w - px, deskY); c.closePath();
+    c.fillStyle = frame; c.fill('evenodd');
+    c.strokeStyle = edge; c.lineWidth = Math.max(1.5, h * 0.005); c.stroke();
+    // mullions that lean in at the corners, and a header with a lamp
+    const mw = w * 0.018;
+    for (const mx of [0.3 + 0.03 * f.seed, 0.7 - 0.03 * f.seed]) {
+      c.beginPath(); c.moveTo(w * mx - mw / 2, deskY); c.lineTo(w * mx - mw / 2, topY); c.lineTo(w * mx + mw / 2, topY); c.lineTo(w * mx + mw / 2, deskY); c.closePath();
+      c.fillStyle = frame; c.fill(); c.fillStyle = 'rgba(255,255,255,0.07)'; c.fillRect(w * mx - mw / 2, topY, mw * 0.2, deskY - topY);
+    }
+    c.fillStyle = vgrad(c, 0, topY, '#2a2d33', '#15171a'); c.fillRect(0, 0, w, topY * 0.85);
+    c.fillStyle = 'rgba(255,200,130,0.45)'; roundRect(c, w * 0.47, topY * 0.2, w * 0.06, topY * 0.25, topY * 0.1); c.fill();
+    // the console: a sloped panel with a bevel, a brass strip, instrument recesses
+    c.beginPath(); c.moveTo(0, deskY + h * 0.03); c.lineTo(w * 0.05, deskY); c.lineTo(w * 0.95, deskY); c.lineTo(w, deskY + h * 0.03); c.lineTo(w, h); c.lineTo(0, h); c.closePath();
+    c.fillStyle = vgrad(c, deskY, h, '#3a3f45', '#121417'); c.fill();
+    c.strokeStyle = 'rgba(255,255,255,0.2)'; c.lineWidth = Math.max(1, h * 0.004);
+    c.beginPath(); c.moveTo(0, deskY + h * 0.03); c.lineTo(w * 0.05, deskY); c.lineTo(w * 0.95, deskY); c.lineTo(w, deskY + h * 0.03); c.stroke();
+    c.fillStyle = 'rgba(200,160,70,0.8)'; c.fillRect(0, deskY + h * 0.045, w, h * 0.006);
+    c.fillStyle = 'rgba(0,0,0,0.4)';
+    for (let i = 0; i < 7; i++) { c.fillRect(w * (0.04 + i * 0.026), deskY + h * 0.11, w * 0.014, h * 0.022); c.fillRect(w * (0.96 - 0.014 - i * 0.026), deskY + h * 0.11, w * 0.014, h * 0.022); }
+  }
+
+  private draw(f: HelmFeed, now: number, w: number, h: number) {
+    const c = this.L.f;
+    c.clearRect(0, h * 0.58, w, h * 0.43);
+    if (this.open) {
+      // the tiller swings with the turn
+      const bx = w * 0.84, by = h * 1.02, a = -1.15 + this.turn * 0.5;
+      c.strokeStyle = '#7a5530'; c.lineWidth = Math.max(3, h * 0.022); c.lineCap = 'round';
+      c.beginPath(); c.moveTo(bx, by); c.lineTo(bx + Math.cos(a) * h * 0.36, by + Math.sin(a) * h * 0.36); c.stroke(); c.lineCap = 'butt';
+      c.fillStyle = 'rgba(255,255,255,0.6)'; c.font = `600 ${Math.max(7, h * 0.03)}px ${MONO}`; c.textAlign = 'left'; c.textBaseline = 'middle';
+      c.fillText(`${Math.round(this.kn)} kt`, w * 0.04, h * 0.94);
+      return;
+    }
+    const deskY = h * 0.7;
+    // compass card: turns with the heading, the lubber line fixed
+    const cr = h * 0.075, cx = w * 0.3, cy = deskY + h * 0.17;
+    c.beginPath(); c.arc(cx, cy, cr, 0, TAU); c.fillStyle = '#090b0e'; c.fill();
+    c.lineWidth = Math.max(1.5, cr * 0.08); c.strokeStyle = '#8a7a4a'; c.stroke();
+    c.save(); c.translate(cx, cy); c.rotate((-f.heading * Math.PI) / 180);
+    c.strokeStyle = '#d7e4d0'; c.fillStyle = '#d7e4d0'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `700 ${Math.max(6, cr * 0.34)}px ${SANS}`;
+    for (let d = 0; d < 360; d += 10) {
+      const a = (d * Math.PI) / 180, major = d % 90 === 0;
+      c.lineWidth = Math.max(1, cr * (major ? 0.07 : 0.035));
+      c.beginPath(); c.moveTo(Math.sin(a) * cr * (major ? 0.62 : 0.8), -Math.cos(a) * cr * (major ? 0.62 : 0.8)); c.lineTo(Math.sin(a) * cr * 0.92, -Math.cos(a) * cr * 0.92); c.stroke();
+    }
+    for (const [t, d] of [['N', 0], ['E', 90], ['S', 180], ['W', 270]] as const) { const a = (d * Math.PI) / 180; c.fillStyle = d === 0 ? '#ff6a4d' : '#d7e4d0'; c.fillText(t, Math.sin(a) * cr * 0.42, -Math.cos(a) * cr * 0.42); }
+    c.restore();
+    c.strokeStyle = '#ffb347'; c.lineWidth = Math.max(1.5, cr * 0.09); c.beginPath(); c.moveTo(cx, cy - cr * 1.02); c.lineTo(cx, cy - cr * 0.78); c.stroke();
+
+    // radar: a phosphor disc with range rings, a sweep and a few echoes of the shore
+    const rr = h * 0.105, rx = w * 0.5, ry = deskY + h * 0.165;
+    c.beginPath(); c.arc(rx, ry, rr, 0, TAU); c.fillStyle = '#031208'; c.fill();
+    c.save(); c.beginPath(); c.arc(rx, ry, rr, 0, TAU); c.clip();
+    c.strokeStyle = 'rgba(80,255,140,0.25)'; c.lineWidth = Math.max(1, rr * 0.02);
+    for (const k of [0.33, 0.66, 1]) { c.beginPath(); c.arc(rx, ry, rr * k, 0, TAU); c.stroke(); }
+    const sweep = (now / 2600 + f.seed) * TAU;
+    for (let i = 0; i < 24; i++) { const a = sweep - i * 0.06; c.strokeStyle = `rgba(90,255,150,${0.5 * (1 - i / 24)})`; c.lineWidth = Math.max(1.5, rr * 0.05); c.beginPath(); c.moveTo(rx, ry); c.lineTo(rx + Math.cos(a) * rr, ry + Math.sin(a) * rr); c.stroke(); }
+    for (let i = 0; i < 9; i++) {
+      const a = (i * 0.7 + f.seed * 5) % TAU, d = rr * (0.45 + 0.4 * ((i * 0.37 + f.seed) % 1)), age = ((sweep - a) % TAU + TAU) % TAU;
+      c.fillStyle = `rgba(120,255,170,${Math.max(0, 0.9 - age / 4)})`;
+      c.fillRect(rx + Math.cos(a) * d - rr * 0.03, ry + Math.sin(a) * d - rr * 0.03, rr * 0.1, rr * 0.05);
+    }
+    c.restore();
+    c.lineWidth = Math.max(1.5, rr * 0.06); c.strokeStyle = '#3b3f47'; c.beginPath(); c.arc(rx, ry, rr, 0, TAU); c.stroke();
+
+    // speed readout and twin throttle levers
+    const sx = w * 0.64, sy = deskY + h * 0.09, sw = w * 0.1, sh = h * 0.07;
+    roundRect(c, sx, sy, sw, sh, h * 0.01); c.fillStyle = '#07090b'; c.fill(); c.strokeStyle = '#3b3f47'; c.lineWidth = Math.max(1, h * 0.004); c.stroke();
+    c.fillStyle = '#9dffb8'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `700 ${Math.max(8, sh * 0.5)}px ${MONO}`; c.fillText(this.kn.toFixed(1), sx + sw / 2, sy + sh * 0.4);
+    c.font = `500 ${Math.max(5, sh * 0.2)}px ${MONO}`; c.globalAlpha = 0.65; c.fillText('KNOTS', sx + sw / 2, sy + sh * 0.82); c.globalAlpha = 1;
+    for (let i = 0; i < 2; i++) {
+      const lx = w * (0.8 + i * 0.045), y0 = deskY + h * 0.07, sl = h * 0.19, lw = h * 0.02;
+      roundRect(c, lx - lw / 2, y0, lw, sl, lw / 2); c.fillStyle = '#07090b'; c.fill(); c.strokeStyle = '#3b3f47'; c.stroke();
+      const ky = y0 + sl * (0.9 - 0.8 * clamp(this.lever + (i ? 0.02 : 0), 0, 1));
+      c.strokeStyle = '#8c929b'; c.lineWidth = lw * 0.5; c.lineCap = 'round'; c.beginPath(); c.moveTo(lx, ky); c.lineTo(lx, ky + h * 0.05); c.stroke(); c.lineCap = 'butt';
+      c.beginPath(); c.arc(lx, ky, lw * 0.95, 0, TAU); c.fillStyle = i ? '#c8402f' : '#3f9d5f'; c.fill();
+    }
+
+    // the wheel: eight spokes with handles, turning with the helm
+    const R = h * 0.19, hubY = h * 1.0, hubX = w * 0.5 - w * 0.0;
+    c.save(); c.translate(hubX, hubY + h * 0.02); c.rotate(this.wheel);
+    c.strokeStyle = '#4a3320'; c.lineWidth = Math.max(3, h * 0.026);
+    c.beginPath(); c.arc(0, 0, R, 0, TAU); c.stroke();
+    c.strokeStyle = '#8a6a3f'; c.lineWidth = Math.max(1.5, h * 0.01);
+    c.beginPath(); c.arc(0, 0, R, 0, TAU); c.stroke();
+    c.strokeStyle = '#4a3320'; c.lineWidth = Math.max(2, h * 0.014);
+    for (let i = 0; i < 8; i++) { const a = (i * TAU) / 8; c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(a) * R * 1.12, Math.sin(a) * R * 1.12); c.stroke(); }
+    c.beginPath(); c.arc(0, 0, h * 0.032, 0, TAU); c.fillStyle = '#b5893a'; c.fill();
+    c.restore();
+  }
+}

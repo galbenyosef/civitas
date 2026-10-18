@@ -16,6 +16,9 @@ import { TrafficLights } from './render/signals';
 import { ParksView } from './render/parks';
 import { PlanesView } from './render/planes';
 import { HelicoptersView } from './render/helicopters';
+import { BoatsView } from './render/boats';
+import { HarbourMock } from './render/boatsMock';
+import { boatTipHtml, boatPanelHtml, boatCab, boatKnots } from './boatPanel';
 import { AirfieldView } from './render/airfield';
 import { TrainsView } from './render/trains';
 import { RailClient, trainHtml, setPlatformCrowd } from './rail';
@@ -158,6 +161,10 @@ scene.add(planes.group, airfield.group);
 // helicopters fly between the helipads on the buildings in the loaded chunks (render/helicopters.ts, shared/src/helicopters.ts)
 const helis = new HelicoptersView();
 scene.add(helis.group);
+// boats sail the harbours the server sends (render/boats.ts, shared/src/boats.ts); with ?dev a mock list is derived from the loaded tiles until it does
+const boats = new BoatsView();
+scene.add(boats.group);
+const boatMock = DEV_TOOLS ? new HarbourMock() : null;
 // trains run every line the server sends (render/trains.ts); the track tool's preview and tooltips (client/src/rail.ts)
 const trains = new TrainsView();
 const rail = new RailClient(world);
@@ -171,10 +178,11 @@ const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz); // cars and walkers on a flyover deck or a bridge and their ramps
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
 landmarks.auxAt = (x, y) => world.auxAt(x, y); // a Tower Bridge span running on into the next chunk
+landmarks.bargeHidden = (seed, day) => boats.liftBooked(seed, day); // real boats booked into a span's lifts replace its decorative barge
 // the underground view (N, the "underground" chip): tunnels and platforms from the under layer, street grates, the platform preview (render/underground.ts)
 const underground = new UndergroundView(world);
 scene.add(underground.group);
-underground.surface = [citizens.group, parked.group, parks.group, junctions.group, bridges.group, lights.group, landmarks.group, trains.group, airfield.group, helis.group, buildings.mesh];
+underground.surface = [citizens.group, parked.group, parks.group, junctions.group, bridges.group, lights.group, landmarks.group, trains.group, airfield.group, helis.group, boats.group, buildings.mesh];
 underground.buildings = buildings.mesh;
 underground.shaderMaterials = [groundMaterial, buildings.mesh.material as Material];
 const airportParam = params.get('airport')?.split(',').map(Number);
@@ -360,6 +368,7 @@ function dropView(key: string) {
   airfield.dropChunk(key);
   underground.dropChunk(key);
   helis.dropChunk(key);
+  boatMock?.dropChunk(key);
   trains.dropChunk(key);
   junctions.dropChunk(key);
   bridges.dropChunk(key);
@@ -416,6 +425,8 @@ const input = new Input(canvas, rig, {
     if (pl) { ctxMenu.open({ k: 'plane', ...pl }, cx, cy); return; }
     const hl = helis.pick(px, py, rig.camera, w, h);
     if (hl !== null) { ctxMenu.open({ k: 'heli', flight: hl }, cx, cy); return; }
+    const bt = boats.pick(px, py, rig.camera, w, h);
+    if (bt !== null) { ctxMenu.open({ k: 'boat', id: bt }, cx, cy); return; }
     const tile = input.tileAt(px, py);
     if (tile) ctxMenu.open({ k: 'tile', x: tile[0], y: tile[1] }, cx, cy);
   },
@@ -430,6 +441,8 @@ const input = new Input(canvas, rig, {
     if (pl) { selectVehicle({ kind: 'plane', ...pl }); return; }
     const hl = helis.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight);
     if (hl !== null) { selectVehicle({ kind: 'heli', flight: hl }); return; }
+    const bt = boats.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight);
+    if (bt !== null) { selectVehicle({ kind: 'boat', id: bt }); return; }
     selectTile(x, y, 'building');
   },
   onHover: (tile) => { updateStatus(); hoverAt(tile); },
@@ -575,7 +588,7 @@ function manifestOf(airport: number, f: Flight): FlightManifest {
   if (!m) { const p = flightPassengers(f); m = flightManifest(f, p.arriving, p.departing); if (manifests.size > 64) manifests.clear(); manifests.set(k, m); }
   return m;
 }
-function clearVehicle() { selectedVehicle = null; trainInfo = null; trains.selected = null; planes.selected = null; helis.selected = null; }
+function clearVehicle() { selectedVehicle = null; trainInfo = null; trains.selected = null; planes.selected = null; helis.selected = null; boats.selected = null; }
 function selectVehicle(v: VehicleSel | null) {
   selectedCitizen = 0; citizens.selected = 0; routeInfo = null; routeView.clear(); ui.markPerson(0);
   following = false;
@@ -584,6 +597,7 @@ function selectVehicle(v: VehicleSel | null) {
   if (v?.kind === 'train') trains.selected = { line: v.line, train: v.train };
   if (v?.kind === 'plane') planes.selected = `${v.airport}:${v.flight}`;
   if (v?.kind === 'heli') helis.selected = v.flight;
+  if (v?.kind === 'boat') boats.selected = v.id;
   fpv.retarget();
   if (!v) { ui.hideCitizen(); return; }
   refreshVehicle();
@@ -594,6 +608,7 @@ function refreshVehicle() {
   if (v?.kind === 'train') { if (net.connected) net.send({ t: 'inspectTrain', line: v.line, train: v.train, full: true }); if (!trainInfo) showTrainPanel(); }
   else if (v?.kind === 'plane') showPlanePanel();
   else if (v?.kind === 'heli') showHeliPanel();
+  else if (v?.kind === 'boat') showBoatPanel();
 }
 setInterval(refreshVehicle, 1000);
 function showTrainPanel() {
@@ -630,6 +645,13 @@ function showHeliPanel() {
   if (!s) { selectVehicle(null); ui.toast('info', 'That helicopter has left'); return; }
   ui.showVehicle(vehicleKey(v), heliPanelHtml(s, heliKnots(heliSpeed(v.flight))), following, fpv.mode);
 }
+function showBoatPanel() {
+  const v = selectedVehicle;
+  if (v?.kind !== 'boat') return;
+  const s = boats.stateOf(v.id);
+  if (!s) { selectVehicle(null); ui.toast('info', 'That boat has gone out of sight'); return; }
+  ui.showVehicle(vehicleKey(v), boatPanelHtml(s, boats.harbourOf(s.harbour), boats.lastTick, boatKnots(s.speed)), following, fpv.mode);
+}
 /** The selected vehicle's cab for the first-person view, from the pose drawn this frame. */
 function cabEye(): CabEye | null {
   const v = selectedVehicle;
@@ -662,6 +684,10 @@ function cabEye(): CabEye | null {
       instruments: { ktPerTile: heliKnots(1000) / 1000, ftPerTile: planeFeet(100) / 100, ticksPerSec: (1000 / TICK_MS) * clock.rate, tick: helis.lastTick, knots: kt, eyeAbove: e.y - s.y },
     };
   }
+  if (v.kind === 'boat') {
+    const s = boats.stateOf(v.id), pose = boats.helmPose();
+    return s && pose ? boatCab(vehicleKey(v), s, boats.harbourOf(s.harbour), boats.lastTick, pose, boats.hullOf(v.id), boats.turnOf(v.id)) : null;
+  }
   const hit = planes.stateOf(v.airport, v.flight);
   if (!hit) return null;
   const m = manifestOf(v.airport, hit.s.flight), e = planes.cockpitOf(hit.s), kt = planeKnots(hit.s.type, planeSpeed(v.airport, v.flight));
@@ -679,6 +705,7 @@ function vehiclePos(): [number, number] | null {
   if (v?.kind === 'train') { const st = trains.stateOf(v.line, v.train); const c = st && trains.cabOf(v.line, v.train); return c ? [c.x, c.z] : null; }
   if (v?.kind === 'plane') { const hit = planes.stateOf(v.airport, v.flight); return hit ? [hit.s.x, hit.s.z] : null; }
   if (v?.kind === 'heli') { const s = helis.stateOf(v.flight); return s ? [s.x, s.z] : null; }
+  if (v?.kind === 'boat') { const s = boats.stateOf(v.id); return s ? [s.x, s.z] : null; }
   return null;
 }
 
@@ -849,9 +876,12 @@ let tipRefresh = 0;
 let tipTile: [number, number] | null = null;
 let tipAgent = 0;
 let mouse = { x: 0, y: 0 };
-canvas.addEventListener('pointermove', (e) => { mouse = { x: e.clientX, y: e.clientY }; if (tipTile || tipAgent || tipTrain || tipPlane || tipHeli !== null) ui.moveTip(mouse.x, mouse.y); });
+canvas.addEventListener('pointermove', (e) => { mouse = { x: e.clientX, y: e.clientY }; if (tipTile || tipAgent || tipTrain || tipPlane || tipHeli !== null || tipBoat !== null) ui.moveTip(mouse.x, mouse.y); });
 function hoverAt(tile: [number, number] | null) {
   if (ctxMenu.isOpen) return; // the right-click menu is up: no tooltips under it
+  boats.hover = null;
+  const bt = tile && input.tool === 'select' && !input.buyRect ? boats.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null; // boats: lowest of the vehicles
+  if (bt === null && tipBoat !== null) { tipBoat = null; ui.hideTip(); }
   const id = tile && input.tool === 'select' && !input.buyRect ? citizens.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : 0;
   if (id) { hoverAgent(id); return; }
   if (tipAgent) { tipAgent = 0; ui.hideTip(); }
@@ -867,7 +897,18 @@ function hoverAt(tile: [number, number] | null) {
   const hl = tile && input.tool === 'select' && !input.buyRect ? helis.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null;
   if (hl !== null) { hoverHeli(hl); return; }
   if (tipHeli !== null) { tipHeli = null; helis.hover = null; ui.hideTip(); }
+  if (bt !== null) { hoverBoat(bt); return; }
   hoverTile(tile);
+}
+let tipBoat: number | null = null;
+function hoverBoat(id: number) {
+  clearTimeout(tipTimer); clearInterval(tipRefresh);
+  tipTile = null; tipAgent = 0; tipTrain = null; trains.hover = null; tipPlane = null; planes.hover = null; tipHeli = null; helis.hover = null; tipBoat = id;
+  boats.hover = id;
+  const s = boats.stateOf(id);
+  if (!s) { ui.hideTip(); return; }
+  ui.showHtmlTip(boatTipHtml(s, boats.harbourOf(s.harbour), boats.lastTick));
+  ui.moveTip(mouse.x, mouse.y);
 }
 let tipHeli: number | null = null;
 function hoverHeli(flight: number) {
@@ -1000,7 +1041,7 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (world.parcelsDirty) { parcelsView.rebuild(world.parcels.values(), world.players, world.me, selectedParcel); world.parcelsDirty = false; }
@@ -1016,6 +1057,9 @@ function frame(now: number) {
   vehTick = Math.abs(live - vehTick) > 4 ? live : vehTick + rdt + (live - vehTick) * Math.min(1, dt * 1.5);
   planes.frame(vehTick);
   helis.frame(vehTick);
+  if (boatMock && !boats.real) { const hs = boatMock.update(world, now); if (hs) boats.setHarbours(hs); }
+  boats.cabView = fpv.mode !== 'off';
+  boats.frame(vehTick);
   const riding = fpv.tunnelOn ? 1 : 0; // a tube cab ride shows the trains and the platform crowds without the underground view
   trains.level = Math.max(underground.level, riding); citizens.underLevel = Math.max(underground.level, riding);
   trains.frame(vehTick);
@@ -1073,7 +1117,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { mapMode, metroMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { mapMode, metroMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

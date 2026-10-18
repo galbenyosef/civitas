@@ -7,7 +7,7 @@ import type { CitizensView } from './citizens';
 import { Interior, placeOf } from './interiors';
 import { sceneUniforms } from './materials';
 import { Instruments, type AircraftCal } from './instruments';
-import { CarInterior, TrainCab, type CarFeed, type TrainCabFeed } from './vehicleInterior';
+import { CarInterior, TrainCab, HelmCab, type CarFeed, type TrainCabFeed, type HelmFeed } from './vehicleInterior';
 import { TunnelRide, TUNNEL_BG, TUNNEL_FOG, type TunnelFeed } from './tunnelRide';
 
 export type FpvMode = 'off' | 'inset' | 'full';
@@ -48,6 +48,8 @@ export interface CabEye {
   instruments?: AircraftCal;
   /** a train cab: draw the driver's cab around the view (render/vehicleInterior.ts) */
   interior?: TrainCabFeed;
+  /** a boat's wheelhouse (or open helm): draw its window frames and console around the view (render/vehicleInterior.ts) */
+  helm?: HelmFeed;
   /** a tube train: ride through the tunnel instead of the street (render/tunnelRide.ts); the surface is not drawn */
   tunnel?: TunnelFeed;
 }
@@ -107,6 +109,7 @@ export class Fpv {
   private inst: Instruments;
   private car: CarInterior;
   private train: TrainCab;
+  private helm: HelmCab;
   /** the car interior was drawn this frame (otherwise it is hidden) */
   private carOn = false;
   private lastHeading = 0;
@@ -159,6 +162,7 @@ export class Fpv {
     // behind the title and the text block, so those stay readable over the dash
     this.car = new CarInterior(this.hud, this.hud.firstElementChild);
     this.train = new TrainCab(this.hud, this.hud.firstElementChild);
+    this.helm = new HelmCab(this.hud, this.hud.firstElementChild);
     // between the canvas and the rest of the UI, so in full-window mode the panels stay clickable but the world does not
     document.body.insertBefore(this.hud, document.getElementById('ui'));
     this.hud.querySelector<HTMLElement>('#fpvClose')!.onclick = () => this.end();
@@ -256,7 +260,7 @@ export class Fpv {
     document.body.classList.toggle('fpv-full', mode === 'full');
     document.body.classList.toggle('fpv-on', mode !== 'off');
     this.hud.className = mode === 'off' ? 'hidden' : mode;
-    if (mode === 'off') { this.inst.hide(); this.car.hide(); this.train.hide(); }
+    if (mode === 'off') { this.inst.hide(); this.car.hide(); this.train.hide(); this.helm.hide(); }
     const swap = this.hud.querySelector<HTMLElement>('#fpvSwap')!;
     swap.textContent = mode === 'full' ? '▣ inset' : '⤢ full';
     this.layout(true);
@@ -300,12 +304,13 @@ export class Fpv {
         this.instruments(cab, now, dt);
         this.car.hide();
         if (cab.interior) this.train.update(cab.interior, now, dt, this.viewW(), this.viewH(), this.level); else this.train.hide();
+        if (cab.helm) this.helm.update(cab.helm, now, dt, this.viewW(), this.viewH(), this.level); else this.helm.hide();
       }
       return;
     }
     this.fogFar = FOG_FAR;
     this.tunnelFeed(null, now);
-    this.inst.hide(); this.train.hide();
+    this.inst.hide(); this.train.hide(); this.helm.hide();
     this.hud.classList.remove('inst');
     this.carOn = false;
     const eye = this.hooks.citizens.eyeOf(this.id);
