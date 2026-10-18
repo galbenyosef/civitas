@@ -4,7 +4,7 @@ import {
 } from 'three';
 import {
   CHUNK_SIZE, SECTOR_CHUNKS, SECTOR_TILES, MAP_MAX_SECTORS, MapClass, mapClassOf, mapLevelOf, mapBuilding, rleDecode, terrainClass, makeTerrainSampler,
-  routeTiles, edgeAdjacent, type ParcelDTO, type PlayerDTO, type LineInfo, type RailLineDTO,
+  routeTiles, edgeAdjacent, MAP_LEVEL_BLOCK, type ParcelDTO, type PlayerDTO, type LineInfo, type RailLineDTO,
 } from '@msimcity/shared';
 import { unionOutline, type OutlineRun } from './parcels';
 
@@ -46,11 +46,14 @@ const LUT = new Uint8Array(256 * 3);
   }
 }
 
+/** where a cell of each level looks for summaries: its own level first, then finer, then coarser */
+const LEVEL_ORDER = [[0, 1, 2], [1, 0, 2], [2, 1, 0]];
 /** the far view's land: the terrain's colours mixed this much into this tint */
 const FAR_TINT = [104, 132, 98], FAR_MIX = 0.35;
 
 interface SectorData { v: number; chunks: Map<number, Uint8Array> }
-interface Cell { lvl: number; cx: number; cy: number; mesh: Mesh; tex: DataTexture; data: Uint8Array; built: boolean; row: number; used: number }
+/** `dirty`: chunks ((cy + 0x8000) * 65536 + cx + 0x8000) to repaint, their summaries having changed since the cell was painted */
+interface Cell { lvl: number; cx: number; cy: number; mesh: Mesh; tex: DataTexture; data: Uint8Array; built: boolean; row: number; used: number; dirty: Set<number> }
 export interface MapLabel { text: string; x: number; z: number; w: number; h: number; kind: 'owner' | 'parcel' | 'line'; colour: number; el?: HTMLDivElement }
 /** A shape to draw over the parcels: rectangles filled and outlined (selection, combine and split previews). */
 export interface MapMark { rects: { x: number; y: number; w: number; h: number }[]; fill?: number; fillA?: number; line?: number; px?: number }
@@ -66,11 +69,12 @@ const QUAD_GEO = (() => {
 export class MapView {
   readonly scene = new Scene();
   private sampler: (x: number, y: number) => number = () => 0;
-  private sectors = new Map<number, SectorData>();
+  /** the summaries the server sent, per detail level (MAP_LEVEL_BLOCK: a byte per 1, 4×4 or 16×16 tiles), by sector */
+  private sectors = MAP_LEVEL_BLOCK.map(() => new Map<number, SectorData>());
   private cells = new Map<string, Cell>();
   private frameNo = 0;
   /** sectors asked for and when, so a request is not repeated while it is answered */
-  private asked = new Map<number, number>();
+  private asked = MAP_LEVEL_BLOCK.map(() => new Map<number, number>());
   private fills = this.vcMesh(10);
   private ribbons = this.vcMesh(11);
   private lineRibbons = this.vcMesh(12);
@@ -111,50 +115,64 @@ export class MapView {
   /** A new game: the seed's terrain, and nothing known of any sector. */
   reset(seed: number) {
     this.sampler = makeTerrainSampler(seed);
-    this.sectors.clear(); this.asked.clear(); this.parcelSig = '';
+    for (const m of this.sectors) m.clear();
+    for (const m of this.asked) m.clear();
+    this.parcelSig = '';
     for (const c of this.cells.values()) this.dropCell(c);
     this.cells.clear();
   }
   setVisible(on: boolean) { this.labelsEl.classList.toggle('hidden', !on); if (!on) for (const l of this.labels) l.el?.remove(); this.lastLayout = ''; }
 
   // ---- data ----------------------------------------------------------------------------------------
+  /** Detail level for a zoom (world units per pixel): a texel per tile while a tile is most of a pixel, then per 4, then per 16. */
+  levelFor(wpp: number) { return wpp < 1 ? 0 : wpp < 4 ? 1 : 2; }
+  /** A chunk's summary at the level asked for if there is one, else the nearest finer, else coarser: its bytes and tiles per byte. */
+  private chunkData(cx: number, cy: number, pref: number): { d: Uint8Array; bs: number } | undefined {
+    const sx = Math.floor(cx / SECTOR_CHUNKS), sy = Math.floor(cy / SECTOR_CHUNKS), k = skey(sx, sy), i = (cy - sy * SECTOR_CHUNKS) * SECTOR_CHUNKS + (cx - sx * SECTOR_CHUNKS);
+    for (const l of LEVEL_ORDER[pref]) { const d = this.sectors[l].get(k)?.chunks.get(i); if (d) return { d, bs: MAP_LEVEL_BLOCK[l] }; }
+    return undefined;
+  }
   /** The map byte of a tile: the server's summary where the chunk was changed, else the terrain the seed makes. */
   byteAt(x: number, y: number): number {
     const cx = Math.floor(x / CHUNK_SIZE), cy = Math.floor(y / CHUNK_SIZE);
-    const s = this.sectors.get(skey(Math.floor(cx / SECTOR_CHUNKS), Math.floor(cy / SECTOR_CHUNKS)));
-    const ch = s?.chunks.get((cy - Math.floor(cy / SECTOR_CHUNKS) * SECTOR_CHUNKS) * SECTOR_CHUNKS + (cx - Math.floor(cx / SECTOR_CHUNKS) * SECTOR_CHUNKS));
-    if (ch) return ch[(y - cy * CHUNK_SIZE) * CHUNK_SIZE + (x - cx * CHUNK_SIZE)];
+    const ch = this.chunkData(cx, cy, 0);
+    if (ch) { const n = CHUNK_SIZE / ch.bs; return ch.d[Math.floor((y - cy * CHUNK_SIZE) / ch.bs) * n + Math.floor((x - cx * CHUNK_SIZE) / ch.bs)]; }
     return terrainClass(this.sampler(x, y));
   }
   isWater(x: number, y: number) { return mapClassOf(this.byteAt(x, y)) === MapClass.Water; }
 
   /** A 'mapSector' answer. Cells over it are rebuilt when what it holds changed. */
-  applySector(sx: number, sy: number, v: number, c: [number, number, string][]) {
-    const k = skey(sx, sy), old = this.sectors.get(k);
+  applySector(sx: number, sy: number, v: number, c: [number, number, string][], l = 0) {
+    if (!(l >= 0 && l < MAP_LEVEL_BLOCK.length)) return;
+    const k = skey(sx, sy), old = this.sectors[l].get(k);
     const chunks = new Map<number, Uint8Array>();
     for (const [cx, cy, d] of c) {
-      const b = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
+      const b = new Uint8Array((CHUNK_SIZE / MAP_LEVEL_BLOCK[l]) ** 2);
       if (rleDecode(d, b)) chunks.set((cy - sy * SECTOR_CHUNKS) * SECTOR_CHUNKS + (cx - sx * SECTOR_CHUNKS), b);
     }
-    this.sectors.set(k, { v, chunks });
-    if (!old?.chunks.size && !chunks.size) return; // untouched land, as already drawn from the seed
-    const x0 = sx * SECTOR_TILES, y0 = sy * SECTOR_TILES;
-    for (const cell of this.cells.values()) {
-      const T = CELL_TILES[cell.lvl];
-      if (cell.cx * T <= x0 && x0 < (cell.cx + 1) * T && cell.cy * T <= y0 && y0 < (cell.cy + 1) * T) cell.row = 0; // rebuild, the old texture shows meanwhile
+    this.sectors[l].set(k, { v, chunks });
+    // the chunks whose map bytes changed (or came or went) are repainted in every cell over them; the rest stays
+    for (const i of new Set([...chunks.keys(), ...(old?.chunks.keys() ?? [])])) {
+      const a = chunks.get(i), b = old?.chunks.get(i);
+      if (a && b && a.every((v, j) => v === b[j])) continue;
+      const cx = sx * SECTOR_CHUNKS + (i % SECTOR_CHUNKS), cy = sy * SECTOR_CHUNKS + Math.floor(i / SECTOR_CHUNKS);
+      for (const cell of this.cells.values()) {
+        const T = CELL_TILES[cell.lvl];
+        if (cell.cx * T <= cx * CHUNK_SIZE && cx * CHUNK_SIZE < (cell.cx + 1) * T && cell.cy * T <= cy * CHUNK_SIZE && cy * CHUNK_SIZE < (cell.cy + 1) * T) cell.dirty.add((cy + 0x8000) * 65536 + cx + 0x8000);
+      }
     }
   }
   /** The 'map' request for these sectors: flat [sx, sy, version held], at most MAP_MAX_SECTORS of those not asked lately. */
-  request(sx0: number, sy0: number, sx1: number, sy1: number, now: number, refreshMs: number): number[] {
+  request(sx0: number, sy0: number, sx1: number, sy1: number, l: number, now: number, refreshMs: number): number[] {
     const out: number[] = [];
     const cx = (sx0 + sx1) / 2, cy = (sy0 + sy1) / 2;
     const list: [number, number, number][] = [];
     for (let sy = sy0; sy <= sy1; sy++) for (let sx = sx0; sx <= sx1; sx++) list.push([sx, sy, Math.hypot(sx - cx, sy - cy)]);
     list.sort((a, b) => a[2] - b[2]);
     for (const [sx, sy] of list) {
-      const k = skey(sx, sy), at = this.asked.get(k), have = this.sectors.get(k);
+      const k = skey(sx, sy), at = this.asked[l].get(k), have = this.sectors[l].get(k);
       if (at !== undefined && now - at < (have ? refreshMs : 4000)) continue; // asked lately: an unchanged sector gets no answer
-      this.asked.set(k, now);
+      this.asked[l].set(k, now);
       out.push(sx, sy, have?.v ?? 0);
       if (out.length >= MAP_MAX_SECTORS * 3) break;
     }
@@ -213,7 +231,7 @@ export class MapView {
     this.frameNo++;
     const v = this.view(cam, tx, tz, dist);
     if (![v.x0, v.x1, v.z0, v.z1].every(Number.isFinite)) return; // no sane view yet
-    const want = wpp < 1 ? 0 : wpp < 4 ? 1 : 2;
+    const want = this.levelFor(wpp);
     const needed: Cell[] = [];
     for (let lvl = 2; lvl >= want; lvl--) {
       const T = CELL_TILES[lvl];
@@ -237,6 +255,13 @@ export class MapView {
       while (c.row >= 0 && performance.now() - t0 < BUILD_BUDGET) this.buildRows(c, 4);
       if (performance.now() - t0 >= BUILD_BUDGET) break;
     }
+    // changed chunks of built cells: a chunk's texels each, cheap, then one upload per cell
+    for (const c of needed) {
+      if (!c.built || !c.dirty.size) continue;
+      for (const k of c.dirty) this.paintChunk(c, (k % 65536) - 0x8000, Math.floor(k / 65536) - 0x8000);
+      c.dirty.clear();
+      c.tex.needsUpdate = true;
+    }
     this.stats.ms += performance.now() - t0;
     if (this.cells.size > CELL_CAP) {
       const old = [...this.cells.values()].filter((c) => c.used !== this.frameNo).sort((a, b) => a.used - b.used);
@@ -258,47 +283,56 @@ export class MapView {
     mesh.frustumCulled = false;
     mesh.visible = false;
     this.scene.add(mesh);
-    return { lvl, cx, cy, mesh, tex, data, built: false, row: 0, used: this.frameNo };
+    return { lvl, cx, cy, mesh, tex, data, built: false, row: 0, used: this.frameNo, dirty: new Set() };
   }
   private dropCell(c: Cell) { this.scene.remove(c.mesh); c.tex.dispose(); (c.mesh.material as MeshBasicMaterial).dispose(); }
 
   /** Fill `n` texel rows of a cell; on the last row the texture is uploaded. */
   private buildRows(c: Cell, n: number) {
-    const T = CELL_TILES[c.lvl], s = T / RES, x0 = c.cx * T, y0 = c.cy * T, d = c.data;
+    const T = CELL_TILES[c.lvl], s = T / RES, x0 = c.cx * T, y0 = c.cy * T;
     const end = Math.min(RES, c.row + n);
     const span = CHUNK_SIZE / s; // texels per chunk (s is at most 16, so a texel never straddles chunks)
     for (let r = c.row; r < end; r++) {
-      const ty = y0 + r * s;
-      const cyy = Math.floor(ty / CHUNK_SIZE), syy = Math.floor(cyy / SECTOR_CHUNKS), ly = ty - cyy * CHUNK_SIZE;
-      for (let q0 = 0; q0 < RES; q0 += span) {
-        // one chunk's worth of texels: its summary looked up once
-        const cxx = Math.floor((x0 + q0 * s) / CHUNK_SIZE), sxx = Math.floor(cxx / SECTOR_CHUNKS);
-        const ch = this.sectors.get(skey(sxx, syy))?.chunks.get((cyy - syy * SECTOR_CHUNKS) * SECTOR_CHUNKS + (cxx - sxx * SECTOR_CHUNKS));
-        for (let q = q0; q < q0 + span; q++) {
-          const tx = x0 + q * s, o = (r * RES + q) * 4;
-          if (!ch) {
-            if (c.lvl < 2) { const b = terrainClass(this.sampler(tx + (s >> 1), ty + (s >> 1))) * 3; d[o] = LUT[b]; d[o + 1] = LUT[b + 1]; d[o + 2] = LUT[b + 2]; d[o + 3] = 255; continue; }
-            // far out, four samples averaged, so lakes smaller than a texel read as a tint, not speckle
-            let rr = 0, gg = 0, bb = 0;
-            for (let k = 0; k < 4; k++) {
-              const b = terrainClass(this.sampler(tx + ((k & 1) * 2 + 1) * (s >> 2), ty + ((k >> 1) * 2 + 1) * (s >> 2))) * 3;
-              rr += LUT[b]; gg += LUT[b + 1]; bb += LUT[b + 2];
-            }
-            // far out the land is muted towards one tint (the lakes are smaller than a few pixels), so what people built stands out
-            d[o] = (rr / 4) * FAR_MIX + FAR_TINT[0] * (1 - FAR_MIX); d[o + 1] = (gg / 4) * FAR_MIX + FAR_TINT[1] * (1 - FAR_MIX); d[o + 2] = (bb / 4) * FAR_MIX + FAR_TINT[2] * (1 - FAR_MIX); d[o + 3] = 255;
-            continue;
-          }
-          const lx = tx - cxx * CHUNK_SIZE;
-          if (s === 1) { const b = ch[ly * CHUNK_SIZE + lx] * 3; d[o] = LUT[b]; d[o + 1] = LUT[b + 1]; d[o + 2] = LUT[b + 2]; d[o + 3] = 255; continue; }
-          let rr = 0, gg = 0, bb = 0;
-          for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) { const b = ch[(ly + j) * CHUNK_SIZE + lx + i] * 3; rr += LUT[b]; gg += LUT[b + 1]; bb += LUT[b + 2]; }
-          const k = s * s;
-          d[o] = rr / k; d[o + 1] = gg / k; d[o + 2] = bb / k; d[o + 3] = 255;
-        }
-      }
+      const cyy = Math.floor((y0 + r * s) / CHUNK_SIZE);
+      for (let q0 = 0; q0 < RES; q0 += span) this.paintSpan(c, r, q0, span, Math.floor((x0 + q0 * s) / CHUNK_SIZE), cyy);
     }
     c.row = end >= RES ? -1 : end;
-    if (c.row < 0) { c.tex.needsUpdate = true; c.built = true; this.stats.built++; }
+    if (c.row < 0) { c.tex.needsUpdate = true; c.built = true; this.stats.built++; } // chunks that changed meanwhile are repainted next
+  }
+  /** Repaint one chunk's texels of a cell (its summary changed), in place. */
+  private paintChunk(c: Cell, cx: number, cy: number) {
+    const T = CELL_TILES[c.lvl], s = T / RES, span = CHUNK_SIZE / s;
+    const q0 = (cx * CHUNK_SIZE - c.cx * T) / s, r0 = (cy * CHUNK_SIZE - c.cy * T) / s;
+    for (let r = r0; r < r0 + span; r++) this.paintSpan(c, r, q0, span, cx, cy);
+  }
+  /** Texels q0..q0+span of row r of a cell: all inside chunk (cx, cy), from its summary or, untouched, from the seed. */
+  private paintSpan(c: Cell, r: number, q0: number, span: number, cx: number, cy: number) {
+    const T = CELL_TILES[c.lvl], s = T / RES, d = c.data;
+    const ty = c.cy * T + r * s, ly = ty - cy * CHUNK_SIZE;
+    const ch = this.chunkData(cx, cy, c.lvl);
+    for (let q = q0; q < q0 + span; q++) {
+      const tx = c.cx * T + q * s, o = (r * RES + q) * 4;
+      if (!ch) {
+        if (c.lvl < 2) { const b = terrainClass(this.sampler(tx + (s >> 1), ty + (s >> 1))) * 3; d[o] = LUT[b]; d[o + 1] = LUT[b + 1]; d[o + 2] = LUT[b + 2]; d[o + 3] = 255; continue; }
+        // far out, four samples averaged, so lakes smaller than a texel read as a tint, not speckle
+        let rr = 0, gg = 0, bb = 0;
+        for (let k = 0; k < 4; k++) {
+          const b = terrainClass(this.sampler(tx + ((k & 1) * 2 + 1) * (s >> 2), ty + ((k >> 1) * 2 + 1) * (s >> 2))) * 3;
+          rr += LUT[b]; gg += LUT[b + 1]; bb += LUT[b + 2];
+        }
+        // and muted towards one tint (the lakes are smaller than a few pixels), so what people built stands out
+        d[o] = (rr / 4) * FAR_MIX + FAR_TINT[0] * (1 - FAR_MIX); d[o + 1] = (gg / 4) * FAR_MIX + FAR_TINT[1] * (1 - FAR_MIX); d[o + 2] = (bb / 4) * FAR_MIX + FAR_TINT[2] * (1 - FAR_MIX); d[o + 3] = 255;
+        continue;
+      }
+      // summary bytes of bs×bs tiles each: one byte per texel, or the texel's bytes averaged
+      const bs = ch.bs, n = CHUNK_SIZE / bs, lx = tx - cx * CHUNK_SIZE;
+      if (s <= bs) { const b = ch.d[Math.floor(ly / bs) * n + Math.floor(lx / bs)] * 3; d[o] = LUT[b]; d[o + 1] = LUT[b + 1]; d[o + 2] = LUT[b + 2]; d[o + 3] = 255; continue; }
+      const m = s / bs, bx = lx / bs, by = ly / bs;
+      let rr = 0, gg = 0, bb = 0;
+      for (let j = 0; j < m; j++) for (let i = 0; i < m; i++) { const b = ch.d[(by + j) * n + bx + i] * 3; rr += LUT[b]; gg += LUT[b + 1]; bb += LUT[b + 2]; }
+      const k = m * m;
+      d[o] = rr / k; d[o + 1] = gg / k; d[o + 2] = bb / k; d[o + 3] = 255;
+    }
   }
 
   // ---- overlays: parcels, lines, selection and previews ----------------------------------------------

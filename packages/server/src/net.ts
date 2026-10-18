@@ -143,7 +143,7 @@ export class Net {
       case 'build': return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
       case 'parcel': return this.editParcel(c, m.id, m.taxRate, m.name, m.color);
       case 'parcelOp': return this.parcelOp(c, m);
-      case 'map': for (const json of this.map.answer(m.s)) if (c.conn.open) c.conn.send(json); return;
+      case 'map': for (const json of this.map.answer(m.s, m.l)) if (c.conn.open) c.conn.send(json); return;
       case 'inspect': return this.inspect(c, m.x, m.y, m.full === true);
       case 'inspectCitizen': return this.send(c, { t: 'citizen', id: Number(m.id), info: this.sim.describeCitizen(Number(m.id), m.route === true) });
       case 'unlock': return this.unlock(c, String(m.id));

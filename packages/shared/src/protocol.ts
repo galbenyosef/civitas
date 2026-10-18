@@ -404,8 +404,8 @@ export type ClientMsg =
   | { t: 'parcelOp'; op: 'combine'; ids: number[] }
   | { t: 'parcelOp'; op: 'split'; id: number; axis: 'x' | 'y'; at: number }
   | { t: 'parcelOp'; op: 'ungroup'; id: number }
-  /** the world map's ground (shared/src/worldmap.ts): flat [sx, sy, version held, …] of the sectors in view; answered with a 'mapSector' for each whose version differs */
-  | { t: 'map'; s: number[] }
+  /** the world map's ground (shared/src/worldmap.ts): flat [sx, sy, version held, …] of the sectors in view, at detail `l` (0 a byte per tile, 1 per 4×4, 2 per 16×16; default 0); answered with a 'mapSector' for each whose version differs */
+  | { t: 'map'; s: number[]; l?: number }
   /** `route` asks for the trail taken and the route ahead (the selected agent; hovers leave it off) */
   | { t: 'inspectCitizen'; id: number; route?: boolean }
   | { t: 'unlock'; id: string }
@@ -439,7 +439,7 @@ export type ServerMsg =
   | { t: 'under'; u: number[] }
   | { t: 'parcels'; parcels: ParcelDTO[]; removed?: number[] }
   /** a sector of the world map (shared/src/worldmap.ts): its version and the run-length coded map bytes of its modified chunks; chunks not listed are as the seed made them */
-  | { t: 'mapSector'; sx: number; sy: number; v: number; c: [number, number, string][] }
+  | { t: 'mapSector'; sx: number; sy: number; v: number; /** detail level (absent: 0) */ l?: number; c: [number, number, string][] }
   | { t: 'players'; players: PlayerDTO[] }
   /** flat quads: id, x, y, flags (see packCitizenFlags) */
   | { t: 'citizens'; c: number[] }

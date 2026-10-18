@@ -5,7 +5,7 @@
  *
  *   npx tsx packages/server/src/parcels-check.ts
  */
-import { CHUNK_SIZE, SECTOR_CHUNKS, MAX_PARCEL_EDGE, Terrain, packTile, rleDecode, mapClassOf, MapClass, KIND_ID, placedFromDoor, type ServerMsg, type ClientMsg } from '@msimcity/shared';
+import { CHUNK_SIZE, SECTOR_CHUNKS, SECTOR_TILES, MAX_PARCEL_EDGE, Terrain, packTile, rleDecode, mapClassOf, MapClass, KIND_ID, placedFromDoor, type ServerMsg, type ClientMsg } from '@msimcity/shared';
 import { World } from './world';
 import { seedCommons } from './seed';
 import { createGame } from './game';
@@ -181,6 +181,45 @@ ok(back.parcels.size >= world.parcels.size && JSON.stringify([...snap2.parcels.v
   console.log(`     8×8-district city: ${chunks.length} modified chunks in ${req.length / 3} sectors; first answer ${first.toFixed(1)} ms, ${(bytes / 1024).toFixed(0)} KB (${(bytes / chunks.length).toFixed(0)} B a chunk); cached ${again.toFixed(2)} ms`);
   ok(bytes / chunks.length < 1400, 'a built-up chunk costs about 1 KB on the wire, once (untouched chunks cost nothing)');
   void g;
+}
+
+// ---- cost on a large world: 2048×2048 tiles (4096 chunks, 64 sectors) all built on, a street every 5 tiles
+{
+  const w = new World(5);
+  const N = 2048;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (x % 5 === 0 || y % 5 === 0) w.setTile(x, y, packTile(Terrain.Grass, true, 0, 0));
+    else if ((x * 7 + y * 13) % 11 < 6) w.setTile(x, y, packTile(Terrain.Grass, false, 1 + ((x >> 4) + (y >> 4)) % 4, 1 + ((x ^ y) % 3)));
+  let conn: ((c: Conn) => void) | null = null;
+  createGame(w, { onConnection: (fn) => { conn = fn; } }, { devTools: false, sandbox: true });
+  const got: string[] = [];
+  let on: ((d: string) => void) | null = null;
+  conn!({ open: true, send: (d) => got.push(d), close() {}, onMessage: (fn) => { on = fn; }, onClose() {} });
+  on!(JSON.stringify({ t: 'hello', name: 'Bench' }));
+  const req: number[] = [];
+  for (let sy = 0; sy < N / SECTOR_TILES; sy++) for (let sx = 0; sx < N / SECTOR_TILES; sx++) req.push(sx, sy, 0);
+  got.length = 0;
+  let t0 = performance.now();
+  on!(JSON.stringify({ t: 'map', s: req }));
+  const first = performance.now() - t0, bytes = got.reduce((n, d) => n + d.length, 0), n = got.length;
+  got.length = 0; t0 = performance.now();
+  on!(JSON.stringify({ t: 'map', s: req.map((v, i) => (i % 3 === 2 ? JSON.parse(JSON.stringify(0)) : v)) }));
+  const cached = performance.now() - t0;
+  const vers: number[] = [];
+  for (let i = 0; i < req.length; i += 3) vers.push(req[i], req[i + 1], (JSON.parse(got[i / 3]) as { v: number }).v);
+  got.length = 0; t0 = performance.now();
+  on!(JSON.stringify({ t: 'map', s: vers }));
+  const unchanged = performance.now() - t0;
+  console.log(`     2048×2048 built world: ${n} sectors, ${(bytes / 1024 / 1024).toFixed(1)} MB (${(bytes / 4096).toFixed(0)} B a chunk); first answer ${first.toFixed(0)} ms, from cache ${cached.toFixed(1)} ms, unchanged (versions held) ${unchanged.toFixed(2)} ms and ${got.length} messages`);
+  ok(n === 64 && got.length === 0, 'a client holding every version is sent nothing');
+  const sizes: string[] = [];
+  for (const l of [1, 2]) {
+    got.length = 0; t0 = performance.now();
+    on!(JSON.stringify({ t: 'map', s: req, l }));
+    const ms = performance.now() - t0, b = got.reduce((k, d) => k + d.length, 0);
+    sizes.push(`level ${l} ${(b / 1024).toFixed(0)} KB (${(b / 4096).toFixed(0)} B a chunk, ${ms.toFixed(0)} ms)`);
+    if (l === 2) ok(b < bytes / 50, 'far out (a byte per 16×16 tiles) the same view costs a fiftieth or less');
+  }
+  console.log(`     the same view at coarser detail: ${sizes.join(', ')}`);
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nall ok');

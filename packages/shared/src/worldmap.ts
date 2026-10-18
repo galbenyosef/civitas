@@ -47,6 +47,26 @@ export const mapClassOf = (b: number) => b & 15;
 export const mapLevelOf = (b: number) => (b >> 4) & 7;
 export const mapBuilding = (b: number) => (b & 0x80) !== 0;
 
+/** Map detail levels: tiles per summary byte along each side (a byte per tile, per 4×4 tiles, per 16×16). */
+export const MAP_LEVEL_BLOCK = [1, 4, 16];
+/**
+ * A chunk's map bytes at a coarser level: each block of tiles is its most common byte (ties to the first seen), so a
+ * district reads as its zones and the roads drop out. `out` is (CHUNK_SIZE / block)² long.
+ */
+export function downsample(bytes: Uint8Array, block: number, out: Uint8Array, count = new Uint16Array(256)): Uint8Array {
+  const n = CHUNK_SIZE / block;
+  for (let by = 0; by < n; by++) for (let bx = 0; bx < n; bx++) {
+    count.fill(0);
+    let best = 0, bestN = 0;
+    for (let y = by * block; y < (by + 1) * block; y++) for (let x = bx * block; x < (bx + 1) * block; x++) {
+      const b = bytes[y * CHUNK_SIZE + x], k = ++count[b];
+      if (k > bestN) { bestN = k; best = b; }
+    }
+    out[by * n + bx] = best;
+  }
+  return out;
+}
+
 /** Run-length code bytes as (run - 1, byte) pairs, runs up to 256, base64'd. */
 export function rleEncode(a: Uint8Array): string {
   const out: number[] = [];

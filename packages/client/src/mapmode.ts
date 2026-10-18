@@ -64,7 +64,7 @@ export class MapMode implements MapInput {
 
   private onMsg(m: ServerMsg) {
     if (m.t === 'welcome') { this.view.reset(m.seed); this.sel = []; this.splitFor = 0; }
-    else if (m.t === 'mapSector') this.view.applySector(m.sx, m.sy, m.v, m.c);
+    else if (m.t === 'mapSector') this.view.applySector(m.sx, m.sy, m.v, m.c, m.l ?? 0);
     else if (m.t === 'lines') this.view.setBusLines(m.lines);
     else if (m.t === 'railLines') this.view.setRailLines(m.lines);
     else if (m.t === 'metroLines') this.view.setMetroLines(m.lines);
@@ -135,12 +135,14 @@ export class MapMode implements MapInput {
     const v = this.view.view(r.camera, r.target.x, r.target.z, r.dist);
     const sx0 = Math.floor(v.x0 / SECTOR_TILES), sx1 = Math.floor(v.x1 / SECTOR_TILES), sy0 = Math.floor(v.z0 / SECTOR_TILES), sy1 = Math.floor(v.z1 / SECTOR_TILES);
     if (![sx0, sx1, sy0, sy1].every(Number.isFinite)) return;
-    const sig = `${sx0},${sx1},${sy0},${sy1}`;
+    const lvl = this.view.levelFor(wpp);
+    const sig = `${sx0},${sx1},${sy0},${sy1},${lvl}`;
     if ((sig !== this.lastView || now - this.lastAsk > 500) && this.d.net.connected) {
       this.lastView = sig; this.lastAsk = now;
       // a wide view asks again less often: its sectors are smaller than a few pixels
-      const s = this.view.request(sx0, sy0, sx1, sy1, now, REFRESH_MS * Math.max(1, ((sx1 - sx0 + 1) * (sy1 - sy0 + 1)) / 40));
-      if (s.length) this.d.net.send({ t: 'map', s });
+      // at the level of detail the view draws: far out a byte per 16×16 tiles is all a pixel can show
+      const s = this.view.request(sx0, sy0, sx1, sy1, lvl, now, REFRESH_MS * Math.max(1, ((sx1 - sx0 + 1) * (sy1 - sy0 + 1)) / 40));
+      if (s.length) this.d.net.send({ t: 'map', s, ...(lvl ? { l: lvl } : {}) });
     }
     this.view.frame(r.camera, r.target.x, r.target.z, r.dist, wpp, vw, vh);
   }
