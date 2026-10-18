@@ -41,3 +41,4 @@ export * from './parcelops';
 export * from './waterways';
 export * from './boats';
 export * from './ferry';
+export * from './education';
