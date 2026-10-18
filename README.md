@@ -460,3 +460,18 @@ hot shard could later be rewritten in Go or Rust without the client noticing.
   and a proper economy loop for commercial/industrial income.
 - Frustum-based subscriptions instead of a radius (far out, the world map takes over: docs/world-map.md).
 - Griefing controls: public roads can currently be bulldozed by anyone.
+
+## Licence and contributing
+
+Copyright (C) 2026 Rich Green.
+
+Civitas is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public
+License** as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later
+version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; see `LICENSE` for details.
+
+In short: you may use, change and host Civitas, but if you run a modified version as a network service, you must offer
+its source code to the players who use it. The official multiplayer servers are run by the project.
+
+Contributions, especially new buildings, are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for the ten-minute
+building workflow and the terms contributions are made under. "Civitas" is the project's name; please rename forks you
+publish or host.
