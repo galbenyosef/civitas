@@ -100,7 +100,7 @@ on the wire) and a little slower in free flow (bicycles 0.75 of car speed, moped
 in the strip between a car's side and the pavement (`BIKE_SIDE` 0.125 out from a car's line, 0.05 wide, so it touches
 neither cars nor walkers), takes none of a lane's car places, and in a lane cars follow cars and bikes follow bikes, so
 bikes pass queues of cars. While either is turning their paths cross, and the body guard holds them as any two
-vehicles (`Traffic.filtering`, `TRAFFIC_TUNING.bikeTurnGuard` 1; section 8 has what the alternatives cost).
+vehicles (`Traffic.filtering`, `TRAFFIC_TUNING.bikeTurnGuard` 1; section 9 has what the alternatives cost).
 
 ## 4. Refuse collection
 
@@ -115,7 +115,8 @@ placement in files other agents were changing, and every town with industry alre
 (Monday to Friday, shared `binDay`). On that day from 06:30 the waste depot nearest the district's homes, within 40
 tiles, sends a bin lorry per three crew on shift (a driver and two loaders, `Unit.crew`). The round is every home's
 kerb (the plain road tile it faces; a home that faces only a junction is emptied from a kerb stop within 3 tiles),
-ordered nearest-neighbour from the depot, at most 40 stops a lorry. At each it halts five ticks and two more per extra home (the WORKING bit: the client tips a wheelie bin up the arms at the back while a loader stands behind),
+ordered nearest-neighbour from the depot, at most 40 stops a lorry. At each it halts five ticks and two more per
+extra home (the WORKING bit: the client tips a wheelie bin up the arms at the back while a loader stands behind),
 marks those homes emptied and charges each home's parcel owner $0.60 for the depot's owner. A home's tooltip shows its
 collection day and when its bins were last emptied; the depot's shows its crews, what is out, and the homes emptied
 today and yesterday.
@@ -180,6 +181,10 @@ and waits, orders placed, delivered and cancelled with delivery times, bin round
 per tick. Target: under 10% more sim time per tick, give-ups within the seed noise.
 
 ## 9. What was built and measured (2026-10-18)
+
+**Showcase.** No new kind, so the bases are tour spots (docs/demo.md): a cab office (5, 0), a takeaway (6, 0), a waste
+and recycling depot (16, 0) and a parcel depot (14, 0) downtown, each with its live tooltip, and four registry entries
+(`cab-office`, `takeaway`, `waste-depot`, `parcel-depot`) whose `seeded` test checks the door still holds the role.
 
 Built: the framework, taxis and private hire (with ranks and real taxis for newcomers and leavers at stations and the
 airport), food delivery on bicycles and mopeds with filtering, refuse rounds and street sweepers from waste depots, and

@@ -18,6 +18,8 @@ import { capacityOf, isGrowableId, terrainOf, Terrain } from '../tile';
 import { PLANE_TYPES, timetable, type PlaneType, type Airport } from '../flights';
 import { heliTimetable, type Pad, type PadKind } from '../helicopters';
 import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
+import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
+import { zoneOf, levelOf, Zone } from '../tile';
 
 /**
  * Demo maps (docs/demo.md): a planned, lived-in town where every large object in the catalogue is placed once and
@@ -172,6 +174,23 @@ function mergedAt(kind: string, ax: number, ay: number, rot: 0 | 1 | 2 | 3, leve
   throw new Error(`no door puts ${kind} at (${ax}, ${ay})`);
 }
 
+/** Mobile-job bases on the tour (shared/src/fleet.ts): the door of a cab office, a takeaway, a waste depot and a parcel depot downtown. */
+const MOBILE_SPOTS: [MobileSpot, number, number, string][] = [
+  ['cab-office', 5, 0, 'Cab office'], ['takeaway', 6, 0, 'Takeaway'], ['waste-depot', 16, 0, 'Waste and recycling depot'], ['parcel-depot', 14, 0, 'Parcel depot'],
+];
+type MobileSpot = 'cab-office' | 'takeaway' | 'waste-depot' | 'parcel-depot';
+/** Does the 1×1 lot at (x, y) of the seeded town hold that mobile-job role? */
+const mobileRoleAt = (spot: MobileSpot, x: number, y: number, t: number, a: number) => {
+  if (a) return false; // a structure's tile: the roles sit on lots
+  const z = zoneOf(t);
+  switch (spot) {
+    case 'cab-office': return z === Zone.Commercial && isCabOffice(Zone.Commercial, x, y);
+    case 'takeaway': return z === Zone.Commercial && isFoodVenue(Zone.Commercial, x, y);
+    case 'waste-depot': return z === Zone.Industrial && isWasteDepot(Zone.Industrial, x, y);
+    case 'parcel-depot': return z === Zone.Industrial && levelOf(t) > 0 && isCourierDepot(Zone.Industrial, levelOf(t), x, y);
+  }
+};
+
 export const SECTIONS: DemoSection[] = [
   {
     id: 'downtown', name: 'Downtown',
@@ -192,6 +211,8 @@ export const SECTIONS: DemoSection[] = [
         blurb: 'A communal garden: the 2×2 middle of a block ringed by homes, which no road reaches, planted by the residents as a shared garden. Only the homes round it count it, as a small park nearby; nobody else can get in.',
         how: 'Nothing to build. Zone a block all homes and own its middle: once every home round it stands, the residents plant it. It costs nothing and has no upkeep.' },
     ],
+    // mobile jobs (docs/mobile-jobs.md): roles of grown lots picked by tile hash, so these doors are where the hashes put them
+    spots: MOBILE_SPOTS.map(([id, x, y, name]): DemoSpot => ({ id, spot: id, name, rect: [x, y, 1, 1], inspect: [x, y] })),
   },
   {
     id: 'transport', name: 'Buses and parking',
@@ -380,6 +401,7 @@ export const SECTIONS: DemoSection[] = [
 export const TOUR: string[] = [
   'welcome',
   'block-residential', 'block-commercial', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
+  'cab-office', 'takeaway', 'waste-depot', 'parcel-depot',
   'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'roundabout', 'flyover',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
   'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
@@ -478,8 +500,32 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover';
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
+  'cab-office': {
+    title: 'Cab office',
+    what: 'A minicab firm in a shopfront (about one shop lot in eleven), its lit sign in taxi yellow. Every member of its staff drives: cabs with a roof sign lit while for hire, waiting at the nearest station or airport rank, and private-hire drivers who log on from home in their own car and wait where the last fare ended. People without a car to hand, out for the night or arriving with a suitcase book the nearest free one when it beats walking, the bus and driving; they wait at the kerb, ride, and pay at the door.',
+    how: 'Nothing to build: zone shops and some become cab offices. The tooltip shows its drivers on shift, the taxis out and the fares today; a driver\'s panel links to the cab they are out in.',
+    facts: [['Fare', `$${TAXI.flagfall} + $${TAXI.perTile} a tile`], ['Split', `${Math.round(TAXI.officeCut * 100)}% to the office for a cab, ${Math.round(TAXI.platformCut * 100)}% for private hire`], ['Reach', `the nearest free taxi within ${TAXI.reach} tiles`], ['Rota', 'round the clock, four shifts']],
+  },
+  takeaway: {
+    title: 'Takeaway',
+    what: 'Every café, bar and restaurant cooks for delivery, and a quarter of their staff are riders on bicycles and mopeds. Homes order at lunch and dinner; shortly before an order is ready the nearest free rider is sent to the kitchen, takes up to three orders for homes close together, rides at the kerb edge past queues of cars, and steps off at each door. The meal is taxed like a visit and the venue\'s owner gets the delivery fee.',
+    how: 'Nothing to build: zone shops. The tooltip shows its riders, the orders in the kitchen and the deliveries today.',
+    facts: [['Orders', `${FOOD.lunchRate} a household at lunch, ${FOOD.dinnerRate} at dinner`], ['Meal', `$${FOOD.mealBase} + the venue's level, $${FOOD.fee} delivery, $${FOOD.tip} tip`], ['Riders', `${Math.round(MOBILE.riderShare * 100)}% of staff, ${Math.round(MOBILE.bicycleShare * 100)}% on bicycles`]],
+  },
+  'waste-depot': {
+    title: 'Waste and recycling depot',
+    what: 'About one industrial lot in twelve is the waste depot. Each 16-tile district has its own collection weekday: from 06:30 the depot sends a bin lorry per three collectors on shift round every home\'s kerb, where it stops while the loaders tip the wheelie bins (the traffic waits behind it); two weekdays later a sweeper drives the district\'s streets with its beacon flashing. The homes\' owner pays the depot\'s owner per home emptied.',
+    how: 'Nothing to build: zone industry within reach of your homes. A home\'s tooltip shows its bin day and when its bins were last emptied; the depot\'s shows its crews, the lorries out and the homes emptied today.',
+    facts: [['Reach', `districts within ${REFUSE.reach} tiles`], ['Fee', `$${REFUSE.feePerHome} a home emptied`], ['Crew', `${REFUSE.crew} a lorry, Monday to Friday from 06:00`]],
+  },
+  'parcel-depot': {
+    title: 'Parcel depot',
+    what: 'Warehouses, freight depots and distribution centres (and some other industry) are parcel depots, and a third of their staff drive courier vans. Homes order parcels through the day; vans leave in a morning and an afternoon wave with up to 14 parcels, pull up at each kerb in turn and come back. The depot\'s owner is paid per parcel.',
+    how: 'Nothing to build: zone industry. The tooltip shows its couriers, the parcels waiting and those delivered today.',
+    facts: [['Parcels', `${COURIER.parcelRate} a household a day`], ['Vans', `from ${COURIER.waves.map((h) => `${h}:00`).join(' and ')}, ${COURIER.vanLoad} parcels each`], ['Fee', `$${COURIER.fee} a parcel`]],
+  },
   'level-crossing': {
     title: 'Level crossing',
     what: 'A road over railway track. Barriers come down across the road ahead of each train and the traffic waits until it has passed. Here the freight line\'s trains cross the street down to the river.',
@@ -819,6 +865,11 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   // ---- metro (docs/underground.md): the showcase runs one underground line, which changes to rail and a bus
   { id: 'metro-interchange', caption: 'a metro line with an interchange (an entrance within the change walk of a rail or bus stop)', tour: 'line-metro-1',
     scenario: (ss) => metroInterchange(ss.flatMap((s) => s.lines ?? [])), seeded: (d) => metroInterchange(d.lines) },
+  // ---- mobile jobs (docs/mobile-jobs.md): each tour spot's door holds its role (fleet.ts hashes)
+  ...MOBILE_SPOTS.map(([spot, x, y, name]): ShowcaseFeature => ({
+    id: spot, caption: `a ${name.toLowerCase()} at (${x}, ${y}) (a mobile-job base)`, tour: spot,
+    seeded: (d) => anyTile(d, (tx, ty, t, a) => tx === x && ty === y && mobileRoleAt(spot, x, y, t, a)),
+  })),
   { id: 'metro-crossover', caption: 'a metro crossover (one line\'s tunnel straight across another\'s)', tour: 'tube-crossover', demo: 'london',
     rule: 'the showcase runs one underground line; lines cross in London, where the Tube\'s Central, Northern and Jubilee lines meet',
     seeded: (d) => anyTile(d, (_x, _y, _t, _a, u) => isTunnel(u) && !isPlatform(u) && underMask(u) === 15) },

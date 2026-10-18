@@ -6,7 +6,7 @@ teaching it.
 
 | Demo | Port | Sections | Tour stops |
 | --- | --- | --- | --- |
-| **Showcase** | 8190 | all eight | 92 |
+| **Showcase** | 8190 | all eight | 96 |
 | Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 32 |
 | Leisure demo | 8192 | Downtown, Leisure | 23 |
 | Civic demo | 8193 | Downtown, Civic services | 28 |
@@ -326,6 +326,7 @@ Some entries are typed against the union they come from, the way `SURFACE_TOOLS`
 | communal garden | built | `block-garden` |
 | bus turnaround | a saved bus line whose buses turn round at a dead end (`BusService.plan(line).turns` has a kind 0) | `line-bus-3` |
 | metro line with an interchange | a metro line calls within the change walk (`TRANSIT.transferWalk`, 4 tiles) of a stop of a bus or rail line, in the scenario and among the saved lines | `line-metro-1` |
+| mobile-job bases (docs/mobile-jobs.md): a cab office, a takeaway, a waste and recycling depot, a parcel depot | the lot at the tour spot's door holds that role (shared/src/fleet.ts `isCabOffice`, `isFoodVenue`, `isWasteDepot`, `isCourierDepot`, tile hashes): (5, 0), (6, 0), (16, 0), (14, 0) downtown | `cab-office`, `takeaway`, `waste-depot`, `parcel-depot` |
 | metro crossover | in **London**: an under byte with all four sides (one line's tunnel straight across another's). Rule: the showcase runs one underground line; lines cross in London | London's `tube-crossover` |
 
 ### Adding a feature to the showcase

@@ -23,7 +23,7 @@ function cab(): BufferGeometry {
   return lampLenses(k.build());
 }
 /** the TAXI sign on the roof (unlit material: it glows by its colour) */
-function cabSign(): BufferGeometry { return new Kit().box(0.045, 0.028, 0.1, -0.02, 0.21, 0, 0xffffff).build(); }
+function cabSign(): BufferGeometry { return new Kit().box(0.06, 0.035, 0.13, -0.02, 0.21, 0, 0xffffff).build(); }
 /** a private-hire car's badge, low on the windscreen */
 function phBadge(): BufferGeometry { return new Kit().box(0.012, 0.022, 0.035, 0.068, 0.14, 0.035, 0xffffff).build(); }
 function bicycle(): BufferGeometry {
@@ -34,7 +34,7 @@ function bicycle(): BufferGeometry {
     .box(0.008, 0.05, 0.008, 0.045, 0.035, 0, 0xffffff)             // fork and head tube
     .box(0.006, 0.006, 0.05, 0.045, 0.085, 0, 0x2a2a2a)             // handlebars
     .box(0.01, 0.01, 0.012, 0.06, 0.07, 0, 0xfff2b0, LAMP.head).box(0.006, 0.01, 0.012, -0.075, 0.06, 0, 0xd62020, LAMP.tail);
-  return k.build();
+  return lampLenses(k.build());
 }
 function moped(): BufferGeometry {
   const k = new Kit();
@@ -44,8 +44,9 @@ function moped(): BufferGeometry {
     .box(0.06, 0.035, 0.045, -0.04, 0.055, 0, 0xffffff)             // seat body
     .box(0.006, 0.006, 0.06, 0.055, 0.12, 0, 0x2a2a2a)              // handlebars
     .box(0.05, 0.008, 0.04, -0.06, 0.09, 0, 0x2a2a2a)               // rear rack
-    .box(0.012, 0.015, 0.02, 0.068, 0.095, 0, 0xfff2b0, LAMP.head).box(0.008, 0.012, 0.02, -0.075, 0.07, 0, 0xd62020, LAMP.tail);
-  return k.build();
+    .box(0.012, 0.012, 0.012, 0.068, 0.095, 0.014, 0xfff2b0, LAMP.head).box(0.012, 0.012, 0.012, 0.068, 0.095, -0.014, 0xfff2b0, LAMP.head)
+    .box(0.008, 0.012, 0.012, -0.075, 0.07, 0.012, 0xd62020, LAMP.tail).box(0.008, 0.012, 0.012, -0.075, 0.07, -0.012, 0xd62020, LAMP.tail);
+  return lampLenses(k.build());
 }
 /** a seated rider (hi-vis jacket in the instance colour, a dark helmet) */
 function rider(): BufferGeometry {
@@ -119,7 +120,7 @@ const CAR_PAINT = [0xe8e8e8, 0x6a707a, 0xc0392b, 0x2e86de, 0xf5f5f5, 0x8e8e8e, 0
 const APP = [0x16b3a4, 0xff7a1a, 0xe03a3e, 0x6fbf2a].map((c) => new Color(c));
 const COURIER = [0xd9302c, 0x2f5fb5, 0xf2b705, 0x4f2a7a, 0x2a8a4a].map((c) => new Color(c));
 const BINS = [0x2e7d32, 0x3a3a3a, 0x2a5db0, 0x6d4c2f, 0x8a8f96].map((c) => new Color(c));
-const SIGN_FREE = new Color(0xffd84a), SIGN_HIRED = new Color(0x4d4a42), BADGE = new Color(0xa88bff), HIVIS = new Color(0xf28c28), BEACON = new Color(0xffa31a), DIM = new Color(0x5a4a30);
+const SIGN_FREE = new Color(0xfffbe0), SIGN_HIRED = new Color(0x3a3833), BADGE = new Color(0xa88bff), HIVIS = new Color(0xf28c28), BEACON = new Color(0xffa31a), DIM = new Color(0x5a4a30);
 const WHITE = new Color(0xffffff);
 const tmpC = new Color();
 
