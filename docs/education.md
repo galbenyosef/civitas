@@ -567,7 +567,7 @@ per tick within noise (0.82-0.88 against 0.82-1.03).
   in `simulation.ts` builds it.
 - **Citizen panel** (`client/src/ui.ts` `lifeHtml`): "Age 34 · adult · turns 35 on Thu", an "Education" row with the
   level and track, and a "Studying" row (stage, year group, attendance) once E3 enrols people. The timeline and the
-  student look are E7 (built, section 14).
+  student look are E7 (built, section 15).
 
 ### The probe
 
