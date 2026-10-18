@@ -48,7 +48,7 @@ export interface Parcel {
   color?: number;
 }
 export type Progress = Record<Counter, number>;
-export const emptyProgress = (): Progress => ({ built: 0, roads: 0, housed: 0, jobs: 0, parked: 0 });
+export const emptyProgress = (): Progress => ({ built: 0, roads: 0, housed: 0, jobs: 0, parked: 0, pupils: 0, graduates: 0 });
 /** Treasury a dev player with unlimited funds is held at. */
 export const DEV_FUNDS = 10_000_000;
 export interface Player {

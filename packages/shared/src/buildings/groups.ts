@@ -21,6 +21,11 @@ export interface GroupDef {
    * order, so the one-family-code rule and the never-shrinks-up-the-ladder checks do not apply. The picker lists them the same way.
    */
   collection?: boolean;
+  /**
+   * A ladder of stages rather than sizes (education): tiers run in the order a pupil moves up, so what a rung holds and
+   * what it costs need not grow with the tier. Build work still grows with the footprint.
+   */
+  stages?: boolean;
   /** A ladder still in development: every rung may be a draft (validation otherwise calls that a mistake). Drop it when the first rung goes live. */
   draft?: boolean;
 }
@@ -39,12 +44,13 @@ export const GROUPS: GroupDef[] = [
   { id: 'theatre', label: 'Theatres', section: 'Leisure', color: '#7a3e8f', holds: 'seats' },
   { id: 'sports', label: 'Sport', section: 'Leisure', color: '#2f6fb5', holds: 'visitors' },
   { id: 'library', label: 'Libraries', section: 'Leisure', color: '#a8875a', holds: 'visitors' },
+  // education (docs/education.md section 3): nursery to university, sub-kinds of the library family (code 14), drafts until the Showcase places them
+  { id: 'education', label: 'Education', section: 'Services', color: '#d8b25a', holds: 'pupils', stages: true, draft: true },
   // landmarks (docs/buildings.md "Landmarks"): real buildings, one picker per city; buildings/landmarks-london.ts
   { id: 'london', label: 'London', section: 'Landmarks', color: '#c8102e', holds: 'staff', collection: true },
   // reserved for other cards
   { id: 'bus', label: 'Buses', section: 'Transport', color: '#e0a92e', holds: 'staff', reserved: true },
   { id: 'rail', label: 'Rail', section: 'Transport', color: '#b0563d', holds: 'staff', reserved: true },
   { id: 'airport', label: 'Airports', section: 'Transport', color: '#2b2e33', holds: 'staff', reserved: true },
-  { id: 'education', label: 'Education', section: 'Services', color: '#d8b25a', holds: 'pupils', reserved: true },
 ];
 export const GROUP_BY_ID = new Map(GROUPS.map((g) => [g.id, g]));

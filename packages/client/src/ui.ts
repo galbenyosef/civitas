@@ -812,5 +812,10 @@ export class UI {
 }
 
 const SHORT = ['', 'at home', 'in shops', 'in factories', 'in offices', 'police', 'firefighters', 'medics', 'builders', 'parking', 'parks', 'at the cinema', 'at the theatre', 'at the sports hall', 'at the library'];
-const shortKind = (k: number) => SHORT[k] ?? KIND_NAMES[k];
+/** where the staff of the education kinds (kind ids 101-108, family code 14 like the library) work, by kind id: the library's "at the library" would be wrong for a teacher */
+const SHORT_EDU: Record<number, string> = {
+  101: 'at the nursery', 102: 'at primary schools', 103: 'at secondary schools', 104: 'at sixth-form colleges', 105: 'at FE colleges',
+  106: 'at the university', 107: 'at the research institute', 108: 'in halls of residence',
+};
+const shortKind = (k: number) => SHORT[k] ?? SHORT_EDU[k] ?? KIND_NAMES[k];
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);

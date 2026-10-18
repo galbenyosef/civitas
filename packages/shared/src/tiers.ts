@@ -48,7 +48,7 @@ export const footprintLabel = (k: KindManifest) => `${k.footprint?.w ?? 1}×${k.
 /** What a rung offers, for the picker card and the viewer's ladder table. */
 export interface TierSummary {
   kindId: number; tier: number; name: string; label: string; footprint: string;
-  /** staff, builders, bays (surface) or visitors at once, by the group's `holds` */
+  /** staff, builders, bays (surface), visitors or pupils (school places, the `pupilCapacity` attribute) at once, by the group's `holds` */
   holds: number; holdsWhat: string;
   cost: number; upkeep: number; work: number;
   /** services: coverage radius and strength; builders: work rate; police, fire and health: patrol rate; venues: event size */
@@ -60,7 +60,7 @@ export function tierSummary(k: KindManifest): TierSummary {
   const a = l.attrs;
   const holdsWhat = g?.holds ?? 'staff';
   // a park that grows shows what it grows into; venues hold visitors, lots hold cars, workplaces hold staff
-  const holds = holdsWhat === 'bays' ? l.parking.surface : (holdsWhat === 'visitors' || holdsWhat === 'seats') ? num(top.attrs.visitorCapacity, 0) : l.capacity;
+  const holds = holdsWhat === 'bays' ? l.parking.surface : (holdsWhat === 'visitors' || holdsWhat === 'seats') ? num(top.attrs.visitorCapacity, 0) : holdsWhat === 'pupils' ? num(a.pupilCapacity, 0) : l.capacity;
   const s: TierSummary = {
     kindId: k.kindId, tier: k.tier ?? 1, name: k.name, label: k.tool?.label ?? k.name, footprint: footprintLabel(k),
     holds, holdsWhat, cost: l.cost, upkeep: l.upkeep, work: l.work,

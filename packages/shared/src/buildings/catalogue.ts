@@ -21,6 +21,7 @@ import { OFFICE_MERGED } from './office-merged';
 import { INDUSTRIAL_MERGED } from './industrial-merged';
 import { BLOCK_INTERIOR } from './block-interior';
 import { LONDON_LANDMARKS } from './landmarks-london';
+import { EDUCATION } from './education';
 
 /**
  * Every building kind. This is source data: only the compile step
@@ -36,6 +37,8 @@ const BASE: KindDef[] = [residential, commercial, industrial, office, police, fi
   ...RESIDENTIAL_MERGED, ...COMMERCIAL_MERGED, ...OFFICE_MERGED, ...INDUSTRIAL_MERGED,
   // block interiors: deep plots growing back into a block's landlocked middle, and the communal garden (block-interior.ts)
   ...BLOCK_INTERIOR,
+  // education (docs/education.md section 3): kind ids 101-108, drafts until the Showcase places them
+  ...EDUCATION,
   // landmarks (docs/buildings.md "Landmarks"): real buildings in a city's collection, placed only where their locked tech is given
   ...LONDON_LANDMARKS];
 

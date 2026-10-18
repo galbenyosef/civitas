@@ -4,7 +4,7 @@ Card "we need an education tree etc" (UTD 851126b0). Rich: "do we have the notio
 schools, high schools, sixth form, colleges, universities etc." and "lets consider the education of the population and
 an education tree / progress for them". Design 2026-10-18. **E1 (the citizen model and the wire) is built**: see
 section 12 for what it provides. The rest is design. Rich has not answered section 11 yet, so the build follows the
-recommended answers (A to every question).
+recommended answers (A to every question). **E2 (the institutions catalogue, section 3 "Built in E2" and the tech track in section 6) is built** too.
 
 Code this touches: `shared/src/education.ts` (new: levels, stages, tables), `shared/src/buildings/education.ts` (new:
 the kinds), `server/src/sim/schools.ts` (new: admissions, attendance, graduation), hooks in
@@ -162,6 +162,35 @@ graduates. This loop is the reason education matters, and section 7 explains how
 Halls of residence (108) are a **residential-family sub-kind (code 1)** that is placed, not grown. It houses only
 enrolled students: `spawn()` skips it, and the university's student intake fills it (section 4). It is not growable,
 so `growth()` leaves it alone.
+
+### Built in E2
+
+`shared/src/buildings/education.ts` (kinds) and `edukit.ts` (shared recipe parts) hold the eight kinds, ids 101-108, each with **two UK designs** (`buildings:check` and `demo:check` pass; the kinds are `draft: true`, so the tools show only with `?dev` until E8 places them in the Showcase):
+
+| Id | Kind | Tool id | Designs |
+| --- | --- | --- | --- |
+| 101 | nursery (1×1) | `nursery` | single-storey pods with a fenced garden, sandpit and buggy shelter; converted Victorian villa with a canopy and picket fence |
+| 102 | primary school (2×2) | `primary` | London board school in yellow stock brick with BOYS and GIRLS doors and a bell cupola; flat-roofed 1960s school with a mobile classroom and playing field |
+| 103 | secondary school (3×3) | `secondary` | 2000s academy with a curved glazed atrium and a floodlit 3G cage; 1950s brick secondary modern with a boiler-house chimney and playing fields |
+| 104 | sixth-form college (2×2) | `sixthform` | Edwardian red-brick grammar school with a clock gable and a glass wing; modern block with a café front |
+| 105 | further-education college (3×2) | `fecollege` | 1970s concrete tower with sawtooth workshops, a motor-vehicle bay and a bricklaying yard; glazed campus with an apprenticeship hall |
+| 106 | university campus (6×6, gate right of centre) | `university` | redbrick Victorian Gothic quad round a clock tower; plate-glass 1960s slabs on a podium beside a lake |
+| 107 | research institute (3×3) | `research` | glass and zinc lab (the Crick) with rooftop plant and fume stacks; science-park pavilions round a pyramid-roofed atrium with an observatory dome |
+| 108 | halls of residence (2×2) | `halls` | 1960s slab with access decks; modern cluster flats round a courtyard |
+
+What the catalogue says, for E3 to read (all attributes, in `attrs`; staff, wage, cost and upkeep are the level's, as for any civic kind):
+
+- `stage`: 1 nursery, 2 primary, 3 secondary, 4 sixth form, 5 FE college, 6 university, 7 research institute, 0 halls. It is the number `Citizen.study` holds.
+- `pupilCapacity` (30, 120, 300, 120, 160, 600, 0, 0), `eveningPlaces` (FE: 60), `catchment` in tiles by road (8, 12, 20, 24, 30; 0 for the university and research institute: the whole city), `ages` as `[from, to]`, `teachersShare` (0.5, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6) and `postgradShare` (university 0.4, research 0.6), `beds` (halls: 80).
+- Staff (the level `capacity`) 6, 10, 24, 10, 18, 60, 40, 2; wages 24, 25, 26, 26, 26, 28, 32, 18; cost and upkeep as the table above. Teachers work Monday to Friday (cycle `[1,1,1,1,1,0,0]`, not rotating); FE and the university also run later shifts, halls staff run a night shift.
+- Build work is `150 × tiles + 150`, so it grows with the footprint.
+
+Decisions made while building it, so the later phases need not rediscover them:
+
+- **All eight kinds, halls included, are family code 14**, civic and not leisure, with no `service` flag. The design put the halls in the residential family (code 1), but a group must share one family code and a code-1 civic kind would meet the residential spawn and growth code before E5 exists. E5 may move them (a kind-id's code can change while the kinds are drafts; the tile would then need a re-placement). The `LEISURE_CODES` loops (`leisureCoverage`, `leisureGrowth`, `pickLeisure`, the child outing) visit code-14 buildings but `leisureAt` returns `undefined` for them (`isLeisure` is by kind id and the family is civic), and every one of those loops skips an `undefined` spec, so a school is invisible to them. The client's "at the library" label is by family code and unchanged; `ui.ts` `SHORT_EDU` names where each education kind's staff work.
+- **The group is a ladder of stages** (`stages: true` on the group in `groups.ts`), so the "never shrinks up the ladder" checks of holds and cost are skipped for it; the picker's count is `pupilCapacity` (`tierSummary` with `holds: 'pupils'`).
+- **Tech and counters**: tech track `education` with nodes `edu1`-`edu5` as in section 6 (`shared/src/tech.ts`) and the counters `pupils` and `graduates`, which start at 0 in `emptyProgress` (`server/src/world.ts`). Nothing bumps them yet: E3's `recomputeStats` does, so until then `edu4` (150 pupils) and `edu5` (200 graduates) cannot be earned in a live game, as intended while the kinds are drafts. `edu1` requires `civ1`. The policy features (free school meals, school buses, adult learning, apprenticeships, tuition fees) are E6's.
+- **The lamps, benches and trees** on lawns, quads and forecourts sit at hashed offsets (`lampRow`, `benchRow`, `scatterTrees` in `edukit.ts`), so no campus looks stamped. The windows light up at night per window and per building as for every civic kind; the floodlight heads and lamp heads use the `venue` window class.
 
 ### Catchment
 
@@ -433,7 +462,7 @@ is no crime model (police coverage only), so there is no link until there is one
 | # | Subtask | Model | Files | Depends on | Size |
 | --- | --- | --- | --- | --- | --- |
 | E1 | **Built.** **Citizen model and wire.** `shared/src/education.ts` (levels, tracks, stages, `EDU`, base mix, `eduDefaults`, year group, birthday); `Citizen` fields; snapshot defaults; `CitizenInfo.life.education`, `PersonRow.edu`, `CITIZEN_STUDY`; newcomer seeding (no tilt yet); `loadtest/education.ts` | opus | world.ts, snapshot.ts, protocol.ts, life.ts, simulation.ts (`makeCitizen`, `describeLife`) | none | M |
-| E2 | **Institutions catalogue.** `buildings/education.ts` kinds 101-108 with two UK designs each; un-reserve the `education` group; the edu1-edu5 tech track and counters; `SHORT` label by kind; viewer | sonnet | buildings/*, groups.ts, tech.ts, compiled.ts (regenerate, never hand-merge), ui.ts | none (attribute names from this doc) | L |
+| E2 | **Built.** **Institutions catalogue.** `buildings/education.ts` kinds 101-108 with two UK designs each; un-reserve the `education` group; the edu1-edu5 tech track and counters; `SHORT` label by kind; viewer | sonnet | buildings/*, groups.ts, tech.ts, compiled.ts (regenerate, never hand-merge), ui.ts | none (attribute names from this doc) | L |
 | E3 | **Schools sim.** `sim/schools.ts`: admissions batches, the pupil timetable on the commute machinery, attendance, weekly rollover, graduation and drop-out, escorts via carpool, the `school` inspect block, `lifeEvents` | opus | sim/schools.ts, simulation.ts (Home branch, `endShift`, `newDay`, describe), carpool.ts | E1, E2 | L |
 | E4 | **Jobs, wages, migration.** Skill gate in `findJob`, `jobMisses` by level, `Building.qualified`, wage multipliers, `EDU.match` tilt, brain drain, happiness parts; tuning runs | opus | simulation.ts (`findJob`, `hire`, `payWage`, `lifeFamily`), life.ts, gateways.ts | E1 (runs beside E3) | M |
 | E5 | **Higher and adult education.** University intake via gateways, halls of residence, families moving in, FE courses, evening classes (`errand` 2), apprenticeships, research ambition | opus | gateways.ts, simulation.ts (`spawn`, `arriveVia`, `ambition`), sim/schools.ts | E3, E4 | L |

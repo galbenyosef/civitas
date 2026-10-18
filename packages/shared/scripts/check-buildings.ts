@@ -812,6 +812,7 @@ section('groups and tiers');
     const g = l.group.id, ts = l.tiers;
     eq(`${g}: tiers 1..${ts.length}`, ts.map((k) => k.tier), ts.map((_, i) => i + 1));
     const collection = !!l.group.collection; // landmarks: separate buildings of any family, not sizes of one
+    const stages = !!l.group.stages; // education: tiers are the stages a pupil moves through, so holds and cost need not climb
     if (!collection) eq(`${g}: one family code`, new Set(ts.map((k) => k.code)).size, 1);
     eq(`${g}: ladderOf round trip`, ts.every((k) => TI.ladderOf(k.kindId) === l), true);
     eq(`${g}: every rung has a tool, a blurb and how to place it`, ts.filter((k) => !k.tool || !k.blurb || !k.howTo).map((k) => k.id), []);
@@ -824,8 +825,7 @@ section('groups and tiers');
       eq(`${g}: ${what} never shrinks up the ladder (${v.join(' ')})`, v.every((x, i) => i === 0 || x >= v[i - 1]), true);
     };
     const s = ts.map((k) => TI.tierSummary(k));
-    up('what it holds', (k) => TI.tierSummary(k).holds);
-    up('cost', (k) => k.levels[0].cost);
+    if (!stages) { up('what it holds', (k) => TI.tierSummary(k).holds); up('cost', (k) => k.levels[0].cost); }
     if (ts[0].flags.service) { up('coverage radius', (k) => TI.SERVICE_RADIUS_OF[k.kindId]); up('coverage strength', (k) => TI.SERVICE_STRENGTH_OF[k.kindId]); up('patrols or call-outs', (k) => TI.PATROL_RATE_OF[k.kindId]); }
     if (g === 'builders') up('builder pace', (k) => TI.WORK_RATE_OF[k.kindId]);
     if (ts[0].family === 'leisure') { up('leisure reach', (k) => s[ts.indexOf(k)].radius ?? 0); up('event pull', (k) => s[ts.indexOf(k)].eventSize ?? 1); }
