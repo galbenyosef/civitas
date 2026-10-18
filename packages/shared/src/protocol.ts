@@ -20,6 +20,10 @@ export interface ParcelStats {
   staffedByKind: number[];
   /** construction sites waiting for or receiving builders */
   sites: number;
+  /** buildings standing (a structure counts once; a site on an empty lot is in `sites`); absent from older servers */
+  buildings?: number;
+  /** book value: what the land, roads and buildings cost to make (parcelops.ts buildingValue, docs/world-map.md); absent from older servers */
+  value?: number;
 }
 export interface ParcelDTO {
   id: number;
@@ -28,6 +32,10 @@ export interface ParcelDTO {
   x: number; y: number; w: number; h: number;
   taxRate: number;
   stats: ParcelStats;
+  /** the estate it belongs to (docs/world-map.md section 2): members share name, colour and tax rate */
+  group?: number;
+  /** a colour its owner gave it on the map (0xRRGGBB); absent: the owner's colour */
+  color?: number;
 }
 export interface PlayerDTO {
   id: string;
@@ -390,7 +398,14 @@ export type ClientMsg =
       rot?: number;
       /** bulldoze in the underground view: fill unused tunnel instead of clearing the surface (docs/underground.md) */
       under?: true }
-  | { t: 'parcel'; id: number; taxRate?: number; name?: string }
+  /** `color` -1 clears it back to the owner's colour; on an estate member every setting applies to the whole estate */
+  | { t: 'parcel'; id: number; taxRate?: number; name?: string; color?: number }
+  /** parcel management on the world map (docs/world-map.md section 2, shared/src/parcelops.ts) */
+  | { t: 'parcelOp'; op: 'combine'; ids: number[] }
+  | { t: 'parcelOp'; op: 'split'; id: number; axis: 'x' | 'y'; at: number }
+  | { t: 'parcelOp'; op: 'ungroup'; id: number }
+  /** the world map's ground (shared/src/worldmap.ts): flat [sx, sy, version held, …] of the sectors in view; answered with a 'mapSector' for each whose version differs */
+  | { t: 'map'; s: number[] }
   /** `route` asks for the trail taken and the route ahead (the selected agent; hovers leave it off) */
   | { t: 'inspectCitizen'; id: number; route?: boolean }
   | { t: 'unlock'; id: string }
@@ -423,6 +438,8 @@ export type ServerMsg =
   /** flat triples: x, y, under byte (docs/underground.md); only for tiles whose under byte changed, sent before 'aux' and 'tiles' */
   | { t: 'under'; u: number[] }
   | { t: 'parcels'; parcels: ParcelDTO[]; removed?: number[] }
+  /** a sector of the world map (shared/src/worldmap.ts): its version and the run-length coded map bytes of its modified chunks; chunks not listed are as the seed made them */
+  | { t: 'mapSector'; sx: number; sy: number; v: number; c: [number, number, string][] }
   | { t: 'players'; players: PlayerDTO[] }
   /** flat quads: id, x, y, flags (see packCitizenFlags) */
   | { t: 'citizens'; c: number[] }

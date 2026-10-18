@@ -35,3 +35,5 @@ export * from './helicopters';
 export * from './metro';
 export * from './fleet';
 export * from './history';
+export * from './worldmap';
+export * from './parcelops';

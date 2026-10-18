@@ -18,6 +18,7 @@ import type { Rail } from './sim/rail';
 import type { Metro } from './sim/metro';
 import { Onboarding } from './goals';
 import { historyOf, type History } from './history';
+import { MapSummaries } from './worldmap';
 
 interface Client {
   conn: Conn; player: Player | null; subs: Set<string>; lastHint: number;
@@ -53,7 +54,7 @@ export interface GameConfig {
  * What a spectator may still ask: looking, never changing. A whitelist, so an intent added to ClientMsg later is refused in
  * spectate mode until it is listed here. (hello and ping are answered before this, as for everyone.)
  */
-const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist']);
+const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map']);
 const SPECTATE_REFUSAL = 'Read-only showcase: you can look around, but nothing can be changed here';
 const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) => k.tool!.id));
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
@@ -92,9 +93,12 @@ export class Net {
   private onboarding: Onboarding | null;
   /** spectate: player records made by a visitor's hello, removed when the last socket with that player closes */
   private visitors = new Set<string>();
+  /** the world map's ground, per sector (worldmap.ts, docs/world-map.md) */
+  readonly map: MapSummaries;
 
   constructor(private w: World, private sim: Simulation, source: ConnSource, private cfg: GameConfig) {
     this.onboarding = this.cfg.sandbox || this.cfg.spectate ? null : new Onboarding(w, sim.traffic);
+    this.map = new MapSummaries(w);
     source.onConnection((conn) => {
       if (!this.accepting) { conn.close(1013, 'starting'); return; }
       const c: Client = { conn, player: null, subs: new Set(), lastHint: 0, builderHint: -Infinity, builtSeen: -1, builtMoved: 0 };
@@ -137,7 +141,9 @@ export class Net {
       case 'unsub': for (const [cx, cy] of m.chunks) c.subs.delete(chunkKey(cx, cy)); return;
       case 'buy': return this.buy(c, m.x, m.y, m.w, m.h);
       case 'build': return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
-      case 'parcel': return this.editParcel(c, m.id, m.taxRate, m.name);
+      case 'parcel': return this.editParcel(c, m.id, m.taxRate, m.name, m.color);
+      case 'parcelOp': return this.parcelOp(c, m);
+      case 'map': for (const json of this.map.answer(m.s)) if (c.conn.open) c.conn.send(json); return;
       case 'inspect': return this.inspect(c, m.x, m.y, m.full === true);
       case 'inspectCitizen': return this.send(c, { t: 'citizen', id: Number(m.id), info: this.sim.describeCitizen(Number(m.id), m.route === true) });
       case 'unlock': return this.unlock(c, String(m.id));
@@ -821,12 +827,38 @@ export class Net {
     this.siteList(c, parcel.id);
   }
 
-  private editParcel(c: Client, id: number, taxRate?: number, name?: string) {
-    const parcel = this.w.parcels.get(id);
+  /** Name, tax rate and colour of a parcel; on an estate member, of the whole estate (docs/world-map.md section 2). */
+  private editParcel(c: Client, id: number, taxRate?: number, name?: string, color?: number) {
+    const parcel = this.w.parcels.get(Number(id));
     if (!parcel || !this.mayEdit(c.player!, parcel.owner)) return this.toast(c, 'Not your parcel');
-    if (typeof taxRate === 'number' && Number.isFinite(taxRate)) parcel.taxRate = Math.round(Math.min(MAX_TAX, Math.max(0, taxRate)) * 100) / 100;
-    if (typeof name === 'string' && name.trim()) parcel.name = name.trim().slice(0, 24);
-    this.w.dirtyParcels.add(id);
+    const all = parcel.group !== undefined ? this.w.estateOf(parcel.group) : [parcel];
+    for (const p of all) {
+      if (typeof taxRate === 'number' && Number.isFinite(taxRate)) p.taxRate = Math.round(Math.min(MAX_TAX, Math.max(0, taxRate)) * 100) / 100;
+      if (typeof name === 'string' && name.trim()) p.name = name.trim().slice(0, 24);
+      if (typeof color === 'number' && Number.isInteger(color)) { if (color < 0) delete p.color; else p.color = color & 0xffffff; }
+      this.w.dirtyParcels.add(p.id);
+    }
+  }
+  /** Combine, split or leave an estate (World.combineParcels etc., rules in shared/src/parcelops.ts). */
+  private parcelOp(c: Client, m: Extract<ClientMsg, { t: 'parcelOp' }>) {
+    const may = (owner: string) => this.mayEdit(c.player!, owner);
+    if (m.op === 'combine') {
+      if (!Array.isArray(m.ids)) return;
+      const r = this.w.combineParcels(m.ids.slice(0, 256).map(Number), may);
+      if (typeof r === 'string') return this.toast(c, r);
+      return this.toast(c, r.estate > 1 ? `Combined into an estate of ${r.estate} parcels${r.merged ? ` (${r.merged} merged into one)` : ''}` : 'Combined into one parcel', 'info');
+    }
+    if (m.op === 'split') {
+      if (m.axis !== 'x' && m.axis !== 'y') return;
+      const r = this.w.splitParcel(Number(m.id), m.axis, Number(m.at), may);
+      if (typeof r === 'string') return this.toast(c, r);
+      return this.toast(c, `Split off ${r.name}, ${r.w}×${r.h} tiles`, 'info');
+    }
+    if (m.op === 'ungroup') {
+      const r = this.w.leaveEstate(Number(m.id), may);
+      if (r) return this.toast(c, r);
+      return this.toast(c, 'Taken out of the estate', 'info');
+    }
   }
 
   // ---- outbound, called after every simulation tick -------------------------
@@ -868,6 +900,7 @@ export class Net {
     if (w.dirtyAux.size) {
       const byChunk = new Map<string, number[]>();
       for (const [x, y] of w.dirtyAux.values()) {
+        this.map.touch(x, y);
         const key = chunkKey(chunkOf(x), chunkOf(y));
         let arr = byChunk.get(key);
         if (!arr) { arr = []; byChunk.set(key, arr); }
@@ -885,6 +918,7 @@ export class Net {
     if (w.dirtySub.size) {
       const byChunk = new Map<string, number[]>();
       for (const [x, y] of w.dirtySub.values()) {
+        this.map.touch(x, y);
         const key = chunkKey(chunkOf(x), chunkOf(y));
         let arr = byChunk.get(key);
         if (!arr) { arr = []; byChunk.set(key, arr); }
@@ -901,6 +935,7 @@ export class Net {
     if (w.dirtyTiles.size) {
       const byChunk = new Map<string, number[]>();
       for (const [x, y] of w.dirtyTiles.values()) {
+        this.map.touch(x, y);
         const key = chunkKey(chunkOf(x), chunkOf(y));
         let arr = byChunk.get(key);
         if (!arr) { arr = []; byChunk.set(key, arr); }

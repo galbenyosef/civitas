@@ -4,7 +4,7 @@ import {
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
-  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName,
+  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName, planCombine, planSplit, KIND_NAMES, isBuildable,
 } from '@msimcity/shared';
 import { LIFE, stageFor } from './sim/life';
 import type { GoalState } from './goals';
@@ -42,6 +42,10 @@ export interface Parcel {
   x: number; y: number; w: number; h: number;
   taxRate: number;
   stats: ParcelStats;
+  /** the estate it belongs to (docs/world-map.md section 2); absent in older saves and for lone parcels */
+  group?: number;
+  /** a colour its owner gave it on the map; absent: the owner's */
+  color?: number;
 }
 export type Progress = Record<Counter, number>;
 export const emptyProgress = (): Progress => ({ built: 0, roads: 0, housed: 0, jobs: 0, parked: 0 });
@@ -179,7 +183,7 @@ const PALETTE = [0xe6194b, 0x3cb44b, 0xffe119, 0x4363d8, 0xf58231, 0x911eb4, 0x4
 
 export const emptyStats = (): ParcelStats => ({
   population: 0, jobs: 0, employed: 0, roads: 0, taxToday: 0, taxYesterday: 0,
-  jobsByKind: new Array(KIND_ID_COUNT).fill(0), staffedByKind: new Array(KIND_ID_COUNT).fill(0), sites: 0, // by kind id
+  jobsByKind: new Array(KIND_ID_COUNT).fill(0), staffedByKind: new Array(KIND_ID_COUNT).fill(0), sites: 0, buildings: 0, value: 0, // by kind id
 });
 
 /**
@@ -852,7 +856,77 @@ export class World {
   /** Car ownership is decided once per citizen, more likely for office workers (the office family; `kind` is a kind id). */
   ownsCar(id: number, kind: number) { return hash2(id, 41) < (familyOf(kind) === Zone.Office ? CAR_OWNERSHIP_OFFICE : CAR_OWNERSHIP); }
   parcelDTO(p: Parcel): ParcelDTO {
-    return { id: p.id, owner: p.owner, name: p.name, x: p.x, y: p.y, w: p.w, h: p.h, taxRate: p.taxRate, stats: { ...p.stats, jobsByKind: [...p.stats.jobsByKind], staffedByKind: [...p.stats.staffedByKind] } };
+    return {
+      id: p.id, owner: p.owner, name: p.name, x: p.x, y: p.y, w: p.w, h: p.h, taxRate: p.taxRate, stats: { ...p.stats, jobsByKind: [...p.stats.jobsByKind], staffedByKind: [...p.stats.staffedByKind] },
+      ...(p.group !== undefined ? { group: p.group } : {}), ...(p.color !== undefined ? { color: p.color } : {}),
+    };
+  }
+
+  // ---- parcel management (docs/world-map.md section 2; rules in shared/src/parcelops.ts) --------------------
+
+  /** The parcels of an estate (empty for undefined). */
+  estateOf(group: number | undefined): Parcel[] {
+    return group === undefined ? [] : [...this.parcels.values()].filter((p) => p.group === group);
+  }
+  /**
+   * Combine parcels (and the estates they are in): rectangles merge, whatever is left becomes one estate taking the
+   * lowest id's name, colour and tax rate. Returns the reason on refusal, else what happened.
+   */
+  combineParcels(ids: readonly number[], mayEdit: (owner: string) => boolean): string | { merged: number; estate: number } {
+    const plan = planCombine(ids, (id) => this.parcels.get(id), this.parcels.values(), mayEdit);
+    if (!plan.ok) return plan.reason;
+    const lead = this.parcels.get(Math.min(...plan.parcels))!;
+    for (const [keep, gone] of plan.merges) {
+      const k = this.parcels.get(keep)!, g = this.parcels.get(gone)!;
+      for (let y = g.y; y < g.y + g.h; y++) for (let x = g.x; x < g.x + g.w; x++) this.setParcelId(x, y, keep);
+      const x0 = Math.min(k.x, g.x), y0 = Math.min(k.y, g.y); // the two make a rectangle: their bounding box
+      Object.assign(k, { x: x0, y: y0, w: Math.max(k.x + k.w, g.x + g.w) - x0, h: Math.max(k.y + k.h, g.y + g.h) - y0 });
+      k.stats.taxToday += g.stats.taxToday; k.stats.taxYesterday += g.stats.taxYesterday;
+      this.parcels.delete(gone);
+      this.removedParcels.add(gone); this.dirtyParcels.delete(gone);
+    }
+    // the rectangles' final extents (a parcel merged into twice is already up to date)
+    for (const [id, r] of plan.rect) { const q = this.parcels.get(id); if (q) Object.assign(q, r); }
+    const group = plan.estate.length > 1 ? this.nextId++ : undefined;
+    for (const id of plan.rect.keys()) {
+      const q = this.parcels.get(id)!;
+      q.group = group;
+      if (group === undefined) delete q.group;
+      if (q !== lead) { q.name = lead.name; q.taxRate = lead.taxRate; if (lead.color === undefined) delete q.color; else q.color = lead.color; }
+      this.recountRoads(id);
+      this.dirtyParcels.add(id);
+    }
+    return { merged: plan.merges.length, estate: plan.estate.length };
+  }
+  /** Split a parcel along x = at or y = at; the new part leaves any estate. Returns the reason on refusal, else the new parcel. */
+  splitParcel(id: number, axis: 'x' | 'y', at: number, mayEdit: (owner: string) => boolean): string | Parcel {
+    const p = this.parcels.get(id);
+    if (!p || !mayEdit(p.owner)) return 'Not your parcel';
+    const plan = planSplit(p, axis, at, {
+      isWater: (x, y) => !isBuildable(this.getTile(x, y)),
+      doorOf: (x, y) => this.doorOf(x, y),
+      nameAt: (x, y) => { const k = this.kindIdAt(x, y); return k ? `the ${KIND_NAMES[k]}` : 'a building'; },
+    });
+    if (!plan.ok) return plan.reason;
+    const name = `${p.name.replace(/ \((east|south)\)$/, '')} (${plan.side})`.slice(0, 24);
+    const q: Parcel = { id: this.nextId++, owner: p.owner, name, ...plan.part, taxRate: p.taxRate, stats: emptyStats(), ...(p.color !== undefined ? { color: p.color } : {}) };
+    Object.assign(p, plan.keep);
+    this.parcels.set(q.id, q);
+    for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) this.setParcelId(x, y, q.id);
+    this.recountRoads(p.id); this.recountRoads(q.id);
+    this.dirtyParcels.add(p.id); this.dirtyParcels.add(q.id);
+    return q;
+  }
+  /** Take a parcel out of its estate; an estate left with one member is dissolved. */
+  leaveEstate(id: number, mayEdit: (owner: string) => boolean): string | null {
+    const p = this.parcels.get(id);
+    if (!p || !mayEdit(p.owner)) return 'Not your parcel';
+    if (p.group === undefined) return 'That parcel is not in an estate';
+    const rest = this.estateOf(p.group).filter((q) => q !== p);
+    delete p.group;
+    this.dirtyParcels.add(p.id);
+    if (rest.length === 1) { delete rest[0].group; this.dirtyParcels.add(rest[0].id); }
+    return null;
   }
   recountRoads(id: number) {
     const parcel = this.parcels.get(id);

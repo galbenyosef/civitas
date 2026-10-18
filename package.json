@@ -17,7 +17,8 @@
     "buildings:check": "tsx packages/shared/scripts/check-buildings.ts",
     "demo:check": "tsx packages/server/src/demo/check.ts",
     "local:check": "tsx packages/server/src/local/check.ts",
-    "history:check": "tsx packages/server/src/history-check.ts"
+    "history:check": "tsx packages/server/src/history-check.ts",
+    "parcels:check": "tsx packages/server/src/parcels-check.ts"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

@@ -11,6 +11,7 @@ import {
   GROW_FORMS, topLevelOf, firstLevelOf, isMergedKind, venueCapacityOf, isMultiTile, placedFromAnchor, planStructure, packTile, terrainOf,
   zoneOf, isBuildable, underConstruction, isGatewayId, GATEWAY_OF, GATEWAY_WORDS, bridgeSpanAt, BRIDGE_STYLE_NAMES,
   type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
+  buildingValue, LAND_PRICE_PER_TILE, ROAD_COST,
 } from '@msimcity/shared';
 import type { Building, Citizen, Leg, Mover, Vehicle, World, MergePlan } from '../world';
 import { noteTrail, resetTrail, tkey, untkey, lifeDefaults, hasJobs } from '../world';
@@ -616,15 +617,16 @@ export class Simulation {
   private recomputeStats() {
     const w = this.w;
     let jobs = 0, employed = 0;
-    const per = new Map<number, { population: number; jobs: number; employed: number; byKind: number[]; staffed: number[]; sites: number }>();
+    const per = new Map<number, { population: number; jobs: number; employed: number; byKind: number[]; staffed: number[]; sites: number; buildings: number; value: number }>();
     const bucket = (pid: number) => {
       let s = per.get(pid);
-      if (!s) { s = { population: 0, jobs: 0, employed: 0, byKind: new Array(KIND_ID_COUNT).fill(0), staffed: new Array(KIND_ID_COUNT).fill(0), sites: 0 }; per.set(pid, s); }
+      if (!s) { s = { population: 0, jobs: 0, employed: 0, byKind: new Array(KIND_ID_COUNT).fill(0), staffed: new Array(KIND_ID_COUNT).fill(0), sites: 0, buildings: 0, value: 0 }; per.set(pid, s); }
       return s;
     };
     this.services.length = 0;
     for (const b of w.buildings.values()) {
       const s = bucket(w.parcelIdAt(b.x, b.y));
+      if (b.level > 0) { s.buildings++; s.value += buildingValue(b.id, b.level); } // book value (docs/world-map.md)
       if (b.zone === Zone.Residential) { s.population += b.occupants; continue; }
       if (b.zone === Zone.Parking) continue;
       const cap = capacityOf(b.id, b.level);
@@ -649,10 +651,12 @@ export class Simulation {
       housed.set(p.owner, (housed.get(p.owner) ?? 0) + s.population);
       filled.set(p.owner, (filled.get(p.owner) ?? 0) + s.employed);
       const st = p.stats;
+      const value = Math.round(s.value + p.w * p.h * LAND_PRICE_PER_TILE + st.roads * ROAD_COST);
       const changed = s.population !== st.population || s.jobs !== st.jobs || s.employed !== st.employed || s.sites !== st.sites
+        || s.buildings !== st.buildings || value !== st.value
         || s.byKind.some((v, i) => v !== st.jobsByKind[i]) || s.staffed.some((v, i) => v !== st.staffedByKind[i]);
       if (!changed) continue;
-      st.population = s.population; st.jobs = s.jobs; st.employed = s.employed; st.sites = s.sites;
+      st.population = s.population; st.jobs = s.jobs; st.employed = s.employed; st.sites = s.sites; st.buildings = s.buildings; st.value = value;
       st.jobsByKind = [...s.byKind]; st.staffedByKind = [...s.staffed];
       w.dirtyParcels.add(p.id);
     }
