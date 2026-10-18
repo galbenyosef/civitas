@@ -1,6 +1,16 @@
 import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, isMultiTile, trackDragPath, BRIDGE_MAX_SPAN, type KindToolId } from '@msimcity/shared';
 import type { CameraRig } from './camera';
 import { Vector3 } from 'three';
+import { WheelClassifier, pinchFactor, type PadMode } from './gestures';
+
+const PAD_KEY = 'msimcity.padMode';
+/** What two-finger scroll does: 'auto' tells a trackpad from a mouse wheel by the events (gestures.ts), the others force it. */
+function readPadMode(): PadMode {
+  try { const v = localStorage.getItem(PAD_KEY); if (v === 'auto' || v === 'trackpad' || v === 'mouse') return v; } catch { /* storage blocked: auto */ }
+  return 'auto';
+}
+/** Safari's trackpad pinch/rotate (GestureEvent is not in lib.dom) */
+interface GestureLike extends UIEvent { scale: number; rotation: number; clientX: number; clientY: number }
 
 export type ToolId = 'select' | 'buy' | 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | KindToolId;
 /** `?dev` in the URL shows draft kinds (catalogue `draft: true`) in the tool bar and on their keys. */
@@ -71,6 +81,15 @@ export class Input {
   private lastPaint: [number, number] | null = null;
   private buyStart: [number, number] | null = null;
   private tmp = new Vector3();
+  /** trackpad input (two-finger scroll, pinch, rotate) is gathered here and eased into the rig a frame at a time in update() */
+  private pend = { panX: 0, panY: 0, yaw: 0, pitch: 0, zoom: 0 };
+  private zoomAt: { x: number; y: number } | null = null;
+  private gPivot = new Vector3();
+  private gPivotAt = -1e9;
+  private pad: PadMode = readPadMode();
+  private cls = new WheelClassifier();
+  /** a Safari gesture in progress: the last scale/rotation seen, and whether the rotation has passed its dead zone */
+  private gest: { scale: number; rot: number; armed: boolean } | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private rig: CameraRig, private cb: InputCallbacks) {
     canvas.addEventListener('pointerdown', this.down);
@@ -78,6 +97,16 @@ export class Input {
     canvas.addEventListener('pointerup', this.up);
     canvas.addEventListener('pointercancel', this.up);
     canvas.addEventListener('wheel', this.wheel, { passive: false });
+    for (const t of ['gesturestart', 'gesturechange', 'gestureend']) canvas.addEventListener(t, this.gesture as EventListener, { passive: false });
+    const sel = document.getElementById('padMode') as HTMLSelectElement | null;
+    if (sel) {
+      sel.value = this.pad;
+      sel.addEventListener('change', () => {
+        this.pad = sel.value as PadMode;
+        try { localStorage.setItem(PAD_KEY, this.pad); } catch { /* not remembered */ }
+        sel.blur(); // a focused select swallows the camera keys
+      });
+    }
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     // middle button: stop browser autoscroll / paste so it can drive the orbit
     canvas.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
@@ -118,6 +147,31 @@ export class Input {
     if (k.has('KeyE')) this.rig.rotate(-1.6 * dt);
     if (k.has('KeyR')) this.rig.rotate(0, 1.2 * dt);
     if (k.has('KeyF')) this.rig.rotate(0, -1.2 * dt);
+    this.drain(dt);
+  }
+
+  /** Ease the gathered trackpad motion into the camera: a short time constant, so it follows the fingers without the steps of coarse events. */
+  private drain(dt: number) {
+    const p = this.pend;
+    if (!(p.panX || p.panY || p.yaw || p.pitch || p.zoom)) return;
+    const f = 1 - Math.exp(-Math.min(dt, 0.25) * 30);
+    const take = (v: number) => (Math.abs(v) < 1e-4 ? v : v * f);
+    const h = this.canvas.clientHeight;
+    const px = take(p.panX), py = take(p.panY);
+    if (px || py) { this.rig.panPixels(px, py, h); p.panX -= px; p.panY -= py; }
+    const yaw = take(p.yaw), pitch = take(p.pitch);
+    if (yaw || pitch) { this.rig.orbitAround(this.gPivot, yaw, pitch); p.yaw -= yaw; p.pitch -= pitch; }
+    const z = take(p.zoom);
+    if (z) {
+      if (this.zoomAt) this.rig.zoomAt(Math.exp(z), this.zoomAt.x, this.zoomAt.y, this.canvas.clientWidth, h);
+      else this.rig.zoom(Math.exp(z));
+      p.zoom -= z;
+    }
+    if (Math.abs(p.panX) < 0.01) p.panX = 0;
+    if (Math.abs(p.panY) < 0.01) p.panY = 0;
+    if (Math.abs(p.yaw) < 1e-5) p.yaw = 0;
+    if (Math.abs(p.pitch) < 1e-5) p.pitch = 0;
+    if (Math.abs(p.zoom) < 1e-4) p.zoom = 0;
   }
 
   private down = (e: PointerEvent) => {
@@ -196,9 +250,65 @@ export class Input {
     if (this.orbiting) { this.orbiting = false; this.canvas.style.cursor = ''; }
   };
 
+  /**
+   * The wheel, by what produced it (gestures.ts): a mouse wheel zooms, as ever; a trackpad two-finger scroll pans (with Alt:
+   * orbits and tilts); a pinch (ctrl+wheel in Chrome/Firefox) zooms about the cursor. Cmd+wheel is left to the browser.
+   */
   private wheel = (e: WheelEvent) => {
+    if (e.metaKey) return;
+    const kind = this.cls.classify(e, this.pad);
+    const lines = e.deltaMode === 0 ? 1 : 16;
+    const dx = e.deltaX * lines, dy = e.deltaY * lines;
+    if (kind === 'pinch') {
+      e.preventDefault(); // otherwise the browser zooms the whole page
+      this.pend.zoom += Math.log(pinchFactor(e.deltaY, e.deltaMode));
+      this.zoomAt = { x: e.offsetX, y: e.offsetY };
+      return;
+    }
+    if (e.altKey) {
+      // Alt + two-finger scroll orbits; with a mouse Alt+wheel does nothing, as before
+      if (this.pad === 'mouse' || (this.pad === 'auto' && this.cls.verdict === 'mouse')) return;
+      e.preventDefault();
+      this.setPivot(e.offsetX, e.offsetY, e.timeStamp);
+      this.pend.yaw += dx * 0.006;
+      this.pend.pitch -= dy * 0.005;
+      return;
+    }
     e.preventDefault();
+    if (kind === 'scroll') { this.pend.panX -= dx; this.pend.panY -= dy; return; }
     this.rig.zoom(Math.exp(e.deltaY * 0.0015));
+  };
+
+  /** the ground point a trackpad orbit turns about: under the cursor where the burst began, kept while it goes on */
+  private setPivot(x: number, y: number, now: number) {
+    if (now - this.gPivotAt > 300) {
+      if (!this.rig.groundAt(x, y, this.canvas.clientWidth, this.canvas.clientHeight, this.gPivot)) this.gPivot.copy(this.rig.target);
+    }
+    this.gPivotAt = now;
+  }
+
+  /** Safari only: trackpad pinch zooms about the cursor; a twist orbits once it passes a dead zone (a pinch always wobbles a little) */
+  private gesture = (ev: Event) => {
+    const e = ev as GestureLike;
+    e.preventDefault(); // otherwise Safari zooms the page
+    if (e.type === 'gesturestart') {
+      const r = this.canvas.getBoundingClientRect();
+      this.gest = { scale: 1, rot: 0, armed: false };
+      this.zoomAt = { x: e.clientX - r.left, y: e.clientY - r.top };
+      if (!this.rig.groundAt(this.zoomAt.x, this.zoomAt.y, this.canvas.clientWidth, this.canvas.clientHeight, this.gPivot)) this.gPivot.copy(this.rig.target);
+      this.gPivotAt = performance.now();
+      return;
+    }
+    const g = this.gest;
+    if (!g || e.type === 'gestureend') { this.gest = null; return; }
+    if (e.scale > 0 && g.scale > 0) this.pend.zoom += Math.log(g.scale / e.scale);
+    g.scale = e.scale;
+    if (!g.armed && Math.abs(e.rotation) > 8) { g.armed = true; g.rot = e.rotation; }
+    if (g.armed) {
+      this.gPivotAt = performance.now(); // pivot is fixed for the gesture
+      this.pend.yaw += (e.rotation - g.rot) * Math.PI / 180; // Safari's rotation is clockwise-positive; clockwise turns the view that way
+      g.rot = e.rotation;
+    }
   };
 
   private keydown = (e: KeyboardEvent) => {

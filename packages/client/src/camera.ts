@@ -40,6 +40,16 @@ export class CameraRig {
     this.target.addScaledVector(this.forward(), dy * s);
   }
   zoom(factor: number) { this.dist = Math.min(DIST_MAX, Math.max(DIST_MIN, this.dist * factor)); }
+  /** Zoom keeping the ground point under a screen position where it is (the cursor); plain zoom over the sky. */
+  zoomAt(factor: number, px: number, py: number, w: number, h: number) {
+    this.update(); this.camera.updateMatrixWorld();
+    const before = this.groundAt(px, py, w, h, new Vector3());
+    this.zoom(factor);
+    if (!before) return;
+    this.update(); this.camera.updateMatrixWorld();
+    const after = this.groundAt(px, py, w, h, new Vector3());
+    if (after) { this.target.x += before.x - after.x; this.target.z += before.z - after.z; }
+  }
   rotate(dYaw: number, dPitch = 0) {
     this.yaw += dYaw;
     this.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, this.pitch + dPitch));
