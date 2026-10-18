@@ -16,7 +16,7 @@ series lists. `server/src/history.ts` fills it.
 - **World series** (`WORLD_SERIES`): population, jobs filled and open, buildings, sites under construction, newcomers and
   leavers per hour (gateways), citizens on the move, cars driving and parked, average speed, share held up, transit boardings
   per hour (all modes), tick time (average and p95 over the last minute), and 15 education series (index, adults by level, enrolment
-  by stage, results over the last 24 hours: `docs/education.md` section 14).
+  by stage, results over the last 24 hours: `docs/education.md` section 15).
 - **Per player** (`PLAYER_SERIES`): treasury, income and spending per day (a rolling 24 hours, worked out from the hourly
   change of the ledger in `World.credit`), the population, job capacity and filled jobs of the parcels they own, and the pupils,
   school places and graduates on them.
