@@ -546,7 +546,8 @@ export type ServerMsg =
   /** your onboarding goals (shared/src/goals.ts), to you only, whenever they change; `completed` names a goal just finished and its reward */
   | { t: 'goals'; goals: GoalsDTO; completed?: { id: string; reward: string } }
   /** an advisor hint (shared/src/goals.ts HINTS); `msg` replaces the stock wording when the server has numbers to put in it */
-  | { t: 'hint'; id: string; msg?: string }
+  /** `at`: a tile the hint is about (the first-settlers moment flies the camera there, docs/first-five.md) */
+  | { t: 'hint'; id: string; msg?: string; at?: [number, number] }
   /** the city's history for the charts panel, to you only, when you open it: the world's series and yours (shared/src/history.ts) */
   | { t: 'history'; hour: number; world: RingsDTO; mine: RingsDTO }
   /** the newest hourly sample, to clients with the charts panel open: WORLD_SERIES values `w` and your PLAYER_SERIES values `p` */

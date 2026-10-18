@@ -13,7 +13,7 @@ import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } fr
 const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌' };
 
 /** Tool bar groups: land and roads first, then the catalogue kinds by what they are, bulldoze last. */
-const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
+const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable || k.family === 'residential' ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
 const GROUP_ORDER = ['Zones', 'Services', 'Transport', 'Leisure', 'Landmarks'];
 export const TOOLS: { id: ToolId; label: string; key: string; cost?: string; color?: string; group?: string }[] = [
   { id: 'select', label: 'Select / inspect', key: '1' },
@@ -34,6 +34,11 @@ export const TOOLS: { id: ToolId; label: string; key: string; cost?: string; col
   const i = TOOLS.findIndex((t) => t.id === 'road');
   TOOLS.splice(i + 1, 0, { id: 'roundabout', label: 'Roundabout (click a junction)', key: '', cost: `$${ROUNDABOUT_COST}`, color: '#7fa24d' },
     { id: 'flyover', label: 'Flyover (click a crossroads)', key: '', cost: `$${FLYOVER_COST}`, color: '#a9a59c' });
+}
+// the pioneer camp (docs/first-five.md, shared buildings/camp.ts) sits right after Residential; every letter is taken, so no key
+{
+  const i = TOOLS.findIndex((t) => t.id === 'camp'), r = TOOLS.findIndex((t) => t.id === 'res');
+  if (i > r && r >= 0) TOOLS.splice(r + 1, 0, ...TOOLS.splice(i, 1));
 }
 // railway track is painted too (shared/src/rail.ts): it sits right after the rail stations; every letter is taken, so no key
 {

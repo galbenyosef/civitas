@@ -212,7 +212,7 @@ Copy this section into the prompt of a model designing buildings. It is complete
 | `chimneyStack` | x y z h r [colour] |
 | `door`, `garage`, `balcony`, `baywindow`, `porch`, `awning`, `cornice`, `dormer` | the facade helpers in the table above |
 
-Windows: write `true` as the box's window class to get the kind's windows (homes: sashes, shops: a shopfront on the ground floor and sashes above, factories: strip windows high up). Only boxes with windows get windows; plain boxes are solid.
+Windows: write `true` as the box's window class to get the kind's windows (homes: sashes, shops: a shopfront on the ground floor and sashes above, factories: strip windows high up). Only boxes with windows get windows; plain boxes are solid. One class is not a window: `fire` makes the whole box glow, faintly by day and fully from dusk, flickering on a phase of its own per building and per part (the pioneer camp's fire pit, lanterns and festoon bulbs, `camp.ts`).
 
 Colours: `cream white pale stone brick grey dark slate terracotta glass glassDark corrugated rust chimney yellow navy red crossRed brown sand signBlue awning door steel plant roofGrey tan green silver charcoal timber mint boxBlue boxOrange boxGreen flare lawn lawnDark gravel pond hedge court gold marquee plum`, or a `0xRRGGBB` number.
 

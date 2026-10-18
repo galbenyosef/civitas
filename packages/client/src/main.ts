@@ -39,6 +39,7 @@ import { Input, DEV_TOOLS, structureTool, type Rect, type ToolId } from './input
 import { UI } from './ui';
 import { ContextMenu } from './contextmenu';
 import { Onboarding } from './onboarding';
+import { CameraMoment } from './moment';
 import { LinesPanel } from './lines';
 import { ChartsPanel } from './charts';
 import { PolicyPanel } from './policies';
@@ -287,7 +288,10 @@ net.on('stats', (m) => {
 });
 net.on('toast', (m) => ui.toast(m.kind, m.msg));
 // onboarding goals, advisor hints and the tech chip's pulse (onboarding.ts)
+/** the first-settlers camera moment (moment.ts, docs/first-five.md); never over a demo tour */
+const moment = new CameraMoment(rig, () => { following = false; });
 const onboarding = new Onboarding({ net, world, liveTick, tool: (t) => input.setTool(t as ToolId), toast: (k, msg) => ui.toast(k, msg),
+  moment: (x, y, caption) => { if (!tour && !mapMode.on) moment.play(x, y, caption); },
   focus: (x, y) => { following = false; rig.target.set(x + 0.5, 0, y + 0.5); rig.dist = Math.min(Math.max(rig.dist, 30), 60); }, openTech: () => { ui.toggleTech(true); ui.showTech(world.myPlayer); } });
 ui.onHint = (id) => onboarding.hint(id);
 net.on('railLines', (m) => { trains.setLines(m.lines); rail.setLines(m.lines); });
@@ -1056,6 +1060,7 @@ function frame(now: number) {
   if (canvas.clientWidth !== sized.w || canvas.clientHeight !== sized.h) resize(); // the window changed, or was not laid out at the first resize
   input.update(dt);
   tour?.frame(dt); // the tour's camera flight, before the rig places the camera
+  moment.frame(); // the first-settlers moment's flight (moment.ts)
   mapMode.frameCamera(dt);
   rig.update();
   // zooming out past the 3D limit opens the map; zooming in below the map's returns to 3D

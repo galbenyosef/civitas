@@ -27,6 +27,8 @@ for (const k of MANIFEST) {
 export const isGatewayId = (kind: number) => GATEWAY_OF[kind] !== undefined;
 /** The motorway connection's kind id (through-traffic and inter-city freight use only motorway gateways). */
 export const MOTORWAY_KIND = MANIFEST.find((k) => k.id === 'motorway')?.kindId ?? -1;
+/** The pioneer camp's kind id (buildings/camp.ts, Audit #1): a new player's first settlers come through the gates to it at once. */
+export const CAMP_KIND = MANIFEST.find((k) => k.id === 'camp')?.kindId ?? -1;
 export const GATEWAY_WORDS: Record<GatewayType, string> = { motorway: 'the motorway', rail: 'the station', bus: 'the coach station', air: 'the airport', sea: 'the harbour' };
 
 /** A gateway's panel figures (BuildingInfo.gateway). */

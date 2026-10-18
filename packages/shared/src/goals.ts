@@ -5,7 +5,7 @@
  */
 
 export type GoalId =
-  | 'plot' | 'road' | 'homes' | 'yard' | 'res12' | 'shops' | 'masonry' | 'res50' | 'cover' | 'leisure' | 'books' | 'res250' | 'busline';
+  | 'plot' | 'road' | 'camp' | 'homes' | 'yard' | 'res12' | 'shops' | 'masonry' | 'res50' | 'cover' | 'leisure' | 'books' | 'res250' | 'busline';
 
 /** Where "show me" points the camera: the open land beside the Commons, or the player's own land. */
 export type GoalFocus = 'commons' | 'plot';
@@ -26,8 +26,9 @@ export interface GoalDef {
 }
 
 /**
- * The chain, in order: one goal is active at a time and the next two are previewed. Targets follow the after-Gauntlet-3
- * curve (12 / 50 / 250 residents at about 13 / 20 / 70 minutes); rewards are modest (about $3,000 over the whole chain
+ * The chain, in order: one goal is active at a time and the next two are previewed. The first five goals fall in the
+ * first three minutes (docs/first-five.md: plot, street, camp, homes, yard, each answered on screen within seconds);
+ * then 12 / 50 / 250 residents at about 4 / 15 / 60 minutes. Rewards are modest (about $3,000 over the whole chain
  * against $10-15k of tax in the same two hours) and land in the stretches where cash runs thin.
  */
 export const GOALS: GoalDef[] = [
@@ -37,15 +38,19 @@ export const GOALS: GoalDef[] = [
   { id: 'road', title: 'Lay a street', how: 'Road (3): drag streets through your plot and join them to the Commons\' road.',
     why: 'Every lot needs a road beside it; every third row is a good rhythm.',
     parts: [{ label: 'road tiles on your land', target: 12 }], reward: { cash: 100 }, show: { tool: 'road', focus: 'plot' } },
+  // the pioneer camp (docs/first-five.md): it opens the moment it is pitched and its eight settlers come up the road at once
+  { id: 'camp', title: 'Pitch camp', how: 'Pioneer camp (under Residential): click a tile beside your street. It opens at once, no builders needed.',
+    why: 'Eight settlers come up the road within the hour: your first residents, and the crew for your builders\' yard.',
+    parts: [{ label: 'pioneer camp', target: 1 }], reward: { cash: 150 }, show: { tool: 'camp', focus: 'plot' } },
   { id: 'homes', title: 'Zone homes', how: 'Residential (4): paint lots along your streets. Zoning goes round roads.',
-    why: 'Homes bring residents, and residents pay property tax to you.',
+    why: 'Each lot opens a building site. Homes bring residents, and residents pay property tax to you.',
     parts: [{ label: 'residential lots beside a road', target: 24 }], reward: { cash: 200 }, show: { tool: 'res', focus: 'plot' } },
-  { id: 'yard', title: 'Hire your own builders', how: "Builders' yard (Y): place one beside one of your roads ($300; your first opens at once).",
-    why: "The Commons' builders work their own streets first; with a yard of your own your lots go up straight away.",
+  { id: 'yard', title: 'Hire your own builders', how: "Builders' yard (Y): place one beside your street, near the camp ($300; your first opens at once).",
+    why: 'Your settlers take its jobs and set off for the nearest sites the moment it opens; a first house takes them minutes.',
     parts: [{ label: "builders' yard", target: 1 }], reward: { cash: 300 }, show: { tool: 'yard', focus: 'plot' } },
-  { id: 'res12', title: 'First residents', how: 'Wait for the first homes to finish: builders walk to each site and work their shift.',
-    why: 'Twelve residents open Commercial zoning on the tech tree.',
-    parts: [{ label: 'residents', target: 12 }], reward: { tech: 'zon1' }, show: { focus: 'plot' } },
+  { id: 'res12', title: 'First homes', how: 'Watch the first houses finish and families move in: builders walk site to site and work their shift.',
+    why: 'Twelve residents in proper homes (the camp aside) open Commercial zoning on the tech tree.',
+    parts: [{ label: 'residents in homes', target: 12 }], reward: { tech: 'zon1' }, show: { focus: 'plot' } },
   { id: 'shops', title: 'Open the shops', how: 'Commercial (5): zone a few lots near your homes.',
     why: 'Shops give your residents work close by, and their staff pay income tax to you rather than to the Commons.',
     parts: [{ label: 'commercial lots', target: 6 }, { label: 'shop jobs filled', target: 8 }], reward: { cash: 300 }, show: { tool: 'com', focus: 'plot' } },
@@ -94,9 +99,12 @@ export interface GoalsDTO {
  * it. The server sends the ones only it can see (builders, the books, the jam, boredom, newcomers), the client raises the
  * rest (night, a refused build on an empty treasury); either way the client shows at most one per HINT_GAP ticks.
  */
-export type HintId = 'builders' | 'buildersRoad' | 'deficit' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night';
+export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night';
 export interface HintDef { kind: 'tip' | 'alert'; msg: string; tool?: string; panel?: 'tech' | 'ledger' | 'lines' }
 export const HINTS: Record<HintId, HintDef> = {
+  // the first-settlers moment (docs/first-five.md): the server sends it once per player with `at` (the camp) and the
+  // first arrival's name in `msg`; the client flies the camera there for a few seconds instead of showing a strip
+  settlers: { kind: 'tip', msg: 'Your first settlers have arrived' },
   builders: { kind: 'alert', tool: 'yard', msg: "Your lots are waiting: the Commons' builders serve the Commons first. Place a builders' yard ($300; your first opens at once) beside one of your roads." },
   buildersRoad: { kind: 'alert', msg: "Your lots are waiting and nobody has built on your land for a day: check that a road links your builders' yard to them." },
   deficit: { kind: 'alert', panel: 'ledger', msg: 'You are spending more than you earn, two days running: staff wages and upkeep come out of your treasury. Raise the tax slider in a parcel, add homes, or hold off on services.' },

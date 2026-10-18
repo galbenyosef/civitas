@@ -266,9 +266,11 @@ export const SECTIONS: DemoSection[] = [
     // the roundabout at (-20, -6), one of the busiest crossroads, takes its four corner lots
     clear: [block(1, 1, 2, 1), block(1, 1, 1, 2), [-21, -7, 1, 1], [-19, -7, 1, 1], [-21, -5, 1, 1], [-19, -5, 1, 1]],
     // the motorway connection (gateways): just outside the west perimeter road, where newcomers, visitors and freight come in
-    land: [{ name: 'Motorway junction', rect: [-39, -3, 4, 6] }],
+    // and a pioneer camp beside it (Audit #1): where a new player's first settlers live
+    land: [{ name: 'Motorway junction', rect: [-39, -3, 4, 6] }, { name: 'Pioneer camp', rect: [-39, 3, 4, 3] }],
     placements: [
       { kind: 'motorway', door: [-36, 0], rot: 1 },
+      { kind: 'camp', door: [-36, 4], rot: 1 },
       { kind: 'bus-depot', door: [1, -2], rot: 0 },
       { kind: 'multi-storey', door: [0, -5], rot: 2 },
       { kind: 'park-and-ride', door: [-4, 3], rot: 0 },
@@ -495,7 +497,7 @@ export const TOUR: string[] = [
   'welcome',
   'block-residential', 'block-commercial', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
   'cab-office', 'takeaway', 'waste-depot', 'parcel-depot',
-  'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'roundabout', 'flyover',
+  'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
   'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
   'fire-post', 'fire', 'large-fire-station', 'fire-hq',

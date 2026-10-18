@@ -1,7 +1,7 @@
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, ROAD_UPKEEP, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
   DRIVE_MIN_TILES, CAR_FETCH_RADIUS, PARK_RADIUS, PARKING_FEE, KERB_CAP, FREIGHT_TRIPS_PER_LEVEL_PER_DAY, VISITORS_PER_100_PEAK_HOUR,
-  Zone, CitizenState, VehicleClass, VehicleKind, KIND_COUNT, KIND_ID_COUNT, KIND_NAMES, CIVIC_UPKEEP, WORK_PER_LEVEL, CONSTRUCTION_FEE, MAX_BUILDERS_PER_SITE,
+  Zone, CitizenState, VehicleClass, VehicleKind, KIND_COUNT, KIND_ID_COUNT, KIND_NAMES, CIVIC_UPKEEP, CONSTRUCTION_FEE, MAX_BUILDERS_PER_SITE, CAMP_KIND,
   capacityOf, parkingOf, wageOf, upkeepOf, workOf, familyOf, isGrowableId, isCivicId, isServiceId, isParkingId,
   withLevel, withProgress, progressOf, isRoad, tileKey, parseKey, mod,
   OCCUPATIONS, pickShift, hoursToTicks, hasFeature, levelFeature, nameFor, surnameFor, hash2, LifeStage, LIFE_STAGE_NAMES,
@@ -36,6 +36,7 @@ import { Couriers } from './couriers';
 import { Skills, Place } from './skills';
 import { plantGardens, deepBackOk, GARDEN_KIND } from './blocks';
 import { Schools, ERRAND_SCHOOL } from './schools';
+import { FirstFive } from './firstfive';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -173,6 +174,8 @@ export class Simulation {
   schools: Schools;
   /** jobs, wages and migration by education (sim/skills.ts, docs/education.md section 7) */
   skills: Skills;
+  /** the first five minutes (sim/firstfive.ts, docs/first-five.md): the camp's settlers, the starter crew, the first-settlers moment */
+  start: FirstFive;
   /** messages for a parcel owner's screen (net.ts sends them as toasts and clears the list) */
   notices: { owner: string; msg: string }[] = [];
   /** owners already told that newcomers spawn in place; cleared once a gateway brings someone in, so a town that loses its last gateway hears again */
@@ -204,6 +207,14 @@ export class Simulation {
     this.skills = new Skills(w, (c) => this.leaveTown(c), (owner, msg) => this.notices.push({ owner, msg })); // it says it once a game day itself
     this.schools.onGraduated = (c) => this.skills.graduated(c);
     w.onCitizenRemoved = (c) => { this.traffic.leave(c); this.transit.drop(c); this.taxis.drop(c); this.mobile.forget(c); this.pool.forget(c); this.releaseParking(c); this.dropVenue(c); };
+    this.start = new FirstFive(w, this.gateways, {
+      spawn: (home) => this.spawnCitizen(home),
+      arriveFrom: (home, x, y) => this.arriveVia(this.start.roadGate(x, y), home.x, home.y),
+      hire: (c, b, path) => this.hire(c, b, path),
+      canTake: (c, b) => this.skills.placeFor(b, c.edu) !== Place.None, // E4's skill gate as findJob applies it
+      moveHome: (c, b, hh) => this.moveHome(c, b, hh),
+      entries: () => this.entries,
+    });
   }
 
   tick() {
@@ -218,6 +229,7 @@ export class Simulation {
     if (w.tick % SPAWN_EVERY === 3) this.spawn();
     if (w.tick % ENTRIES_EVERY === 7) this.findEntries();
     this.gateways.tick((g, hx, hy) => this.arriveVia(g, hx, hy));
+    this.start.tick(); // a camp's settlers coming up the road (sim/firstfive.ts)
     if (w.tick % SWEEP_EVERY === 11) this.traffic.sweep();
     this.traffic.beginTick();
     this.routeBudget = ROUTE_BUDGET;
@@ -855,7 +867,7 @@ export class Simulation {
       const need = levelFeature(target);
       if (need && !w.ownerHas(b.x, b.y, need, hasFeature)) continue; // the owner's builders can't raise anything taller yet
       if (b.zone === Zone.Residential && target >= 3 && cov === 0) continue; // the top tiers want services nearby
-      w.createSite(b.x, b.y, b.id, target, merged ? workOf(b.id, target) : WORK_PER_LEVEL * target);
+      w.createSite(b.x, b.y, b.id, target, workOf(b.id, target)); // the catalogue's work: a first house is a third of WORK_PER_LEVEL (docs/first-five.md)
     }
     if (merges.length) w.mergeLots(merges);
   }
@@ -996,6 +1008,7 @@ export class Simulation {
     const c = this.makeCitizen(id, home, n.age, 70 + 28 * hash2(id, 212), n.edu);
     w.addCitizen(c);
     home.occupants++;
+    this.start.settled(c); // the first settlers on a player's land (sim/firstfive.ts)
     if (this.vacantJobs > 0) this.findJob(c);
   }
   // ---- migration through gateways (sim/gateways.ts) ------------------------------
@@ -1085,6 +1098,7 @@ export class Simulation {
     const w = this.w;
     if (c.mig === MIG.In) {
       c.mig = 0; c.gx = undefined; c.gy = undefined;
+      this.start.settled(c); // the first settlers on a player's land (sim/firstfive.ts)
       if (this.vacantJobs > 0) this.findJob(c);
       return;
     }
@@ -1168,6 +1182,7 @@ export class Simulation {
     c.car = c.car || this.w.ownsCar(c.id, b.id); // a better job can mean a car
     if (this.vacantJobs > 0) this.vacantJobs--;
     this.scheduleNext(c);
+    this.start.hired(c, b); // a starter yard's crew sets out now (sim/firstfive.ts)
   }
 
   // ---- schedule -------------------------------------------------------------
@@ -1535,6 +1550,7 @@ export class Simulation {
     }
     if (c.stage === LifeStage.Retired) { c.money += LIFE.pension; noteIncome(c, LIFE.pension, tick); }
     if (c.stage !== LifeStage.Child && c.state === S.Home) this.lifeFamily(c, age, hh);
+    if (c.state === S.Home) this.start.campStep(c); // a camp settler moves into a finished home nearby (sim/firstfive.ts)
     if (c.job && c.friends.length < LIFE.maxFriends && Math.random() < LIFE.workFriendPerDay) {
       const o = this.pickFrom(this.socialIndex().work.get(tkey(c.wx, c.wy)), c);
       if (o) this.befriend(c, o);
@@ -1672,7 +1688,7 @@ export class Simulation {
     }
     if (c.par && age <= LIFE.moveOutMaxAge && hh && hh.ids.includes(c.par) && Math.random() < LIFE.moveOutPerDay) {
       const b = w.bestBuiltNear(c.hx, c.hy, [Zone.Residential], LIFE.moveOutRadius, 6,
-        (b, d) => (b !== home && b.occupants < capacityOf(b.id, b.level) ? 6 * Math.random() - d : null), (b) => w.hasRoadAccess(b.x, b.y));
+        (b, d) => (b !== home && b.id !== CAMP_KIND && b.occupants < capacityOf(b.id, b.level) ? 6 * Math.random() - d : null), (b) => w.hasRoadAccess(b.x, b.y)); // not into the tents
       if (b) { this.moveHome(c, b, w.nextId++); this.lifeEvents.movedOut++; }
     }
   }

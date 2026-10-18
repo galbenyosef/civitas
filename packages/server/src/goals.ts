@@ -1,5 +1,5 @@
 import {
-  GOALS, HINTS, TECH_BY_ID, Zone, TICKS_PER_DAY, familyOf, isLeisure, isHintId, rewardText, tileKey,
+  GOALS, HINTS, TECH_BY_ID, Zone, TICKS_PER_DAY, CAMP_KIND, familyOf, isLeisure, isHintId, rewardText, tileKey,
   type GoalDef, type GoalId, type GoalsDTO, type HintId, type LedgerDTO, type ServerMsg,
 } from '@msimcity/shared';
 import type { World, Player } from './world';
@@ -14,17 +14,21 @@ export interface GoalState {
   negStreak?: number; negDay?: number;
   /** tick each server hint was last sent, so none comes more than once a game day */
   hintAt?: Partial<Record<HintId, number>>;
+  /** the first-settlers moment has happened (docs/first-five.md; absent in older saves) */
+  settlers?: boolean;
 }
 
 /** A server hint is sent again (unless dismissed) at most this often, tips less often than alerts; the client spaces whatever arrives. */
 const HINT_REPEAT = { alert: TICKS_PER_DAY, tip: TICKS_PER_DAY * 3 };
 /** Hints that say what a goal already says: quiet while that goal is the active one. */
 const SAID_BY_GOAL: Partial<Record<HintId, GoalId>> = { builders: 'yard', bored: 'leisure', deficit: 'books' };
+/** Where "Pitch camp" sits in the chain: a player saved past it (before the camp existed) is not sent back to it. */
+const CAMP_AT = GOALS.findIndex((g) => g.id === 'camp');
 /** Hourly samples of the world's queued share, and the share over a day of them that counts as jammed. */
 const JAM_HOURS = 24, JAM_SHARE = 0.5, JAM_MIN_VEHICLES = 40;
 
 /** What the goals measure on a player's own land. */
-interface Tally { land: number; roads: number; resLots: number; comLots: number; shopJobs: number; yards: number; police: number; fire: number; leisure: number }
+interface Tally { land: number; camps: number; homePop: number; roads: number; resLots: number; comLots: number; shopJobs: number; yards: number; police: number; fire: number; leisure: number }
 
 /**
  * Onboarding goals and the advisor's server-side hints (shared/src/goals.ts). Net calls `check` a few times a game hour
@@ -39,7 +43,11 @@ export class Onboarding {
 
   /** The player's state, created on first use; goals a returning player has already met are marked done without a reward. */
   private state(p: Player): GoalState {
-    if (p.onboarding) return p.onboarding;
+    if (p.onboarding) {
+      const s = p.onboarding;
+      if (!s.done.includes('camp') && s.done.some((id) => GOALS.findIndex((g) => g.id === id) > CAMP_AT)) s.done.push('camp');
+      return s;
+    }
     const s: GoalState = { done: [] };
     p.onboarding = s;
     const t = this.tally(p);
@@ -94,9 +102,11 @@ export class Onboarding {
     switch (g.id) {
       case 'plot': return [t.land];
       case 'road': return [t.roads];
+      case 'camp': return [t.camps || (housed >= 8 ? 1 : 0)]; // or eight people housed another way: the chain never blocks on the camp
       case 'homes': return [t.resLots];
       case 'yard': return [t.yards];
-      case 'res12': case 'res50': case 'res250': return [housed];
+      case 'res12': return [t.homePop]; // in houses, not the camp's tents
+      case 'res50': case 'res250': return [housed];
       case 'shops': return [t.comLots, t.shopJobs];
       case 'masonry': return [p.tech.includes('con1') ? 1 : 0];
       case 'cover': return [t.police, t.fire];
@@ -114,7 +124,7 @@ export class Onboarding {
 
   private tally(p: Player): Tally {
     const w = this.w;
-    const t: Tally = { land: 0, roads: 0, resLots: 0, comLots: 0, shopJobs: 0, yards: 0, police: 0, fire: 0, leisure: 0 };
+    const t: Tally = { land: 0, camps: 0, homePop: 0, roads: 0, resLots: 0, comLots: 0, shopJobs: 0, yards: 0, police: 0, fire: 0, leisure: 0 };
     for (const q of w.parcels.values()) {
       if (q.owner !== p.id) continue;
       t.land += q.w * q.h;
@@ -123,6 +133,8 @@ export class Onboarding {
       for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) {
         const b = w.buildings.get(tileKey(x, y));
         if (!b) continue;
+        if (b.id === CAMP_KIND) { if (b.level > 0) t.camps++; continue; } // a camp is not a lot that grows
+        if (b.zone === Zone.Residential && b.level > 0) t.homePop += b.occupants;
         if (b.zone === Zone.Residential && w.hasRoadAccess(x, y)) t.resLots++;
         else if (b.zone === Zone.Commercial) t.comLots++;
         if (b.level <= 0) continue;
@@ -148,6 +160,17 @@ export class Onboarding {
     if (at !== undefined && this.w.tick - at < HINT_REPEAT[HINTS[id].kind] && at <= this.w.tick) return null;
     s.hintAt[id] = this.w.tick;
     return { t: 'hint', id, msg };
+  }
+
+  /**
+   * The first settlers have moved in on this player's land, at the camp (x, y) (sim/firstfive.ts): the camera moment,
+   * once per player ever, never after "skip the tutorial". Null when it has happened already.
+   */
+  settlers(p: Player, x: number, y: number, who: string): ServerMsg | null {
+    const s = this.state(p);
+    if (s.settlers) return null;
+    s.settlers = true;
+    return s.skipped ? null : { t: 'hint', id: 'settlers', msg: who, at: [x, y] };
   }
 
   /** Once a game hour: sample the world's traffic. */

@@ -13,7 +13,8 @@ export const residential: KindDef = {
   lotTint: 0x8fe07a,
   levels: [
     {
-      capacity: 4, work: 60, parking: { surface: 4, underground: 4 },
+      // a third of WORK_PER_LEVEL (Audit #1): the first houses go up in minutes, not a game day; levels 2 and 3 stay 120 and 180
+      capacity: 4, work: 20, parking: { surface: 4, underground: 4 },
       attrs: { style: 'house', rentBand: 'low' },
       designs: [
         { name: 'cottage, pitched roof and chimney', height: 0.52, ops: [

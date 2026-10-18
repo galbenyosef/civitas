@@ -25,6 +25,8 @@ export interface OnboardingDeps {
   liveTick(): number;
   /** fall back to a plain toast (no goals from this server) */
   toast(kind: 'info' | 'error', msg: string): void;
+  /** a camera moment at a tile with a caption (moment.ts): the first settlers arriving */
+  moment?(x: number, y: number, caption: string): void;
 }
 
 /** At most one hint per this many ticks (two game hours), and how long an undismissed one stays up (real ms). */
@@ -69,7 +71,11 @@ export class Onboarding {
     };
     try { this.collapsed = localStorage.getItem('msimcity.goalsCollapsed') === '1'; } catch { /* storage blocked */ }
     d.net.on('goals', (m) => this.onGoals(m));
-    d.net.on('hint', (m) => { if (isHintId(m.id)) this.raise(m.id, m.msg); });
+    d.net.on('hint', (m) => {
+      // the first settlers (docs/first-five.md): the camera flies to them for a few seconds instead of a strip (once per player)
+      if (m.id === 'settlers') { if (m.at && d.moment) d.moment(m.at[0], m.at[1], m.msg ?? HINTS.settlers.msg); return; }
+      if (isHintId(m.id)) this.raise(m.id, m.msg);
+    });
     d.net.tap((m) => this.tap(m));
     setInterval(() => this.pump(), 1000);
   }

@@ -20,7 +20,7 @@ export const sceneUniforms = {
 export const nightUniform = sceneUniforms.uNight;
 
 /** Window schedule classes carried in the `aWin` vertex attribute. */
-export const Win = { None: 0, Home: 1, Shop: 2, Office: 3, Civic: 4, Factory: 5, Venue: 6 } as const;
+export const Win = { None: 0, Home: 1, Shop: 2, Office: 3, Civic: 4, Factory: 5, Venue: 6, Fire: 7 } as const;
 
 const HASH = /* glsl */ `float mscHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`;
 
@@ -180,7 +180,13 @@ float mscLitShare(float cls, float t, float bld) {
  * mirrors the layouts below for buildings:check; keep the two in step.
  */
 const WINDOWS = /* glsl */ `
-if (vWin > 0.5) {
+if (vWin > 6.5) {
+  // Win.Fire: a camp fire or a lantern (shared buildings/camp.ts). The whole box glows, faintly by day and fully from
+  // dusk, and flickers on a phase of its own per building and per part, so no two camps (or lamps) pulse together
+  float ph = mscHash(floor(vOrigin * 4.0) + 5.3) * 40.0 + dot(floor(vLocal.xz * 12.0), vec2(3.1, 7.7));
+  float fl = 0.74 + 0.16 * sin(uTime * 7.3 + ph) + 0.1 * sin(uTime * 12.7 + ph * 1.7) * sin(uTime * 3.1 + ph * 0.6);
+  totalEmissiveRadiance += diffuseColor.rgb * fl * (0.18 + 1.5 * min(1.0, uNight * 1.6));
+} else if (vWin > 0.5) {
   vec2 g = vec2(0.0);
   float wall = 0.0;
   if (abs(vLocalN.x) > 0.7) { g = vec2(vLocal.z, vLocal.y); wall = 1.0; }

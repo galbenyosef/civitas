@@ -196,3 +196,26 @@ export const ECONOMY_TUNING = {
   civicPayroll: 0.5,
 };
 export type EconomyTuning = typeof ECONOMY_TUNING;
+
+/**
+ * The first five minutes (Audit #1, docs/first-five.md): the pioneer camp's settlers, the starter crew and the camp's
+ * turnover. The camp's size and price are catalogue data (shared/src/buildings/camp.ts); the lighter first house is
+ * residential level 1's `work` (20, a third of WORK_PER_LEVEL).
+ */
+export const START_TUNING = {
+  /**
+   * A new camp's settlers set out at once, due over this many game hours: through the nearest gate on a one-off
+   * allowance past its hourly bucket, or with no gate up the road from the nearest road end (server sim/firstfive.ts).
+   */
+  campWaveHours: 0.75,
+  /** With no gate, settlers come from a road end at least this far away (tiles), so they are seen arriving; nearer ones appear in place. */
+  campWalkMin: 10,
+  /** For this many game days after a player's first builders' yard opens, anyone it hires starts their shift at once. */
+  starterCrewDays: 1,
+  /** How far (tiles, Manhattan) the starter yard looks for people out of work to hire the moment it opens. */
+  starterCrewRadius: 64,
+  /** A camp resident whose job is farther than this (tiles, Manhattan) leaves it for the owner's first yard when it opens. */
+  starterCrewSwitchDist: 12,
+  /** A camp resident's chance per game day of moving into a finished home with room nearby (the camp is a transit camp). */
+  campMoveOutPerDay: 0.35,
+};

@@ -29,7 +29,8 @@ const RELEASE_EVERY = 5;
 /** share of a plane's (or a ro-ro ferry's) arriving passengers who are moving here (the rest are visitors and returning residents) */
 const PLANE_NEWCOMER_SHARE = 0.08;
 
-interface QueuedArrival { hx: number; hy: number; due: number }
+/** `free`: one of a pioneer camp's first wave (wave), released when due whether or not the gate has a token left */
+interface QueuedArrival { hx: number; hy: number; due: number; free?: boolean }
 export interface Gate {
   key: number; x: number; y: number; kind: number; spec: GatewaySpec;
   /** the road tile in front of the door: cars start and end their trips on it rather than pulling out of the building */
@@ -46,7 +47,7 @@ export class Gateways {
   /** arrivals the planner could not route from their gate (they moved straight in) since start */
   unroutable = 0;
   /** arrivals and departures through gateways since the simulation started (probes read these) */
-  totals = { in: 0, out: 0, fallbackIn: 0, fallbackOut: 0 };
+  totals = { in: 0, out: 0, fallbackIn: 0, fallbackOut: 0, roadIn: 0 };
 
   private scanned = false;
   /** Has the cargo port whose door is (x, y) a sea route? (sim/harbours.ts, set by game.ts) A sea gate opens only with one. */
@@ -90,6 +91,9 @@ export class Gateways {
   private queueMax(g: Gate) { return Math.max(6, Math.ceil(g.spec.perHour)); }
 
   pendingAt(x: number, y: number) { return this.pending.get(tkey(x, y)) ?? 0; }
+  /** Beds at (x, y) spoken for by newcomers coming by other means (a camp's road wave, sim/firstfive.ts): spawn() leaves them. */
+  reserve(x: number, y: number, n: number) { const k = tkey(x, y); this.pending.set(k, (this.pending.get(k) ?? 0) + n); }
+  release(x: number, y: number) { this.unpend(x, y); }
   private unpend(x: number, y: number) {
     const k = tkey(x, y), n = (this.pending.get(k) ?? 1) - 1;
     if (n > 0) this.pending.set(k, n); else this.pending.delete(k);
@@ -116,6 +120,22 @@ export class Gateways {
     return true;
   }
 
+  /**
+   * A pioneer camp's settlers (sim/firstfive.ts): n newcomers for `home` at the nearest gate, due spread over the next
+   * `within` ticks. They are released as they fall due on a one-off allowance, past the gate's hourly bucket and its
+   * queue limit, so the camp fills within the hour without holding anyone else up. False with no gate at all (the
+   * caller moves them in at once).
+   */
+  wave(home: Building, n: number, within: number): boolean {
+    if (!this.gates.size || this.w.filling) return false;
+    let best: Gate | null = null, bestD = Infinity;
+    for (const g of this.gates.values()) { const d = Math.abs(g.x - home.x) + Math.abs(g.y - home.y); if (d < bestD) { bestD = d; best = g; } }
+    for (let i = 0; i < n; i++) best!.queue.push({ hx: home.x, hy: home.y, due: this.w.tick + Math.floor(((i + Math.random()) / n) * within), free: true });
+    const k = tkey(home.x, home.y);
+    this.pending.set(k, (this.pending.get(k) ?? 0) + n);
+    return true;
+  }
+
   /** Release the newcomers due at each gate while it has capacity this hour; `arrive` puts them on their way. */
   tick(arrive: (g: Gate, hx: number, hy: number) => void) {
     const now = this.w.tick;
@@ -127,12 +147,12 @@ export class Gateways {
       g.last = now;
       if (!g.queue.length) continue;
       // due order is not queue order (each newcomer has their own jitter): release whoever is due
-      for (let i = 0; i < g.queue.length && g.tokens >= 1;) {
+      for (let i = 0; i < g.queue.length;) {
         const q = g.queue[i];
-        if (q.due > now) { i++; continue; }
+        if (q.due > now || (g.tokens < 1 && !q.free)) { i++; continue; } // a camp's first wave rides on its own allowance
         g.queue[i] = g.queue[g.queue.length - 1]; g.queue.pop();
         this.unpend(q.hx, q.hy);
-        g.tokens -= 1;
+        if (!q.free) g.tokens -= 1;
         arrive(g, q.hx, q.hy);
       }
     }
@@ -175,7 +195,8 @@ export class Gateways {
   }
 
   at(x: number | undefined, y: number | undefined): Gate | undefined { return x === undefined || y === undefined ? undefined : this.gates.get(tkey(x, y)); }
-  noteIn(g: Gate) { this.roll(g); g.inToday++; this.totals.in++; }
+  /** A pseudo-gate (key -1: a road end a camp's settlers come up, sim/firstfive.ts) counts under `roadIn`, not as a gateway arrival. */
+  noteIn(g: Gate) { this.roll(g); g.inToday++; if (g.key < 0) this.totals.roadIn++; else this.totals.in++; }
   noteOut(g: Gate | undefined) { this.totals.out++; if (g) { this.roll(g); g.outToday++; } }
 
   /** Road entry points for through-traffic and inter-city freight: the road in front of each motorway connection. */

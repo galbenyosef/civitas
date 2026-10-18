@@ -14,6 +14,8 @@ export type PaletteName = keyof typeof PALETTE;
 /**
  * Window schedule classes, carried per vertex in `aWin` and read by the
  * building shader (render/materials.ts `Win` must match these numbers).
+ * `fire` is not a window: a camp fire or a lantern, the whole box glowing from
+ * dusk and flickering on its own phase per building.
  */
-export const WINDOW_CLASSES = { none: 0, home: 1, shop: 2, office: 3, civic: 4, factory: 5, venue: 6 } as const;
+export const WINDOW_CLASSES = { none: 0, home: 1, shop: 2, office: 3, civic: 4, factory: 5, venue: 6, fire: 7 } as const;
 export type WindowClass = keyof typeof WINDOW_CLASSES;

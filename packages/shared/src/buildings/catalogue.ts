@@ -1,6 +1,7 @@
 import type { KindDef } from './schema';
 import { EXTRA_DESIGNS } from './designs';
 import { residential } from './residential';
+import { pioneerCamp } from './camp';
 import { commercial } from './commercial';
 import { industrial } from './industrial';
 import { office } from './office';
@@ -29,6 +30,8 @@ import { EDUCATION } from './education';
  * compiled.ts and recipes.ts. Add a family file and list its kinds here.
  */
 const BASE: KindDef[] = [residential, commercial, industrial, office, police, fire, hospital, yard, parking, park, cinema, theatre, sports, library, terminal, busDepot, busStop, railHalt, railStation, freightYard, motorwayStub, metroEntrance, metroStation,
+  // the pioneer camp (Audit #1, camp.ts): kind id 120, a residential sub-kind placed like a structure (the tool bar puts it after Residential)
+  pioneerCamp,
   // harbours (docs/boats.md section 5): kind ids 24-28, back rows over water
   ...HARBOURS,
   // size ladders (groups.ts): the smaller and bigger rungs around the kinds above

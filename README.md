@@ -355,9 +355,17 @@ changing behaviour in game time.
   builders' fees, construction, land, technology) for yesterday and today, sent
   with the players message once a game hour (`PlayerDTO.ledger`). High taxes make workers quit and residents leave; nearby staffed
   services raise what people will put up with.
-- *Onboarding* (`shared/src/goals.ts`, `server/src/goals.ts`, `client/src/onboarding.ts`). A chain of 13 goals for the
-  first two hours (claim a plot, a street, homes, your own builders' yard, 12 residents, shops, Masonry, 50 residents,
-  police and fire cover, a park, a day in the black, 250 residents, a bus line), measured server-side a few times a game
+- *The first five minutes* (`docs/first-five.md`, `server/src/sim/firstfive.ts`, `shared/src/buildings/camp.ts`,
+  `client/src/moment.ts`). A new player's third act is to pitch a **pioneer camp** ($150, 2×2, tents and caravans
+  round a fire that glows from dusk): it opens at once and eight settlers come up the road within the game hour
+  (through a gateway when there is one), the camera flies to meet the first of them for a few seconds, and the
+  player's first builders' yard hires them on the spot and sends them to the nearest sites now rather than with
+  tomorrow's shift. A first house is 20 units of work (levels 2 and 3 unchanged). Settlers move out of the tents into
+  finished homes nearby over the following days and newcomers fill them behind; bulldozing the camp rehomes its people
+  first. Numbers in `START_TUNING` (`shared/src/tuning.ts`).
+- *Onboarding* (`shared/src/goals.ts`, `server/src/goals.ts`, `client/src/onboarding.ts`). A chain of 14 goals for the
+  first two hours (claim a plot, a street, pitch camp, homes, your own builders' yard, 12 residents in homes, shops,
+  Masonry, 50 residents, police and fire cover, a park, a day in the black, 250 residents, a bus line), measured server-side a few times a game
   hour from the player's parcels and progress counters, one active at a time with the next two previewed, each paying a
   modest reward (cash through the ledger, or Commercial zoning free). The card sits beside the tool bar with progress
   bars and a "show me" (picks the tool, flashes its button, opens the panel, looks at the plot); the `goals` chip in

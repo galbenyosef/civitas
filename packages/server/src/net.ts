@@ -8,7 +8,7 @@ import {
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
   isBridgeAux, planBridge, joinsBridgeSide, BRIDGE_STYLE_NAMES, type BridgePlan,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
-  isMetroStationKind, CITIZEN_UNDER, isFerryPierKind,
+  isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -486,7 +486,12 @@ export class Net {
         apply = () => {
           this.w.setTile(x, y, packTile(terrainOf(t), false, 0, 0));
           const site = this.w.createSite(x, y, k, 1, workOf(k, 1), familyOf(k) === Zone.Yard ? 2 : 1); // a yard is urgent: it brings its own builders; work per kind (size tiers: a police box is quicker than a station)
-          if (site && starter) { this.w.completeSite(site); this.toast(c, 'Your first builders\' yard opens at once; its builders start on your nearest lots with their next shift', 'info'); }
+          if (site && starter) {
+            this.w.completeSite(site);
+            const { hired: n, camp: fromCamp } = this.sim.start.starterYard(x, y);
+            const who = n === 0 ? '' : fromCamp === n ? (n === 1 ? 'your settler takes' : `${n} of your settlers take`) : fromCamp ? `${fromCamp} of your settlers and ${n - fromCamp} neighbour${n - fromCamp === 1 ? '' : 's'} take` : `${n} ${n === 1 ? 'neighbour takes' : 'neighbours take'}`;
+            this.toast(c, n ? `Your first builders' yard opens at once: ${who} up tools and set off for your nearest lots now` : 'Your first builders\' yard opens at once; whoever it hires starts work straight away', 'info');
+          }
           if (platform) this.metro!.lay(platform);
         };
       } else if (tool === 'busstop') {
@@ -522,7 +527,7 @@ export class Net {
         } else {
           if (!isRoad(t) && zoneOf(t) === Zone.None) continue;
           cost = levelOf(t) > 0 ? BULLDOZE_COST : 0;
-          apply = () => this.w.setTile(x, y, packTile(terrainOf(t), false, 0, 0));
+          apply = () => { this.sim.start.campCleared(x, y); this.w.setTile(x, y, packTile(terrainOf(t), false, 0, 0)); }; // a camp's people find beds nearby first (sim/firstfive.ts)
         }
       } else return;
       if (p.money - spent < cost) { this.toast(c, 'Not enough money'); break; }
@@ -622,10 +627,15 @@ export class Net {
     // a metro hall lays its platform under the door (sim/metro.ts), along the street its front faces
     const platform = isMetroStationKind(kind) ? this.metro?.platformFor(kind, verdict.placed.doorX, verdict.placed.doorY, verdict.placed.r) ?? 'No underground railways on this server' : null;
     if (typeof platform === 'string') { this.toast(c, platform); return false; }
-    this.w.placeStructure(verdict.placed, { work: workOf(kind, 1), priority: 1 }); // build work scales with the tier (CIVIC_WORK for the original kinds)
+    // a pioneer camp (docs/first-five.md) opens at once, one per player at a time, and its settlers set out now (sim/firstfive.ts)
+    const camp = kind === CAMP_KIND;
+    if (camp && this.hasCamp(p.id)) { this.toast(c, 'You already have a pioneer camp: bulldoze it before pitching another'); return false; }
+    this.w.placeStructure(verdict.placed, { work: workOf(kind, 1), priority: 1, built: camp }); // build work scales with the tier (CIVIC_WORK for the original kinds)
+    if (camp) { const how = this.sim.start.campPitched(verdict.placed.doorX, verdict.placed.doorY); this.toast(c, how === 'gate' ? 'Camp pitched: eight settlers are on their way through the gate and arrive within the hour' : how === 'road' ? 'Camp pitched: eight settlers are coming up the road and arrive within the hour' : 'Camp pitched: eight settlers move in', 'info'); }
     if (platform) this.metro!.lay(platform);
     return true;
   }
+  private hasCamp(owner: string) { return this.w.builtOf(Zone.Residential).some((b) => b.id === CAMP_KIND && this.w.parcelAt(b.x, b.y)?.owner === owner); }
 
   /**
    * Paint a runway from a dragged line (shared/src/airport.ts): six rows (shoulders, runway, taxiway) behind an
@@ -1013,6 +1023,11 @@ export class Net {
     }
     if (w.tick % 5 === 0) this.sendStats();
     // notices from the simulation for one owner's screen (sim/gateways.ts: newcomers with no gateway to come through; that one is an advisor hint)
+    // the first settlers on a player's land (sim/firstfive.ts): the camera moment, once per player (goals.ts)
+    if (this.sim.start.settlers.length) for (const st of this.sim.start.settlers.splice(0)) for (const c of this.clients) if (c.player?.id === st.owner && this.onboarding) {
+      const m = this.onboarding.settlers(c.player, st.x, st.y, st.who);
+      if (m) this.send(c, m);
+    }
     if (this.sim.notices.length) {
       for (const n of this.sim.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) {
         if (n.msg.startsWith('Newcomers are moving')) this.hint(c, 'newcomers', n.msg); else this.toast(c, n.msg, 'info');
