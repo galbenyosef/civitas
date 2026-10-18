@@ -5,7 +5,8 @@ import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, LEDGER_LABELS, type KindToolId, type LedgerDTO, type LedgerCat } from '@msimcity/shared';
 import { FLEET_LABEL } from '@msimcity/shared';
-import { EDU_LEVEL_NAMES, EDU_TRACK_NAMES, STUDY_NAMES, WEEKDAY_NAMES, yearGroupName } from '@msimcity/shared';
+import { WEEKDAY_NAMES } from '@msimcity/shared';
+import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
 const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐' };
@@ -355,6 +356,7 @@ export class UI {
           <tr><td>Jobs filled</td><td id="pJobs"></td></tr>
           <tr><td>Under construction</td><td id="pSites"></td></tr>
           <tr><td>Roads</td><td id="pRoads"></td></tr>
+          <tr id="pEduRow"><td title="Residents aged 25-64: 20 x their mean level, 0-100">Education</td><td id="pEdu"></td></tr>
           <tr><td colspan="2" id="pKinds" style="padding-top:6px"></td></tr>
           <tr><td colspan="2" id="pBuild" style="padding-top:6px"></td></tr>
           <tr><td>Tax collected today</td><td id="pTax"></td></tr>
@@ -380,6 +382,9 @@ export class UI {
     $('pJobs').textContent = `${s.employed} / ${s.jobs}`;
     $('pRoads').textContent = String(s.roads);
     $('pSites').textContent = String(s.sites);
+    const edu = eduTotals([p]);
+    $('pEduRow').style.display = edu.n || edu.places || edu.grads ? '' : 'none';
+    $('pEdu').textContent = [edu.n ? `index ${edu.index} (${eduIndexLabel(edu.index)})` : '', edu.grads ? `${edu.grads} graduates` : '', edu.places ? `${edu.pupils}/${edu.places} pupils` : ''].filter(Boolean).join(' · ');
     $('pKinds').innerHTML = s.jobsByKind.map((cap, k) => cap > 0 ? `<div style="display:flex;justify-content:space-between"><span>${esc(KIND_NAMES[k])}</span><span style="color:var(--fg)">${s.staffedByKind[k]} / ${cap}</span></div>` : '').join('');
     $('pTax').textContent = fmt(s.taxToday);
     $('pTaxY').textContent = fmt(s.taxYesterday);
@@ -497,6 +502,7 @@ export class UI {
     if (info.harbour) html += harbourHtml(info.harbour, row);
     if (info.gateway) html += gatewayHtml(info.gateway, row);
     if (info.transit) html += stopHtml(info.transit, row);
+    if (info.school) html += schoolHtml(info.school);
     if (info.venue) {
       const v = info.venue;
       html += `<div class="sect">${v.block ? 'Communal garden' : v.type === 'park' ? 'Park' : 'Venue'}</div>`;
@@ -682,12 +688,7 @@ export class UI {
     let html = `<div class="sect">Life</div>`;
     html += row('Age', `${life.age} · ${life.stage}${life.birthday ? ` · turns ${life.age + 1} on ${WEEKDAY_NAMES[life.birthday.weekday]}` : ''}`);
     const ed = life.education;
-    if (ed) {
-      // the level and track; a pupil or student: where, which year, attendance (docs/education.md; the full timeline is E7)
-      html += row('Education', esc(`${EDU_LEVEL_NAMES[ed.level] ?? ''}${ed.track ? ` · ${EDU_TRACK_NAMES[ed.track]}` : ''}`));
-      const st = ed.studying;
-      if (st) html += row('Studying', esc(`${STUDY_NAMES[st.stage] ?? ''}${st.yearGroup !== undefined ? `, ${yearGroupName(st.yearGroup)}` : ''} · ${Math.round(100 * st.attendance)}% attendance`));
-    }
+    if (ed) html += educationHtml(ed);
     html += row('Health', `<span class="${life.health < 45 ? 'bad' : ''}">${life.health}</span>${life.conditions.length ? ` · ${esc(life.conditions.join(', '))}` : ''}`);
     html += meter(life.health, life.health < 45 ? 'poor' : life.health < 70 ? 'fair' : 'good');
     if (life.care) html += row('Right now', esc(life.care));

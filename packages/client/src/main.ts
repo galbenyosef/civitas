@@ -10,6 +10,7 @@ import { ClientWorld } from './world';
 import { CameraRig, parseShot, urlShot, type CameraShot } from './camera';
 import { ChunkView } from './render/chunkView';
 import { ParcelsView } from './render/parcels';
+import { EduHeat } from './render/eduHeat';
 import { CitizensView } from './render/citizens';
 import { ParkedCars } from './render/parkedCars';
 import { TrafficLights } from './render/signals';
@@ -254,7 +255,7 @@ net.on('aux', (m) => world.applyAux(m.u));
 net.on('sub', (m) => world.applySub(m.u));
 net.on('under', (m) => world.applyUnder(m.u));
 net.on('tiles', (m) => world.applyTiles(m.u));
-net.on('parcels', (m) => { world.applyParcels(m.parcels, m.removed); lights.invalidate(); refreshPanel(); mapMode.parcelsChanged(); });
+net.on('parcels', (m) => { world.applyParcels(m.parcels, m.removed); lights.invalidate(); refreshPanel(); mapMode.parcelsChanged(); eduDirty = true; });
 net.on('players', (m) => {
   lights.invalidate();
   world.applyPlayers(m.players);
@@ -268,6 +269,7 @@ const lines = new LinesPanel(net, world, (kind, msg) => ui.toast(kind, msg), liv
 // city history charts (charts.ts, docs/charts.md): the charts chip, the ` key, and a click on the population or treasury figure
 const charts = new ChartsPanel(net);
 ui.onOpenChart = (id) => charts.show(id);
+charts.me = () => world.myPlayer;
 lines.onLivery = (pairs, colours) => citizens.setLivery(pairs, colours);
 lines.onEdit = () => input.setTool('select');
 scene.add(lines.group);
@@ -497,6 +499,19 @@ function setHeat(on: boolean) {
   ui.setHeat(on);
 }
 document.getElementById('heat')!.onclick = () => setHeat(!ChunkView.heatOn);
+// ---- education overlay: parcels tinted by their education index (render/eduHeat.ts, docs/education.md section 14) ----
+const eduHeat = new EduHeat(); scene.add(eduHeat.group);
+let eduDirty = false;
+const eduBtn = document.createElement('button');
+eduBtn.id = 'eduHeat'; eduBtn.className = 'chip'; eduBtn.textContent = 'education';
+eduBtn.title = 'Tint parcels by how well qualified their residents are (the education index); a white edge marks a school';
+document.getElementById('heat')!.after(eduBtn);
+function setEduHeat(on: boolean) {
+  eduHeat.setOn(on); eduDirty = on;
+  eduBtn.classList.toggle('on', on);
+  eduBtn.innerHTML = on ? 'education <i class="legend edu"></i>' : 'education';
+}
+eduBtn.onclick = () => setEduHeat(!eduHeat.on);
 // ---- the underground view ------------------------------------------------------------------------
 /** the view came on by itself because a metro tool was picked, and goes back off when the tool does */
 let underAuto = false;
@@ -1060,6 +1075,7 @@ function frame(now: number) {
     if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
+  if (eduDirty && eduHeat.on) { eduHeat.rebuild(world.parcels.values()); eduDirty = false; }
   if (world.parcelsDirty) { parcelsView.rebuild(world.parcels.values(), world.players, world.me, selectedParcel); world.parcelsDirty = false; }
   applyTrafficUpdates();
   citizens.frame(now, dt);
@@ -1133,7 +1149,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

@@ -366,3 +366,21 @@ body.map-on #tools, body.map-on #panel, body.map-on #cpanel, body.map-on #tip, b
 #mapPanel .mplan.ok { background: rgba(98,210,162,0.12); color: var(--accent); }
 #mapPanel .mplan.bad { background: rgba(255,107,107,0.12); color: var(--danger); }
 #mapPanel .hint { margin-top: 8px; font-size: 11px; color: var(--muted); }
+
+/* education (eduView.ts): meters, the citizen's school timeline, the overlay legend */
+.edu-meter { height: 4px !important; margin: 1px 0 4px !important; }
+.edu-meter.good i { background: #4fd36a !important; }
+.edu-meter.fair i { background: #f2c230 !important; }
+.edu-meter.poor i { background: #e8392b !important; }
+.edutl { position: relative; margin: 4px 0 2px 4px; }
+.edustep { position: relative; display: flex; gap: 9px; padding: 0 0 8px 0; }
+.edustep:not(:last-child)::before { content: ''; position: absolute; left: 4px; top: 12px; bottom: 0; width: 1px; background: var(--line); }
+.edustep .dot { flex: none; width: 9px; height: 9px; margin-top: 3px; border-radius: 50%; background: var(--muted); }
+.edustep.done .dot { background: #4fd36a; }
+.edustep.failed .dot { background: #e8392b; }
+.edustep.now .dot { background: #5aa8ff; box-shadow: 0 0 0 3px rgba(90,168,255,0.25); }
+.edustep .edubody { min-width: 0; flex: 1; }
+.edustep b { font-weight: 600; }
+.edustep span { color: var(--muted); }
+.edustep .edunote { color: var(--muted); font-size: 11px; }
+.legend.edu { background: linear-gradient(90deg, #e5484d, #f0dc82, #1f7bff); }

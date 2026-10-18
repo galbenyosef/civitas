@@ -25,6 +25,9 @@ export interface HistoryJSON {
   prev?: { migIn: number; migOut: number; boarded: number };
 }
 
+/** WORLD_SERIES slots of the education group (shared/src/history.ts), in order */
+const EDU_AT = WORLD_KEYS.indexOf('eduIndex');
+
 const zeros = () => new Array<number>(24).fill(0);
 const sum = (a: number[]) => { let s = 0; for (const v of a) s += v; return s; };
 /** positive and negative parts of a ledger row */
@@ -43,6 +46,9 @@ export class History {
   readonly lastWorld = new Float64Array(WORLD_KEYS.length);
   private lastPlayer = new Map<string, Float64Array>();
   private prev = { migIn: 0, migOut: 0, boarded: -1 };
+  /** results since the process started as of the last sample (-1: none yet), and the hourly results of the last 24 hours (not saved: they restart with the process) */
+  private prevResults = { pass: -1, drop: -1 };
+  private passH = zeros(); private dropH = zeros();
 
   private playerHist(id: string): PlayerHist {
     let p = this.players.get(id);
@@ -79,14 +85,39 @@ export class History {
     v[12] = this.prev.boarded >= 0 && boarded >= this.prev.boarded ? boarded - this.prev.boarded : 0;
     this.prev.boarded = boarded;
     v[13] = tickAvg; v[14] = tickP95;
+    this.sampleEducation(sim, hour);
     this.world.push(hour, v);
     this.samplePlayers(w, hour);
     return true;
   }
 
+  /** The education series: the schools' census (hourly) and the results of the last 24 hours, kept as hourly differences of the event counters. */
+  private sampleEducation(sim: Simulation, hour: number) {
+    const v = this.lastWorld, a = sim.schools.attainment(), ev = sim.schools.events;
+    let k = EDU_AT;
+    v[k++] = Math.round(a.index * 10) / 10;
+    for (let l = 0; l < 6; l++) v[k++] = a.adults[l];
+    const st = a.study;
+    v[k++] = st[1]; v[k++] = st[2]; v[k++] = st[3]; v[k++] = st[4];
+    v[k++] = st[6] + st[7]; v[k++] = st[5] + st[8];
+    const pass = ev.graduations + ev.nurseryDone, drop = ev.failed + ev.dropOuts;
+    const p = this.prevResults;
+    this.passH[hour % 24] = p.pass >= 0 ? Math.max(0, pass - p.pass) : 0;
+    this.dropH[hour % 24] = p.drop >= 0 ? Math.max(0, drop - p.drop) : 0;
+    p.pass = pass; p.drop = drop;
+    v[k++] = sum(this.passH); v[k++] = sum(this.dropH);
+  }
+
   private samplePlayers(w: World, hour: number) {
     const housed = new Map<string, number>(), jobs = new Map<string, number>(), staffed = new Map<string, number>();
+    const edu = new Map<string, number[]>();
     for (const p of w.parcels.values()) {
+      const st = p.stats;
+      if (st.pupils || st.places || st.grads) {
+        let e = edu.get(p.owner);
+        if (!e) edu.set(p.owner, (e = [0, 0, 0]));
+        e[0] += st.pupils ?? 0; e[1] += st.places ?? 0; e[2] += st.grads ?? 0;
+      }
       housed.set(p.owner, (housed.get(p.owner) ?? 0) + p.stats.population);
       jobs.set(p.owner, (jobs.get(p.owner) ?? 0) + p.stats.jobs);
       staffed.set(p.owner, (staffed.get(p.owner) ?? 0) + p.stats.employed);
@@ -108,6 +139,8 @@ export class History {
       if (!v) { v = new Float64Array(PLAYER_KEYS.length); this.lastPlayer.set(pl.id, v); }
       v[0] = pl.money; v[1] = sum(h.inH); v[2] = sum(h.outH);
       v[3] = housed.get(pl.id) ?? 0; v[4] = jobs.get(pl.id) ?? 0; v[5] = staffed.get(pl.id) ?? 0;
+      const e = edu.get(pl.id);
+      v[6] = e ? e[0] : 0; v[7] = e ? e[1] : 0; v[8] = e ? e[2] : 0;
       h.rings.push(hour, v);
     }
   }

@@ -15,7 +15,7 @@ export const HIST_TIERS = [
 export type HistTierId = (typeof HIST_TIERS)[number]['id'];
 
 export type HistUnit = '' | '%' | '$' | 'ms';
-export type HistGroup = 'city' | 'economy' | 'traffic';
+export type HistGroup = 'city' | 'economy' | 'traffic' | 'education';
 export interface HistSeriesDef { key: string; label: string; unit: HistUnit; group: HistGroup }
 
 /** The world series, in the order of a 'histSample' message's `w` (and of Rings built from them). */
@@ -35,6 +35,22 @@ export const WORLD_SERIES: readonly HistSeriesDef[] = [
   { key: 'riders', label: 'Transit boardings per hour', unit: '', group: 'traffic' },
   { key: 'tickMs', label: 'Server tick (average)', unit: 'ms', group: 'traffic' },
   { key: 'tickP95', label: 'Server tick (95th percentile)', unit: 'ms', group: 'traffic' },
+  // education (docs/education.md section 14): adults 18+ by highest level, people enrolled by stage, results over the last 24 hours
+  { key: 'eduIndex', label: 'Education index', unit: '', group: 'education' },
+  { key: 'lvlNone', label: 'No qualifications', unit: '', group: 'education' },
+  { key: 'lvlPrimary', label: 'Primary', unit: '', group: 'education' },
+  { key: 'lvlSecondary', label: 'GCSEs', unit: '', group: 'education' },
+  { key: 'lvlFurther', label: 'A-levels or Level 3', unit: '', group: 'education' },
+  { key: 'lvlDegree', label: 'Degree', unit: '', group: 'education' },
+  { key: 'lvlPostgrad', label: 'Postgraduate', unit: '', group: 'education' },
+  { key: 'stNursery', label: 'Nursery', unit: '', group: 'education' },
+  { key: 'stPrimary', label: 'Primary school', unit: '', group: 'education' },
+  { key: 'stSecondary', label: 'Secondary school', unit: '', group: 'education' },
+  { key: 'stSixth', label: 'Sixth form and FE', unit: '', group: 'education' },
+  { key: 'stHigher', label: 'University', unit: '', group: 'education' },
+  { key: 'stAdult', label: 'Adult courses', unit: '', group: 'education' },
+  { key: 'passDay', label: 'Passed (last 24 hours)', unit: '', group: 'education' },
+  { key: 'dropDay', label: 'Dropped out or failed (last 24 hours)', unit: '', group: 'education' },
 ];
 /** Your series, in the order of a 'histSample' message's `p`. Income and expenses are per game day (the last 24 hours). */
 export const PLAYER_SERIES: readonly HistSeriesDef[] = [
@@ -44,6 +60,9 @@ export const PLAYER_SERIES: readonly HistSeriesDef[] = [
   { key: 'housed', label: 'Your population', unit: '', group: 'economy' },
   { key: 'jobs', label: 'Your job capacity', unit: '', group: 'economy' },
   { key: 'staffed', label: 'Your jobs filled', unit: '', group: 'economy' },
+  { key: 'myPupils', label: 'Pupils at your schools', unit: '', group: 'education' },
+  { key: 'myPlaces', label: 'School places on your land', unit: '', group: 'education' },
+  { key: 'myGrads', label: 'Graduates living on your land', unit: '', group: 'education' },
 ];
 export const WORLD_KEYS = WORLD_SERIES.map((s) => s.key);
 export const PLAYER_KEYS = PLAYER_SERIES.map((s) => s.key);

@@ -26,6 +26,10 @@ export interface ParcelStats {
   buildings?: number;
   /** book value: what the land, roads and buildings cost to make (parcelops.ts buildingValue, docs/world-map.md); absent from older servers */
   value?: number;
+  /** education (docs/education.md section 14; sim/schools.ts census, hourly; absent from older servers): pupils enrolled at the schools on this parcel, the day places those schools have */
+  pupils?: number; places?: number;
+  /** residents with a degree or more, and the education index (0-100, 20 x the mean level) of the `eduN` residents aged 25-64 who live here; 0 when eduN is 0 */
+  grads?: number; eduIndex?: number; eduN?: number;
 }
 export interface ParcelDTO {
   id: number;

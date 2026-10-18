@@ -1,5 +1,5 @@
 import { InstancedMesh, RingGeometry, Mesh, MeshBasicMaterial, MeshLambertMaterial, Matrix4, Color, Vector3, Quaternion, Group, BufferGeometry, InstancedBufferAttribute, Frustum, Sphere, type Camera } from 'three';
-import { CitizenState, TICK_MS, Zone, VehicleClass, VehicleKind, citizenState, citizenMode, citizenKind, citizenClass, citizenQueued, citizenEmergency, citizenStage, citizenBag, citizenReversing, citizenIndicator, Indicator, LifeStage, hash2, citizenFleet, fleetLoaded, fleetWorking, citizenUnder } from '@msimcity/shared';
+import { CitizenState, TICK_MS, Zone, VehicleClass, VehicleKind, citizenState, citizenMode, citizenKind, citizenClass, citizenQueued, citizenEmergency, citizenStage, citizenBag, citizenReversing, citizenIndicator, Indicator, LifeStage, hash2, citizenFleet, fleetLoaded, fleetWorking, citizenUnder, citizenStudy } from '@msimcity/shared';
 import { METRO_Y } from './underground';
 import { Luggage } from './luggage';
 import { Kit } from './kit';
@@ -33,6 +33,8 @@ interface Agent {
   fleet: number; loaded: boolean; working: boolean;
   /** waiting on a metro platform (CITIZEN_UNDER): drawn only in the underground view */
   under: boolean;
+  /** on a school trip (CITIZEN_STUDY): a student's rucksack and lanyard, not a worker's outfit */
+  study: boolean;
 }
 
 /** Where a first-person camera sits for an agent, in world units (a tile is 1). */
@@ -256,13 +258,13 @@ export class CitizensView {
       const a = this.agents.get(id);
       const ind = drives ? citizenIndicator(f) : Indicator.None, rev = citizenReversing(f);
       const fleet = citizenFleet(f), loaded = fleetLoaded(f), working = fleetWorking(f);
-      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f), ind, rev, brake: 0, fleet, loaded, working, under: citizenUnder(f) }); continue; }
+      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f), ind, rev, brake: 0, fleet, loaded, working, under: citizenUnder(f), study: citizenStudy(f) }); continue; }
       const dx = x - a.tx, dy = y - a.ty;
       // slowing hard since the last tick: the brake lights come on for a moment
       if (drives && (dx * dx + dy * dy) < 0.5 * ((a.tx - a.px) ** 2 + (a.ty - a.py) ** 2) && (a.tx - a.px) ** 2 + (a.ty - a.py) ** 2 > 1e-4) a.brake = now + 700;
       // facing the way it moves, except a bus backing up in a three-point turn (server sim/traffic.ts)
       if (dx * dx + dy * dy > 1e-4) { const d = Math.hypot(dx, dy) * (rev ? -1 : 1); a.hx = dx / d; a.hy = dy / d; }
-      a.px = a.x; a.py = a.y; a.tx = x; a.ty = y; a.t = 0; a.state = state; a.drives = drives; a.kind = kind; a.cls = cls; a.queued = queued; a.emergency = emergency; a.last = now; a.stage = stage; a.bag = citizenBag(f); a.ind = ind; a.rev = rev;
+      a.px = a.x; a.py = a.y; a.tx = x; a.ty = y; a.t = 0; a.state = state; a.drives = drives; a.kind = kind; a.cls = cls; a.queued = queued; a.emergency = emergency; a.last = now; a.stage = stage; a.study = citizenStudy(f); a.bag = citizenBag(f); a.ind = ind; a.rev = rev;
       a.fleet = fleet; a.loaded = loaded; a.working = working; a.under = citizenUnder(f);
     }
   }
@@ -405,7 +407,7 @@ export class CitizensView {
   private dress(id: number, a: Agent, evening: boolean): Look {
     const work = dressFor(a.state, a.kind), cur = a.look?.dress;
     const want = work === null ? cur ?? (a.kind ? 'w' : 'l') : work ? 'w' : cur === 'e' || cur === 'l' ? cur : evening ? 'e' : 'l';
-    if (!a.look || cur !== want) a.look = lookOf(id, a.kind, a.stage, want === 'w', want === 'e');
+    if (!a.look || cur !== want || a.look.student !== a.study) a.look = lookOf(id, a.kind, a.stage, want === 'w', want === 'e', a.study);
     a.dressed = a.state;
     return a.look;
   }

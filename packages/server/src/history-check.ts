@@ -4,7 +4,8 @@
  *
  *   npx tsx packages/server/src/history-check.ts
  */
-import { Rings, HIST_TIERS, WORLD_KEYS, PLAYER_KEYS, TICKS_PER_HOUR, type ServerMsg } from '@msimcity/shared';
+import { Rings, HIST_TIERS, WORLD_KEYS, PLAYER_KEYS, TICKS_PER_HOUR, Study, EduLevel, type ServerMsg } from '@msimcity/shared';
+import { ageOf } from './sim/life';
 import { World } from './world';
 import { seedCommons } from './seed';
 import { createGame } from './game';
@@ -101,6 +102,44 @@ ok(w3 && historyOf(w3).hour === -1 && historyOf(w3).world.read(0, 0) === null, '
 const g3 = createGame(w3, { onConnection() {} }, { devTools: false, sandbox: true });
 for (let i = 0; i < TICKS_PER_HOUR * 2; i++) g3.step();
 ok(historyOf(w3).world.read(0, 0)!.v.length >= 2, 'and starts recording on the next hours');
+
+// ---- 3b. the education series (docs/education.md section 14) -------------------------------
+{
+  const last = (k: string) => hist.world.read(WORLD_KEYS.indexOf(k), 0)!.v.at(-1)!;
+  const adults = [...world.citizens.values()].filter((c) => !c.mig && ageOf(c, world.tick) >= 18).length;
+  const byLevel = ['lvlNone', 'lvlPrimary', 'lvlSecondary', 'lvlFurther', 'lvlDegree', 'lvlPostgrad'].reduce((n, k) => n + last(k), 0);
+  ok(Math.abs(byLevel - adults) <= 2 && adults > 0, `adults by level add up to the adult residents (${byLevel} of ${adults})`);
+  ok(last('eduIndex') > 10 && last('eduIndex') <= 100, `the education index is in range (${last('eduIndex')})`);
+  ok(['stNursery', 'stPrimary', 'stSecondary', 'stSixth', 'stHigher', 'stAdult', 'passDay', 'dropDay'].every((k) => last(k) === 0), 'nobody enrolled and no results while nothing is built');
+  // enrol a resident by hand: the next sample counts them in the university series, and the player's parcels in their own
+  const c = [...world.citizens.values()].find((x) => !x.mig && ageOf(x, world.tick) >= 22)!;
+  c.study = Study.Degree; c.edu = EduLevel.Degree;
+  const parcel = world.parcelAt(c.hx, c.hy);
+  for (let i = 0; i < TICKS_PER_HOUR * 2; i++) game.step();
+  ok(last('stHigher') >= 1, `a student shows in the university series (${last('stHigher')})`);
+  ok(last('lvlDegree') >= 1, 'and a degree holder in the level series');
+  if (parcel) {
+    const st = world.parcels.get(parcel.id)!.stats;
+    ok((st.grads ?? 0) >= 1 && (st.eduN ?? 0) >= 0 && (st.eduIndex ?? 0) >= 0, `their parcel's stats carry graduates (${st.grads}), residents aged 25-64 (${st.eduN}) and the index (${st.eduIndex})`);
+    const mine = hist.playerRings(parcel.owner)?.read(PLAYER_KEYS.indexOf('myGrads'), 0)?.v.at(-1);
+    ok(mine === undefined || mine >= 1, `the owner's graduates series counts them (${mine})`);
+  }
+  c.study = 0;
+  // a save from before the education series: the other series load, the new ones start empty
+  const older = JSON.parse(JSON.stringify(snapshotOf(world)));
+  const wd = older.history.world;
+  const drop = wd.keys.map((k: string, i: number) => (/^(eduIndex|lvl|st[A-Z]|passDay|dropDay)/.test(k) ? i : -1)).filter((i: number) => i >= 0);
+  wd.keys = wd.keys.filter((_: string, i: number) => !drop.includes(i));
+  for (const t of wd.tiers) { t.data = t.data.filter((_: unknown, i: number) => !drop.includes(i)); t.sum = t.sum.filter((_: unknown, i: number) => !drop.includes(i)); }
+  const w4 = worldFromSnapshot(older)!;
+  const h4 = historyOf(w4);
+  const popOk = near(h4.world.read(0, 0), hist.world.read(0, 0));
+  const eduEmpty = h4.world.read(WORLD_KEYS.indexOf('eduIndex'), 0)!.v.slice(0, -1).every(Number.isNaN);
+  ok(popOk && eduEmpty, 'a save from before the education series loads, and the new series start empty');
+  const g4 = createGame(w4, { onConnection() {} }, { devTools: false, sandbox: true });
+  for (let i = 0; i < TICKS_PER_HOUR * 2; i++) g4.step();
+  ok(Number.isFinite(h4.world.read(WORLD_KEYS.indexOf('eduIndex'), 0)!.v.at(-1)!), 'and they fill in on the next hours');
+}
 
 // ---- 4. cost -------------------------------------------------------------------------------
 {

@@ -78,6 +78,11 @@ export class Schools {
   /** stages some school in town takes, with the widest catchment (Infinity: city-wide), refreshed by the census */
   private reach = new Map<number, number>();
   private counted = false;
+  /**
+   * What the last census saw of the whole population (the charts and the parcel panels, docs/education.md section 14):
+   * residents aged 18+ by highest level, residents aged 25-64 by level (the education index) and everyone enrolled by Study.
+   */
+  readonly attain = { adults: new Array<number>(6).fill(0), core: new Array<number>(6).fill(0), study: new Array<number>(9).fill(0), index: 0 };
   /** called when a pass raises a citizen's level (E4 wires Skills.graduated here: the "graduated" mood and brain drain) */
   onGraduated: ((c: Citizen) => void) | null = null;
   /** since the simulation started (probes read these) */
@@ -244,9 +249,13 @@ export class Schools {
       s.pupils = 0; s.present = 0; s.staff = 0; s.teachers = 0; s.postgrads = 0;
     }
     for (const k of this.schools.keys()) if (!seen.has(k)) this.schools.delete(k);
-    const grads = new Map<string, number>(), ownerOf = new Map<number, string | undefined>();
+    const grads = new Map<string, number>(), at = this.attain, now = w.tick;
+    at.adults.fill(0); at.core.fill(0); at.study.fill(0);
+    // per parcel: graduates living there, and the residents aged 25-64 with the sum of their levels (the index)
+    const perParcel = new Map<number, number[]>(), parcelOfHome = new Map<number, number>();
     for (const c of w.citizens.values()) {
       if (c.study) {
+        at.study[c.study]++;
         const s = this.schools.get(tkey(c.sx, c.sy));
         if (s) { s.pupils++; if (c.state === S.Work && !c.job) s.present++; }
       }
@@ -254,22 +263,39 @@ export class Schools {
         const s = this.schools.get(tkey(c.wx, c.wy));
         if (s) { s.staff++; if (c.edu >= EduLevel.Degree) s.teachers++; if (c.edu >= EduLevel.Postgrad) s.postgrads++; }
       }
-      if (c.edu >= EduLevel.Degree && !c.mig) {
+      if (c.mig) continue;
+      const age = ageOf(c, now), core = age >= 25 && age < 65;
+      if (age >= 18) at.adults[c.edu]++;
+      if (core) at.core[c.edu]++;
+      if (core || c.edu >= EduLevel.Degree) {
         const hk = tkey(c.hx, c.hy);
-        let o = ownerOf.get(hk);
-        if (o === undefined && !ownerOf.has(hk)) { o = w.parcelAt(c.hx, c.hy)?.owner; ownerOf.set(hk, o); }
-        if (o) grads.set(o, (grads.get(o) ?? 0) + 1);
+        let pid = parcelOfHome.get(hk);
+        if (pid === undefined) { pid = w.parcelIdAt(c.hx, c.hy); parcelOfHome.set(hk, pid); }
+        let a = perParcel.get(pid);
+        if (!a) perParcel.set(pid, (a = [0, 0, 0]));
+        if (c.edu >= EduLevel.Degree) a[0]++;
+        if (core) { a[1]++; a[2] += c.edu; }
       }
     }
-    const pupils = new Map<string, number>();
+    for (const [pid, a] of perParcel) {
+      const o = w.parcels.get(pid)?.owner;
+      if (o && a[0]) grads.set(o, (grads.get(o) ?? 0) + a[0]);
+    }
+    let n = 0, sum = 0;
+    for (let l = 0; l < at.core.length; l++) { n += at.core[l]; sum += l * at.core[l]; }
+    at.index = n ? (20 * sum) / n : 0;
+    const pupils = new Map<string, number>(), schoolsOf = new Map<number, number[]>();
     this.reach.clear();
     for (const s of this.schools.values()) {
       const cap = capacityOf(s.b.id, s.b.level);
       s.needed = Math.ceil(cap * s.spec.teachersShare); s.needPg = Math.ceil(cap * s.spec.postgradShare);
       s.staffing = Math.min(s.needed ? s.teachers / s.needed : 1, s.needPg ? s.postgrads / s.needPg : 1);
       if (s.quality < 0) s.quality = this.qualityNow(s);
-      const o = w.parcelAt(s.b.x, s.b.y)?.owner;
+      const pid = w.parcelIdAt(s.b.x, s.b.y), o = w.parcels.get(pid)?.owner;
       if (o && s.pupils) pupils.set(o, (pupils.get(o) ?? 0) + s.pupils);
+      let ps = schoolsOf.get(pid);
+      if (!ps) schoolsOf.set(pid, (ps = [0, 0]));
+      ps[0] += s.pupils; ps[1] += s.spec.places;
       if (s.spec.places <= 0) continue;
       const r = s.spec.catchment > 0 ? s.spec.catchment : Infinity;
       for (const st of [Study.Nursery, Study.Primary, Study.Secondary, Study.SixthForm, Study.Degree, Study.Postgrad]) {
@@ -278,6 +304,23 @@ export class Schools {
     }
     for (const [o, n] of pupils) w.bump(o, 'pupils', n, true);
     for (const [o, n] of grads) w.bump(o, 'graduates', n, true);
+    this.parcelStats(perParcel, schoolsOf);
+  }
+  /** The education figures of each parcel's panel; a parcel is sent again only when one of them changes. */
+  private parcelStats(perParcel: Map<number, number[]>, schoolsOf: Map<number, number[]>) {
+    for (const p of this.w.parcels.values()) {
+      const a = perParcel.get(p.id), sc = schoolsOf.get(p.id), st = p.stats;
+      const grads = a?.[0] ?? 0, eduN = a?.[1] ?? 0, eduIndex = eduN ? Math.round((20 * a![2]) / eduN) : 0;
+      const pupils = sc?.[0] ?? 0, places = sc?.[1] ?? 0;
+      if ((st.grads ?? 0) === grads && (st.eduN ?? 0) === eduN && (st.eduIndex ?? 0) === eduIndex && (st.pupils ?? 0) === pupils && (st.places ?? 0) === places) continue;
+      st.grads = grads; st.eduN = eduN; st.eduIndex = eduIndex; st.pupils = pupils; st.places = places;
+      this.w.dirtyParcels.add(p.id);
+    }
+  }
+  /** The population figures of the last census, counted first if none was taken yet (a world just loaded). */
+  attainment() {
+    if (!this.counted) this.census();
+    return this.attain;
   }
   private qualityNow(s: School) { return 1 - EDU.qualityDrop * (1 - s.staffing); }
   /** Places the staffing lets the school fill. */

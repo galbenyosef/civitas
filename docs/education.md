@@ -7,7 +7,8 @@ section 12 for what it provides. The rest is design. Rich has not answered secti
 recommended answers (A to every question). **E2 (the institutions catalogue, section 3 "Built in E2" and the tech track in section 6) is built** too,
 and so is **E3 (the schools simulation, section 13)**: children are admitted, walk (or are taken) to school, attend, sit
 results and move up a stage. **E8 (the Showcase and London, section 14)** is built too: every kind stands in the Showcase
-and the four London universities are landmarks.
+and the four London universities are landmarks. **E7 (the city views, section 15)** is built: history series, the Charts panel's Education tab, parcel
+attainment, the education overlay, the citizen's timeline, the school tooltip and the student look.
 
 Code this touches: `shared/src/education.ts` (new: levels, stages, tables), `shared/src/buildings/education.ts` (new:
 the kinds), `server/src/sim/schools.ts` (new: admissions, attendance, graduation), hooks in
@@ -470,7 +471,7 @@ is no crime model (police coverage only), so there is no link until there is one
 | E4 | **Jobs, wages, migration.** Skill gate in `findJob`, `jobMisses` by level, `Building.qualified`, wage multipliers, `EDU.match` tilt, brain drain, happiness parts; tuning runs | opus | simulation.ts (`findJob`, `hire`, `payWage`, `lifeFamily`), life.ts, gateways.ts | E1 (runs beside E3) | M |
 | E5 | **Higher and adult education.** University intake via gateways, halls of residence, families moving in, FE courses, evening classes (`errand` 2), apprenticeships, research ambition | opus | gateways.ts, simulation.ts (`spawn`, `arriveVia`, `ambition`), sim/schools.ts | E3, E4 | L |
 | E6 | **Policies and the tree UI.** `policies.ts`, `Player.policies`, `setPolicy` intent, Policies panel, Education track in the tech panel; school buses as FleetKind 9 (the server part goes to opus) | sonnet (+ opus for `mobile.ts`) | policies.ts, net.ts, ui.ts, fleet.ts, sim/mobile.ts | E2; the effects need E3 | M |
-| E7 | **City views.** History series and the Education tab funnel; `ParcelStats` fields; heat overlay; citizen timeline; school tooltip; student look in people.ts | sonnet | history.ts, charts.ts, main.ts, chunkView.ts, ui.ts, render/people.ts | E3 | M |
+| E7 | **Built.** **City views.** History series and the Education tab funnel; `ParcelStats` fields; heat overlay; citizen timeline; school tooltip; student look in people.ts | sonnet | history.ts, charts.ts, main.ts, chunkView.ts, ui.ts, render/people.ts | E3 | M |
 | E8 | **Built.** **Showcase and London.** Placements and tour stops, registry entries, London universities 111-114 and `lnd2` | sonnet | demo/showcase.ts, demo/london.ts, landmarks-london-3.ts, tech.ts | E2 (E3 for the seeded tests) | M |
 
 **In parallel:** E1 and E2 first. Then E3 and E4 together (both edit `simulation.ts`, in different functions; merge E4
@@ -566,7 +567,7 @@ per tick within noise (0.82-0.88 against 0.82-1.03).
   in `simulation.ts` builds it.
 - **Citizen panel** (`client/src/ui.ts` `lifeHtml`): "Age 34 · adult · turns 35 on Thu", an "Education" row with the
   level and track, and a "Studying" row (stage, year group, attendance) once E3 enrols people. The timeline and the
-  student look are E7.
+  student look are E7 (built, section 14).
 
 ### The probe
 
@@ -806,3 +807,62 @@ change that: section 13), the university runs at 25 of 36 teachers, quality 0.6.
 
 Teachers are whoever took the job until E4, so some London schools and King's College London find no staff in the first
 game days (staff 0, "waiting" lists of 21 to 53): the demo is honest about it, and E4 fixes it.
+
+
+## 15. Built: E7, the city views
+
+Built 2026-10-18 on branch `edu-e7`. Everything here reads what E1 and E3 already keep; nothing new runs per tick. The server side is
+one hourly census (`Schools.census`) and one hourly history sample; the rest is client.
+
+### The census feeds the views
+
+`Schools.census()` (hourly, at midnight and before each admissions batch) already walks the citizens once. It now also fills
+`Schools.attain` (`attainment()` counts first if no census has run, as for a world just loaded): residents aged 18+ by highest
+level (`adults`), residents aged 25-64 by level (`core`, whose mean gives `index`, the education index of section 6) and everyone
+enrolled by `Study` (`study`). Citizens moving in or out (`mig`) are left out. It also writes each parcel's figures into
+`ParcelStats` and adds the parcel to `dirtyParcels` only when one changed, so a quiet district costs the wire nothing.
+
+- **`ParcelStats`** (all optional, absent from older servers and saves): `pupils` (enrolled at the schools standing on the parcel),
+  `places` (their day places), `grads` (residents with a degree or more), `eduIndex` (0-100, the index of the parcel's residents
+  aged 25-64, rounded) and `eduN` (how many residents that is, the weight when an estate or the map sums parcels).
+- **History** (`docs/charts.md`): 15 new `WORLD_SERIES` in a new `HistGroup` `'education'`: `eduIndex`; `lvlNone` ... `lvlPostgrad`
+  (adults by highest level, which is the funnel); `stNursery`, `stPrimary`, `stSecondary`, `stSixth`, `stHigher` (degree and
+  postgraduate), `stAdult` (FE courses and evening classes); `passDay` and `dropDay` (passes including nursery years, and fails plus
+  drop-outs, over the last 24 hours, from the hourly difference of `Schools.events` so they restart with the process like the transit
+  boardings). 3 new `PLAYER_SERIES`: `myPupils`, `myPlaces`, `myGrads`, summed over the player's parcels. Saves need no bump: series
+  load by key, so an older save keeps its history and the new series start empty (`history:check` covers it). The wire grows by
+  18 numbers per hourly sample, and the full history, with every tier full, is about 37 KB as JSON (the history check prints it).
+
+### Client
+
+- **Charts, Education tab** (`client/src/charts.ts`): a full-width **funnel** card on top, then charts. The funnel is built from the newest
+  hourly sample and has no message of its own: one bar per level showing the share of adults who reached it or better, with how many
+  stopped there; beside it the enrolment by stage, the last 24 hours' passes and fails, and the **next milestone** (the first
+  education node of the tech tree you have not unlocked, with its counter from your `progress`; `ChartsPanel.me` is set by
+  `main.ts`). Charts: education index (fitted axis), enrolled by stage, graduates in town (degree plus postgraduate), results in
+  the last 24 hours, adults by highest qualification, your schools (pupils against places) and graduates on your land.
+- **Parcels:** the parcel panel (`ui.ts`) gets an Education row (index and a word for it, graduates, pupils against places) that hides
+  itself on land with nothing to say; the world map's panel (`mapmode.ts`) has Education index, Graduates and Pupils / places rows
+  for the parcel and its estate (the map's ground is not tinted by index: the overlay is a 3D-view feature) (the index of an estate is weighted by `eduN`). Both use `eduTotals` in `client/src/eduView.ts`.
+- **Overlay:** an **education** chip beside the traffic heat (`main.ts`, `render/eduHeat.ts` `EduHeat`). It tints every parcel with
+  residents aged 25-64 by `eduIndex` on a diverging ramp centred on the base mix: red at 40 and below, soft yellow at 62, blue at 84 and above. It is one merged mesh
+  rebuilt when the parcels change; a parcel with a school gets a white edge, and a school with nobody living round it is grey. It is per parcel, not per tile:
+  the index needs no extra message, and the unit a player decides about is the parcel. (A per-tile byte stream like the traffic heat is
+  the follow-up if parcels turn out too coarse.) `msc.setEduHeat(on)` drives it from a console.
+- **Citizen panel:** `educationHtml` (`eduView.ts`) replaces the two rows of E1 with the level and track, and under "School and
+  college" a timeline: one step per entry of `life.education.history` (stage, place, how it ended, the game week) in green for a pass,
+  red for a fail or drop-out and grey for leaving, then the stage they are in now, with the year group, attendance and a progress bar.
+- **School tooltip and panel:** `schoolHtml` for `BuildingInfo.school`, in the hover tooltip, the building panel and the demo tour's
+  card: pupils or students against places, in class now, places the staffing lets it take, teachers with a degree against needed (and
+  postgraduates), catchment, the school day, quality, this year's results and the waiting list.
+- **Student look** (`render/people.ts`, `render/citizens.ts`): `CITIZEN_STUDY` (bit 25) is read into `Agent.study`. A grown-up on a
+  school trip (sixth form, college, university, an adult course) is dressed in casual clothes with a rucksack (85%) and a lanyard with a
+  card (70%; a new near-detail feature bit `G.lanyard`), never a tie or a briefcase. Child pupils keep the school jumper and bag
+  that `dressFor` gave them. `Look.student` records it, so the figure is re-dressed when the flag flips.
+
+### Checks
+
+`npm run history:check` gained a section: adults by level add up to the adult residents, the index is in range, nothing is enrolled
+while nothing is built, a hand-enrolled student shows in the university series, their parcel's `grads` and the owner's `myGrads`
+count a graduate, and a save from before the series loads with the new ones empty and filling on the next hours.
+

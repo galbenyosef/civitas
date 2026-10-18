@@ -27,7 +27,7 @@ const L = { none: 0, lUpper: 1, lFore: 2, rUpper: 3, rFore: 4, lThigh: 5, lShin:
 const G = {
   hairCap: 0, hairLong: 1, hairBun: 2, hairTail: 3, hairAfro: 4, hairQuiff: 5,
   skirt: 6, coat: 7, sideBag: 8, backpack: 9, briefcase: 10, cap: 11, hardHat: 12, phone: 13,
-  shirtFront: 14, tie: 15, stick: 16, bands: 17,
+  shirtFront: 14, tie: 15, stick: 16, bands: 17, lanyard: 21,
   /** not geometry: forearms bare, shins bare, child head proportions */
   shortSleeves: 18, shorts: 19, child: 20,
 } as const;
@@ -124,6 +124,8 @@ function figure(near: boolean): BufferGeometry {
       .add(torsoGeo(0.268, 0.011, 1.07, true), P.inner, L.none, G.bands)
       .box(0.016, 0.046, 0.05, -0.012, 0.162, 0.058, P.leather, L.none, G.sideBag)
       .box(0.03, 0.078, 0.068, -0.038, 0.214, 0, P.accent, L.none, G.backpack)
+      .box(0.004, 0.07, 0.007, 0.0262, 0.232, 0, P.accent, L.none, G.lanyard)
+      .box(0.004, 0.028, 0.02, 0.0272, 0.205, 0, P.inner, L.none, G.lanyard)
       .box(0.062, 0.046, 0.014, 0.004, 0.072, ARM_Z, P.leather, L.rFore, G.briefcase)
       .box(0.012, 0.022, 0.006, 0.006, 0.124, -ARM_Z, P.phone, L.lFore, G.phone)
       .box(0.01, 0.13, 0.01, 0.012, 0.0, ARM_Z + 0.004, P.wood, L.rFore, G.stick)
@@ -264,6 +266,8 @@ export interface Look {
   turn: number;
   /** which outfit this is: 'w' work, 'l' leisure, 'e' evening out */
   dress: string;
+  /** dressed as a student (a pupil or a grown-up in education on a trip to or from their place of study) */
+  student: boolean;
 }
 
 const SKIN = [0xf6d7c3, 0xeec1a0, 0xe2ae88, 0xcf9670, 0xb07650, 0x8d5a3a, 0x6c432b, 0x4f3020];
@@ -297,7 +301,7 @@ function jit(hex: number, u: number, r = 0.1) {
 }
 
 /** Dress a person for what they are doing: `work` on the way to or from (or at) their job, otherwise leisure; `evening` after dark. */
-export function lookOf(id: number, kind: number, stage: number, work: boolean, evening: boolean): Look {
+export function lookOf(id: number, kind: number, stage: number, work: boolean, evening: boolean, student = false): Look {
   let n = 100;
   const h = () => hash2(id, n++);
   const pick = <T>(a: readonly T[]) => a[Math.floor(h() * a.length)];
@@ -411,9 +415,17 @@ export function lookOf(id: number, kind: number, stage: number, work: boolean, e
       default: casual();
     }
   }
+  // a student (CITIZEN_STUDY on a grown-up: sixth form, college, university, an adult course) wears their own clothes
+  // with a rucksack and, for most, a lanyard with a card on it; a child pupil already has the school jumper and bag
+  if (student && !child && !old) {
+    n = 260;
+    if (h() < 0.85) { f |= bit(G.backpack); f &= ~bit(G.sideBag) & ~bit(G.briefcase); acc = pick(BRIGHT); }
+    if (h() < 0.7) { f |= bit(G.lanyard); inner = 0xf4f4f2; if (!(f & bit(G.backpack))) acc = pick(BRIGHT); }
+    f &= ~bit(G.tie);
+  }
   // hats sit on the hair: crops, buns, afros and quiffs go under them, long hair and ponytails still show
   if (f & (bit(G.cap) | bit(G.hardHat))) f &= ~(bit(G.hairCap) | bit(G.hairBun) | bit(G.hairAfro) | bit(G.hairQuiff));
-  return { a: [skin, hair, top, legs], b: [inner, shoe, acc, f], height, girth, stoop, pace, phone, turn, dress: work ? 'w' : evening ? 'e' : 'l' };
+  return { a: [skin, hair, top, legs], b: [inner, shoe, acc, f], height, girth, stoop, pace, phone, turn, dress: work ? 'w' : evening ? 'e' : 'l', student };
 }
 
 /** Whether this state dresses for work (`true`), for leisure (`false`), or keeps whatever they had on (`null`, walking home). */

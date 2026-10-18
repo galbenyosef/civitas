@@ -5,6 +5,7 @@ import type { ClientWorld } from './world';
 import { CameraRig, MAP_PITCH, DIST_MAX, MAP_DIST_MIN, MAP_DIST_MAX } from './camera';
 import type { MapInput } from './input';
 import { MapView, type MapMark } from './render/worldmap';
+import { eduTotals, eduIndexLabel } from './eduView';
 
 /**
  * The world map mode (docs/world-map.md): Tab, the map chip, or zooming out past the 3D limit. Owns the map's camera
@@ -18,7 +19,7 @@ interface Deps {
   /** the map came up or went: main.ts drops or streams chunks, hides the 3D panels */
   onToggle(on: boolean): void;
 }
-interface Totals { area: number; buildings: number; population: number; employed: number; jobs: number; roads: number; value: number; tax: number; sites: number }
+interface Totals { area: number; buildings: number; population: number; employed: number; jobs: number; roads: number; value: number; tax: number; sites: number; edu: ReturnType<typeof eduTotals> }
 const EASE_S = 0.4;
 /** sectors in view are asked again this often while the map is up (ms) */
 const REFRESH_MS = 3000;
@@ -284,7 +285,7 @@ export class MapMode implements MapInput {
   }
   private estate(p: ParcelDTO) { return p.group === undefined ? [p] : [...this.d.world.parcels.values()].filter((q) => q.group === p.group); }
   private totals(list: ParcelDTO[]): Totals {
-    const t = { area: 0, buildings: 0, population: 0, employed: 0, jobs: 0, roads: 0, value: 0, tax: 0, sites: 0 };
+    const t = { area: 0, buildings: 0, population: 0, employed: 0, jobs: 0, roads: 0, value: 0, tax: 0, sites: 0, edu: eduTotals(list) };
     for (const p of list) {
       const s = p.stats;
       t.area += p.w * p.h; t.buildings += s.buildings ?? 0; t.population += s.population; t.employed += s.employed; t.jobs += s.jobs;
@@ -299,6 +300,9 @@ export class MapMode implements MapInput {
     ['population', 'Population', (t: Totals) => t.population.toLocaleString('en-GB')],
     ['jobs', 'Jobs filled', (t: Totals) => `${t.employed.toLocaleString('en-GB')} / ${t.jobs.toLocaleString('en-GB')}`],
     ['roads', 'Road tiles', (t: Totals) => String(t.roads)],
+    ['eduIndex', 'Education index', (t: Totals) => (t.edu.n ? `${t.edu.index} · ${eduIndexLabel(t.edu.index)}` : '–')],
+    ['grads', 'Graduates', (t: Totals) => t.edu.grads.toLocaleString('en-GB')],
+    ['pupils', 'Pupils / places', (t: Totals) => `${t.edu.pupils.toLocaleString('en-GB')} / ${t.edu.places.toLocaleString('en-GB')}`],
     ['value', 'Book value', (t: Totals) => money(t.value)],
     ['tax', 'Tax yesterday', (t: Totals) => money(t.tax)],
   ] as const;
@@ -313,7 +317,7 @@ export class MapMode implements MapInput {
   }
   private table(estate: boolean) {
     return `<table class="mstats">${estate ? '<tr><th></th><th>parcel</th><th>estate</th></tr>' : ''}
-      ${this.statRows.map(([k, label]) => `<tr${k === 'value' ? ' title="What the land, roads and buildings cost to make (land, zoning, building work, civic prices); not a market price"' : ''}><td>${label}</td><td data-s="${k}"></td>${estate ? `<td data-e="${k}"></td>` : ''}</tr>`).join('')}</table>`;
+      ${this.statRows.map(([k, label]) => `<tr${k === 'value' ? ' title="What the land, roads and buildings cost to make (land, zoning, building work, civic prices); not a market price"' : k === 'eduIndex' ? ' title="Residents aged 25-64: 20 x their mean level (none 0 to postgraduate 5), so 0-100"' : ''}><td>${label}</td><td data-s="${k}"></td>${estate ? `<td data-e="${k}"></td>` : ''}</tr>`).join('')}</table>`;
   }
   private oneHtml(p: ParcelDTO) {
     const w = this.d.world, owner = w.players.get(p.owner), mine = w.mayEdit(p.owner);

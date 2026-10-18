@@ -1,4 +1,4 @@
-import { Rings, WORLD_SERIES, PLAYER_SERIES, WORLD_KEYS, PLAYER_KEYS, HIST_TIERS, type ServerMsg, type HistUnit } from '@msimcity/shared';
+import { Rings, WORLD_SERIES, PLAYER_SERIES, WORLD_KEYS, PLAYER_KEYS, HIST_TIERS, TECH, EDU_LEVEL_NAMES, type ServerMsg, type HistUnit, type PlayerDTO } from '@msimcity/shared';
 import type { NetClient } from './net';
 
 /**
@@ -8,9 +8,9 @@ import type { NetClient } from './net';
  * Small-multiple line charts on canvas, one shared hover time across all of them.
  */
 
-type Tab = 'city' | 'economy' | 'traffic';
+type Tab = 'city' | 'economy' | 'traffic' | 'education';
 type Range = 'day' | 'week' | 'month' | 'all';
-const TABS: { id: Tab; label: string }[] = [{ id: 'city', label: 'City' }, { id: 'economy', label: 'Economy' }, { id: 'traffic', label: 'Traffic & transport' }];
+const TABS: { id: Tab; label: string }[] = [{ id: 'city', label: 'City' }, { id: 'economy', label: 'Economy' }, { id: 'traffic', label: 'Traffic & transport' }, { id: 'education', label: 'Education' }];
 const RANGES: { id: Range; label: string; title: string }[] = [
   { id: 'day', label: 'Day', title: 'The last game day, hour by hour' },
   { id: 'week', label: 'Week', title: 'The last 7 game days, hour by hour' },
@@ -18,7 +18,7 @@ const RANGES: { id: Range; label: string; title: string }[] = [
   { id: 'all', label: 'All', title: 'Everything kept: daily, then weekly once the daily record is full' },
 ];
 
-const C = { green: '#62d2a2', blue: '#5aa8ff', orange: '#ffa14a', violet: '#b48bff', red: '#ff7a7a' };
+const C = { green: '#62d2a2', blue: '#5aa8ff', orange: '#ffa14a', violet: '#b48bff', red: '#ff7a7a', teal: '#4dd0e1' };
 interface SeriesSpec {
   key: string; label: string; color: string; src?: 'w' | 'p';
   /** a series worked out from two others (net = income - spending) */
@@ -41,6 +41,13 @@ const CHARTS: ChartSpec[] = [
   { id: 'vehicles', tab: 'traffic', title: 'Cars on the road', unit: '', series: [W('vehicles', 'Driving', C.blue), W('parked', 'Parked', C.orange)] },
   { id: 'moving', tab: 'traffic', title: 'Citizens on the move', unit: '', series: [W('moving', 'Travelling', C.green)] },
   { id: 'riders', tab: 'traffic', title: 'Transit boardings per hour', unit: '/h', series: [W('riders', 'Boardings', C.violet)], note: 'Buses and trains' },
+  { id: 'eduIndex', tab: 'education', title: 'Education index', unit: '', fit: true, series: [W('eduIndex', 'Index', C.violet)], note: 'Residents aged 25-64: 20 \u00d7 their mean level (none 0 to postgraduate 5), so 0-100' },
+  { id: 'enrolled', tab: 'education', title: 'Enrolled by stage', unit: '', series: [W('stNursery', 'Nursery', C.teal), W('stPrimary', 'Primary', C.green), W('stSecondary', 'Secondary', C.blue), W('stSixth', 'Sixth form and FE', C.violet), W('stHigher', 'University', C.orange), W('stAdult', 'Adult courses', C.red)] },
+  { id: 'graduates', tab: 'education', title: 'Graduates in town', unit: '', series: [{ key: 'graduates', label: 'Degree or more', color: C.green, src: 'w', calc: { a: 'lvlDegree', b: 'lvlPostgrad', fn: (a, b) => a + b } }], note: 'Adults who hold a degree or a postgraduate degree' },
+  { id: 'results', tab: 'education', title: 'Results in the last 24 hours', unit: '', series: [W('passDay', 'Passed', C.green), W('dropDay', 'Failed or dropped out', C.orange)], note: 'Results come on Saturdays, so the figures step up then and fade over a day' },
+  { id: 'levels', tab: 'education', title: 'Adults by highest qualification', unit: '', series: [W('lvlNone', 'None', C.red), W('lvlPrimary', 'Primary', C.orange), W('lvlSecondary', 'GCSEs', C.teal), W('lvlFurther', 'Level 3', C.blue), W('lvlDegree', 'Degree', C.green), W('lvlPostgrad', 'Postgraduate', C.violet)] },
+  { id: 'myschools', tab: 'education', title: 'Your schools', unit: '', series: [P('myPupils', 'Pupils', C.blue), P('myPlaces', 'Places', C.orange)], note: 'School places on your land, and how many are filled' },
+  { id: 'mygrads', tab: 'education', title: 'Graduates on your land', unit: '', series: [P('myGrads', 'Graduates', C.green)], note: 'Residents of your parcels with a degree or more' },
   { id: 'tick', tab: 'traffic', title: 'Server tick time (ms)', unit: 'ms', series: [W('tickMs', 'Average', C.blue), W('tickP95', '95th percentile', C.orange)], note: 'Over the last minute at each sample' },
 ];
 const TAB_OF = new Map(CHARTS.map((c) => [c.id, c.tab]));
@@ -119,6 +126,9 @@ export class ChartsPanel {
   private hoverT: number | null = null;
   private hoverCard: Card | null = null;
   private raf = 0;
+  /** the signed-in player, for the milestones in the education funnel (main.ts sets it) */
+  me: () => PlayerDTO | undefined = () => undefined;
+  private funnel: HTMLElement | null = null;
   private sparks: { canvas: HTMLCanvasElement; key: string; src: 'w' | 'p' }[] = [];
   private colors = { fg: '#e6e9ef', muted: '#8a93a3', line: 'rgba(255,255,255,0.08)', panel: '#10141b' };
 
@@ -230,6 +240,12 @@ export class ChartsPanel {
     for (const b of this.el.querySelectorAll<HTMLElement>('[data-range]')) b.classList.toggle('on', b.dataset.range === this.range);
     this.grid.textContent = '';
     this.cards = [];
+    this.funnel = null;
+    if (this.tab === 'education') {
+      this.funnel = document.createElement('div');
+      this.funnel.className = 'chcard chfunnel';
+      this.grid.appendChild(this.funnel);
+    }
     for (const spec of CHARTS.filter((c) => c.tab === this.tab)) {
       const el = document.createElement('div');
       el.className = 'chcard'; el.dataset.chart = spec.id;
@@ -327,6 +343,55 @@ export class ChartsPanel {
       if (p) this.load(card, p); else { card.xs = []; card.ys = card.spec.series.map(() => []); }
       this.drawCard(card);
     }
+    if (this.funnel) this.drawFunnel(this.funnel);
+  }
+
+  /** The newest value of a world series (the latest hourly sample), or null before there is one. */
+  private latest(key: string): number | null {
+    const r = this.world?.read(this.world.keys.indexOf(key), 0);
+    if (!r) return null;
+    for (let i = r.v.length - 1; i >= 0; i--) if (Number.isFinite(r.v[i])) return r.v[i];
+    return null;
+  }
+
+  /**
+   * The attainment funnel: how many adults reached each level, who is enrolled where, this day's results and the
+   * next education milestone of the tech tree (docs/education.md section 14). Built from the newest hourly sample.
+   */
+  private drawFunnel(el: HTMLElement) {
+    const lv = ['lvlNone', 'lvlPrimary', 'lvlSecondary', 'lvlFurther', 'lvlDegree', 'lvlPostgrad'].map((k) => this.latest(k));
+    if (lv.some((v) => v === null)) { el.innerHTML = `<div class="chtop"><span class="chtitle">Qualifications of adults</span></div><div class="chnote">${this.world ? 'The first sample lands next game hour.' : 'Loading the history\u2026'}</div>`; return; }
+    const n = lv as number[];
+    const total = n.reduce((a, b) => a + b, 0) || 1;
+    const idx = this.latest('eduIndex') ?? 0;
+    let above = total;
+    const fun = n.map((count, l) => {
+      const reached = above; above -= count;
+      const share = reached / total;
+      return `<div class="funrow"><span class="funlab">${l === 0 ? 'Adults (18+)' : EDU_LEVEL_NAMES[l].replace(/^./, (ch) => ch.toUpperCase())}</span>`
+        + `<span class="funbar"><i style="width:${Math.max(1.5, 100 * share).toFixed(1)}%;opacity:${(0.95 - l * 0.11).toFixed(2)}"></i></span>`
+        + `<span class="funnum"><b>${Math.round(100 * share)}%</b> <em>${count.toLocaleString()} ${l === 0 ? 'with none' : 'stop here'}</em></span></div>`;
+    }).join('');
+    const stages: [string, string][] = [['Nursery', 'stNursery'], ['Primary', 'stPrimary'], ['Secondary', 'stSecondary'], ['Sixth form and FE', 'stSixth'], ['University', 'stHigher'], ['Adult courses', 'stAdult']];
+    const enrolled = stages.map(([label, k]) => `<div class="funst"><span>${label}</span><b>${Math.round(this.latest(k) ?? 0).toLocaleString()}</b></div>`).join('');
+    const pass = Math.round(this.latest('passDay') ?? 0), drop = Math.round(this.latest('dropDay') ?? 0);
+    el.innerHTML = `<div class="chtop"><span class="chtitle">How far adults got</span><span class="chval">education index <b>${idx.toFixed(0)}</b></span></div>
+      <div class="funbody"><div class="funrows">${fun}</div>
+      <div class="funside"><div class="funhead">Enrolled now</div>${enrolled}
+        <div class="funhead">Last 24 hours</div><div class="funst"><span>Passed</span><b>${pass}</b></div><div class="funst"><span>Failed or dropped out</span><b class="${drop > pass ? 'bad' : ''}">${drop}</b></div>
+        ${this.milestone()}</div></div>
+      <div class="chnote">Each bar is the share of adults who reached that level or better; the figure after it is how many stopped there.</div>`;
+  }
+
+  /** The next education node you have not unlocked and how far its condition is (the progress counters of your parcels). */
+  private milestone(): string {
+    const me = this.me();
+    if (!me) return '';
+    const next = TECH.filter((t) => t.track === 'education' && !t.locked && !me.tech.includes(t.id)).sort((a, b) => a.tier - b.tier)[0];
+    if (!next) return `<div class="funhead">Next milestone</div><div class="funms">Every education node is unlocked.</div>`;
+    const what: Record<string, string> = { pupils: 'pupils at school', graduates: 'graduates', housed: 'residents', jobs: 'jobs filled' };
+    const have = me.progress[next.condition.counter] ?? 0, need = next.condition.min;
+    return `<div class="funhead">Next milestone</div><div class="funms"><b>${next.name}</b>: ${need} ${what[next.condition.counter] ?? next.condition.counter}<span class="funbar ms"><i style="width:${Math.min(100, (100 * have) / need).toFixed(0)}%"></i></span><em>${Math.min(have, need)} of ${need}</em></div>`;
   }
 
   private drawCard(card: Card) {
@@ -472,7 +537,8 @@ export class ChartsPanel {
       const first = card.ys[0].find((x) => Number.isFinite(x));
       if (first !== undefined && Number.isFinite(v) && n > 1) {
         const d = v - first;
-        const txt = first !== 0 && spec.unit !== '%' ? `${d >= 0 ? '+' : '−'}${Math.abs(Math.round((100 * d) / Math.abs(first)))}%` : `${d >= 0 ? '+' : '−'}${fmtVal(Math.abs(d), spec.unit)}`;
+        const pct = first !== 0 && spec.unit !== '%' ? Math.round((100 * d) / Math.abs(first)) : null;
+        const txt = pct !== null ? `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct)}%` : `${d >= 0 ? '+' : '−'}${fmtVal(Math.abs(d), spec.unit)}`;
         delta = ` <i class="chdelta">${txt}</i>`;
       }
     }
@@ -557,6 +623,20 @@ const STYLE = `
 #charts .chlegend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
 #charts .chlegend b { color: var(--fg); font-weight: 600; margin-left: 2px; }
 #charts .chnote { margin-top: 2px; color: var(--muted); font-size: 11px; }
+#charts .chfunnel { grid-column: 1 / -1; }
+#charts .funbody { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(190px, 1fr); gap: 4px 22px; margin: 6px 0 2px; }
+#charts .funrow { display: grid; grid-template-columns: 112px 1fr 148px; align-items: center; gap: 8px; margin: 5px 0; }
+#charts .funlab { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#charts .funbar { display: block; height: 14px; border-radius: 3px; background: rgba(255,255,255,0.05); overflow: hidden; }
+#charts .funbar i { display: block; height: 100%; border-radius: 3px; background: #5aa8ff; }
+#charts .funbar.ms { height: 5px; margin: 4px 0 2px; } #charts .funbar.ms i { background: var(--accent); }
+#charts .funnum { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#charts .funnum b { color: var(--fg); font-size: 13px; } #charts .funnum em, #charts .funms em { font-style: normal; font-size: 11px; }
+#charts .funhead { margin: 8px 0 3px; color: var(--muted); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+#charts .funhead:first-child { margin-top: 0; }
+#charts .funst { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#charts .funst b { color: var(--fg); font-weight: 600; }
+#charts .funms { color: var(--muted); } #charts .funms b { color: var(--fg); }
 #charts .chfoot { margin-top: 8px; color: var(--muted); font-size: 11px; }
 .spark { display: inline-block; vertical-align: middle; margin-left: 6px; cursor: pointer; opacity: 0.85; }
 .spark:hover { opacity: 1; }
@@ -564,6 +644,8 @@ const STYLE = `
 @media (max-width: 700px) {
   #charts { left: 8px; right: 8px; top: 48px; width: auto; max-height: calc(100vh - 56px); padding: 10px; }
   #charts .chgrid { grid-template-columns: 1fr; }
+  #charts .funbody { grid-template-columns: 1fr; }
+  #charts .funrow { grid-template-columns: 92px 1fr 118px; }
   #charts .chtabs { order: 3; width: 100%; overflow-x: auto; }
   #charts .chranges { margin-left: 0; }
   #charts h2 { margin-right: auto; }
