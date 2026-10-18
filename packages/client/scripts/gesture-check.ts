@@ -129,6 +129,20 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
   const r1 = Math.hypot(m.rig.target.x - p.x, m.rig.target.z - p.z);
   ok(Math.abs(r1 - r0) < 1e-6 && Math.hypot(b.x - a.x, b.z - a.z) > 1, 'the view orbits the point under the cursor (target swings round it at a fixed radius)');
 }
+{ // a Mac mouse with smooth scrolling: small fractional vertical-only pixel deltas in a quick stream must still zoom
+  const m = make();
+  const d0 = m.rig.dist;
+  for (let i = 0; i < 12; i++) m.wheel({ deltaY: 4.73 + (i % 3) * 1.37 }, 16);
+  m.settle();
+  ok(m.rig.dist > d0 && m.rig.target.length() === 0, 'a smooth-scroll Mac mouse wheel zooms, it does not pan');
+  // and after a trackpad swipe, going back to that mouse zooms again within a few events
+  for (let i = 0; i < 8; i++) m.wheel({ deltaX: 1.5, deltaY: 6.25 }, 16);
+  m.settle(); const d1 = m.rig.dist;
+  m.wheel({ deltaY: 5.1 }, 400);
+  for (let i = 0; i < 11; i++) m.wheel({ deltaY: 5.1 }, 16);
+  m.settle();
+  ok(m.rig.dist > d1, 'back on the smooth-scroll mouse after a swipe, the wheel zooms again');
+}
 { // a mouse then a trackpad: the verdict follows, in the same Input
   const m = make();
   m.wheel({ deltaY: 100 }, 400); const d1 = m.rig.dist;

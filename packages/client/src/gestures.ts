@@ -33,14 +33,20 @@ export class WheelClassifier {
   private vote(e: WheelLike) {
     const dt = e.timeStamp - this.last;
     this.last = e.timeStamp;
+    // a pause starts a new gesture with no verdict: switching device always takes longer than this, and an undecided
+    // event zooms, so a mouse is never stuck panning because a trackpad swipe came before it
+    if (dt > 300) { this.score = 0; this.verdict = null; }
     const ax = Math.abs(e.deltaX), ay = Math.abs(e.deltaY);
     const whole = (v: number) => Math.abs(v - Math.round(v)) < 0.01;
     let v = 0, definite = false;
     if (e.deltaMode !== 0) { v = -1; definite = true; } // lines/pages: a notched wheel
     else if (ax > 0 && !e.shiftKey && ay > 0) v = 1; // both axes at once: fingers drift, a wheel never does
-    else if (!whole(ax) || !whole(ay)) v = 1; // fractional pixels: only a trackpad (or a smooth-scroll mouse, rare)
+    else if (ax > 0 && !e.shiftKey && ay === 0) v = 0.6; // sideways only: a swipe (a wheel has no sideways axis)
     else if ((ay >= 100 && dt > 80) || (ay >= 40 && dt > 150)) { v = -1; definite = true; } // a big discrete step on its own (not inside a swipe's stream)
-    else if (dt < 50 && ay > 0 && ay < 30) v = 0.3; // a quick run of small steps: a stream; alone it stays under FLIP (a fast-spun Mac mouse looks the same)
+    // Vertical only. A Mac mouse with smooth scrolling sends small fractional pixel deltas just like a trackpad, so
+    // fractions prove nothing (Rich's mouse wheel panned because of that); a purely vertical event leans mouse, and
+    // only the sideways drift of real fingers, which a trackpad swipe shows within its first few events, says trackpad.
+    else if (ay > 0) v = whole(ay) ? -0.3 : -0.15;
     // lines/pages and an isolated big step are a wheel beyond doubt: no swipe's average should outvote them
     this.score = definite ? Math.min(this.score, -0.6) : this.score * 0.6 + v * 0.4;
     // a clear single vote (fractional / big step / lines) flips quickly; ambiguous ones only drift the average
