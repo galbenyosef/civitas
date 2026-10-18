@@ -44,8 +44,8 @@ export const GROUPS: GroupDef[] = [
   { id: 'theatre', label: 'Theatres', section: 'Leisure', color: '#7a3e8f', holds: 'seats' },
   { id: 'sports', label: 'Sport', section: 'Leisure', color: '#2f6fb5', holds: 'visitors' },
   { id: 'library', label: 'Libraries', section: 'Leisure', color: '#a8875a', holds: 'visitors' },
-  // education (docs/education.md section 3): nursery to university, sub-kinds of the library family (code 14), drafts until the Showcase places them
-  { id: 'education', label: 'Education', section: 'Services', color: '#d8b25a', holds: 'pupils', stages: true, draft: true },
+  // education (docs/education.md section 3): nursery to research institute, sub-kinds of the library family (code 14)
+  { id: 'education', label: 'Education', section: 'Services', color: '#d8b25a', holds: 'pupils', stages: true },
   // landmarks (docs/buildings.md "Landmarks"): real buildings, one picker per city; buildings/landmarks-london.ts
   { id: 'london', label: 'London', section: 'Landmarks', color: '#c8102e', holds: 'staff', collection: true },
   // reserved for other cards

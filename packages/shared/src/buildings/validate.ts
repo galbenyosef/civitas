@@ -336,7 +336,7 @@ export function groupErrors(kinds: KindDef[]): string[] {
     if (k.group === undefined && k.tier === undefined) continue;
     const g = k.group !== undefined ? GROUP_BY_ID.get(k.group) : undefined;
     if (!g) { errs.push(`${w}: group '${k.group}' unknown (buildings/groups.ts)`); continue; }
-    if (!Number.isInteger(k.tier) || (k.tier as number) < 1 || (k.tier as number) > 12) errs.push(`${w}: tier must be an integer 1-12 (1 = the smallest rung)`);
+    if (!Number.isInteger(k.tier) || (k.tier as number) < 1 || (k.tier as number) > 16) errs.push(`${w}: tier must be an integer 1-16 (1 = the smallest rung)`);
     if (!k.tool) errs.push(`${w}: a rung of the '${k.group}' ladder needs a tool (its id is the tier's tech feature)`);
     if (typeof k.blurb !== 'string' || k.blurb.length < 20) errs.push(`${w}: a grouped kind needs a blurb (a sentence or two for the size picker)`);
     if (typeof k.howTo !== 'string' || k.howTo.length < 20) errs.push(`${w}: a grouped kind needs howTo (how to place it well)`);

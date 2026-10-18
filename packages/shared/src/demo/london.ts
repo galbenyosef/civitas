@@ -74,6 +74,12 @@ const STRUCTURES: Spot[] = [
   ['natural-history-museum', 'museum', 51.4967, -0.1764, 'N'],
   ['maritime-museum', 'museum', 51.4810, -0.0054, 'N', 'S'], // Greenwich, across the river from the tip of the Isle of Dogs
   ['british-library', 'central-library', 51.5300, -0.1276, 'S'],
+  // the universities (buildings/landmarks-london-3.ts): UCL's Wilkins Building on Gower Street, King's Strand building
+  // beside Somerset House, LSE on Houghton Street, Imperial's Queen's Tower in South Kensington
+  ['ucl', 'ucl', 51.5246, -0.1340, 'S'],
+  ['kings', 'kings', 51.5115, -0.1160, 'N', 'N'],
+  ['lse', 'lse', 51.5144, -0.1165, 'W', 'N'],
+  ['imperial', 'imperial', 51.4988, -0.1749, 'S'],
   ['leicester-square', 'multiplex', 51.5103, -0.1301, 'W'],
   ['serpentine', 'lakeside-park', 51.5050, -0.1700, 'S'],
   ['regents-park-lake', 'lakeside-park', 51.5270, -0.1600, 'N'],
@@ -82,6 +88,17 @@ const STRUCTURES: Spot[] = [
   ['london-stadium', 'stadium', 51.5387, -0.0166, 'S'],
   ['copper-box', 'leisure-centre', 51.5448, -0.0215, 'W'],
   ['o2-arena', 'arena', 51.4999, 0.0211, 'W'],
+  // the schools of the boroughs, among their homes (docs/education.md section 9): primaries and secondaries
+  ['primary-islington', 'primary-school', 51.5400, -0.1050, 'S'],
+  ['primary-hackney', 'primary-school', 51.5470, -0.0600, 'S'],
+  ['primary-camden', 'primary-school', 51.5420, -0.1500, 'S'],
+  ['primary-brixton', 'primary-school', 51.4640, -0.1100, 'N'],
+  ['primary-clapham', 'primary-school', 51.4640, -0.1520, 'N'],
+  ['primary-kensington', 'primary-school', 51.4930, -0.1950, 'S'],
+  ['secondary-islington', 'secondary-school', 51.5330, -0.1100, 'S'],
+  ['secondary-hackney', 'secondary-school', 51.5520, -0.0500, 'S'],
+  ['secondary-brixton', 'secondary-school', 51.4560, -0.1180, 'N'],
+  ['secondary-hammersmith', 'secondary-school', 51.4950, -0.2200, 'S'],
   ['victoria-garage', 'bus-depot', 51.4930, -0.1450, 'N'],
   ['stockwell-garage', 'bus-depot', 51.4740, -0.1180, 'E'],
   ['poplar-garage', 'bus-depot', 51.5110, -0.0050, 'N'],
@@ -499,15 +516,21 @@ export function londonScenario(): LondonScenario {
     },
     {
       id: 'london-landmarks', name: 'Landmarks',
-      blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Big Ben and the Houses of Parliament, the London Eye, Buckingham Palace, the Tower and Tower Bridge, and the hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
+      blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Big Ben and the Houses of Parliament, the London Eye, Buckingham Palace, the Tower and Tower Bridge, UCL, King\'s College, LSE and Imperial College as universities, and the hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
       placements: [
         ...pick('new-scotland-yard', 'st-thomas', 'royal-london', 'lambeth-fire', 'british-museum', 'natural-history-museum', 'maritime-museum', 'british-library',
-          'royal-opera-house', 'gherkin', 'walkie-talkie', 'shard', 'one-canada-square', 'parliament', 'london-eye', 'buckingham-palace', 'tower-of-london'),
+          'royal-opera-house', 'gherkin', 'walkie-talkie', 'shard', 'one-canada-square', 'parliament', 'london-eye', 'buckingham-palace', 'tower-of-london',
+          'ucl', 'kings', 'lse', 'imperial'),
         ...venues,
         ...pick('leicester-square', 'serpentine', 'regents-park-lake', 'kew-gardens', 'wembley', 'london-stadium', 'copper-box', 'o2-arena'),
       ],
       // the street plan bridges every named crossing (londonMap.ts); Tower Bridge is the landmark among them
       bridges: [{ id: 'tower-bridge', name: 'Tower Bridge', from: towerFrom, to: towerTo, style: 'Bascule', landmark: 'tower-bridge' }],
+    },
+    {
+      id: 'london-education', name: 'Schools',
+      blurb: 'Primary and secondary schools among the homes of Islington, Hackney, Camden, Brixton, Clapham, Kensington and Hammersmith: families live round them, so on a school day the children walk to class. The four universities in the Landmarks section take the sixth-form leavers.',
+      placements: pick(...STRUCTURES.filter(([, kind]) => kind === 'primary-school' || kind === 'secondary-school').map(([id]) => id)),
     },
     {
       id: 'london-rail', name: 'Rail and Heathrow',
@@ -577,15 +600,15 @@ export function londonScenario(): LondonScenario {
 export const LONDON_TOUR: string[] = [
   'welcome',
   'area-westminster', 'parliament', 'london-eye', 'pier-embankment', 'line-ferry-rb1', 'pier-millbank', 'buckingham-palace', 'new-scotland-yard', 'st-thomas', 'lambeth-fire',
-  'area-west-end', 'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'leicester-square', 'line-bus-25', 'line-bus-159',
+  'area-west-end', 'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'kings', 'lse', 'leicester-square', 'line-bus-25', 'line-bus-159',
   'tube-central-tottenham-court-road', 'line-tube-central', 'line-tube-northern',
   'area-city', 'gherkin', 'walkie-talkie', 'tower-of-london', 'tower-bridge', 'pool-of-london', 'st-katharine', 'pier-tower', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
-  'area-south-bank', 'shard', 'waterloo', 'tube-crossover', 'line-tube-jubilee', 'line-south-western', 'clapham-junction', 'area-clapham', 'chelsea-jetty', 'victoria-garage', 'stockwell-garage', 'area-brixton',
+  'area-south-bank', 'shard', 'waterloo', 'tube-crossover', 'line-tube-jubilee', 'line-south-western', 'clapham-junction', 'area-clapham', 'primary-clapham', 'chelsea-jetty', 'victoria-garage', 'stockwell-garage', 'area-brixton', 'primary-brixton', 'secondary-brixton',
   'area-canary-wharf', 'one-canada-square', 'tube-jubilee-canary-wharf', 'pier-canary-wharf', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'pier-greenwich', 'maritime-museum', 'o2-arena',
   'area-royal-docks', 'area-thames-gateway', 'london-port', 'thamesmead-quay', 'dagenham-yard', 'track-freight', 'barking-yard', 'line-freight',
-  'royal-london', 'area-hackney', 'area-islington', 'kings-cross', 'british-library', 'line-east-coast', 'finsbury-park', 'british-museum',
-  'area-camden', 'regents-park-lake', 'lords', 'serpentine', 'area-kensington', 'natural-history-museum',
-  'paddington', 'line-heathrow', 'ealing-broadway', 'track-great-western', 'wembley', 'area-hammersmith', 'kew-gardens',
+  'royal-london', 'area-hackney', 'primary-hackney', 'secondary-hackney', 'area-islington', 'primary-islington', 'secondary-islington', 'kings-cross', 'british-library', 'line-east-coast', 'finsbury-park', 'british-museum', 'ucl',
+  'area-camden', 'primary-camden', 'regents-park-lake', 'lords', 'serpentine', 'area-kensington', 'primary-kensington', 'natural-history-museum', 'imperial',
+  'paddington', 'line-heathrow', 'ealing-broadway', 'track-great-western', 'wembley', 'area-hammersmith', 'secondary-hammersmith', 'kew-gardens',
   'heathrow', 'heathrow-runway', 'heathrow-station',
 ];
 /** The welcome stop: the whole river from high over the City. */

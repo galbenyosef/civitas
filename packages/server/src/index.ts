@@ -14,7 +14,7 @@ import { seedCommons } from './seed';
 import { seedCity } from './loadtest/cities';
 import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, stopsChildrenOn } from './testcities';
 import { fillCity } from './fill';
-import { seedDemoTown, seedDemoNetwork, fillDemo, seededRandom, worldHash } from './demo/seed';
+import { seedDemoTown, seedDemoNetwork, seedDemoStudents, fillDemo, seededRandom, worldHash } from './demo/seed';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 8080);
@@ -169,11 +169,12 @@ http.listen(PORT, HOST, async () => {
     net.accepting = false;
     const t0 = performance.now();
     const r = await fillDemo(world!, game.step, (p) => { fillProgress = p; });
+    const students = seedDemoStudents(world!, sim, DEMO); // the universities' first students (a campus would stand empty for days)
     Math.random = realRandom;
     startHash = worldHash(world!);
     ready = true;
     net.accepting = true;
-    console.log(`demo ${DEMO} filled: ${r.pop} citizens after ${(r.ticks / 2400).toFixed(2)} days in ${((performance.now() - t0) / 1000).toFixed(1)} s, hash ${startHash}`);
+    console.log(`demo ${DEMO} filled: ${r.pop} citizens after ${(r.ticks / 2400).toFixed(2)} days in ${((performance.now() - t0) / 1000).toFixed(1)} s, hash ${startHash}${students ? `, ${students} students enrolled` : ''}`);
     save('fill');
     if (DEMO_SNAPSHOT) try { copyFileSync(DATA, DEMO_SNAPSHOT); } catch (e) { console.error('demo snapshot failed', e); }
   } else if (needsFill) {

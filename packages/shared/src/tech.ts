@@ -92,6 +92,9 @@ export const TECH: TechNode[] = [
   // The second five tool ids are reserved for the landmarks of kind ids 96-100.
   { id: 'lnd1', track: 'culture', tier: 6, name: 'London landmarks', blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Big Ben, the London Eye, the Tower, Buckingham Palace and Tower Bridge: real London buildings that work as offices, venues and attractions.', cost: 10000, requires: ['cul5'], condition: { counter: 'jobs', min: 1000 }, locked: 'How these unlock is still to be decided: for now they stand only in test cities and demos.',
     unlocks: ['gherkin', 'shard', 'walkietalkie', 'canadasquare', 'royalopera', 'bigben', 'londoneye', 'toweroflondon', 'buckingham', 'towerbridge'] },
+  // London's universities (buildings/landmarks-london-3.ts, docs/education.md section 9): landmarks that work as universities. Locked like lnd1.
+  { id: 'lnd2', track: 'culture', tier: 6, name: 'London universities', blurb: 'UCL, Imperial College, King\'s College and the London School of Economics: real London buildings that work as universities, admitting students from across the city.', cost: 10000, requires: ['edu4', 'cul5'], condition: { counter: 'graduates', min: 500 }, locked: 'How these unlock is still to be decided: for now they stand only in test cities and demos.',
+    unlocks: ['ucl', 'imperial', 'kings', 'lse'] },
 ];
 export const TECH_BY_ID = new Map(TECH.map((t) => [t.id, t]));
 export const ALL_TECH_IDS = TECH.map((t) => t.id);

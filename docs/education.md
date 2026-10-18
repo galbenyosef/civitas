@@ -6,7 +6,8 @@ an education tree / progress for them". Design 2026-10-18. **E1 (the citizen mod
 section 12 for what it provides. The rest is design. Rich has not answered section 11 yet, so the build follows the
 recommended answers (A to every question). **E2 (the institutions catalogue, section 3 "Built in E2" and the tech track in section 6) is built** too,
 and so is **E3 (the schools simulation, section 13)**: children are admitted, walk (or are taken) to school, attend, sit
-results and move up a stage.
+results and move up a stage. **E8 (the Showcase and London, section 14)** is built too: every kind stands in the Showcase
+and the four London universities are landmarks.
 
 Code this touches: `shared/src/education.ts` (new: levels, stages, tables), `shared/src/buildings/education.ts` (new:
 the kinds), `server/src/sim/schools.ts` (new: admissions, attendance, graduation), hooks in
@@ -167,7 +168,7 @@ so `growth()` leaves it alone.
 
 ### Built in E2
 
-`shared/src/buildings/education.ts` (kinds) and `edukit.ts` (shared recipe parts) hold the eight kinds, ids 101-108, each with **two UK designs** (`buildings:check` and `demo:check` pass; the kinds are `draft: true`, so the tools show only with `?dev` until E8 places them in the Showcase):
+`shared/src/buildings/education.ts` (kinds) and `edukit.ts` (shared recipe parts) hold the eight kinds, ids 101-108, each with **two UK designs** (`buildings:check` and `demo:check` pass; the kinds were drafts until E8 placed them in the Showcase, section 14, so the tools show in every game now that their tech is earned):
 
 | Id | Kind | Tool id | Designs |
 | --- | --- | --- | --- |
@@ -191,7 +192,7 @@ Decisions made while building it, so the later phases need not rediscover them:
 
 - **All eight kinds, halls included, are family code 14**, civic and not leisure, with no `service` flag. The design put the halls in the residential family (code 1), but a group must share one family code and a code-1 civic kind would meet the residential spawn and growth code before E5 exists. E5 may move them (a kind-id's code can change while the kinds are drafts; the tile would then need a re-placement). The `LEISURE_CODES` loops (`leisureCoverage`, `leisureGrowth`, `pickLeisure`, the child outing) visit code-14 buildings but `leisureAt` returns `undefined` for them (`isLeisure` is by kind id and the family is civic), and every one of those loops skips an `undefined` spec, so a school is invisible to them. The client's "at the library" label is by family code and unchanged; `ui.ts` `SHORT_EDU` names where each education kind's staff work.
 - **The group is a ladder of stages** (`stages: true` on the group in `groups.ts`), so the "never shrinks up the ladder" checks of holds and cost are skipped for it; the picker's count is `pupilCapacity` (`tierSummary` with `holds: 'pupils'`).
-- **Tech and counters**: tech track `education` with nodes `edu1`-`edu5` as in section 6 (`shared/src/tech.ts`) and the counters `pupils` and `graduates`, which start at 0 in `emptyProgress` (`server/src/world.ts`). E3's census bumps them (section 13), so `edu4` (150 pupils) and `edu5` (200 graduates) can be earned once schools stand; while the kinds are drafts only `?dev` places them. `edu1` requires `civ1`. The policy features (free school meals, school buses, adult learning, apprenticeships, tuition fees) are E6's.
+- **Tech and counters**: tech track `education` with nodes `edu1`-`edu5` as in section 6 (`shared/src/tech.ts`) and the counters `pupils` and `graduates`, which start at 0 in `emptyProgress` (`server/src/world.ts`). E3's census bumps them (section 13), so `edu4` (150 pupils) and `edu5` (200 graduates) can be earned once schools stand. `edu1` requires `civ1`. The policy features (free school meals, school buses, adult learning, apprenticeships, tuition fees) are E6's.
 - **The lamps, benches and trees** on lawns, quads and forecourts sit at hashed offsets (`lampRow`, `benchRow`, `scatterTrees` in `edukit.ts`), so no campus looks stamped. The windows light up at night per window and per building as for every civic kind; the floodlight heads and lamp heads use the `venue` window class.
 
 ### Catchment
@@ -457,7 +458,7 @@ is no crime model (police coverage only), so there is no link until there is one
   - LSE's Centre Building on Houghton Street, Aldwych (51.5144, -0.1165)
 
   `londonMap.ts` already names Bloomsbury and Holborn. The London scenario fits them before the streets, as it does
-  the other landmarks. `lnd2` is `locked`, as `lnd1` is.
+  the other landmarks. `lnd2` is `locked`, as `lnd1` is. Built in E8: section 14.
 
 ## 10. Phased plan
 
@@ -470,7 +471,7 @@ is no crime model (police coverage only), so there is no link until there is one
 | E5 | **Higher and adult education.** University intake via gateways, halls of residence, families moving in, FE courses, evening classes (`errand` 2), apprenticeships, research ambition | opus | gateways.ts, simulation.ts (`spawn`, `arriveVia`, `ambition`), sim/schools.ts | E3, E4 | L |
 | E6 | **Policies and the tree UI.** `policies.ts`, `Player.policies`, `setPolicy` intent, Policies panel, Education track in the tech panel; school buses as FleetKind 9 (the server part goes to opus) | sonnet (+ opus for `mobile.ts`) | policies.ts, net.ts, ui.ts, fleet.ts, sim/mobile.ts | E2; the effects need E3 | M |
 | E7 | **City views.** History series and the Education tab funnel; `ParcelStats` fields; heat overlay; citizen timeline; school tooltip; student look in people.ts | sonnet | history.ts, charts.ts, main.ts, chunkView.ts, ui.ts, render/people.ts | E3 | M |
-| E8 | **Showcase and London.** Placements and tour stops, registry entries, London universities 111-114 and `lnd2` | sonnet | demo/showcase.ts, demo/london.ts, landmarks-london-3.ts, tech.ts | E2 (E3 for the seeded tests) | M |
+| E8 | **Built.** **Showcase and London.** Placements and tour stops, registry entries, London universities 111-114 and `lnd2` | sonnet | demo/showcase.ts, demo/london.ts, landmarks-london-3.ts, tech.ts | E2 (E3 for the seeded tests) | M |
 
 **In parallel:** E1 and E2 first. Then E3 and E4 together (both edit `simulation.ts`, in different functions; merge E4
 after E3). E6's UI can start after E2. E7 and E8 follow E3. E5 comes last.
@@ -723,3 +724,85 @@ draws a random number); main's own three runs spread 2.5%, so take main as the b
 drop-offs on the way to work; with no schools placed the `docs/traffic-tuning.md` baselines are unchanged (above).
 The probe's `--save` writes a Tuesday-morning world for a live look: children in school jumpers with backpacks walking to
 the secondary schools at 08:30-09:00 (screenshots in the E3 report).
+
+## 14. Built: E8, the Showcase and London
+
+Built 2026-10-18 on branch `edu-e8`. The education kinds are no longer drafts (`draft` is gone from kinds 101-108; the
+`education` group keeps no `draft` flag), so `demo:check` enforces them: every kind is placed in the Showcase and has a
+tour stop. London gets four university landmarks and ten schools. Details of the demos are in `docs/demo.md` ("Schools in
+the demos", "London").
+
+### The Showcase (section `education`, `shared/src/demo/showcase.ts`)
+
+- **In district A2**, on four of its job blocks (the homes stay): the primary school (2×2) with the nursery (1×1)
+  beside it, the secondary school (3×3), the sixth-form college (2×2) and the FE college (3×2), each with its door on
+  the street between blocks. This puts the schools in the middle of the homes the families are seeded in.
+- **The University Quarter**, a new 45×26 parcel east of the town's east road, with one street (y = -26): the 6×6
+  campus (gate on the street), two halls of residence (`halls`, `halls-2`: one on each side of the street) and the
+  research institute. The tour runs after the library group: nursery, primary, secondary, sixth form, FE college,
+  university, halls, research institute.
+- **Registry** (`SHOWCASE_FEATURES`): `school-run` (children of nursery, primary, secondary and sixth-form age live within
+  the catchment of a school that takes them: `SeededDemo.schools` and `children`), `student-quarter` (halls within 12
+  tiles of the university), `school-bus` (todo: E6) and, in London, `london-school-run`. Section 9's `school-run` over
+  "a pupil attends a showcase primary" became a seeded test, since no pupil is enrolled before the first admission batch;
+  `graduation` is a line of the run report (below), not a feature.
+
+### Families and students for the demos (`server/src/demo/seed.ts`)
+
+- `seedDemoFamilies(w, sim, sections)` runs at the end of `seedDemoNetwork` for a demo that places a school: homes within
+  the catchment of a placed primary take up to one family per four beds (two adults, one to three children aged 3 to 17,
+  15% under three), at most `DEMO_FAMILIES.max` = 450, from a seeded stream; the adults find work at once. Showcase: 310
+  children (about 150 families); London: 819 (450 families). It builds citizens through `Simulation.makeCitizen` and
+  `findJob` by a cast (the probe's way), so `simulation.ts` is untouched.
+- `seedDemoStudents(w, sim, id)` runs after the fill (in `index.ts` and `check.ts --fill`): each university enrols up
+  to 60 (or a sixth of its places) young adults aged 18-22 who are home, through `Schools.enrolAt`, as second and third
+  years (`due` 0-13), so a campus is not empty for the first game days. Showcase 60, London 149.
+
+### London (`shared/src/buildings/landmarks-london-3.ts`, `demo/london.ts`)
+
+- **Kinds 111-114**, collection tiers 11-14 of the `london` group, `landmark: true`, civic, family code 14, unlocked by
+  the new locked node `lnd2` "London universities" (culture tier 6; requires `edu4` and `cul5`; unlocks `ucl`,
+  `imperial`, `kings`, `lse`). Each carries the university attributes (`stage: 6`, `catchment: 0`, `ages [18, 99]`,
+  `teachersShare` 0.6, `postgradShare` 0.4), and `SCHOOL_SPECS` now reads a landmark with a numeric `stage` as it reads
+  the education group, so the schools simulation takes them with no other change:
+
+| Id | Kind | Footprint | Places / staff | Cost / upkeep | Design |
+| --- | --- | --- | --- | --- | --- |
+| 111 | UCL (`ucl`) | 4×3 | 360 / 36 | 9,000 / 110 | the Wilkins Building: Portland-stone front between two forward wings, eight Corinthian columns and a pediment on a flight of steps, the green dome on its drum behind, railings and gate piers |
+| 112 | Imperial College (`imperial`) | 3×3 | 320 / 32 | 8,500 / 105 | the Queen's Tower (about 3 tiles tall): stone base, brick shaft, stone clock stage and belfry with pinnacles, copper dome and spire, between two brick ranges on the Queen's Lawn |
+| 113 | King's College (`kings`) | 4×3 | 300 / 30 | 8,000 / 100 | the Strand building: four-storey stone front with a banded ground floor, a four-column portico, a pediment, a balustrade and lead roofs, side ranges round a courtyard with a fountain |
+| 114 | LSE (`lse`) | 3×3 | 240 / 24 | 7,500 / 95 | the Centre Building: a stepped stack of cream masonry (two, four and seven storeys), a glazed corner atrium, a canopy on slim columns over a plaza with red flags |
+
+  Each is one design. Windows follow `buildings:check`'s rule: facade boxes that meet do so on whole cells or with a slot,
+  and no `cornice` ring runs over a neighbour's windows. Group tiers may now run to 16 (`validate.ts`).
+- **Placement**: `STRUCTURES` entries at the real latitude and longitude, fitted before the streets like the other
+  landmarks. UCL lands 1.5 tiles from its place and Imperial 2.6; the West End is saturated with landmarks and
+  arterials (the Opera House is 2.4 off), so King's and LSE settle 6.6 and 6.9 tiles (about 1.1 km) from theirs, on the
+  same bank, and the tour shows them by their names.
+- **Schools** (`london-education` section): six primaries (Islington, Hackney, Camden, Brixton, Clapham, Kensington)
+  and four secondaries (Islington, Hackney, Brixton, Hammersmith), each within 2.5 tiles of its spot. London's tour
+  gains 14 stops (106 in all).
+
+### Measured (2026-10-18, machine shared with other agents)
+
+`check.ts --fill --run 1`:
+
+| | Showcase | London |
+| --- | --- | --- |
+| citizens after the fill | 16,407 (90 s) | 30,804 (223 s) |
+| children and young people under 18 | 301 | 797 |
+| enrolled after the day | 255: nursery 4, primary 60, secondary 101, sixth form 37, degree 53 | 438: primary 209, secondary 111, degree 118 |
+| university students seeded | 60 | 149 |
+| citizens with a degree / postgraduate | 4,678 / 1,991 | 8,953 / 3,823 |
+| `pupils` / `graduates` counters of the owner | 262 / 6,644 | 0 / 0 (London's land belongs to the boroughs, `sys:<borough>`, not to the demo owner the check reads) |
+| tick, last game day | 22.5 ms avg, 33.5 p95 | 51.6 ms avg, 85.4 p95 |
+
+Showcase over a school week (`--fill --run 5`, Thursday to the next Wednesday): 35 graduations (8 primary leavers, 13 with GCSEs, 12 with
+Level 3, 1 FE course and 1 degree), 19 failed, 3 nursery years, 3 school
+leavers going on to a degree, 1 drop-out, 966 days attended; escorts for the under-8s: 28 lifts in a household car, 22
+with an older brother or sister, 39 walked in by a grown-up, 40 dropped off on a parent's way to work, 54 missed days;
+`life.graduations` 35. The primary school admits 60 of 120 places with 3 of its 6 teachers (E4's skill gate would
+change that: section 13), the university runs at 25 of 36 teachers, quality 0.6.
+
+Teachers are whoever took the job until E4, so some London schools and King's College London find no staff in the first
+game days (staff 0, "waiting" lists of 21 to 53): the demo is honest about it, and E4 fixes it.

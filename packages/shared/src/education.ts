@@ -130,11 +130,11 @@ export interface SchoolSpec {
   beds: number;
 }
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
-/** By kind id: every education kind (101-108 and any later rung), undefined for everything else. */
+/** By kind id: every education kind (101-108 and any later rung) and every landmark that works as a school (London's universities, 111-114), undefined for everything else. */
 export const SCHOOL_SPECS: (SchoolSpec | undefined)[] = [];
 for (const k of MANIFEST) {
-  if (k.group !== 'education') continue;
   const a = k.levels[0]?.attrs ?? k.attrs;
+  if (k.group !== 'education' && !(k.landmark && typeof a.stage === 'number')) continue;
   const ages = Array.isArray(a.ages) && a.ages.length === 2 ? [num(a.ages[0], 0), num(a.ages[1], 99)] as [number, number] : [18, 99] as [number, number];
   SCHOOL_SPECS[k.kindId] = {
     kind: k.kindId, stage: num(a.stage, 0), places: num(a.pupilCapacity, 0), evening: num(a.eveningPlaces, 0), catchment: num(a.catchment, 0),

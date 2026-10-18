@@ -23,7 +23,7 @@
 import {
   KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, DEMOS, demoSections, showcaseProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
   isBridgeAux, bridgeStyle, BridgeStyle, basculeSeed, basculeLiftAt, isCrossing, isTunnel, isPlatform, underMask, boatTimetable, boatLifts, HARBOUR_OF,
-  type DemoId, type SeededDemo,
+  SCHOOL_SPECS, Study, STUDY_NAMES, EduLevel, type DemoId, type SeededDemo,
 } from '@msimcity/shared';
 import { chunkPads } from '@msimcity/shared/src/helipads';
 import { World } from '../world';
@@ -34,8 +34,9 @@ import type { Metro } from '../sim/metro';
 import type { Ferry } from '../sim/ferry';
 import { Harbours } from '../sim/harbours';
 import type { TransitPlan } from '../sim/transit';
-import { seedDemoTown, seedDemoNetwork, worldHash, seededRandom, fillDemo } from './seed';
+import { seedDemoTown, seedDemoNetwork, seedDemoStudents, worldHash, seededRandom, fillDemo } from './seed';
 import { GARDEN_KIND } from '../sim/blocks';
+import { ageOf } from '../sim/life';
 
 const CHUNK = CHUNK_SIZE;
 const argv = process.argv.slice(2);
@@ -81,6 +82,8 @@ function seededOf(w: World, airports: Airports, sim: Simulation, harbours: Harbo
     // as staffed: nobody works anywhere before the fill, and an unstaffed harbour sails nothing
     harbours: harbours.list.map((h) => ({ ...h, active: true })),
     seaGates: w.seaGates,
+    schools: [...w.buildings.values()].filter((b) => SCHOOL_SPECS[b.id]).map((b) => ({ kind: b.id, x: b.x, y: b.y })),
+    children: [...w.citizens.values()].map((c) => ({ x: c.hx, y: c.hy, age: ageOf(c, w.tick) })).filter((c) => c.age < 18),
   };
 }
 
@@ -128,6 +131,7 @@ for (const d of DEMOS) {
     console.log(`  ${HARBOUR_OF[h.kind]!.role} ${h.name} at (${h.x}, ${h.y}): ${h.lanes.map((l) => `${l.purpose}/${l.cls}${l.gate ? ` to ${l.gate}` : ''} ${l.route.sides.length}`).join(', ') || 'no lanes'}${why}`);
   }
   if (seededA.seaGates.length) console.log(`  sea gates: ${seededA.seaGates.map((g) => `${g.name} (${g.x}, ${g.y})${g.low ? ' low' : ''}`).join(', ')}`);
+  if (seededA.schools.length) console.log(`  schools: ${seededA.schools.length} standing (${[...new Set(seededA.schools.map((q) => KIND_NAMES[q.kind]))].join(', ')}), ${seededA.children.length} children and young people living in homes before the fill`);
   const featureMisses = seededFeatureProblems(d.id, seededA);
   for (const m of featureMisses) fail(m);
   if (!a.problems.length && ha === hb) console.log(`  ok: ${a.w.buildings.size} buildings, ${a.w.transitLines.size} lines, hash ${ha}`);
@@ -145,6 +149,8 @@ if (days > 0) {
     const f0 = performance.now();
     const r = await fillDemo(w, () => { sim.tick(); airports.tick(); harbours.tick(); }, () => {});
     console.log(`  filled: ${r.pop} citizens after ${(r.ticks / TICKS_PER_DAY).toFixed(2)} days in ${((performance.now() - f0) / 1000).toFixed(1)} s`);
+    const students = seedDemoStudents(w, sim, id);
+    if (students) console.log(`  ${students} university students enrolled for the first week (seedDemoStudents)`);
   }
   const t0 = performance.now(), day0 = w.day;
   // tick times of the last game day (the town is fullest then)
@@ -206,6 +212,23 @@ if (days > 0) {
     console.log(`  ${(p.id ?? p.kind).padEnd(22)} ${KIND_NAMES[bld.id]}: ${bits.join(' · ')}`);
   }
   for (const l of sim.transit.lineInfos((i) => i)) console.log(`  line ${l.mode} ${l.number}: ${l.status || 'running'}, in service ${l.inService}, riders today ${l.ridersToday}, yesterday ${l.ridersYesterday}`);
+  // the schools (docs/education.md, docs/demo.md "Schools in the demos"): who is enrolled where, how the day ran, the graduates
+  if (sim.schools.list().length) {
+    const stu = new Map<number, number>();
+    let kids = 0, grads = 0, postgrads = 0;
+    for (const c of w.citizens.values()) {
+      if (c.study) stu.set(c.study, (stu.get(c.study) ?? 0) + 1);
+      if (ageOf(c, w.tick) < 18) kids++;
+      if (c.edu === EduLevel.Degree) grads++; else if (c.edu >= EduLevel.Postgrad) postgrads++;
+    }
+    const enrolled = [...stu.values()].reduce((a, b) => a + b, 0);
+    console.log(`  schools: ${sim.schools.list().length} standing, ${kids} children and young people under 18, ${enrolled} enrolled (${[...stu].sort((a, b) => a[0] - b[0]).map(([k, n]) => `${(STUDY_NAMES as Record<number, string>)[k]} ${n}`).join(', ') || 'none'})`);
+    console.log(`  education levels: ${grads} citizens with a degree, ${postgrads} with a postgraduate degree; university students (degree and master's) ${(stu.get(Study.Degree) ?? 0) + (stu.get(Study.Postgrad) ?? 0)}; counters ${JSON.stringify({ pupils: w.players.get('sys')?.progress?.pupils, graduates: w.players.get('sys')?.progress?.graduates })}`);
+    for (const sc of sim.schools.list()) {
+      console.log(`  ${KIND_NAMES[sc.b.id].padEnd(26)} (${sc.b.x}, ${sc.b.y}): pupils ${sc.pupils}/${sim.schools.admittingOf(sc)} admitted of ${sc.spec.places + sc.spec.evening}, staff ${sc.staff}, teachers ${sc.teachers}/${sc.needed}, quality ${sc.quality.toFixed(2)}, waiting ${sc.waiting}, last results ${sc.passed} passed ${sc.failed} failed ${sc.dropped} dropped out`);
+    }
+    console.log(`  school events: ${JSON.stringify(sim.schools.events)}; life ${JSON.stringify({ graduations: sim.lifeEvents.graduations, dropOuts: sim.lifeEvents.dropOuts })}`);
+  }
   console.log(`  freight: ${JSON.stringify(rail.freightStats)}`);
   console.log(`  transit: ${JSON.stringify(sim.transit.stats)}`);
   // the registry's features in use over the days run (docs/demo.md "Keeping it complete")

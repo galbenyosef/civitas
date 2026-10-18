@@ -2,9 +2,10 @@ import {
   DEFAULT_TAX, Terrain, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, KIND_ID, KIND_NAMES, chunkKey, isBuildable, isRoad, packTile, terrainOf,
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
-  isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux, isMetroStationKind,
+  isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux, isMetroStationKind, SCHOOL_SPECS, capacityOf, Study, EduLevel, LifeStage, CitizenState,
 } from '@msimcity/shared';
-import { World, emptyStats, DEV_FUNDS } from '../world';
+import { World, emptyStats, DEV_FUNDS, type Building, type Citizen } from '../world';
+import { ageOf, stageFor } from '../sim/life';
 import { seedCity } from '../loadtest/cities';
 import { settleInteriors, GARDEN_KIND } from '../sim/blocks';
 import { seedLondon } from './london';
@@ -239,7 +240,64 @@ export function seedDemoNetwork(w: World, sim: Simulation, rail: Rail, id: DemoI
     if (typeof r === 'string') problems.push(`${s.id}: ${l.id}: ${r}`);
     else if (r.mode !== l.mode) problems.push(`${s.id}: ${l.id} came out as a ${r.mode} line, not ${l.mode}`);
   }
+  seedDemoFamilies(w, sim, sections);
   return problems;
+}
+
+/**
+ * How many families with children a demo with schools starts with (the rest of its beds fill through the gateways as
+ * for any demo): at most `max`, and at most `share` of the family-sized places (four beds) in the homes in reach of a school.
+ */
+export const DEMO_FAMILIES = { max: 450, share: 0.8, ages: [3, 18] as const, babies: 0.15 } as const;
+
+/**
+ * Families for a demo that has schools (docs/education.md section 9, docs/demo.md "Schools in the demos"): a showcase
+ * school is no use empty, and newcomers arrive as adults (the families of E5 are not built, and the couples who settle
+ * have no school-age children for years). Before the fill, homes within the catchment of a placed primary school take two adults and one to three children, 15% of them under three, the rest aged 3 to 17
+ * (the shape E5's family newcomers will have), up to `DEMO_FAMILIES.max` families (one for every four beds, each by
+ * chance, from a seeded stream, so the same town gets the same families). The adults find work at once. A demo with no school gets nothing, so the other demos play
+ * as before. Returns the families and children made.
+ */
+export function seedDemoFamilies(w: World, sim: Simulation, sections: DemoSection[]): { families: number; children: number } {
+  const schools = sections.flatMap((s) => s.placements ?? []).flatMap((p) => {
+    const spec = SCHOOL_SPECS[kindId(p.kind)];
+    return spec && spec.stage >= 1 && spec.stage <= 5 ? [{ x: p.door[0], y: p.door[1], reach: spec.catchment, stage: spec.stage }] : [];
+  });
+  if (!schools.length) return { families: 0, children: 0 };
+  // a family lives within a primary school's catchment (the narrowest of the stages most children are in, so their
+  // secondary and sixth form are in reach too); with no primary, within reach of any school
+  const anchors = schools.some((q) => q.stage === Study.Primary) ? schools.filter((q) => q.stage === Study.Primary) : schools;
+  const priv = sim as unknown as { makeCitizen(id: number, home: Building, age: number, health: number): Citizen; findJob(c: Citizen): boolean };
+  const rnd = seededRandom(0x5c001);
+  const homes = [...w.buildings.values()].filter((b) => familyOf(b.id) === Zone.Residential && b.level > 0 && capacityOf(b.id, b.level) >= 4
+    && anchors.some((q) => Math.abs(q.x - b.x) + Math.abs(q.y - b.y) <= q.reach));
+  // up to one family for every four beds, each by chance, so the cap is met from across the homes in reach
+  const slots = homes.reduce((n, b) => n + Math.floor(capacityOf(b.id, b.level) / 4), 0);
+  const take = Math.min(DEMO_FAMILIES.share, DEMO_FAMILIES.max / Math.max(1, slots));
+  let families = 0, children = 0;
+  for (const home of homes) for (let f = 0, n = Math.floor(capacityOf(home.id, home.level) / 4); f < n; f++) {
+    if (rnd() >= take) continue;
+    const room = capacityOf(home.id, home.level) - home.occupants;
+    if (room < 3) break;
+    const add = (age: number) => {
+      const c = priv.makeCitizen(w.nextId++, home, age, 75 + 20 * rnd());
+      w.addCitizen(c);
+      home.occupants++;
+      return c;
+    };
+    const a = add(28 + rnd() * 16), b = add(28 + rnd() * 16);
+    a.partner = b.id; b.partner = a.id; w.setHousehold(b, a.hh);
+    const kids = Math.min(room - 2, 1 + Math.floor(rnd() * 3));
+    for (let i = 0; i < kids; i++) {
+      const k = add(rnd() < DEMO_FAMILIES.babies ? rnd() * 3 : DEMO_FAMILIES.ages[0] + rnd() * (DEMO_FAMILIES.ages[1] - DEMO_FAMILIES.ages[0]));
+      k.stage = stageFor(k.id, ageOf(k, w.tick)); k.car = false; k.money = 0; k.par = a.id; k.sn = a.sn;
+      w.setHousehold(k, a.hh);
+      children++;
+    }
+    priv.findJob(a); priv.findJob(b);
+    families++;
+  }
+  return { families, children };
 }
 
 /**
@@ -259,6 +317,41 @@ export async function fillDemo(w: World, step: () => void, onProgress: (p: { tic
     await yieldNow();
   }
   return { ticks: first.ticks + ticks, pop: w.citizens.size, settled: first.settled };
+}
+
+/** The students a demo's universities start with, once the fill has staffed them (`seedDemoStudents`). */
+export const DEMO_STUDENTS = { perCampus: 60, ages: [18, 23] as const, years: 14 };
+
+/**
+ * Students for a demo's universities, after its fill (docs/demo.md "Schools in the demos"). A university takes its first
+ * students on the first Monday after a Saturday's results, a few game days away, and a visitor should not find the campus
+ * empty: so each (the campus, and London's four landmarks) enrols up to `perCampus` or a sixth of its places, whichever
+ * is fewer, from the young adults at home (aged 18-22, no longer in a job), at the stage of a second or third year
+ * (`due` 0-13 of the 15 school days a degree takes, so a few graduate on the first Saturday and the rest follow week by
+ * week). They go in through `Schools.enrolAt`, so only as many as the university's staffing allows. Deterministic (ids in
+ * order, a hash for the year); returns how many were enrolled.
+ */
+export function seedDemoStudents(w: World, sim: Simulation, id: DemoId): number {
+  const unis = demoSections(id).flatMap((s) => s.placements ?? []).flatMap((p) => {
+    const spec = SCHOOL_SPECS[kindId(p.kind)], b = w.buildings.get(`${p.door[0]},${p.door[1]}`);
+    return spec && spec.stage === Study.Degree && b ? [{ b, n: Math.min(DEMO_STUDENTS.perCampus, Math.floor(spec.places / 6)) }] : [];
+  });
+  if (!unis.length) return 0;
+  const pool = [...w.citizens.values()].filter((c) => c.state === CitizenState.Home && !c.study && !c.mig && c.stage === LifeStage.Adult
+    && ageOf(c, w.tick) >= DEMO_STUDENTS.ages[0] && ageOf(c, w.tick) < DEMO_STUDENTS.ages[1] - 1).sort((a, b) => a.id - b.id);
+  let n = 0;
+  for (const { b, n: want } of unis) {
+    const room = () => { const sc = sim.schools.list().find((q) => q.b === b); return sc ? sim.schools.admittingOf(sc) - sc.pupils : 0; };
+    for (let got = 0; got < want && pool.length && room() > 0;) {
+      const c = pool.shift()!;
+      if (c.edu < EduLevel.Further) { c.edu = EduLevel.Further; c.track = 1 + (c.id % 2); } // A-levels first
+      if (c.job) w.quitJob(c);
+      if (!sim.schools.enrolAt(c, b, Study.Degree)) continue;
+      c.due = Math.floor(DEMO_STUDENTS.years * (((c.id * 2654435761) >>> 0) / 4294967296)); c.att = Math.round(c.due * 0.9);
+      got++; n++;
+    }
+  }
+  return n;
 }
 
 /** A small deterministic generator (mulberry32) to stand in for Math.random while a demo is seeded and filled. */

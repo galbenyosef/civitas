@@ -24,6 +24,7 @@ import type { SeaGate } from '../waterways';
 import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
 import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
 import { zoneOf, levelOf, Zone } from '../tile';
+import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
 
 /**
  * Demo maps (docs/demo.md): a planned, lived-in town where every large object in the catalogue is placed once and
@@ -43,8 +44,8 @@ import { zoneOf, levelOf, Zone } from '../tile';
  * would click (the door) and its rotation (FRONT order: 0 the door faces +y/south, 1 east, 2 north, 3 west).
  */
 
-export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour'
-  | 'london-areas' | 'london-landmarks' | 'london-rail' | 'london-buses' | 'london-river' | 'london-tube';
+export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education'
+  | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-rail' | 'london-buses' | 'london-river' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
 /** x, y, width, height in tiles */
@@ -207,6 +208,8 @@ const mergedAt = (kind: string, ax: number, ay: number, rot: 0 | 1 | 2 | 3, leve
  */
 const QUAY_ROAD = 33;
 const BASIN: DemoRect = [45, 39, 51, 17], BAY: DemoRect = [56, 36, 40, 3], POOL: DemoRect = [19, 41, 4, 3];
+/** The university quarter's street (east of the town's east road): the campus, halls and institute face it */
+const QUARTER_STREET = -26;
 const SEA_GATE: SeaGate = { x: 95, y: 47, name: 'the sea' };
 const HARBOUR_AT: Record<'jetty' | 'pier-river' | 'pier-bay' | 'marina' | 'fishing' | 'port', DemoPlacement> = {
   jetty: { kind: 'jetty', door: doorAt('jetty', 27, RIVER_ROWS[1], 0), rot: 0, name: 'Quarter Jetty' },
@@ -443,6 +446,30 @@ export const SECTIONS: DemoSection[] = [
     estates: [{ name: 'Riverside estate', lands: ['South railway', 'Riverside'] }],
   },
   {
+    id: 'education', name: 'Schools and university',
+    blurb: 'A nursery and a primary school among the homes of district A2, a secondary school in the middle of them, a sixth-form college and a further-education college on its edges, and a university quarter beyond the east road: a campus, two halls of residence and a research institute. Families live round the schools, so the children walk to class on school days.',
+    // job blocks of district A2 (x -11..9, y -35..-15), among its homes: the schools replace shops and works, never homes
+    clear: [block(1, 0, 2, 0), block(1, 0, 2, 1), block(1, 0, 0, 1), block(1, 0, 3, 1)],
+    // the university quarter: east of the town's east road (x = 34), along a street laid off it
+    land: [{ name: 'University Quarter', rect: [35, -40, 45, 26] }],
+    roads: [[[35, QUARTER_STREET], [79, QUARTER_STREET]]],
+    placements: [
+      // the primary (2×2) and the nursery beside it, facing the street between blocks (y = -30)
+      { kind: 'primary-school', door: doorAt('primary-school', 0, -32, 0), rot: 0 },
+      { kind: 'nursery', door: [3, -31] },
+      // the secondary (3×3) in the middle of the homes, its door on the street south of it (y = -25)
+      { kind: 'secondary-school', door: doorAt('secondary-school', 0, -28, 0), rot: 0 },
+      // the sixth-form college (2×2) and the further-education college (3×2) on the district's edges
+      { kind: 'sixth-form', door: doorAt('sixth-form', 5, -27, 0), rot: 0 },
+      { kind: 'fe-college', door: doorAt('fe-college', -10, -27, 0), rot: 0 },
+      // the quarter: the campus gate on the street (x = 41), two halls of residence (one across the street) and the institute
+      { kind: 'university', door: doorAt('university', 38, QUARTER_STREET - 6, 0), rot: 0 },
+      { kind: 'halls', door: doorAt('halls', 45, QUARTER_STREET - 2, 0), rot: 0 },
+      { id: 'halls-2', kind: 'halls', door: doorAt('halls', 48, QUARTER_STREET + 1, 2), rot: 2 },
+      { kind: 'research-institute', door: doorAt('research-institute', 51, QUARTER_STREET - 3, 0), rot: 0 },
+    ],
+  },
+  {
     id: 'harbour', name: 'Harbour',
     blurb: 'The river runs on into a basin that opens to the sea: a cargo port with container ships, coasters and ro-ro ferries met by a tug, a fishing harbour whose trawlers sail before dawn, a marina of pleasure boats, a jetty by the lifting bridge whose dinghies sail through its lifts, and a river bus line between two piers.',
     // the land east of the town; the river across it (dried with the land) is painted back below
@@ -479,6 +506,7 @@ export const TOUR: string[] = [
   'studio-theatre', 'theatre', 'opera-house',
   'sports', 'leisure-centre', 'arena', 'stadium',
   'library', 'central-library', 'museum',
+  'nursery', 'primary-school', 'secondary-school', 'sixth-form', 'fe-college', 'university', 'halls', 'research-institute',
   'airport', 'runway',
   'block-estate', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
   'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3', 'world-map',
@@ -488,7 +516,7 @@ export const TOUR: string[] = [
 ];
 
 export const DEMOS: DemoDef[] = [
-  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'civic', 'rail', 'leisure', 'airport', 'industry', 'riverside', 'harbour'],
+  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'civic', 'rail', 'leisure', 'education', 'airport', 'industry', 'riverside', 'harbour'],
     blurb: 'A lived-in town with one of every large building and every merged lot, buses, trains, an underground and river buses, an airport every plane type flies to, helicopters, a river with every style of bridge, and a harbour with every kind of boat, all running. Take the guided tour.' },
   { id: 'transport', name: 'Transport demo', slot: 91, sections: ['downtown', 'transport', 'rail', 'airport', 'industry'],
     blurb: 'Buses, parking, rail, freight and the airport, in the same town.' },
@@ -496,7 +524,7 @@ export const DEMOS: DemoDef[] = [
     blurb: 'Parks, cinemas, theatres, sport and libraries, every size.' },
   { id: 'civic', name: 'Civic demo', slot: 93, sections: ['downtown', 'civic'],
     blurb: 'Health, police, fire and builders, every size.' },
-  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-rail', 'london-buses', 'london-river', 'london-tube'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
+  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-education', 'london-rail', 'london-buses', 'london-river', 'london-tube'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
     blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, the Central, Northern and Jubilee lines underneath, and on the river the RB1 river buses, yachts through Tower Bridge and ships from the estuary.' },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
@@ -859,6 +887,10 @@ export interface SeededDemo {
   harbours: readonly (BoatHarbour & { refused?: readonly string[] })[];
   /** the world's sea gates (World.seaGates) */
   seaGates: readonly SeaGate[];
+  /** every school standing (an education kind, or a London university): its kind id and door */
+  schools: readonly { kind: number; x: number; y: number }[];
+  /** every child and young person under 18: the home tile and the age in years (server/src/demo/seed.ts seedDemoFamilies) */
+  children: readonly { x: number; y: number; age: number }[];
 }
 
 /**
@@ -948,6 +980,22 @@ function basculeLifts(d: SeededDemo): boolean {
 }
 
 /**
+ * Every stage in `stages` has a school standing whose catchment (Manhattan tiles) holds the home of a child of its age:
+ * on a school day that child is admitted and walks, or is taken, to class (sim/schools.ts).
+ */
+const schoolRun = (stages: readonly number[]) => (d: SeededDemo) => stages.every((stage) => {
+  const [from, to] = STAGES[stage].ages;
+  return d.schools.some((s) => {
+    const spec = SCHOOL_SPECS[s.kind];
+    return !!spec && schoolTakes(spec, stage) && d.children.some((c) => c.age >= from && c.age < to && (spec.catchment === 0 || Math.abs(c.x - s.x) + Math.abs(c.y - s.y) <= spec.catchment));
+  });
+});
+/** Halls of residence stand within this many tiles of a university (students would walk). */
+const HALLS_WALK = 12;
+const studentQuarter = (d: SeededDemo) => d.schools.some((u) => SCHOOL_SPECS[u.kind]?.stage === Study.Degree
+  && d.schools.some((h) => SCHOOL_SPECS[h.kind]?.beds && Math.abs(h.x - u.x) + Math.abs(h.y - u.y) <= HALLS_WALK));
+
+/**
  * The feature registry: everything interesting the showcase must show that is not a catalogue kind (those are checked
  * by kind: every placeable kind, ladder rung, surface tool and line mode, below). A new feature lands with its entry
  * here, its placement in a section and its tour stop, or demo:check fails (docs/demo.md "Keeping it complete").
@@ -1021,6 +1069,14 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
     scenario: (ss) => ss.some((s) => s.seaGates?.length), seeded: (d) => d.seaGates.length > 0 && d.harbours.some((h) => h.lanes.some((l) => !!l.gate)) },
   { id: 'ferry-interchange', caption: 'a river bus line with an interchange (a pier within the change walk of a bus, rail or metro stop)', tour: 'line-ferry-1',
     scenario: (ss) => ferryInterchange(ss.flatMap((s) => s.lines ?? [])), seeded: (d) => ferryInterchange(d.lines) },
+  // ---- education (docs/education.md): families live within reach of the schools, so the children walk to class; halls stand beside the university
+  { id: 'school-run', caption: 'children living within reach of a nursery, a primary, a secondary and a sixth-form school, who walk to class on a school day',
+    tour: 'primary-school', seeded: schoolRun([Study.Nursery, Study.Primary, Study.Secondary, Study.SixthForm]) },
+  { id: 'student-quarter', caption: 'halls of residence within a short walk of the university', tour: 'halls', seeded: studentQuarter },
+  { id: 'school-bus', caption: 'a school bus on a round (a fleet unit of kind 9)', tour: 'secondary-school', todo: 'the school buses are E6 (docs/education.md section 10): they take over from the escorts and the missed days' },
+  { id: 'london-school-run', caption: 'children living within reach of a primary and a secondary school in London', tour: 'primary-islington', demo: 'london',
+    rule: 'London has its own schools in its boroughs, and the four London universities are landmarks that stand in London, not the showcase',
+    seeded: schoolRun([Study.Primary, Study.Secondary]) },
   { id: 'tower-bridge-lift', caption: 'St Katharine Docks\' tall boats through Tower Bridge\'s lifts', tour: 'st-katharine', demo: 'london',
     rule: 'Tower Bridge and St Katharine Docks are London\'s; the showcase\'s own lifting bridge has its tall boat (boat-lift)',
     seeded: tallThroughLift },

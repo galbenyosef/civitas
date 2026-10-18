@@ -17,7 +17,7 @@ import {
  * be qualified; `postgradShare` of staff are postgraduates), `beds`. Staff are the kind's level capacity, as for any
  * civic kind, and teachers come from the educated population.
  *
- * Every kind is a draft until the Showcase places it (E8). Recipes bigger than 1×1 are authored in tiles for the
+ * The Showcase places every kind (E8, docs/demo.md). Recipes bigger than 1×1 are authored in tiles for the
  * whole footprint: x -w/2..w/2, z -h/2..h/2, +z towards the road. Lamps, benches and trees on lawns and quads sit at
  * hashed offsets (edukit.ts), never on a grid.
  */
@@ -33,7 +33,7 @@ const edu = (
   const area = (k.footprint?.w ?? 1) * (k.footprint?.h ?? 1);
   return {
     id: k.id, name: k.name, code: 14, kindId: k.kindId, family: 'civic', flags: { civic: true, workplace: true }, windows: k.windows ?? 'civic',
-    group: 'education', tier: k.tier, draft: true, ...(k.footprint ? { footprint: k.footprint } : {}),
+    group: 'education', tier: k.tier, ...(k.footprint ? { footprint: k.footprint } : {}),
     tool: k.tool, blurb: k.blurb, howTo: k.howTo, occupation: k.occupation, lot: { wage: l.wage }, attrs: k.attrs,
     // build work grows with the footprint (buildings:check "groups and tiers")
     levels: [{ capacity: l.capacity, wage: l.wage, cost: l.cost, upkeep: l.upkeep, work: 150 * area + 150, parking: l.parking, designs: l.designs }],

@@ -6,11 +6,11 @@ teaching it.
 
 | Demo | Port | Sections | Tour stops |
 | --- | --- | --- | --- |
-| **Showcase** | 8190 | all nine | 105 |
+| **Showcase** | 8190 | all ten | 113 |
 | Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 36 |
 | Leisure demo | 8192 | Downtown, Leisure | 27 |
 | Civic demo | 8193 | Downtown, Civic services | 32 |
-| **London** | 8194 | Areas, Landmarks, Rail and Heathrow, Buses, The Thames, The Underground (its own map, below) | 92 |
+| **London** | 8194 | Areas, Landmarks, Schools, Rail and Heathrow, Buses, The Thames, The Underground (its own map, below) | 106 |
 
 Code:
 
@@ -138,6 +138,15 @@ Code:
   the Tower of London is on the river by Tower Bridge, the Shard by London Bridge, the Gherkin and the Walkie Talkie in
   the City, One Canada Square at Canary Wharf and the Royal Opera House in Covent Garden. `demo:check` fails a landmark
   that no city demo places. Tall placements are framed from further out on the tour.
+- **The universities** are landmarks too (kind ids 111-114, `landmarks-london-3.ts`, tech `lnd2`; docs/education.md
+  section 14): UCL's Wilkins Building by Gower Street, King's College's Strand building and LSE's Centre Building in
+  Aldwych and Covent Garden, and Imperial's Queen's Tower in South Kensington. They are fitted with the other landmarks
+  (`STRUCTURES` in `shared/src/demo/london.ts`, in the Landmarks section) and each works as a university, so they take the
+  sixth-form leavers of the boroughs' schools. UCL and Imperial land within 3 tiles of their real places; the West End
+  is already full of landmarks and streets, so King's and LSE settle about 7 tiles (a kilometre) off, on the same bank.
+- **Schools** (section `london-education`): six primary and four secondary schools among the homes of Islington,
+  Hackney, Camden, Brixton, Clapham, Kensington and Hammersmith, fitted like the landmarks (within 3 tiles of the spot
+  asked for). Families with children live round them (`seedDemoFamilies`, below).
 - **Tower Bridge is a real crossing.** The Landmarks section lays it as a bridge (`bridges`, a `DemoBridge` with
   `style: 'Bascule'` and `landmark: 'tower-bridge'`, its ends taken from the plan's Tower Bridge) rather than placing
   the structure: a bascule span is drawn as the landmark's model with its lifting leaves, and the traffic drives over
@@ -336,6 +345,8 @@ Some choices make every system busy:
   fish quay, the port and the sea gate.
 - **One underground line, the Crosstown** (metro line 1, in the rail section, so the transport demo has it too): a kiosk, Station Road, 3 tiles from the rail station's door on the railway land at (17, -36); a kiosk by the arena, Arena, at (27, -19); a hall, Eastgate, at (27, -2), 2 tiles from bus line 1's stop at (25, -2). Every platform runs north-south (`rot: 1`), so the tunnel leaves Station Road southwards, turns once under the stadium's district and runs straight down x = 27 under the roads and blocks between: 39 tiles bored, 2 trains of 4 cars, there and back. Riders change to the passenger line or bus line 1 on foot. The tour stops at the kiosk, the line (with the underground view on) and the hall.
 
+- **The schools and the university** (section `education`, docs/education.md section 14), in district A2 and on a new parcel east of the town. Four job blocks of A2 (among its homes, never replacing them) hold the primary school (2×2) with the nursery (1×1) beside it, the secondary school (3×3) in the middle, the sixth-form college (2×2) and the further-education college (3×2), each with its door on the street between blocks. The **University Quarter** (a 45×26 parcel, x 35-79, y -40 to -15, off the east road at x = 34) has one street, y = -26: the 6×6 campus with its gate on it, two halls of residence (one on each side of the street) and the research institute.
+
 ## How seeding uses the players' planners
 
 Seeding has two phases, because stops, track and lines need the simulation's services. In `index.ts` the child calls `seedDemoTown` before creating the Simulation and `seedDemoNetwork` after rail is registered. Each phase goes through the same planner the matching player tool uses:
@@ -367,6 +378,15 @@ Seeding has two phases, because stops, track and lines need the simulation's ser
 
 A visitor therefore arrives in the morning with yesterday's counters filled in: visits, riders, flights and containers.
 
+## Schools in the demos
+
+A school with no children is a still life, and the families of E5 (children arriving with their parents) are not built: newcomers arrive as adults and the couples who settle have no school-age children for years. So a demo with schools in its scenario seeds its own (`seedDemoFamilies` in `server/src/demo/seed.ts`, called at the end of `seedDemoNetwork`; a demo with no school placed gets nothing, so the transport, leisure and civic demos play as before):
+
+- **Families.** Before the fill, every home within the catchment of a placed primary school (12 tiles, Manhattan) takes up to one family for every four beds, each by chance, to at most `DEMO_FAMILIES.max` (450) families: two adults and one to three children, 15% of them under three and the rest aged 3 to 17, the adults in work at once (`findJob`). The stream is seeded, so the same town gets the same families. The showcase starts with 310 children and young people (about 150 families, in the 56 homes round the primary school); London with 819 (450 families, in the homes round its six primaries). A home of the grid town is a level 3 house of 12 beds, so a home takes up to three families.
+- **Students.** A university admits its first students on the Monday after a Saturday's results, a few game days after a fill, and a campus should not stand empty until then. After the fill `seedDemoStudents` enrols up to 60 (or a sixth of the places, for London's smaller landmarks) young adults aged 18 to 22 at each university through `Schools.enrolAt`, so no more than the university's staffing allows; each is a second or third year (`due` 0 to 13 of the 15 school days a degree takes), so a few graduate on the first Saturday and the rest week by week. The demo child (`index.ts`, and `check.ts --fill`) calls it right after `fillDemo` (60 at the showcase campus, 149 in London's four).
+- **Staffing.** Teachers are whoever took the job until E4's skill gate lands, so a school hires about half the graduates it needs and admits only that share of its places (docs/education.md section 13): the showcase primary admits 40 of 120 with 2 of its 6 teachers, and a few of London's schools and King's College find no staff at all in the first game days. The tooltips say so ("teachers 2 of 6").
+- **Features** (the registry, below): `school-run` (a child of every school stage lives within reach of a school that takes them), `student-quarter` (halls within 12 tiles of the university), `london-school-run`, and `school-bus` as a todo for E6.
+
 ## Keeping it complete
 
 `npm run demo:check` fails when the showcase is missing anything a player can build. These are the rules:
@@ -382,6 +402,7 @@ A visitor therefore arrives in the morning with yesterday's counters filled in: 
 The check then seeds every demo through the real planners. It fails on any refusal and on a rail line that does not run, and it seeds each demo twice to compare hashes. It then runs every feature's `seeded` test on what was built. With `--run <days>` it also runs the showcase, or `--demo <id>`, under the seeded random. `--fill` first grows the town with the live demo's fast fill (`fillDemo`, about 75 s for the showcase), so the run starts from the town a visitor finds. The run prints who uses what:
 
 - staff per placement, venue visits and riders per line
+- for the schools (docs/education.md): the children under 18 and those enrolled by stage, the citizens with a degree or a postgraduate degree, the university students, the `pupils` and `graduates` counters, each school's pupils against the places its staffing admits, its teachers against the teachers it needs, quality, waiting list and the last results, and the school events (enrolments, graduations, drop-outs, escorts for the under-8s, fetched)
 - the planes scheduled by type and the helicopter flights by service
 - the bascule's lifts for a barge and how long the level crossing's barriers were down
 - gateway arrivals and freight containers
@@ -429,6 +450,10 @@ Some entries are typed against the union they come from, the way `SURFACE_TOOLS`
 | every boat type (`boat-<type>`) | scheduled at a showcase harbour within 7 days (`boatTimetable` over the seeded harbours); the river bus by a saved ferry line. Typed as a `Record<BoatType, …>`. The police launch and fire boat are todos until a station by the water bases them | the harbour that bases or receives it, `line-ferry-1`, or `bridge-bascule` for the sailing barge |
 | a tall boat through a lift (`boat-lift`) | a voyage that is not the bascule's own lift barge booked into a lift within 7 days (`boatLifts`) | `bridge-bascule` |
 | a sea gate (`sea-gate`) | the scenario declares one, and a seeded harbour's lane ends at a gate | `sea-gate` |
+| children within reach of every school stage (`school-run`) | a child of nursery, primary, secondary and sixth-form age lives within the catchment of a showcase school that takes that stage (`SeededDemo.schools` and `children`, from the seeded families) | `primary-school` |
+| halls beside the university (`student-quarter`) | a halls of residence within 12 tiles of the university | `halls` |
+| school buses (`school-bus`) | todo: E6 | `secondary-school` |
+| London's school run (`london-school-run`) | in **London**: a child of primary and of secondary age lives within reach of a London school of that stage. Rule: London has its own schools and the four universities are landmarks | London's `primary-islington` |
 | a river bus interchange (`ferry-interchange`) | a ferry line calls within the change walk of a bus, rail or metro stop, in the scenario and among the saved lines | `line-ferry-1` |
 | St Katharine's tall boats through Tower Bridge (`tower-bridge-lift`) | in **London**: a tall boat booked into a lift within 7 days. Rule: Tower Bridge and St Katharine Docks are London's | London's `st-katharine` |
 
@@ -505,6 +530,8 @@ containers and took 213, 673 ro-ro passengers came ashore, and the marina's 10 c
 sailed; river bus line 1 ran 3 boats but carried nobody. London's Thames over the same run: 13 calls at Dagenham Docks,
 183 boxes landed at Thamesmead, a St Katharine yacht out and back through Tower Bridge's lifts on day 3, and RB1's 5
 boats with 12 trips planned, 6 changing to the Tube. docs/boats.md 8.1 has the rest.
+
+The schools, measured with `--fill --run 1` (2026-10-18): the showcase fills to 16,407 citizens in 90 s with 301 children and young people under 18, 255 of them enrolled by the end of the day (nursery 4, primary 60, secondary 101, sixth form 37, degree 53, the last seeded) and 262 for the `pupils` counter; London fills to 30,804 in 223 s with 797 under 18, 438 enrolled and 149 university students in its four landmarks. Over a school week (`--run 5`) the showcase had 35 graduations, 19 fails, 3 nursery years and 3 school leavers going on to a degree. docs/education.md section 14 has the table.
 
 Rail riders are few. Everyone takes the nearest job, so nobody commutes 30 tiles. The riders are the occasional night out at the stadium from the homes by the halt.
 
