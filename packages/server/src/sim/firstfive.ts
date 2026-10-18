@@ -49,6 +49,8 @@ export class FirstFive {
   private quick = new Map<number, number>();
   /** Camp settlers still to set off up the road (no gate in town). */
   private waves: RoadWave[] = [];
+  /** Owners whose first arrival since the server started has been queued (goals.ts keeps the once-ever flag). */
+  private seen = new Set<string>();
 
   constructor(private w: World, private gateways: Gateways, private d: FirstFiveDeps) {}
 
@@ -193,14 +195,17 @@ export class FirstFive {
     if (c.state === S.Home && !c.mig) c.nextAt = this.w.tick; // depart() on the next tick; anyone out keeps the roster
   }
 
-  /** Called when a newcomer moves in: the first on the land of an owner with nobody housed yet. */
+  /**
+   * Called when a newcomer moves in (in place, or at the end of the trip from a gate or road end): the first on an
+   * owner's land since the server started. `housed` cannot be the test: a traveller counts from the moment they set
+   * off. goals.ts drops it for a player who has had the moment, or who already has a town.
+   */
   settled(c: Citizen) {
     const w = this.w;
     if (w.filling) return;
     const owner = w.parcelAt(c.hx, c.hy)?.owner;
-    if (!owner || this.settlers.some((s) => s.owner === owner)) return;
-    const p = w.players.get(owner);
-    if (!p || p.progress.housed > 0) return;
+    if (!owner || this.seen.has(owner)) return;
+    this.seen.add(owner);
     const home = w.buildings.get(tileKey(c.hx, c.hy));
     const more = home ? capacityOf(home.id, home.level) - 1 : 0; // the rest of the camp's wave is behind them
     const name = nameFor(c.id);

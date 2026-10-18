@@ -170,7 +170,9 @@ export class Onboarding {
     const s = this.state(p);
     if (s.settlers) return null;
     s.settlers = true;
-    return s.skipped ? null : { t: 'hint', id: 'settlers', msg: who, at: [x, y] };
+    // a player with a town already (a save from before the moment existed): no "first settlers" for them
+    if (s.skipped || s.done.includes('res12') || p.progress.housed > 12) return null;
+    return { t: 'hint', id: 'settlers', msg: who, at: [x, y] };
   }
 
   /** Once a game hour: sample the world's traffic. */
