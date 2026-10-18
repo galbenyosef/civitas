@@ -216,6 +216,88 @@ Rail and causeways:
 - **Building a bridge that cuts a route** is allowed. The road tool's status line warns, for example "this girder bridge
   is lower than the trawlers of Fishbourne harbour use: they will lose their way to sea".
 
+### 3.1 Built: B1, waterways (2026-10-18)
+
+Sections 2 and 3 are built in `shared/src/waterways.ts`, with `BRIDGE_CLEARANCE`, `bridgeClearance`, `bridgeChannel` and
+`waterStepOk` in `bridges.ts`. Nothing calls them yet: B3, B4 and B5 do. Checked by `packages/shared/scripts/boats-check.ts`.
+
+- **The grid.**
+  - `navigableTile`/`navigable` and `clearanceAt(env, x, y)` are uncached, for one-off checks such as a fairway.
+  - `WaterGrid(env)` caches clearance per chunk. A two-pass distance transform runs over the chunk plus a 4-tile
+    margin, so the result is exact; the check compares it with `clearanceAt` on every tile.
+  - The owner calls `grid.invalidate(x, y)` for every terrain or aux change. `grid.channel(x, y)` reports a deck
+    tile on its channel.
+  - `grid.room(x, y)` is clearance that also treats decks as obstacles (section 2.2 explains why).
+- **Pass signatures.**
+  - `passSig(airDraft, lifts = true)` sets bit `s` for each style the boat clears closed. It adds `PASS_LIFT` (16)
+    when the boat does not clear a closed bascule and may have one lifted.
+  - `passUnder(sig, style)` returns `true`, `'lift'` or `false`. Measured: a narrowboat at 0.07 gives 15, a trawler
+    at 0.17 gives 12 (suspension and bascule), and every tall boat gives 16.
+- **Lanes.** `waterLane(grid, from, to | to[], { cls, sig, entry?, notIn?, maxNodes? })` is A\* over (tile, entry
+  side).
+  - It never reverses, crosses a deck only straight across and only on its channel, and uses the section 2.2 costs
+    (`LANE_COST`) and `LANE_MAX_NODES` (20,000).
+  - A refusal has `why` ('bridge' | 'narrow' | 'unconnected' | 'far') and a `reason`, such as "the steel girder bridge
+    at (85, 21) is too low" or "the water is too narrow at (70, 39)". The harbour prefixes it ("no sea route for
+    trawlers: ..."). To find what is in the way, it searches again with every bridge passable, then on any width.
+- **The route carries more than a rail route.** A `WaterRoute` is `{ x, y, entry, sides, room, loop, bridges,
+  stops? }`.
+  - `room` is one digit a tile (`grid.room`). With the route's tiles, it is all `waterGeometry` needs to know which
+    off-route tiles are clear: room r on a route tile means room r − d at L1 distance d. So the sailing line needs no
+    chunk.
+  - `bridges` lists each deck passed under as `{ k, style, x0, y0 }` (the span's first deck tile, for `basculeSeed`).
+  - The wire cost is about 2 bytes a tile.
+- **Sea gates.**
+  - `SeaGate { x, y, name, low? }`, `gateServes(gate, airDraft)` (`SEA_GATE_LOW_AIR` 0.11) and `SEA_GATE_FADE` (4).
+  - `seaGateGoals(grid, gate, cls)` returns the tiles within 4 (L1) of a gate that have the class's clearance and no
+    deck, nearest first. A lane to a gate ends at the nearest of them, because the gate tile at the world's edge has
+    little room itself.
+  - `openWater(grid, x, y)` is the `OPEN_SEA_TILES` fill. Its offing prefers a tile 30 or more out, then the most room
+    up to 3, then the farthest.
+- **The other lanes.**
+  - `fishingGrounds(grid, from, cls, sig)` returns the tile with the most room within 60 by water.
+  - `cruiseWaypoints(grid, from, seed, cls, sig)` returns 1-3 hashed tiles with clearance 2 or more, 6 or more apart,
+    visited nearest first.
+  - `cruiseLane(grid, from, waypoints, opts)` returns a loop route whose first tile is `from`. Each leg starts the way
+    the last one arrived, and the final leg may not arrive the way the tour left (`notIn`), so no tile turns back on
+    itself.
+  - `waterReach` is the breadth-first search under the last two.
+- **The sailing line.** `waterGeometry(route, minC)`, `waterPoint(g, S)` (`x`, `z`, `h` and `c`, the least
+  clearance of that piece, for the keep-to-starboard offset), `g.tileS`, `g.decks` and `g.stopS`.
+  - **String-pulling** joins two tile centres when four conditions hold:
+    - the straight touches only route tiles, or tiles whose room bound is the class's clearance;
+    - the steps between the two centres never go both ways along an axis;
+    - the straight turns no more than square from the way in;
+    - the next step does not turn back against it.
+
+    The first rule keeps the line on clear water. The other three stop a shortcut from cutting off a detour or a
+    turn-round, and stop it from making a hairpin.
+  - **Fixed points.** Decks, the tiles either side of them, and stop rows stay as vertices. So a deck is crossed
+    straight across, and `g.decks[i].s0`/`s1` (the arclengths where the line enters and leaves the deck tile) are
+    exact. `seed` is the bascule's lift seed.
+  - **Corners** are rounded with radius `min(0.45 × room, 1.5)`. The radius is capped so the arc fits in half of
+    each straight, and halved until the arc stays on clear water. A loop's seam, at its first tile, is left
+    unrounded.
+- **For B5.** A ferry route needs `room` and `bridges` too. `railGeometry` can hand a `water` route to
+  `waterGeometry(route, 2)`. `stops` rows are kept straight, and `stopS` is each row's middle.
+- **Measured.**
+  - **London.** The whole Thames, from the south-west margin to the estuary: 456 tiles under 18 bridges for a
+    narrowboat, in 22 ms with a cold grid. The river bus takes 13 ms and clears every bridge. A trawler is refused
+    at the first stone arch.
+  - **The check world.** Its 12 lanes take 22 ms cold, and one lane takes 1-15 ms.
+- **`boats-check.ts` (the B1 sections).**
+  - **Clearance:** the cache equals the counted values, 1, 2, 2, 1 across the river, and the same under a deck.
+  - **Bridges:** the channels and the step rules for boats (across) and cars (along).
+  - **Signatures:** air drafts against the table.
+  - **Lanes:** 12 cases, each checked on its tiles, joints, room digits, decks (channel, across, cleared) and bascule
+    lift count. Each must be the same lane from a fresh grid and from the client's mirrored tiles, and each refusal
+    must name the right bridge or narrows.
+  - **Sailing lines,** sampled every 0.05 tiles: continuous, on route tiles or clear water of the class, straight
+    across each deck inside its arclengths, no sharp turn except at a loop's seam, and ending on the last centre.
+  - **The rest:** open water against a 300-tile lake, the lake's fishing grounds, and four cruise tours. A girder
+    built across the river cuts the trawler lane after `invalidate`, the same as a fresh grid, and taking it away
+    gives back the identical lane. A tiny node budget gives `why: 'far'`.
+
 ## 4. Boat types
 
 `BOAT_TYPES: Record<BoatType, BoatSpec>` in a new `shared/src/boats.ts`. Lengths and widths are in tiles; speed is in

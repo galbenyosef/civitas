@@ -17,8 +17,8 @@ import { TICKS_PER_HOUR } from './constants';
  * lot's road access (World.hasRoadAccess). The world stays flat: the deck's rise, the ramps on the landings and the
  * piers are drawn by the client (render/bridges.ts), which lifts cars and walkers to the deck with its roadY hook.
  *
- * Boats (the seaport card) will need clearance under a deck: every style's deck is drawn at bridgeDeckH above the
- * water, and a bascule span is the one that can open (its lifts: basculeLiftAt, below).
+ * Boats (docs/boats.md) pass under a deck only across it, on its channel (bridgeChannel), and only when their air
+ * draft is under the style's BRIDGE_CLEARANCE; a bascule span is the one that can open (its lifts: basculeLiftAt).
  */
 export const BRIDGE_AUX = 0xd8;
 export const BridgeStyle = { Arch: 0, Girder: 1, Suspension: 2, Bascule: 3 } as const;
@@ -39,6 +39,13 @@ export const BRIDGE_TILE_COST = 120;
 /** Deck height above the water, in tiles, by style (a car is about 0.12 tall). The bascule matches Tower Bridge's deck. */
 export const BRIDGE_DECK_H: readonly number[] = [0.18, 0.22, 0.26, 0.25];
 export const bridgeDeckH = (style: number) => BRIDGE_DECK_H[style & 3];
+/**
+ * Clear height under a deck over its channel, in tiles, by style (docs/boats.md section 3): a boat passes under when
+ * its air draft is less than this. The arch's crown and the girders' plates sit below the deck; a bascule open stands
+ * clear of everything (waterways.ts passSig).
+ */
+export const BRIDGE_CLEARANCE: readonly number[] = [0.12, 0.13, 0.21, 0.20];
+export const bridgeClearance = (style: number) => BRIDGE_CLEARANCE[style & 3];
 
 /**
  * The style a new bridge gets from its span and a hash of where it starts: short crossings are mostly stone arches,
@@ -70,6 +77,17 @@ export function bridgeSpanAt(x: number, y: number, aux: (x: number, y: number) =
 
 /** May a router step from tile A (aux a) to its neighbour B? From a deck tile only along the deck. */
 export const bridgeStepOk = (a: number, ax: number, ay: number, bx: number, by: number) => (bridgeNS(a) ? bx === ax : by === ay);
+/** May a boat step between a deck tile (aux a) at A and its neighbour B, either way? Only across the deck. */
+export const waterStepOk = (a: number, ax: number, ay: number, bx: number, by: number) => (bridgeNS(a) ? by === ay : bx === ax);
+/**
+ * The deck tiles boats pass under: the middle one of an odd span, the middle two of an even one. render/bridges.ts
+ * keeps an arch's crown, or the clear span between piers, over them.
+ */
+export function bridgeChannel(s: BridgeSpan): [number, number][] {
+  const m = (s.len - 1) >> 1, out: [number, number][] = [[s.x0 + s.dx * m, s.y0 + s.dy * m]];
+  if (s.len % 2 === 0) out.push([s.x0 + s.dx * (m + 1), s.y0 + s.dy * (m + 1)]);
+  return out;
+}
 
 export interface BridgeEnv {
   tile(x: number, y: number): number | undefined;
