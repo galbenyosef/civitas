@@ -1,6 +1,6 @@
 import { MANIFEST } from './buildings/compiled';
 import { HARBOUR_BERTHS, type BerthSlot } from './buildings/harbour';
-import { FRONT, WET_OF, footprintPoint, type Placed } from './structures';
+import { FRONT, WET_OF, footprintOf, footprintPoint, footprintTile, type Placed } from './structures';
 export type { BerthSlot } from './buildings/harbour';
 
 /**
@@ -41,13 +41,17 @@ export interface PlacedBerth {
   /** that direction as an angle, atan2(dy, dx) in tile space */
   angle: number;
   len: number; mode: BerthSlot['mode']; label: string;
+  /** the fairway tile (the row just behind the back edge) at the berth's column: where its boat leaves the lane */
+  fairway: [number, number];
 }
 /** The berths of a placed harbour, turned with it (empty for any other structure). */
 export function placedBerths(p: Placed): PlacedBerth[] {
   const h = HARBOUR_OF[p.kind];
   if (!h) return [];
+  const w = footprintOf(p.kind).w;
   return h.berths.map((b, index) => {
     const [x, y] = footprintPoint(p, b.x, b.y), dir = (b.dir + p.r) & 3;
-    return { index, x, y, dir, angle: Math.atan2(FRONT[dir][1], FRONT[dir][0]), len: b.len, mode: b.mode, label: b.label };
+    const fairway = footprintTile(p, Math.min(w - 1, Math.max(0, Math.floor(b.x))), -1);
+    return { index, x, y, dir, angle: Math.atan2(FRONT[dir][1], FRONT[dir][0]), len: b.len, mode: b.mode, label: b.label, fairway };
   });
 }

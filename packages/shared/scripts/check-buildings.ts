@@ -668,6 +668,7 @@ section('harbours');
         return !water || lx < 0 || lx >= fp.w || along - slot.len / 2 < -1e-6 || along + slot.len / 2 > room + 1e-6 || b.dir !== ((slot.dir + r) & 3);
       });
       eq(`${id} r${r}: every berth on the water and inside the footprint's width`, bad.map((b) => b.label), []);
+      eq(`${id} r${r}: every berth's fairway tile is in the fairway`, berths.every((b) => fw.some(([x, y]) => x === b.fairway[0] && y === b.fairway[1])), true);
     }
     // the world map reads a wet structure tile as water
     eq(`${id}: map byte of a wet tile`, mapByte(T.packTile(T.Terrain.Water, false, T.Zone.Hub, 1), S.partAux(0, 0)) & 15, MapClass.Water);

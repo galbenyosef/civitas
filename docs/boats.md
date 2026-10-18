@@ -426,7 +426,8 @@ showcase does not place.
 
   `shared/src/harbours.ts` (exported from the index) gives `HARBOUR_OF[kindId]` (`role`, `wet`, `fairwayClearance`,
   `berths`), `HARBOUR_KIND[role]`, `isHarbourId` and `placedBerths(p)`. `placedBerths` returns the world centre, the
-  bow's `dir` (FRONT index) and `angle`, `len` and `mode` of each berth.
+  bow's `dir` (FRONT index) and `angle`, `len` and `mode` of each berth, and its `fairway` tile: the tile just behind
+  the back edge at the berth's column.
 - **Marks.** `MarkKind` gains `'quay'` (pale stone) and `'berth'` (blue). The preview shows each kind's berths as a band
   over the wet rows, its quay tiles, and the pier's berth line on its back edge.
 - **Water stays water.** These parts already kept the terrain bits:
