@@ -232,7 +232,7 @@ for (const c of cs) if (c.study) { const r = byStage.get(c.study) ?? { n: 0, att
 console.log('\nEnrolled now, by stage (attendance = days attended / school days held, this stage so far):');
 for (const st of [1, 2, 3, 4, 6, 7]) { const r = byStage.get(st); if (r) console.log(`  ${pad(STUDY_NAMES[st], 17)} ${pad(r.n, 5)}  attendance ${pct(r.att, r.due)}% (${r.att}/${r.due})`); }
 // school-age children (by age at the start of this school year) without a place
-const yearStart = Math.floor(w.tick / DAY / 7) * 7;
+const yearStart = Math.floor((Math.floor(w.tick / DAY) + 2) / 7) * 7; // the school year of the next school day (after Saturday's results: next year's)
 const unplaced = new Map<number, number>();
 for (const c of kids) { const a = (yearStart - c.born) / LIFE.daysPerYear; if (a >= 3 && a < 18 && !c.study) { const st = a < 4 ? 1 : a < 11 ? 2 : a < 16 ? 3 : 4; unplaced.set(st, (unplaced.get(st) ?? 0) + 1); } }
 if (argv.includes('--debug')) for (const c of kids.filter((k) => { const a = (yearStart - k.born) / LIFE.daysPerYear; return a >= 3 && a < 18 && !k.study; }).slice(0, 12)) {
