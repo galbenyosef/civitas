@@ -110,6 +110,11 @@ function adaptQuality(dt: number) {
 // page opens (DEFAULT_DEMO); asked before anything connects. A local game or a ?ws= server elsewhere has no such answer.
 const showcase = __LOCAL_ONLY__ || params.has('local') || params.get('ws') ? {} : await serverConfig();
 if (showcase.spectate) document.body.classList.add('spectate'); // no tool bar flashing up before the welcome confirms it
+// a showcase with a default demo shows only that one (the server refuses to start the others): ?demo=<other> opens it like a bare page
+if (showcase.spectate && isDemoId(showcase.defaultDemo) && params.get('demo') && demoOf(params) !== showcase.defaultDemo) {
+  params.delete('demo');
+  history.replaceState(null, '', `${location.pathname}${params.size ? `?${params}` : ''}${location.hash}`);
+}
 // DEFAULT_VIEW: the opening shot of a bare page (no camera parameters, no ?demo=, ?city=: the world DEFAULT_DEMO or the live one), its hour
 // only when there is no ?hour; put on again at the first welcome, after a demo's tour has placed the camera on its welcome stop
 if (!startShot && !params.get('demo') && !params.get('city')) {

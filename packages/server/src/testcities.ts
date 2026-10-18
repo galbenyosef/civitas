@@ -44,6 +44,8 @@ const POLL_MS = Number(process.env.TEST_CITY_POLL_MS ?? 2_000);
 
 /** what a read-only showcase (SPECTATE) answers to a demo stop or reset, or a test-city start or stop */
 const READ_ONLY_REFUSAL = 'Read-only showcase: demos cannot be stopped or reset here';
+/** what a showcase pinned to its default demo (`onlyDemo`) answers to starting another */
+const ONLY_DEMO_REFUSAL = 'This showcase only shows its own demo';
 
 export type CityStatus = 'stopped' | 'starting' | 'running' | 'stopping';
 /** what a test-city child reports on /healthz */
@@ -92,8 +94,9 @@ export class TestCities {
    * @param entry the server entry script to spawn, @param staticDir the built client the children serve,
    * @param cities offer test cities (dev servers), @param demoDir where demo worlds, snapshots and logs go,
    * @param spectate a read-only showcase (index.ts SPECTATE): demos may be started (that is how a visitor gets in), nothing else
+   * @param onlyDemo a showcase's DEFAULT_DEMO: the only demo listed, started or joined (the others each cost a large child process)
    */
-  constructor(private opts: { entry: string; staticDir: string; dataDir: string; cwd: string; cities: boolean; demoDir: string; spectate?: boolean }) {
+  constructor(private opts: { entry: string; staticDir: string; dataDir: string; cwd: string; cities: boolean; demoDir: string; spectate?: boolean; onlyDemo?: DemoId }) {
     if (opts.cities) for (const n of TEST_CITY_SIZES) this.entries.set(n, { n, proc: null, pid: null, status: 'stopped', health: null, idleSince: null, startedAt: 0 });
     for (const d of DEMOS) this.entries.set(d.slot, { n: d.slot, demo: d.id, proc: null, pid: null, status: 'stopped', health: null, idleSince: null, startedAt: 0 });
     this.timer = setInterval(() => { void this.poll(); }, POLL_MS);
@@ -260,7 +263,7 @@ export class TestCities {
     const m = /^\/demo-ws\/([a-z]+)$/.exec((req.url ?? '').split('?')[0]);
     if (!m) return false;
     const d = DEMO_BY_ID.get(m[1] as DemoId);
-    const e = d ? this.entries.get(d.slot) : undefined;
+    const e = d && (!this.opts.onlyDemo || d.id === this.opts.onlyDemo) ? this.entries.get(d.slot) : undefined;
     if (!e || e.status !== 'running') { socket.end('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n'); return true; }
     const up = connect(TEST_CITY_BASE_PORT + e.n, '127.0.0.1');
     const close = () => { socket.destroy(); up.destroy(); };
@@ -333,11 +336,12 @@ export class TestCities {
     if (!demos && path !== '/api/test-cities' && !path.startsWith('/api/test-cities/')) return false;
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': '*' }); res.end(); return true; }
     if (demos) {
-      const list = [...this.entries.values()].filter((e) => e.demo);
+      const list = [...this.entries.values()].filter((e) => e.demo && (!this.opts.onlyDemo || e.demo === this.opts.onlyDemo));
       if (path === '/api/demos') { send(200, { available: true, idleMinutes: IDLE_MS / 60_000, demos: list.map((e) => this.demoView(e)) }); return true; }
       const dm = /^\/api\/demos\/([a-z]+)\/(start|stop|reset)$/.exec(path);
       const e = dm ? list.find((x) => x.demo === dm[1]) : undefined;
       if (!dm || req.method !== 'POST') { send(404, { error: 'POST /api/demos/<id>/start, /stop or /reset' }); return true; }
+      if (!e && this.opts.onlyDemo && DEMO_BY_ID.has(dm[1] as DemoId)) { send(403, { error: ONLY_DEMO_REFUSAL }); return true; }
       if (!e) { send(404, { error: `no demo called ${dm[1]}` }); return true; }
       if (this.opts.spectate && dm[2] !== 'start') { send(403, { error: READ_ONLY_REFUSAL }); return true; }
       void this.adopted.then(() => {

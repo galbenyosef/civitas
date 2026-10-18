@@ -95,8 +95,10 @@ menu's changes (demolish, buy, build sooner, later, pause) are hidden, tool keys
 tax slider or name field and the lines panel lists every line without edit buttons. The camera, hover tooltips, the
 building, person and vehicle panels, follow, first-person view, the congestion and perf overlays, the underground view,
 the charts and the guided tour all work. The banner reads "London: a read-only showcase" and, with `DEFAULT_DEMO`
-set, offers no way back to the live world. Other demos stay reachable by URL (`?demo=showcase`); test cities stay
-dev-only (`NODE_ENV=production` has none).
+set, offers no way back to the live world. With `DEFAULT_DEMO` set the showcase shows only that demo: `/api/demos` lists
+just it, starting another answers 403 ("This showcase only shows its own demo"), `/demo-ws/<other>` is refused, and a
+`?demo=<other>` link opens the default like a bare page (each demo is a child process of about a gigabyte). Without
+`DEFAULT_DEMO` every demo stays reachable. Test cities stay dev-only (`NODE_ENV=production` has none).
 
 The demo worlds live beside the world file: with the Dockerfile's `WORLD_FILE=/data/world.json` they are
 `/data/demos/demo-<id>.json`, the first fill's snapshot `demo-<id>.seed.json` and the child's log `demo-<id>.log`;
@@ -108,7 +110,7 @@ host does better): London's cold start, seeding and filling with nobody waiting,
 `running` (the fill itself 450 s, 31,200 citizens); a start from its saved world took 10 s. Running with one visitor the
 London child holds about 1.1-1.2 GB resident and uses about half a core (the simulation runs whether anyone watches;
 tick average 100-170 ms under that load); the main server with the live world about 150 MB. On disk London is a
-42 MB world plus a 42 MB seed snapshot, so allow about 100 MB of `/data` for it, more for each other demo started.
+42 MB world plus a 42 MB seed snapshot, so allow about 100 MB of `/data` for it.
 
 ## London
 

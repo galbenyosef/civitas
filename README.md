@@ -41,7 +41,8 @@ live world and every demo child alike (the children inherit it). The server refu
 the HTTP API refuses demo stop and reset and test-city start and stop (403); starting a demo still works, as that is how a
 visitor gets in. The page hides the tool bar, the treasury, the tech tree, Reset demo and the context menu's changes, and joins
 at once as a made-up "Visitor 1234" instead of showing the join form. `DEFAULT_DEMO=<id>` (e.g. `london`) sends a page opened
-without `?demo=`, `?ws=` or `?city=` to that demo instead of the live world, and the server starts it as it starts. The page
+without `?demo=`, `?ws=` or `?city=` to that demo instead of the live world, and the server starts it as it starts; with
+`SPECTATE` it is then the only demo the server lists, starts or joins (a `?demo=<other>` link opens it instead). The page
 reads both from `GET /api/config`; each world also says `spectate` in its welcome. Without them nothing changes.
 `DEFAULT_VIEW="x,y,dist,yaw,pitch[,hour]"` (yaw and pitch in degrees, the hour freezes the lighting) is the camera's opening
 shot on a bare page (no camera parameters, no `?demo=` or `?city=`: the `DEFAULT_DEMO` or the live world), also through

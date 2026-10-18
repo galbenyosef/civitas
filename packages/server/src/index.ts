@@ -97,7 +97,7 @@ let ready = !needsFill;
 let fillProgress: { tick: number; of: number; pop: number } | undefined;
 /** the live server's test-city launcher (dev only; a test city itself has none) */
 const testCities = worldLauncherAvailable() // demos on every main server, test cities on dev servers only
-  ? new TestCities({ entry: fileURLToPath(import.meta.url), staticDir: STATIC, dataDir: join(dirname(DATA), 'test-cities'), cwd: join(here, '..'), cities: testCitiesAvailable(), demoDir: join(dirname(DATA), 'demos'), spectate: SPECTATE })
+  ? new TestCities({ entry: fileURLToPath(import.meta.url), staticDir: STATIC, dataDir: join(dirname(DATA), 'test-cities'), cwd: join(here, '..'), cities: testCitiesAvailable(), demoDir: join(dirname(DATA), 'demos'), spectate: SPECTATE, ...(SPECTATE && DEFAULT_DEMO ? { onlyDemo: DEFAULT_DEMO } : {}) })
   : null;
 
 const MIME: Record<string, string> = {
