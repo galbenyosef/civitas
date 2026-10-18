@@ -1,7 +1,7 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   CHUNK_SIZE, LAND_PRICE_PER_TILE, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo,
+  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
@@ -162,6 +162,7 @@ scene.add(helis.group);
 const trains = new TrainsView();
 const rail = new RailClient(world);
 scene.add(trains.group, trains.under, rail.group);
+trains.underAt = (x, y) => world.underAt(x, y); // tube trains follow a crossover's dip
 scene.add(citizens.under);
 setPlatformCrowd((x0, y0, x1, y1) => citizens.platformCrowd(x0, y0, x1, y1));
 citizens.platformAlongX = (x, y) => underMask(world.underAt(x, y)) === 10; // a platform tile's axis (docs/underground.md section 1)
@@ -275,7 +276,10 @@ const onboarding = new Onboarding({ net, world, liveTick, tool: (t) => input.set
 ui.onHint = (id) => onboarding.hint(id);
 net.on('railLines', (m) => { trains.setLines(m.lines); rail.setLines(m.lines); });
 // underground lines (docs/underground.md): their trains run in the bores, and the bores take the lines' colours
+const metroMeta = new Map<number, MetroLineDTO>(); // the metro lines as sent, for station names on a cab ride
 net.on('metroLines', (m) => {
+  metroMeta.clear();
+  for (const l of m.lines) metroMeta.set(l.id, l);
   trains.setMetroLines(m.lines);
   lines.setMetroNames(m.lines);
   underground.setLines(m.lines.filter((l) => l.route).map((l) => ({ colour: l.color, sides: lineSides(l.route!, { under: (x, y) => world.underAt(x, y) }) })));
@@ -507,6 +511,7 @@ const fpv = new Fpv({
   cab: () => cabEye(),
   indicator: (id) => { const s = citizens.indicatorOf(id); return s && citizens.indicatorLit(id) ? (s === 'hazard' ? 2 : s) : 0; },
   notify: (msg) => ui.toast('info', msg),
+  tunnel: { underAt: (x, y) => world.underAt(x, y), keep: () => [trains.under, citizens.under] }, // a tube cab ride draws these over its tunnel (render/tunnelRide.ts)
   onChange: (mode) => {
     ui.markFpv(mode);
     if (mode === 'full') { input.hover = null; ui.hideTip(); rig.dist = Math.min(rig.dist, 30); }
@@ -562,7 +567,7 @@ const ctxMenu = new ContextMenu({
 });
 
 // ---- selected train or plane: panel, follow camera and cab view (vehicles.ts) ------------------------
-const UP = new Vector3(0, 1, 0);
+const UP = new Vector3(0, 1, 0), AXIS_Z = new Vector3(0, 0, 1);
 const manifests = new Map<string, FlightManifest>();
 function manifestOf(airport: number, f: Flight): FlightManifest {
   const k = `${airport}:${f.id}`;
@@ -632,11 +637,17 @@ function cabEye(): CabEye | null {
   if (v.kind === 'train') {
     const c = trains.cabOf(v.line, v.train), dto = trains.lines.find((l) => l.id === v.line);
     if (!c || !dto) return null;
-    const doing = c.st.phase === 'dwell' ? (c.st.doors ? 'standing · doors open' : 'standing') : trainInfo?.next ? `running to ${trainInfo.next}` : 'running';
+    const svc = trains.serviceOf(v.line), meta = svc?.metro ? metroMeta.get(v.line) : undefined;
+    // a tube train knows the station names itself: the stop it is at, or the one it is running to
+    const next = meta?.names[c.st.stop] ?? trainInfo?.next;
+    const doing = c.st.phase === 'dwell' ? (c.st.doors ? 'standing · doors open' : 'standing') : next ? `running to ${next}` : 'running';
+    const q = new Quaternion().setFromAxisAngle(UP, -c.h);
+    if (meta) q.multiply(new Quaternion().setFromAxisAngle(AXIS_Z, c.pitch)); // a crossover's dip pitches the cab
     return {
-      key: vehicleKey(v), x: c.x, y: c.y, z: c.z, q: new Quaternion().setFromAxisAngle(UP, -c.h),
-      label: `Line ${dto.number} · driver's cab`, lines: [doing, `${trainKmh(c.st.v)} km/h`], dip: 0.035, sway: c.st.v / TRAIN_VMAX, seed: hash2(v.line, v.train),
-      interior: { kind: 'train', kmh: trainKmh(c.st.v), vmax: trainKmh(TRAIN_VMAX), next: trainInfo?.next, doors: !!c.st.doors, seed: hash2(v.line, v.train) },
+      key: vehicleKey(v), x: c.x, y: c.y, z: c.z, q,
+      label: `${meta?.name ?? `Line ${dto.number}`} · driver's cab`, lines: [doing, `${trainKmh(c.st.v)} km/h`], dip: meta ? 0.02 : 0.035, sway: c.st.v / TRAIN_VMAX * (meta ? 1.4 : 1), seed: hash2(v.line, v.train),
+      interior: { kind: 'train', kmh: trainKmh(c.st.v), vmax: trainKmh(TRAIN_VMAX), next, doors: !!c.st.doors, seed: hash2(v.line, v.train) },
+      tunnel: svc && meta ? { geom: svc.geom, s: c.s, dir: c.dir, off: c.off, line: v.line, colour: dto.color, names: meta.names, stop: c.st.stop, dwelling: c.st.phase === 'dwell' } : undefined,
     };
   }
   if (v.kind === 'heli') {
@@ -1005,7 +1016,8 @@ function frame(now: number) {
   vehTick = Math.abs(live - vehTick) > 4 ? live : vehTick + rdt + (live - vehTick) * Math.min(1, dt * 1.5);
   planes.frame(vehTick);
   helis.frame(vehTick);
-  trains.level = underground.level; citizens.underLevel = underground.level;
+  const riding = fpv.tunnelOn ? 1 : 0; // a tube cab ride shows the trains and the platform crowds without the underground view
+  trains.level = Math.max(underground.level, riding); citizens.underLevel = Math.max(underground.level, riding);
   trains.frame(vehTick);
   rail.frame(input.tool === 'rail' ? input.railPath : null);
   airfield.frame();
@@ -1061,7 +1073,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { mapMode, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { mapMode, metroMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

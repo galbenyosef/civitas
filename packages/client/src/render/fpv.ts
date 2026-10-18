@@ -1,6 +1,6 @@
 import {
   PerspectiveCamera, OrthographicCamera, Color, Scene, Mesh, PlaneGeometry, ShaderMaterial, WebGLRenderTarget, HalfFloatType, LinearFilter,
-  Quaternion, Vector3, type WebGLRenderer, type Fog, type Object3D,
+  Quaternion, Vector2, Vector3, type WebGLRenderer, type Fog, type Object3D, type Light,
 } from 'three';
 import { hash2, type CitizenInfo } from '@msimcity/shared';
 import type { CitizensView } from './citizens';
@@ -8,6 +8,7 @@ import { Interior, placeOf } from './interiors';
 import { sceneUniforms } from './materials';
 import { Instruments, type AircraftCal } from './instruments';
 import { CarInterior, TrainCab, type CarFeed, type TrainCabFeed } from './vehicleInterior';
+import { TunnelRide, TUNNEL_BG, TUNNEL_FOG, type TunnelFeed } from './tunnelRide';
 
 export type FpvMode = 'off' | 'inset' | 'full';
 
@@ -47,6 +48,8 @@ export interface CabEye {
   instruments?: AircraftCal;
   /** a train cab: draw the driver's cab around the view (render/vehicleInterior.ts) */
   interior?: TrainCabFeed;
+  /** a tube train: ride through the tunnel instead of the street (render/tunnelRide.ts); the surface is not drawn */
+  tunnel?: TunnelFeed;
 }
 
 export interface FpvHooks {
@@ -61,6 +64,11 @@ export interface FpvHooks {
   onChange(mode: FpvMode): void;
   /** a short message for the player ("they are indoors") */
   notify(msg: string): void;
+  /**
+   * What a tube cab ride needs: the under layer's byte at a tile, and the groups of the main scene that are drawn
+   * over the tunnel (the tube trains, the crowds on the platforms).
+   */
+  tunnel?: { underAt(x: number, y: number): number; keep(): Object3D[] };
 }
 
 /**
@@ -82,6 +90,8 @@ export class Fpv {
   readonly camera = new PerspectiveCamera(70, 16 / 9, 0.02, 160);
   /** fade 0..1 (1 = fully shown); a fade-out ends in 'off' */
   level = 0;
+  /** a tube cab ride is on (main.ts then keeps the underground trains and platform crowds alive for it) */
+  get tunnelOn() { return this.inTunnel && this.mode !== 'off'; }
   /** frames drawn / skipped, for the FPS probe */
   rendered = 0; skipped = 0;
   /** milliseconds the FPV render itself took last time (CPU side, includes GL submission) */
@@ -127,6 +137,10 @@ export class Fpv {
   private cabKey = '';
   private cabQ = new Quaternion();
   private fogFar = FOG_FAR;
+  // riding a tube train: the tunnel scene, drawn in place of the street
+  private tunnel: TunnelRide | null = null;
+  private inTunnel = false;
+  private clr = new Color();
   // indoors: the room on show, the selected citizen's latest inspect (whoever it is for), and a fade-out under way
   private room: Interior | null = null;
   private latest: CitizenInfo | null = null;
@@ -268,6 +282,7 @@ export class Fpv {
     if (!this.want && this.level <= 0) {
       this.id = 0; this.info = null; this.cabKey = '';
       this.leaveRoom();
+      this.tunnelFeed(null, now);
       this.setMode('off');
       return;
     }
@@ -280,6 +295,7 @@ export class Fpv {
       } else {
         this.lost = 0;
         this.ride(cab, now, dt);
+        this.tunnelFeed(cab, now);
         this.cabHud(now, cab);
         this.instruments(cab, now, dt);
         this.car.hide();
@@ -288,6 +304,7 @@ export class Fpv {
       return;
     }
     this.fogFar = FOG_FAR;
+    this.tunnelFeed(null, now);
     this.inst.hide(); this.train.hide();
     this.hud.classList.remove('inst');
     this.carOn = false;
@@ -425,6 +442,20 @@ export class Fpv {
     this.fogFar = cab.fogFar ?? FOG_FAR;
   }
 
+  /** Ride the tunnel while the cab is a tube train's; otherwise put the tunnel scene away. */
+  private tunnelFeed(cab: CabEye | null, now: number) {
+    const hk = this.hooks.tunnel;
+    if (cab?.tunnel && hk) {
+      this.tunnel ??= new TunnelRide(hk.underAt);
+      this.tunnel.update(cab.tunnel, now);
+      this.inTunnel = true;
+      this.fogFar = TUNNEL_FOG.far;
+    } else if (this.inTunnel) {
+      this.inTunnel = false;
+      this.tunnel?.hide();
+    }
+  }
+
   // ---- HUD ----------------------------------------------------------------------------------
 
   /** The flight instruments, for aircraft only; the `inst` class makes room for them in the text block. */
@@ -525,7 +556,7 @@ export class Fpv {
       renderer.shadowMap.autoUpdate = false;
       // leave the sky out of the target (clear to alpha 0); the blit paints it
       const bg = scene.background, alpha = renderer.getClearAlpha();
-      if (bg instanceof Color) (mat.uniforms.sky.value as Color).copy(bg);
+      if (bg instanceof Color) (mat.uniforms.sky.value as Color).copy(this.inTunnel ? this.clr.setHex(TUNNEL_BG) : bg);
       scene.background = null; renderer.setClearAlpha(0);
       renderer.setRenderTarget(this.rt);
       this.street(renderer, scene, hide);
@@ -547,6 +578,7 @@ export class Fpv {
 
   /** One street-level render of the scene, with the closer fog and the overhead-only helpers hidden. */
   private street(renderer: WebGLRenderer, scene: Scene, hide: Object3D[]) {
+    if (this.inTunnel && this.tunnel) { this.tunnelPass(renderer, scene); return; }
     const fog = scene.fog as Fog;
     const near = fog.near, far = fog.far;
     fog.near = FOG_NEAR; fog.far = Math.min(this.fogFar, far);
@@ -556,4 +588,43 @@ export class Fpv {
     hide.forEach((o, n) => { o.visible = vis[n]; });
     fog.near = near; fog.far = far;
   }
+
+  /**
+   * A tube cab: the tunnel scene (render/tunnelRide.ts) first, then the main scene over it with everything hidden but the
+   * groups the tunnel keeps (other tube trains, the crowds on the platforms), their light turned right down and the
+   * fog the tunnel's, so a train ahead comes up out of the dark. The depth buffer is shared, so they sit inside the bore.
+   */
+  private tunnelPass(renderer: WebGLRenderer, scene: Scene) {
+    const t = this.tunnel!, fog = scene.fog as Fog;
+    const rt = renderer.getRenderTarget();
+    t.setView(rt ? rt.height : renderer.getDrawingBufferSize(TMP_V2).y, this.camera.fov);
+    const ca = renderer.getClearAlpha();
+    renderer.getClearColor(this.clr);
+    const clear = this.clr.getHex();
+    const bg = scene.background;
+    scene.background = null;
+    renderer.setClearColor(TUNNEL_BG, 1);
+    renderer.render(t.scene, this.camera);
+    const keep = new Set(this.hooks.tunnel!.keep());
+    const hidden: Object3D[] = [], lit: [Light, number][] = [];
+    for (const o of scene.children) {
+      if ((o as Light).isLight) { lit.push([o as Light, (o as Light).intensity]); (o as Light).intensity *= TUNNEL_LIGHT; continue; }
+      if (keep.has(o) || !o.visible) continue;
+      o.visible = false; hidden.push(o);
+    }
+    const fc = fog.color.getHex(), near = fog.near, far = fog.far;
+    fog.color.setHex(TUNNEL_FOG.color); fog.near = TUNNEL_FOG.near; fog.far = TUNNEL_FOG.far;
+    const auto = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.render(scene, this.camera);
+    renderer.autoClear = auto;
+    fog.color.setHex(fc); fog.near = near; fog.far = far;
+    for (const o of hidden) o.visible = true;
+    for (const [l, i] of lit) l.intensity = i;
+    scene.background = bg;
+    renderer.setClearColor(clear, ca);
+  }
 }
+const TMP_V2 = new Vector2();
+/** how much of the sun and sky light reaches a tube train in its bore */
+const TUNNEL_LIGHT = 0.5;

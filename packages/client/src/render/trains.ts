@@ -8,7 +8,7 @@ import type { ClientChunk } from '../world';
 import { Kit } from './kit';
 import { vehicleMaterial, sceneUniforms } from './materials';
 import { CrossingsView } from './crossings';
-import { METRO_Y } from './underground';
+import { METRO_Y, crossoverDip } from './underground';
 
 /**
  * Trains and the overhead line (shared/src/rail.ts, docs/rail.md). Where every train is comes from the shared pure
@@ -191,6 +191,8 @@ export class TrainsView {
    */
   readonly under = new Group();
   level = 0;
+  /** the under layer's byte at a tile, so tube trains can follow a crossover's dip (set by main.ts) */
+  underAt: ((x: number, y: number) => number) | null = null;
   /** the lines as the server last sent them: the surface's, then the metro's (line ids are unique across modes) */
   lines: RailLineDTO[] = [];
   private surfaceLines: RailLineDTO[] = []; private metroLines: RailLineDTO[] = [];
@@ -211,7 +213,7 @@ export class TrainsView {
   private chunks = new Map<string, ChunkWires>();
   private wiresChanged = true;
   private m = new Matrix4(); private mi = new Matrix4();
-  private p = new Vector3(); private q = new Quaternion(); private s = new Vector3(1, 1, 1);
+  private p = new Vector3(); private q = new Quaternion(); private qz = new Quaternion(); private s = new Vector3(1, 1, 1);
   private col = new Color();
   private states: TrainState[] = [];
   private poses: VehiclePose[] = [];
@@ -414,8 +416,12 @@ export class TrainsView {
       ty.n++;
       const vx = v.x + Math.sin(v.h) * off, vz = v.z - Math.cos(v.h) * off;
       if (pickable) this.picks.push(vx, metro ? base + 0.1 : 0.15, vz, dto.id, st.train);
+      // a crossover dips the north-south bores: the car rides down and up it on its bogies
+      let dy = 0, pitch = 0;
+      if (metro && this.underAt) { this.dipPose(v.x, v.z, v.h); dy = this.dipY; pitch = v.flip ? -this.dipPitch : this.dipPitch; }
       this.q.setFromAxisAngle(UP, -v.h + (v.flip ? Math.PI : 0));
-      this.m.compose(this.p.set(vx, base, vz), this.q, this.s.set(1, 1, 1));
+      if (pitch) this.q.multiply(this.qz.setFromAxisAngle(AXIS_Z, pitch));
+      this.m.compose(this.p.set(vx, base + dy, vz), this.q, this.s.set(1, 1, 1));
       for (const mesh of [ty.shell, ty.trim, ty.fixed, ty.glass]) mesh?.setMatrixAt(i, this.m);
       ty.fixed.setColorAt(i, lift > 1 ? this.col.copy(WHITE).multiplyScalar(lift) : WHITE);
       if (v.kind >= 3 && v.kind <= 6) {
@@ -433,7 +439,7 @@ export class TrainsView {
         ty.trim.setColorAt(i, accent);
         this.col.setRGB(1, 0.9 + 0.08 * hw, 0.66 + 0.3 * hw).multiplyScalar(hw < 0.1 ? 0.6 : 0.85 + 0.15 * hw);
         ty.glass?.setColorAt(i, this.col);
-        if (riders > 0) this.seat(dto.id, st.train, v, vx, vz, riders);
+        if (riders > 0) this.seat(dto.id, st.train, v, vx, vz, riders, dy);
         continue;
       }
       ty.shell.setColorAt(i, main);
@@ -445,16 +451,30 @@ export class TrainsView {
     const lead = st.dir > 0 ? poses[0] : poses[n - 1], tail = st.dir > 0 ? poses[n - 1] : poses[0];
     const sz = metro ? 0.04 : 0.03 + 0.06 * night; // a tunnel is dark at every hour
     for (const z of [-0.065, 0.065]) {
-      this.light(lead, st.dir * (CAR_LEN / 2 + 0.005), z, 0.07, HEAD, sz * (st.phase === 'dwell' ? 0.6 : 1), metro, off);
-      this.light(tail, -st.dir * (CAR_LEN / 2 + 0.005), z, 0.07, TAIL, sz * 0.6, metro, off);
+      this.light(lead, st.dir * (CAR_LEN / 2 + 0.005), z, 0.07, HEAD, sz * (st.phase === 'dwell' ? 0.6 : 1), metro, off, metro ? this.leadDy(lead, st.dir) : 0);
+      this.light(tail, -st.dir * (CAR_LEN / 2 + 0.005), z, 0.07, TAIL, sz * 0.6, metro, off, metro ? this.leadDy(tail, -st.dir) : 0);
     }
   }
-  private light(v: VehiclePose, dx: number, dz: number, y: number, color: Color, glow: number, tube = false, off = 0) {
+  /** a crossover's dip under a car at (x, z) heading h: the height of its middle (dipY) and its pitch (dipPitch), from the bogies' two points */
+  private dipY = 0; private dipPitch = 0;
+  private dipPose(x: number, z: number, h: number) {
+    const c = Math.cos(h) * 0.3, s = Math.sin(h) * 0.3;
+    const f = this.dropAt(x + c, z + s, h), b = this.dropAt(x - c, z - s, h);
+    this.dipY = -(f + b) / 2;
+    this.dipPitch = f === b ? 0 : Math.atan2(b - f, 0.6);
+  }
+  private dropAt(x: number, z: number, h: number): number { return crossoverDip(this.underAt!(Math.floor(x), Math.floor(z)), x, z, h).drop; }
+  /** the dip at the end of a car, for its head and tail lamps */
+  private leadDy(v: VehiclePose, dir: number): number {
+    if (!this.underAt) return 0;
+    return -this.dropAt(v.x + Math.cos(v.h) * dir * CAR_LEN / 2, v.z + Math.sin(v.h) * dir * CAR_LEN / 2, v.h);
+  }
+  private light(v: VehiclePose, dx: number, dz: number, y: number, color: Color, glow: number, tube = false, off = 0, dy = 0) {
     const boxes = tube ? this.tLightBoxes : this.lightBoxes, halo = tube ? this.tGlow : this.glow;
     if ((tube ? this.nTLights : this.nLights) >= boxes.instanceMatrix.count) return;
     const k = tube ? this.nTLights++ : this.nLights++;
     const c = Math.cos(v.h), s = Math.sin(v.h);
-    this.p.set(v.x + c * dx - s * dz + s * off, (tube ? TUBE_TOP : RAIL_TOP) + y, v.z + s * dx + c * dz - c * off);
+    this.p.set(v.x + c * dx - s * dz + s * off, (tube ? TUBE_TOP : RAIL_TOP) + y + dy, v.z + s * dx + c * dz - c * off);
     this.q.setFromAxisAngle(UP, -v.h);
     this.m.compose(this.p, this.q, this.s.set(1, 1, 1));
     boxes.setMatrixAt(k, this.m);
@@ -467,7 +487,7 @@ export class TrainsView {
    * The riders of one car, seen through its windows: `per` is the riders per car ('metroLoads' over the cars), drawn as up to
    * eight head-and-shoulders silhouettes against the lit glass, each at its own spot, seated or standing, in its own clothes.
    */
-  private seat(line: number, train: number, v: VehiclePose, vx: number, vz: number, per: number) {
+  private seat(line: number, train: number, v: VehiclePose, vx: number, vz: number, per: number, dy = 0) {
     if (per < 0.5) return;
     const cls = hash2(line * 41 + train * 7 + v.j, 75);
     const k = Math.min(8, 1 + Math.floor(per / 5)) + (cls < 0.25 ? -1 : cls > 0.8 ? 1 : 0);
@@ -477,7 +497,7 @@ export class TrainsView {
       const lx = (h1 < 0.4 ? -0.145 : h1 < 0.8 ? 0.145 : h1 < 0.9 ? -0.38 : 0.38) + (h2 - 0.5) * (h1 < 0.8 ? 0.12 : 0.03);
       const lz = (h3 < 0.5 ? -1 : 1) * (TUBE_W / 2 + 0.0095);
       this.q.setFromAxisAngle(UP, -v.h);
-      this.m.compose(this.p.set(vx + c * lx - s * lz, TUBE_TOP + 0.118, vz + s * lx + c * lz), this.q, this.s.set(1, h2 < 0.45 ? 1.2 : 0.95, 1));
+      this.m.compose(this.p.set(vx + c * lx - s * lz, TUBE_TOP + 0.118 + dy, vz + s * lx + c * lz), this.q, this.s.set(1, h2 < 0.45 ? 1.2 : 0.95, 1));
       this.figures.setMatrixAt(this.nFig, this.m);
       this.figures.setColorAt(this.nFig, this.col.copy(CLOTHES[Math.floor(hash2(line * 67 + train * 41 + v.j * 17 + r, 97) * CLOTHES.length)]).multiplyScalar(0.7 + 0.6 * h1));
       this.nFig++;
@@ -507,7 +527,7 @@ export class TrainsView {
    * The driver's eye of a train as drawn last frame: just ahead of the leading cab (the locomotive, or the driving
    * trailer on the way home), at window height, and the heading of travel along the track.
    */
-  cabOf(line: number, train: number): { x: number; y: number; z: number; h: number; st: TrainState } | null {
+  cabOf(line: number, train: number): { x: number; y: number; z: number; h: number; st: TrainState; s: number; dir: 1 | -1; off: number; pitch: number } | null {
     const svc = this.serviceOf(line), st = this.stateOf(line, train);
     if (!svc || !st) return null;
     const poses = trainPoses(svc, st, []);
@@ -518,7 +538,10 @@ export class TrainsView {
     const h = lead.h + (dir > 0 ? 0 : Math.PI), d = CAR_LEN / 2 + 0.012;
     // a metro driver sits in the bore the train runs in, at METRO_Y
     const off = svc.metro ? metroBore(svc, st) * BORE_OFF : 0;
-    return { x: lead.x + Math.cos(h) * d + Math.sin(lead.h) * off, y: (svc.metro ? TUBE_TOP : RAIL_TOP) + 0.165, z: lead.z + Math.sin(h) * d - Math.cos(lead.h) * off, h, st };
+    const x = lead.x + Math.cos(h) * d + Math.sin(lead.h) * off, z = lead.z + Math.sin(h) * d - Math.cos(lead.h) * off;
+    let dy = 0, pitch = 0;
+    if (svc.metro && this.underAt) { const cd = crossoverDip(this.underAt(Math.floor(x), Math.floor(z)), x, z, h); dy = -cd.drop; pitch = Math.atan(cd.slope); }
+    return { x, y: (svc.metro ? TUBE_TOP : RAIL_TOP) + 0.165 + dy, z, h, st, s: st.s + dir * (svc.length / 2 + 0.012), dir, off, pitch };
   }
   /** The consist of a line's train (vehicle kinds, front first), for its tooltip. */
   consistOf(line: number, train: number): number[] | null { const svc = this.serviceOf(line); return svc ? svc.consists[train] ?? null : null; }
@@ -543,4 +566,4 @@ export class TrainsView {
     return null;
   }
 }
-const UP = new Vector3(0, 1, 0);
+const UP = new Vector3(0, 1, 0), AXIS_Z = new Vector3(0, 0, 1);

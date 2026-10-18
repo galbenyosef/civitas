@@ -123,7 +123,19 @@ function tube(g: Geo, P: (t: number) => [number, number, number], radii: number[
 const COLLAR = 1.13;
 const RADII4 = [BORE_R, BORE_R * COLLAR, BORE_R * COLLAR, BORE_R, BORE_R];
 const RADII6 = [BORE_R, BORE_R * COLLAR, BORE_R * COLLAR, BORE_R, BORE_R, BORE_R, BORE_R];
-const DIP = 0.4;
+export const DIP = 0.4;
+
+/**
+ * How far a train at (x, z) heading h is below the track level because of a crossover: at a crossover (all four sides,
+ * `b` is the tile's under byte) the north-south bores dip DIP by sin^2 across the tile, the east-west ones stay level.
+ * `slope` is the rise per tile of travel along h (negative going down into the dip).
+ */
+export function crossoverDip(b: number, x: number, z: number, h: number): { drop: number; slope: number } {
+  if (!isTunnel(b) || isPlatform(b) || underMask(b) !== 15 || Math.abs(Math.sin(h)) <= Math.abs(Math.cos(h))) return NO_DIP;
+  const t = z - Math.floor(z), s = Math.sin(Math.PI * t);
+  return { drop: DIP * s * s, slope: -DIP * Math.PI * Math.sin(2 * Math.PI * t) * Math.sign(Math.sin(h)) };
+}
+const NO_DIP = { drop: 0, slope: 0 };
 
 /** What the lines running through each tile look like: sides it covers and its colour. */
 interface TileLine { mask: number; rgb: RGB }
