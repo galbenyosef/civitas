@@ -11,7 +11,7 @@ import {
  * to the research institute. They are sub-kinds of the library family (code 14): a school is not leisure
  * (`isLeisure` is by id and the family is civic) and not a service (no `service` flag), so coverage, happiness and tax
  * tolerance read them as they read nothing today. What a pupil's school does is data, read by the schools simulation
- * (E3) from the attributes: `stage` (the number a citizen's `study` field holds: 1 nursery, 2 primary, 3 secondary,
+ * (E3) from the attributes: `stage` (the number a citizen's `study` field holds, `Study` in shared/src/education.ts: 1 nursery, 2 primary, 3 secondary,
  * 4 sixth form, 5 FE college, 6 university, 7 research; 0 for halls), `pupilCapacity` (places), `eveningPlaces`,
  * `catchment` (tiles by road, 0 = the whole city), `ages` ([from, to]), `teachersShare` (the share of staff that must
  * be qualified; `postgradShare` of staff are postgraduates), `beds`. Staff are the kind's level capacity, as for any

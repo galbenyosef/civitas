@@ -180,7 +180,7 @@ so `growth()` leaves it alone.
 
 What the catalogue says, for E3 to read (all attributes, in `attrs`; staff, wage, cost and upkeep are the level's, as for any civic kind):
 
-- `stage`: 1 nursery, 2 primary, 3 secondary, 4 sixth form, 5 FE college, 6 university, 7 research institute, 0 halls. It is the number `Citizen.study` holds.
+- `stage`: 1 nursery, 2 primary, 3 secondary, 4 sixth form, 5 FE college, 6 university, 7 research institute, 0 halls. It is the number `Citizen.study` holds (`Study` in `shared/src/education.ts`). The FE college keeps `stage: 5` (`Study.FeCourse`); E3 also admits 16-18 pupils there as `Study.SixthForm` and its `eveningPlaces` as `Study.Evening`, keyed on kind 105.
 - `pupilCapacity` (30, 120, 300, 120, 160, 600, 0, 0), `eveningPlaces` (FE: 60), `catchment` in tiles by road (8, 12, 20, 24, 30; 0 for the university and research institute: the whole city), `ages` as `[from, to]`, `teachersShare` (0.5, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6) and `postgradShare` (university 0.4, research 0.6), `beds` (halls: 80).
 - Staff (the level `capacity`) 6, 10, 24, 10, 18, 60, 40, 2; wages 24, 25, 26, 26, 26, 28, 32, 18; cost and upkeep as the table above. Teachers work Monday to Friday (cycle `[1,1,1,1,1,0,0]`, not rotating); FE and the university also run later shifts, halls staff run a night shift.
 - Build work is `150 × tiles + 150`, so it grows with the footprint.
