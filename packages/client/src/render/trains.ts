@@ -185,11 +185,23 @@ const WIRE_Y = 0.37, MAST_OFF = 0.36;
 
 export class TrainsView {
   group = new Group();
-  /** the lines as the server last sent them */
+  /**
+   * The underground view's trains and their riders (docs/underground.md section 5). Not inside `group`, which the view
+   * ghosts with the rest of the surface; shown while `level` (how far the view is up, 0..1, set by main.ts) is above SHOW_LEVEL.
+   */
+  readonly under = new Group();
+  level = 0;
+  /** the lines as the server last sent them: the surface's, then the metro's (line ids are unique across modes) */
   lines: RailLineDTO[] = [];
+  private surfaceLines: RailLineDTO[] = []; private metroLines: RailLineDTO[] = [];
   private services: { dto: RailLineDTO; svc: RailService }[] = [];
   private types: TypeMeshes[];
   private glassMat = new MeshBasicMaterial({ toneMapped: false });
+  private tubeGlass = new MeshBasicMaterial({ toneMapped: false });
+  private tLightBoxes: InstancedMesh; private tGlow: InstancedMesh; private nTLights = 0;
+  /** riders seen through the windows, from 'metroLoads' (riders per train, by train index) */
+  private figures: InstancedMesh; private nFig = 0;
+  private loads = new Map<number, number[]>();
   private lightBoxes: InstancedMesh;
   private glow: InstancedMesh;
   private glowMat = new MeshBasicMaterial({ transparent: true, opacity: 0.5, blending: AdditiveBlending, depthWrite: false, toneMapped: false });
@@ -206,7 +218,7 @@ export class TrainsView {
   private nLights = 0;
   /** trains drawn last frame, by line id (window.msc and checks read it) */
   drawn = new Map<number, TrainState[]>();
-  /** vehicle centres drawn last frame, flat x, z, line id, train, for picking */
+  /** vehicle centres drawn last frame, flat x, y, z, line id, train, for picking */
   private picks: number[] = [];
   /** freeze trains at a tick (screenshots) */
   debugTick: number | null = null;
@@ -218,21 +230,32 @@ export class TrainsView {
 
   constructor() {
     const mat = vehicleMaterial();
-    const mk = (parts: Parts): TypeMeshes => {
+    // the tube stock has its own materials: the underground view ghosts the surface's by material, and no sun reaches the bores (a fill keeps them readable)
+    const tubeMat = vehicleMaterial();
+    tubeMat.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.indirectDiffuse += diffuseColor.rgb * 0.4;');
+    };
+    const mk = (parts: Parts, tube = false): TypeMeshes => {
+      const cap = tube ? MAX_TUBE : MAX_VEHICLES, into = tube ? this.under : this.group;
       const t: TypeMeshes = {
-        shell: new InstancedMesh(parts.shell, mat, MAX_VEHICLES), trim: new InstancedMesh(parts.trim, mat, MAX_VEHICLES),
-        fixed: new InstancedMesh(parts.fixed, mat, MAX_VEHICLES), glass: parts.glass ? new InstancedMesh(parts.glass, this.glassMat, MAX_VEHICLES) : null, n: 0,
+        shell: new InstancedMesh(parts.shell, tube ? tubeMat : mat, cap), trim: new InstancedMesh(parts.trim, tube ? tubeMat : mat, cap),
+        fixed: new InstancedMesh(parts.fixed, tube ? tubeMat : mat, cap), glass: parts.glass ? new InstancedMesh(parts.glass, tube ? this.tubeGlass : this.glassMat, cap) : null, n: 0,
       };
       for (const mesh of [t.shell, t.trim, t.fixed, t.glass]) {
         if (!mesh) continue;
-        mesh.count = 0; mesh.frustumCulled = false; mesh.castShadow = mesh !== t.glass; mesh.receiveShadow = true;
+        mesh.count = 0; mesh.frustumCulled = false; mesh.castShadow = !tube && mesh !== t.glass; mesh.receiveShadow = !tube;
         mesh.setColorAt(0, WHITE);
-        this.group.add(mesh);
+        into.add(mesh);
       }
       return t;
     };
-    // by RailVehicle kind: locomotive, carriage, driving trailer, container flat, tank, hopper, covered van
-    this.types = [mk(locomotive()), mk(carriage(false)), mk(carriage(true)), mk(flatWagon()), mk(tankWagon()), mk(hopperWagon()), mk(coveredVan())];
+    // by RailVehicle kind: locomotive, carriage, driving trailer, container flat, tank, hopper, covered van, tube motor car, tube car
+    this.types = [mk(locomotive()), mk(carriage(false)), mk(carriage(true)), mk(flatWagon()), mk(tankWagon()), mk(hopperWagon()), mk(coveredVan()), mk(tubeCab(), true), mk(tubeCar(), true)];
+    this.tLightBoxes = new InstancedMesh(new BoxGeometry(0.02, 0.025, 0.035), new MeshBasicMaterial({ toneMapped: false }), MAX_TUBE_LIGHTS);
+    this.tGlow = new InstancedMesh(new IcosahedronGeometry(1, 1), new MeshBasicMaterial({ transparent: true, opacity: 0.5, blending: AdditiveBlending, depthWrite: false, toneMapped: false }), MAX_TUBE_LIGHTS);
+    this.figures = new InstancedMesh(figure(), new MeshBasicMaterial({ toneMapped: false }), MAX_FIGURES);
+    for (const mesh of [this.tLightBoxes, this.tGlow, this.figures]) { mesh.count = 0; mesh.frustumCulled = false; mesh.setColorAt(0, WHITE); this.under.add(mesh); }
+    this.under.visible = false;
     this.lightBoxes = new InstancedMesh(new BoxGeometry(0.02, 0.025, 0.035), new MeshBasicMaterial({ toneMapped: false }), MAX_LIGHTS);
     this.glow = new InstancedMesh(new IcosahedronGeometry(1, 1), this.glowMat, MAX_LIGHTS);
     for (const mesh of [this.lightBoxes, this.glow]) { mesh.count = 0; mesh.frustumCulled = false; mesh.setColorAt(0, WHITE); this.group.add(mesh); }
@@ -248,10 +271,18 @@ export class TrainsView {
   }
 
   /** New line list from the server: services are rebuilt from each running line's definition and route. */
-  setLines(lines: RailLineDTO[]) {
-    this.lines = lines;
-    this.services = lines.filter((l) => l.route && l.status === 'running').map((dto) => ({ dto, svc: railService(dto, dto.route!) }));
-    this.svcs = this.services.map((s) => s.svc);
+  setLines(lines: RailLineDTO[]) { this.surfaceLines = lines; this.rebuildServices(); }
+  /** The metro's lines ('metroLines'): their services run in the bores, drawn while the underground view is up. */
+  setMetroLines(lines: RailLineDTO[]) { this.metroLines = lines; this.rebuildServices(); }
+  /** Riders per train of each metro line ('metroLoads' l: [lineId, trains, load0, ...]), for the crowds at the windows. */
+  setLoads(l: number[]) {
+    this.loads.clear();
+    for (let i = 0; i + 1 < l.length;) { const n = l[i + 1]; this.loads.set(l[i], l.slice(i + 2, i + 2 + n)); i += 2 + n; }
+  }
+  private rebuildServices() {
+    this.lines = [...this.surfaceLines, ...this.metroLines];
+    this.services = this.lines.filter((l) => l.route && l.status === 'running').map((dto) => ({ dto, svc: railService(dto, dto.route!) }));
+    this.svcs = this.services.filter((s) => !s.svc.metro).map((s) => s.svc); // level crossings are the surface's
   }
   private svcs: RailService[] = [];
   /** level-crossing barriers and lamps (render/crossings.ts), timed from the same services */
@@ -331,7 +362,9 @@ export class TrainsView {
     this.lastTick = t;
     this.crossings.frame(t, this.svcs);
     for (const ty of this.types) ty.n = 0;
-    this.nLights = 0;
+    this.nLights = 0; this.nTLights = 0; this.nFig = 0;
+    const under = this.level > SHOW_LEVEL;
+    this.under.visible = under;
     this.drawn.clear();
     this.picks.length = 0;
     // glass: blue-grey by day, warm and lit at night (the per-vehicle colour gives each carriage its own warmth)
@@ -339,6 +372,7 @@ export class TrainsView {
     this.glowMat.opacity = 0.18 + 0.5 * night;
     const day = Math.floor(t / TICKS_PER_DAY);
     for (const { dto, svc } of this.services) {
+      if (svc.metro && !under) continue;
       const states = trainsAt(svc, t, this.states).map((s) => ({ ...s }));
       this.drawn.set(dto.id, states);
       for (const st of states) this.drawTrain(dto, svc, st, night, day);
@@ -350,65 +384,105 @@ export class TrainsView {
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
     this.lightBoxes.count = this.nLights; this.glow.count = this.nLights;
-    for (const mesh of [this.lightBoxes, this.glow]) { mesh.instanceMatrix.needsUpdate = true; if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; }
+    this.tLightBoxes.count = this.nTLights; this.tGlow.count = this.nTLights; this.figures.count = this.nFig;
+    for (const mesh of [this.lightBoxes, this.glow, this.tLightBoxes, this.tGlow, this.figures]) { mesh.instanceMatrix.needsUpdate = true; if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; }
   }
 
   private drawTrain(dto: RailLineDTO, svc: RailService, st: TrainState, night: number, _day: number) {
     const line = this.col.setHex(dto.color).clone();
     const hv = hash2(dto.id * 13 + st.train, 29);
+    const metro = svc.metro;
     const liveryB = hv < 0.5; // white with a band of the line colour, else the colour with white trim
     const wear = 0.9 + 0.1 * hash2(dto.id + st.train * 7, 31);
     // hovered or selected: lifted above full brightness (instance colours are float), the selected one pulsing gently
     const mine = (h: { line: number; train: number } | null) => !!h && h.line === dto.id && h.train === st.train;
     const lift = mine(this.selected) ? 1.3 + 0.2 * Math.sin(performance.now() / 260) : mine(this.hover) ? 1.25 : 1;
-    const main = (liveryB ? PALE.clone() : line.clone()).multiplyScalar(wear * lift);
-    const accent = (liveryB ? line.clone() : WHITE.clone()).multiplyScalar(wear * lift);
+    // tube stock: silver sides with the line's colour on the doors and stripe, or (a train in four) painted in the line's colour with pale doors
+    const painted = metro && hv < 0.25;
+    const main = (metro ? (painted ? line.clone().multiplyScalar(0.85) : SILVER.clone()) : liveryB ? PALE.clone() : line.clone()).multiplyScalar(wear * lift);
+    const accent = (metro ? (painted ? PALE.clone() : line.clone()) : liveryB ? line.clone() : WHITE.clone()).multiplyScalar(wear * lift);
     const poses = trainPoses(svc, st, this.poses);
     const n = poses.length;
+    // a metro train runs in the bore to the left of its direction of travel, and crosses over in the middle of its dwell at a terminus
+    const off = metro ? metroBore(svc, st) * BORE_OFF : 0, base = metro ? TUBE_TOP : RAIL_TOP, cap = metro ? MAX_TUBE : MAX_VEHICLES;
+    const pickable = !metro || this.level > USE_LEVEL;
+    const riders = metro && this.level > USE_LEVEL ? (this.loads.get(dto.id)?.[st.train] ?? 0) / Math.max(1, n) : 0;
     for (const v of poses) {
       const ty = this.types[v.kind];
       const i = ty.n;
-      if (i >= MAX_VEHICLES) continue;
+      if (i >= cap) continue;
       ty.n++;
-      this.picks.push(v.x, v.z, dto.id, st.train);
+      const vx = v.x + Math.sin(v.h) * off, vz = v.z - Math.cos(v.h) * off;
+      if (pickable) this.picks.push(vx, metro ? base + 0.1 : 0.15, vz, dto.id, st.train);
       this.q.setFromAxisAngle(UP, -v.h + (v.flip ? Math.PI : 0));
-      this.m.compose(this.p.set(v.x, RAIL_TOP, v.z), this.q, this.s.set(1, 1, 1));
+      this.m.compose(this.p.set(vx, base, vz), this.q, this.s.set(1, 1, 1));
       for (const mesh of [ty.shell, ty.trim, ty.fixed, ty.glass]) mesh?.setMatrixAt(i, this.m);
       ty.fixed.setColorAt(i, lift > 1 ? this.col.copy(WHITE).multiplyScalar(lift) : WHITE);
-      if (v.kind >= 3) {
+      if (v.kind >= 3 && v.kind <= 6) {
         // wagons: their own colours, seeded per wagon (organic rule); containers mixed on the flats
         const hw = hash2(dto.id * 97 + st.train * 13 + v.j, 41), hc = hash2(dto.id * 53 + st.train * 29 + v.j, 43);
         ty.shell.setColorAt(i, (v.kind === 4 ? TANK_COLOURS[Math.floor(hw * TANK_COLOURS.length)] : WAGON_COLOURS[Math.floor(hw * WAGON_COLOURS.length)]).clone().multiplyScalar(wear * lift));
         ty.trim.setColorAt(i, (v.kind === 3 ? BOX_COLOURS[Math.floor(hc * BOX_COLOURS.length)] : (v.kind === 4 ? WAGON_COLOURS[Math.floor(hc * WAGON_COLOURS.length)] : TANK_COLOURS[Math.floor(hc * 3)])).clone().multiplyScalar(lift));
         continue;
       }
-      ty.shell.setColorAt(i, main);
-      ty.trim.setColorAt(i, accent);
       // lit windows: each vehicle its own warmth and brightness, a few dim ones (organic rule)
       const hw = hash2(dto.id * 31 + st.train * 5 + v.j, 37);
+      if (metro) {
+        // each car its own grime on the sides, and its own lamp colour and brightness in the saloon, lit at every hour
+        ty.shell.setColorAt(i, this.col.copy(main).multiplyScalar(0.92 + 0.08 * hash2(dto.id * 19 + st.train * 11 + v.j, 73)));
+        ty.trim.setColorAt(i, accent);
+        this.col.setRGB(1, 0.9 + 0.08 * hw, 0.66 + 0.3 * hw).multiplyScalar(hw < 0.1 ? 0.6 : 0.85 + 0.15 * hw);
+        ty.glass?.setColorAt(i, this.col);
+        if (riders > 0) this.seat(dto.id, st.train, v, vx, vz, riders);
+        continue;
+      }
+      ty.shell.setColorAt(i, main);
+      ty.trim.setColorAt(i, accent);
       this.col.setRGB(1, 0.86 + 0.1 * hw, 0.62 + 0.25 * hw).multiplyScalar(v.kind === 0 ? 0.7 : hw < 0.12 ? 0.45 : 0.8 + 0.2 * hw);
       ty.glass?.setColorAt(i, this.col);
     }
     // head lights at the leading end in the direction of travel, red tail lights at the other
     const lead = st.dir > 0 ? poses[0] : poses[n - 1], tail = st.dir > 0 ? poses[n - 1] : poses[0];
-    const sz = 0.03 + 0.06 * night;
+    const sz = metro ? 0.04 : 0.03 + 0.06 * night; // a tunnel is dark at every hour
     for (const z of [-0.065, 0.065]) {
-      this.light(lead, st.dir * (CAR_LEN / 2 + 0.005), z, 0.07, HEAD, sz * (st.phase === 'dwell' ? 0.6 : 1));
-      this.light(tail, -st.dir * (CAR_LEN / 2 + 0.005), z, 0.07, TAIL, sz * 0.6);
+      this.light(lead, st.dir * (CAR_LEN / 2 + 0.005), z, 0.07, HEAD, sz * (st.phase === 'dwell' ? 0.6 : 1), metro, off);
+      this.light(tail, -st.dir * (CAR_LEN / 2 + 0.005), z, 0.07, TAIL, sz * 0.6, metro, off);
     }
   }
-  private light(v: VehiclePose, dx: number, dz: number, y: number, color: Color, glow: number) {
-    if (this.nLights >= MAX_LIGHTS) return;
-    const k = this.nLights++;
+  private light(v: VehiclePose, dx: number, dz: number, y: number, color: Color, glow: number, tube = false, off = 0) {
+    const boxes = tube ? this.tLightBoxes : this.lightBoxes, halo = tube ? this.tGlow : this.glow;
+    if ((tube ? this.nTLights : this.nLights) >= boxes.instanceMatrix.count) return;
+    const k = tube ? this.nTLights++ : this.nLights++;
     const c = Math.cos(v.h), s = Math.sin(v.h);
-    this.p.set(v.x + c * dx - s * dz, RAIL_TOP + y, v.z + s * dx + c * dz);
+    this.p.set(v.x + c * dx - s * dz + s * off, (tube ? TUBE_TOP : RAIL_TOP) + y, v.z + s * dx + c * dz - c * off);
     this.q.setFromAxisAngle(UP, -v.h);
     this.m.compose(this.p, this.q, this.s.set(1, 1, 1));
-    this.lightBoxes.setMatrixAt(k, this.m);
-    this.lightBoxes.setColorAt(k, color);
+    boxes.setMatrixAt(k, this.m);
+    boxes.setColorAt(k, color);
     this.mi.makeScale(glow, glow, glow).setPosition(this.p);
-    this.glow.setMatrixAt(k, this.mi);
-    this.glow.setColorAt(k, color);
+    halo.setMatrixAt(k, this.mi);
+    halo.setColorAt(k, color);
+  }
+  /**
+   * The riders of one car, seen through its windows: `per` is the riders per car ('metroLoads' over the cars), drawn as up to
+   * eight head-and-shoulders silhouettes against the lit glass, each at its own spot, seated or standing, in its own clothes.
+   */
+  private seat(line: number, train: number, v: VehiclePose, vx: number, vz: number, per: number) {
+    if (per < 0.5) return;
+    const cls = hash2(line * 41 + train * 7 + v.j, 75);
+    const k = Math.min(8, 1 + Math.floor(per / 5)) + (cls < 0.25 ? -1 : cls > 0.8 ? 1 : 0);
+    const c = Math.cos(v.h), s = Math.sin(v.h);
+    for (let r = 0; r < Math.min(8, k) && this.nFig < MAX_FIGURES; r++) {
+      const h1 = hash2(line * 53 + train * 29 + v.j * 7 + r, 79), h2 = hash2(line * 59 + train * 31 + v.j * 11 + r, 83), h3 = hash2(line * 61 + train * 37 + v.j * 13 + r, 89);
+      const lx = (h1 < 0.4 ? -0.145 : h1 < 0.8 ? 0.145 : h1 < 0.9 ? -0.38 : 0.38) + (h2 - 0.5) * (h1 < 0.8 ? 0.12 : 0.03);
+      const lz = (h3 < 0.5 ? -1 : 1) * (TUBE_W / 2 + 0.0095);
+      this.q.setFromAxisAngle(UP, -v.h);
+      this.m.compose(this.p.set(vx + c * lx - s * lz, TUBE_TOP + 0.118, vz + s * lx + c * lz), this.q, this.s.set(1, h2 < 0.45 ? 1.2 : 0.95, 1));
+      this.figures.setMatrixAt(this.nFig, this.m);
+      this.figures.setColorAt(this.nFig, this.col.copy(CLOTHES[Math.floor(hash2(line * 67 + train * 41 + v.j * 17 + r, 97) * CLOTHES.length)]).multiplyScalar(0.7 + 0.6 * h1));
+      this.nFig++;
+    }
+    this.s.set(1, 1, 1);
   }
 
   /** The train under a screen point (within `radius` px of one of its vehicles), or null. */
@@ -416,11 +490,11 @@ export class TrainsView {
     let best: { line: number; train: number } | null = null, bd = radius * radius;
     const v = new Vector3();
     camera.updateMatrixWorld();
-    for (let i = 0; i < this.picks.length; i += 4) {
-      v.set(this.picks[i], 0.15, this.picks[i + 1]).project(camera);
+    for (let i = 0; i < this.picks.length; i += 5) {
+      v.set(this.picks[i], this.picks[i + 1], this.picks[i + 2]).project(camera);
       if (v.z > 1) continue;
       const sx = ((v.x + 1) / 2) * w, sy = ((1 - v.y) / 2) * h, d = (sx - px) ** 2 + (sy - py) ** 2;
-      if (d < bd) { bd = d; best = { line: this.picks[i + 2], train: this.picks[i + 3] }; }
+      if (d < bd) { bd = d; best = { line: this.picks[i + 3], train: this.picks[i + 4] }; }
     }
     return best;
   }
@@ -442,7 +516,9 @@ export class TrainsView {
     if (st.phase === 'dwell' && !svc.geom.loop && (st.stop === 0 || st.stop === svc.geom.stopS.length - 1) && st.progress < 0.5) dir = -dir as 1 | -1;
     const lead = dir > 0 ? poses[0] : poses[poses.length - 1];
     const h = lead.h + (dir > 0 ? 0 : Math.PI), d = CAR_LEN / 2 + 0.012;
-    return { x: lead.x + Math.cos(h) * d, y: RAIL_TOP + 0.165, z: lead.z + Math.sin(h) * d, h, st };
+    // a metro driver sits in the bore the train runs in, at METRO_Y
+    const off = svc.metro ? metroBore(svc, st) * BORE_OFF : 0;
+    return { x: lead.x + Math.cos(h) * d + Math.sin(lead.h) * off, y: (svc.metro ? TUBE_TOP : RAIL_TOP) + 0.165, z: lead.z + Math.sin(h) * d - Math.cos(lead.h) * off, h, st };
   }
   /** The consist of a line's train (vehicle kinds, front first), for its tooltip. */
   consistOf(line: number, train: number): number[] | null { const svc = this.serviceOf(line); return svc ? svc.consists[train] ?? null : null; }

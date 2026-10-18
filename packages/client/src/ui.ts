@@ -1,7 +1,7 @@
 import { ROAD_COST, ZONE_COST, LAND_PRICE_PER_TILE, MAX_TAX, CIVIC_COST, Zone, KIND_NAMES, PRIORITY_NAMES, DAYS_PER_WEEK, isCivicId, familyOf, hasFeature, techFor, TECH, TECH_BY_ID, TRACK_NAMES, describeCondition, type ParcelDTO, type PlayerDTO, type BuildingInfo, type PersonRow, type PersonRef, type RoadInfo, type CitizenInfo, type SiteDTO } from '@msimcity/shared';
 import { TOOL_KINDS, DEV_TOOLS, type ToolId } from './input';
 import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo } from '@msimcity/shared';
-import { railStationHtml } from './rail';
+import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, LEDGER_LABELS, type KindToolId, type LedgerDTO, type LedgerCat } from '@msimcity/shared';
 import { FLEET_LABEL } from '@msimcity/shared';
@@ -471,6 +471,7 @@ export class UI {
     }
     if (info.airport) html += airportHtml(info.airport, row);
     if (info.rail) html += railStationHtml(info.rail, row);
+    if (info.metro) html += metroStationHtml(info.metro, row);
     if (info.gateway) html += gatewayHtml(info.gateway, row);
     if (info.transit) html += stopHtml(info.transit, row);
     if (info.venue) {

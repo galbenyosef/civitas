@@ -1,6 +1,7 @@
-import { Group, Mesh, MeshBasicMaterial, RingGeometry, PlaneGeometry, DoubleSide, Sprite, SpriteMaterial, CanvasTexture, SRGBColorSpace } from 'three';
-import { isFreightYardKind, stopName, stopModeOf, hasFeature, techFor, TRANSIT, TICKS_PER_DAY, TICKS_PER_HOUR, type LineInfo, type StopInfo, type BusInfo, type StopRef, type ServerMsg, type TransitMode, type LinePreview } from '@msimcity/shared';
+import { Group, Mesh, MeshBasicMaterial, RingGeometry, PlaneGeometry, BufferGeometry, Float32BufferAttribute, DoubleSide, Sprite, SpriteMaterial, CanvasTexture, SRGBColorSpace } from 'three';
+import { isFreightYardKind, stopName, stopModeOf, hasFeature, techFor, TRANSIT, METRO, TICKS_PER_DAY, TICKS_PER_HOUR, type MetroLineDTO, type LineInfo, type StopInfo, type BusInfo, type StopRef, type ServerMsg, type TransitMode, type LinePreview } from '@msimcity/shared';
 import { Ribbon } from './render/route';
+import { METRO_Y } from './render/underground';
 import type { NetClient } from './net';
 import type { ClientWorld } from './world';
 
@@ -54,8 +55,9 @@ export function busHtml(b: BusInfo, row: (k: string, v: string | number) => stri
 }
 
 /** `mode` comes from the first stop clicked: bus stops make a bus line, rail stations a rail line (docs/rail.md) */
-interface Draft { id?: number; number: number; colour: number; loop: boolean; vehicles: number; stops: StopRef[]; mode?: TransitMode }
+interface Draft { id?: number; number: number; colour: number; loop: boolean; vehicles: number; stops: StopRef[]; mode?: TransitMode; name?: string }
 const VEHICLE: Record<TransitMode, [string, string]> = { bus: ['bus', 'buses'], rail: ['train', 'trains'], metro: ['train', 'trains'] };
+const DIG = 0xffc233, CROSS = 0xff7a1f;
 
 export class LinesPanel {
   readonly group = new Group();
@@ -80,6 +82,13 @@ export class LinesPanel {
   onLivery: (pairs: number[], colours: Map<number, number>) => void = () => {};
   /** called when editing starts, so the map is in select mode and a click on a stop reaches mapClick */
   onEdit: () => void = () => {};
+  /** a metro line is being edited (true) or no longer is: main.ts turns the underground view on for the tunnels, and back off */
+  onUnder: (on: boolean) => void = () => {};
+  private underOn = false;
+  /** station names by door tile, from 'metroLines' (a draft's stops are doors) */
+  private metroNames = new Map<string, string>();
+  /** the draft's overlay (rings, ribbons, badges) sits at tunnel depth while a metro line is edited */
+  private yShift = 0;
 
   constructor(private net: NetClient, private world: ClientWorld, private toast: (kind: 'info' | 'error', msg: string) => void, tick: () => number) {
     clock = tick;
@@ -121,6 +130,7 @@ export class LinesPanel {
     if (open) this.net.send({ t: 'lines' });
     else this.draft = null;
     this.render(); this.dirty = true;
+    this.syncUnder();
   }
 
   /** A 'lines' message: every line, and which line each bus on the road runs. */
@@ -132,6 +142,13 @@ export class LinesPanel {
     this.dirty = true;
     if (this.open && !this.draft) this.render();
   }
+  /** The metro lines ('metroLines'): the stations' names, which the stop lists use. */
+  setMetroNames(lines: MetroLineDTO[]) {
+    this.metroNames.clear();
+    for (const l of lines) l.stations.forEach(([x, y], i) => { if (l.names[i]) this.metroNames.set(`${x},${y}`, l.names[i]); });
+    if (this.open) this.render();
+  }
+  private nameOf(x: number, y: number) { return this.metroNames.get(`${x},${y}`) ?? stopName(x, y); }
   /** A 'lineStats' message: buses in service, riders and status since the last full list, and the livery map. */
   applyStats(m: Extract<ServerMsg, { t: 'lineStats' }>) {
     const byId = new Map(m.lines.map((s) => [s.id, s]));
@@ -145,14 +162,15 @@ export class LinesPanel {
     if (!this.open || !this.draft) return false;
     const kind = this.world.kindIdAt(x, y);
     const mode = stopModeOf(kind);
-    if (!mode) { this.toast('error', 'Click bus stops or rail stations to add them to the line'); return true; }
-    if (this.draft.mode && this.draft.stops.length && mode !== this.draft.mode) { this.toast('error', this.draft.mode === 'rail' ? 'This is a rail line: click rail stations' : 'This is a bus line: click bus stops'); return true; }
-    if (mode === 'rail') [x, y] = this.world.doorOf(x, y); // a station is several tiles: the line knows it by its door
+    if (!mode) { this.toast('error', 'Click bus stops, rail stations or underground stations to add them to the line'); return true; }
+    if (this.draft.mode && this.draft.stops.length && mode !== this.draft.mode) { this.toast('error', this.draft.mode === 'rail' ? 'This is a rail line: click rail stations' : this.draft.mode === 'metro' ? 'This is an underground line: click underground stations' : 'This is a bus line: click bus stops'); return true; }
+    if (mode === 'rail' || mode === 'metro') [x, y] = this.world.doorOf(x, y); // a station is several tiles: the line knows it by its door
     const p = this.world.parcelAt(x, y);
     if (!p || !this.world.mayEdit(p.owner)) { this.toast('error', 'Lines can only use stops on your own land'); return true; }
     const st = this.draft.stops;
     if (st.length && st[st.length - 1].x === x && st[st.length - 1].y === y) return true;
-    if (st.length >= TRANSIT.maxStops) { this.toast('error', `A line has at most ${TRANSIT.maxStops} stops`); return true; }
+    const most = mode === 'metro' ? METRO.stationsMax : TRANSIT.maxStops;
+    if (st.length >= most) { this.toast('error', `A line has at most ${most} ${mode === 'metro' ? 'stations' : 'stops'}`); return true; }
     st.push({ x, y });
     this.draft.mode = mode;
     this.changed();
@@ -190,7 +208,7 @@ export class LinesPanel {
   private mine() { return this.lines.filter((l) => this.world.mayEdit(l.owner)); }
 
   private startDraft(l?: LineInfo) {
-    if (l) this.draft = { id: l.id, number: l.number, colour: l.colour, loop: l.loop, vehicles: l.vehicles, stops: l.stops.map((s) => ({ ...s })), mode: l.mode };
+    if (l) this.draft = { id: l.id, number: l.number, colour: l.colour, loop: l.loop, vehicles: l.vehicles, stops: l.stops.map((s) => ({ ...s })), mode: l.mode, name: l.name };
     else {
       const used = new Set(this.mine().map((x) => x.number));
       let n = 1; while (used.has(n)) n++;
@@ -214,7 +232,7 @@ export class LinesPanel {
     } else if (act === 'edit') { const l = this.lines.find((x) => x.id === id); if (l) this.startDraft(l); }
     else if (act === 'delete') { if (confirm(`Delete line ${this.lines.find((x) => x.id === id)?.number}?`)) this.net.send({ t: 'line', op: 'delete', id }); }
     else if (act === 'cancel') { this.draft = null; this.preview = null; this.render(); this.dirty = true; }
-    else if (act === 'save' && d) this.net.send({ t: 'line', op: 'save', line: { id: d.id, number: d.number, colour: d.colour, loop: d.loop, vehicles: d.vehicles, stops: d.stops } });
+    else if (act === 'save' && d) this.net.send({ t: 'line', op: 'save', line: { id: d.id, number: d.number, colour: d.colour, loop: d.loop, vehicles: d.vehicles, stops: d.stops, ...(d.mode === 'metro' ? { name: (d.name ?? '').trim() } : {}) } });
     else if (act === 'rm' && d) { d.stops.splice(id, 1); if (!d.stops.length && !d.id) d.mode = undefined; this.changed(); }
     else if (act === 'undo' && d) this.undoStop();
     else if (act === 'swatch' && d) { d.colour = Number(t.dataset.c); this.render(); this.dirty = true; }
@@ -224,7 +242,8 @@ export class LinesPanel {
     const t = e.target as HTMLInputElement, d = this.draft;
     if (!d) return;
     if (t.name === 'number') d.number = Math.max(1, Math.min(999, Math.floor(Number(t.value) || 1)));
-    else if (t.name === 'vehicles') d.vehicles = Math.max(0, Math.min(TRANSIT.maxVehicles, Math.floor(Number(t.value) || 0)));
+    else if (t.name === 'vehicles') d.vehicles = Math.max(0, Math.min(d.mode === 'metro' ? METRO.trainsMax : TRANSIT.maxVehicles, Math.floor(Number(t.value) || 0)));
+    else if (t.name === 'lname') d.name = t.value.slice(0, 24);
     else if (t.name === 'colour') { d.colour = parseInt(t.value.slice(1), 16); this.dirty = true; if (e.type === 'change') this.render(); }
   }
 
@@ -237,28 +256,35 @@ export class LinesPanel {
       if (!mine.length) html += `<div class="lempty">No lines yet. Place bus stops beside plain stretches of road (Bus stop tool), a bus depot nearby (its staff drive the buses), then make a line here.</div>`;
       for (const l of mine) {
         const ok = l.status === 'running';
-        html += `<div class="lrow"><div class="ltop">${lineBadge(l.number, l.colour)}<span class="lname">${l.mode === 'rail' ? (isFreightYardKind(this.world.kindIdAt(l.stops[0].x, l.stops[0].y)) ? 'freight · ' : 'rail · ') : ''}${l.loop ? 'loop' : 'there and back'} · ${l.stops.length} ${l.mode === 'rail' ? 'stations' : 'stops'}</span>
+        html += `<div class="lrow"><div class="ltop">${lineBadge(l.number, l.colour)}<span class="lname">${l.mode === 'metro' ? `underground · ${l.name ? `${esc(l.name)} · ` : ''}` : l.mode === 'rail' ? (isFreightYardKind(this.world.kindIdAt(l.stops[0].x, l.stops[0].y)) ? 'freight · ' : 'rail · ') : ''}${l.loop ? 'loop' : 'there and back'} · ${l.stops.length} ${l.mode === 'bus' ? 'stops' : 'stations'}</span>
           <button class="chip" data-act="edit" data-id="${l.id}">edit</button><button class="chip" data-act="delete" data-id="${l.id}" title="delete">✕</button></div>
           <div class="lstat"><span class="${ok ? '' : 'bad'}">${esc(l.status)}</span> · ${VEHICLE[l.mode]?.[1] ?? 'vehicles'} ${l.inService}/${l.vehicles}</div>
           <div class="lstat">riders ${l.ridersToday} today, ${l.ridersYesterday} yesterday · fares $${Math.round(l.faresToday)}</div>
-          <div class="lstops">${l.stops.map((s, i) => `<span title="${l.stopBoardings[i] ?? 0} boarded today">${esc(stopName(s.x, s.y))}</span>`).join(' → ')}${l.loop ? ' ↺' : ' ⇄'}</div></div>`;
+          <div class="lstops">${l.stops.map((s, i) => `<span title="${l.stopBoardings[i] ?? 0} boarded today">${esc(this.nameOf(s.x, s.y))}</span>`).join(' → ')}${l.loop ? ' ↺' : ' ⇄'}</div></div>`;
       }
       html += `<button class="chip lnew" data-act="new">+ new line</button>`;
-      html += `<div class="lhint">Fares $${TRANSIT.fare} a ride (children free, retirees half) go to you. Buses run ${hm(TRANSIT.serviceStart * TICKS_PER_HOUR)}–${hm(TRANSIT.serviceEnd * TICKS_PER_HOUR)}, one per driver on shift at your depot. Trains run 05:00–01:00 on your track between your rail stations (click stations instead of stops); click freight yards for a freight line, which carries industry's containers instead of passengers.</div>`;
+      html += `<div class="lhint">Fares $${TRANSIT.fare} a ride (children free, retirees half) go to you. Buses run ${hm(TRANSIT.serviceStart * TICKS_PER_HOUR)}–${hm(TRANSIT.serviceEnd * TICKS_PER_HOUR)}, one per driver on shift at your depot. Trains run 05:00–01:00 on your track between your rail stations (click stations instead of stops); click freight yards for a freight line, which carries industry's containers instead of passengers. Underground lines run on tunnels the server bores between your underground stations (click those instead): the view drops below ground while you edit.</div>`;
     } else {
       html += `<div class="lform">
         <label>Number <input name="number" type="number" min="1" max="999" value="${d.number}"></label>
-        <label>${d.mode === 'rail' ? 'Trains' : 'Buses'} <input name="vehicles" type="number" min="0" max="${TRANSIT.maxVehicles}" value="${d.vehicles}"></label>
+        <label>${d.mode === 'bus' || !d.mode ? 'Buses' : 'Trains'} <input name="vehicles" type="number" min="0" max="${d.mode === 'metro' ? METRO.trainsMax : TRANSIT.maxVehicles}" value="${d.vehicles}"></label>
       </div>
+      ${d.mode === 'metro' ? `<label class="lname-in">Name <input name="lname" type="text" maxlength="24" placeholder="Central" value="${esc(d.name ?? '')}"></label>` : ''}
       <div class="lsw">${PALETTE.map((c) => `<button class="sw${c === d.colour ? ' on' : ''}" data-act="swatch" data-c="${c}" style="background:${hex(c)}" title="${hex(c)}"></button>`).join('')}<input name="colour" type="color" value="${hex(d.colour)}" title="any colour"></div>
       <div class="lmode"><button class="chip${d.loop ? ' on' : ''}" data-act="mode" data-v="loop">loop ↺</button><button class="chip${d.loop ? '' : ' on'}" data-act="mode" data-v="back">there and back ⇄</button></div>
       <div class="lsect">Stops in order <span>${d.stops.length}</span></div>
-      ${d.stops.length ? `<ol class="lstoplist">${d.stops.map((s, i) => `<li>${esc(stopName(s.x, s.y))} <span class="lxy">(${s.x}, ${s.y})</span><button class="lrm" data-act="rm" data-id="${i}" title="remove">✕</button></li>`).join('')}</ol>` : ''}
+      ${d.stops.length ? `<ol class="lstoplist">${d.stops.map((s, i) => `<li>${esc(this.nameOf(s.x, s.y))} <span class="lxy">(${s.x}, ${s.y})</span><button class="lrm" data-act="rm" data-id="${i}" title="remove">✕</button></li>`).join('')}</ol>` : ''}
       ${this.routeHtml(d)}
-      <div class="lhint">${d.mode === 'rail' ? `Click your rail stations in the order trains should call; consecutive stations must be joined by track, and no other line may use it. ${d.loop ? 'The track must lead from the last station back round to the first; the loop takes as many trains as fit.' : 'Trains reverse at the ends and call everywhere on the way back; one track runs one train.'}` : `Click your bus stops (or rail stations, for a rail line) on the map in the order the bus should call: the road between them fills in, the shortest way a bus can drive. ${d.loop ? 'The last stop runs back to the first.' : 'Buses call at every stop on the way back.'} Where a bus has to turn round it goes round a block or a roundabout, or turns at a dead end or a junction. Backspace or right-click takes the last stop off.`}</div>
-      <div class="lbtns"><button class="chip" data-act="undo" ${d.stops.length ? '' : 'disabled'}>undo stop</button><button class="chip" data-act="cancel">cancel</button><button class="chip on" data-act="save" ${d.stops.length >= 2 && !this.current()?.problem?.fatal ? '' : 'disabled'}>save line</button></div>`;
+      <div class="lhint">${d.mode === 'metro' ? `Click your underground stations in the order trains should call. The tunnel is bored when you save: new tunnel in amber, crossovers ringed, the cost on the button. Lines share no tunnel except at crossovers, and every station needs its own platform. ${d.loop ? 'The last station runs back round to the first, one way.' : 'Trains run out in one bore and home in the other.'}` : d.mode === 'rail' ? `Click your rail stations in the order trains should call; consecutive stations must be joined by track, and no other line may use it. ${d.loop ? 'The track must lead from the last station back round to the first; the loop takes as many trains as fit.' : 'Trains reverse at the ends and call everywhere on the way back; one track runs one train.'}` : `Click your bus stops (or rail stations, for a rail line) on the map in the order the bus should call: the road between them fills in, the shortest way a bus can drive. ${d.loop ? 'The last stop runs back to the first.' : 'Buses call at every stop on the way back.'} Where a bus has to turn round it goes round a block or a roundabout, or turns at a dead end or a junction. Backspace or right-click takes the last stop off.`}</div>
+      <div class="lbtns"><button class="chip" data-act="undo" ${d.stops.length ? '' : 'disabled'}>undo stop</button><button class="chip" data-act="cancel">cancel</button><button class="chip on" data-act="save" ${d.stops.length >= 2 && !this.current()?.problem?.fatal ? '' : 'disabled'}>save line${d.mode === 'metro' && this.current()?.cost ? ` · $${this.current()!.cost!.toLocaleString('en-GB')}` : ''}</button></div>`;
     }
     this.el.innerHTML = html;
+    this.syncUnder();
+  }
+  /** the underground view follows a metro line being edited (the tunnels are the thing being drawn) */
+  private syncUnder() {
+    const want = this.open && this.draft?.mode === 'metro';
+    if (want !== this.underOn) { this.underOn = want; this.onUnder(want); }
   }
 
   /** The server's route for the draft as it is now, or null while it is still working it out. */
@@ -269,7 +295,11 @@ export class LinesPanel {
     const p = this.current();
     if (!p) return `<div class="lroute">routing…</div>`;
     let html = '';
-    if (p.ok) {
+    if (p.ok && d.mode === 'metro') {
+      const bored = (p.bore?.length ?? 0) / 2, cross = (p.crossovers?.length ?? 0) / 2;
+      html += `<div class="lroute">${p.length} tiles a lap${p.lapTicks ? ` · round trip ~${minutes(p.lapTicks)} min` : ''}</div>`;
+      html += `<div class="lroute" style="color:#${DIG.toString(16)}">${bored ? `${bored} tile${bored === 1 ? '' : 's'} of new tunnel${cross ? ` with ${cross} crossover${cross === 1 ? '' : 's'}` : ''} · $${(p.cost ?? 0).toLocaleString('en-GB')}` : 'all the tunnel is there already · $0'}</div>`;
+    } else if (p.ok) {
       const kinds: string[] = [];
       for (let i = 0; i < p.turns.length; i += 3) kinds.push(`${TURN_KIND[p.turns[i + 2]]} (${p.turns[i]}, ${p.turns[i + 1]})`);
       const turns = kinds.length ? ` · turns round ${kinds.length === 1 ? 'once' : `${kinds.length} times`}` : '';
@@ -288,10 +318,12 @@ export class LinesPanel {
     for (const b of this.badges) { this.group.remove(b); b.material.map?.dispose(); b.material.dispose(); }
     this.ribbons = []; this.marks = []; this.badges = [];
     this.editRibbon.hide(); this.failRibbon.hide();
+    this.yShift = 0;
     if (!this.open) return;
     const mine = this.mine();
     mine.forEach((l, i) => {
       if (this.draft?.id === l.id) return;
+      if (l.mode === 'metro') return; // its tunnel is drawn, in the line's colour, by the underground view
       const pts = lanePoints(l.path, true, l.mode === 'rail' ? 0 : 0.19); // trains run on the track's centre line
       if (pts.length < 4) return;
       const r = new Ribbon(new MeshBasicMaterial({ color: l.colour, transparent: true, opacity: 0.85, depthWrite: false, side: DoubleSide, toneMapped: false }), RIBBON_Y + 0.002 * i);
@@ -301,10 +333,14 @@ export class LinesPanel {
       for (const s of l.stops) this.mark(s, l.colour);
     });
     const d = this.draft;
+    // a metro draft is drawn at tunnel depth, over the tunnels (depth test off), so it reads in the underground view
+    const metro = d?.mode === 'metro';
+    this.yShift = metro ? METRO_Y - RIBBON_Y + 0.1 : 0;
+    for (const r of [this.editRibbon, this.failRibbon]) { r.mesh.position.y = this.yShift; (r.mesh.material as MeshBasicMaterial).depthTest = !metro; }
     if (d) {
       (this.editRibbon.mesh.material as MeshBasicMaterial).color.setHex(d.colour);
       // the road the bus will take, once the server has routed it (the last answer while it works on the next)
-      const p = this.preview, rail = d.mode === 'rail';
+      const p = this.preview, rail = d.mode === 'rail' || metro;
       if (p && p.path.length >= 4 && d.stops.length >= 2) {
         const pts = lanePoints(p.path, p.ok, rail ? 0 : 0.19);
         if (pts.length >= 4) this.editRibbon.set(pts, new Array(pts.length / 2).fill(RIBBON_W));
@@ -317,6 +353,8 @@ export class LinesPanel {
       const cur = this.current();
       if (cur) {
         for (let i = 0; i < cur.turns.length; i += 3) this.mark({ x: cur.turns[i], y: cur.turns[i + 1] }, 0xffffff, 0.1, 0.17);
+        if (metro && cur.bore?.length) this.digMarks(cur.bore);
+        if (metro && cur.crossovers) for (let i = 0; i < cur.crossovers.length; i += 2) this.mark({ x: cur.crossovers[i], y: cur.crossovers[i + 1] }, CROSS, 0.3, 0.42);
         const pr = cur.problem;
         if (pr) {
           const c = pr.fatal ? FAIL : WARN;
@@ -332,7 +370,8 @@ export class LinesPanel {
   /** A tile marked in a colour (land to lay a road over, a stop to move). */
   private square(x: number, y: number, colour: number) {
     const m = new Mesh(new PlaneGeometry(0.9, 0.9).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false }));
-    m.position.set(x + 0.5, RIBBON_Y + 0.008, y + 0.5);
+    m.position.set(x + 0.5, RIBBON_Y + 0.008 + this.yShift, y + 0.5);
+    (m.material as MeshBasicMaterial).depthTest = !this.yShift;
     m.renderOrder = 6;
     this.marks.push(m); this.group.add(m);
   }
@@ -349,14 +388,31 @@ export class LinesPanel {
     t.colorSpace = SRGBColorSpace;
     const sp = new Sprite(new SpriteMaterial({ map: t, depthTest: false, depthWrite: false, transparent: true, toneMapped: false, sizeAttenuation: false }));
     sp.scale.set(0.045, 0.045, 1);
-    sp.position.set(s.x + 0.5, 0.9, s.y + 0.5);
+    sp.position.set(s.x + 0.5, 0.9 + this.yShift, s.y + 0.5);
     sp.renderOrder = 9;
     this.badges.push(sp); this.group.add(sp);
   }
   private mark(s: StopRef, colour: number, r0 = 0.22, r1 = 0.32) {
     const m = new Mesh(new RingGeometry(r0, r1, 24).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false }));
-    m.position.set(s.x + 0.5, RIBBON_Y + 0.01, s.y + 0.5);
+    m.position.set(s.x + 0.5, RIBBON_Y + 0.01 + this.yShift, s.y + 0.5);
+    (m.material as MeshBasicMaterial).depthTest = !this.yShift;
     m.renderOrder = 7;
+    this.marks.push(m); this.group.add(m);
+  }
+  /** The tunnel a save would bore: a small amber square on every new tile, in one mesh. */
+  private digMarks(bore: number[]) {
+    const pos: number[] = [], idx: number[] = [], h = 0.17;
+    for (let i = 0; i < bore.length; i += 2) {
+      const x = bore[i] + 0.5, z = bore[i + 1] + 0.5, v = pos.length / 3;
+      pos.push(x - h, 0, z - h, x + h, 0, z - h, x + h, 0, z + h, x - h, 0, z + h);
+      idx.push(v, v + 2, v + 1, v, v + 3, v + 2);
+    }
+    const g = new BufferGeometry();
+    g.setAttribute('position', new Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    const m = new Mesh(g, new MeshBasicMaterial({ color: DIG, transparent: true, opacity: 0.85, depthWrite: false, depthTest: false, toneMapped: false }));
+    m.position.y = RIBBON_Y + 0.006 + this.yShift;
+    m.frustumCulled = false; m.renderOrder = 6;
     this.marks.push(m); this.group.add(m);
   }
 }
@@ -402,7 +458,8 @@ const STYLE = `
 #linesPanel .lnew { margin-top: 8px; }
 #linesPanel .lform { display: flex; gap: 10px; }
 #linesPanel .lform label { flex: 1; color: var(--muted); }
-#linesPanel .lform input { width: 100%; box-sizing: border-box; margin-top: 3px; padding: 4px 6px; background: rgba(255,255,255,0.06); border: 1px solid var(--line); border-radius: 6px; color: var(--fg); font: inherit; }
+#linesPanel .lname-in { display: block; margin-top: 8px; color: var(--muted); }
+#linesPanel .lform input, #linesPanel .lname-in input { width: 100%; box-sizing: border-box; margin-top: 3px; padding: 4px 6px; background: rgba(255,255,255,0.06); border: 1px solid var(--line); border-radius: 6px; color: var(--fg); font: inherit; }
 #linesPanel .lsw { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin: 9px 0; }
 #linesPanel .lsw .sw { width: 20px; height: 20px; border-radius: 5px; border: 2px solid transparent; cursor: pointer; padding: 0; }
 #linesPanel .lsw .sw.on { border-color: #fff; }

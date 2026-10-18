@@ -428,10 +428,12 @@ export class Crowd {
   mesh: InstancedMesh;
   private colA: InstancedBufferAttribute; private colB: InstancedBufferAttribute; private anim: InstancedBufferAttribute;
   n = 0;
-  constructor(near: boolean, cap: number, geometry?: BufferGeometry) {
+  /** `own`: a material of its own, so the underground view (which ghosts the surface's by material) leaves this crowd solid */
+  constructor(near: boolean, cap: number, geometry?: BufferGeometry, own = false) {
     const geo = geometry ?? figure(near);
     const { mat, depth } = materials();
-    this.mesh = new InstancedMesh(geo, mat, cap);
+    const material = own ? Object.assign(mat.clone(), { onBeforeCompile: mat.onBeforeCompile }) : mat;
+    this.mesh = new InstancedMesh(geo, material, cap);
     this.mesh.customDepthMaterial = depth;
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage);
     const attr = (name: string) => {

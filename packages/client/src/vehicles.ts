@@ -26,7 +26,7 @@ export const trainKmh = (v: number) => Math.round((v / TRAIN_VMAX) * 120);
 
 export function trainTitle(dto: RailLineDTO, freight: boolean) {
   const name = dto.name === `Line ${dto.number}` ? `Line ${dto.number}` : `${dto.number} ${dto.name}`;
-  return `<span class="sw" style="background:${hex(dto.color)}"></span>${esc(name)} <span style="color:var(--muted);font-weight:400">${freight ? 'freight train' : 'passenger train'}</span>`;
+  return `<span class="sw" style="background:${hex(dto.color)}"></span>${esc(name)} <span style="color:var(--muted);font-weight:400">${freight ? 'freight train' : dto.metro ? 'tube train' : 'passenger train'}</span>`;
 }
 
 /** The selected train's panel. `info` is the server's last answer (null until it comes). */

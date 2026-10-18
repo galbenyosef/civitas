@@ -1,7 +1,7 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   CHUNK_SIZE, LAND_PRICE_PER_TILE, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo,
+  terrainOf, isRoad, zoneOf, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
@@ -18,7 +18,7 @@ import { PlanesView } from './render/planes';
 import { HelicoptersView } from './render/helicopters';
 import { AirfieldView } from './render/airfield';
 import { TrainsView } from './render/trains';
-import { RailClient, trainHtml } from './rail';
+import { RailClient, trainHtml, setPlatformCrowd } from './rail';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
 import { BridgeView } from './render/bridges';
@@ -141,7 +141,10 @@ scene.add(helis.group);
 // trains run every line the server sends (render/trains.ts); the track tool's preview and tooltips (client/src/rail.ts)
 const trains = new TrainsView();
 const rail = new RailClient(world);
-scene.add(trains.group, rail.group);
+scene.add(trains.group, trains.under, rail.group);
+scene.add(citizens.under);
+setPlatformCrowd((x0, y0, x1, y1) => citizens.platformCrowd(x0, y0, x1, y1));
+citizens.platformAlongX = (x, y) => underMask(world.underAt(x, y)) === 10; // a platform tile's axis (docs/underground.md section 1)
 const junctions = new JunctionView(world); scene.add(junctions.group); // roundabout islands, flyover decks and ramps
 const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks, piers, towers and ramps (render/bridges.ts)
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz); // cars and walkers on a flyover deck or a bridge and their ramps
@@ -244,6 +247,14 @@ const onboarding = new Onboarding({ net, world, liveTick, tool: (t) => input.set
   focus: (x, y) => { following = false; rig.target.set(x + 0.5, 0, y + 0.5); rig.dist = Math.min(Math.max(rig.dist, 30), 60); }, openTech: () => { ui.toggleTech(true); ui.showTech(world.myPlayer); } });
 ui.onHint = (id) => onboarding.hint(id);
 net.on('railLines', (m) => { trains.setLines(m.lines); rail.setLines(m.lines); });
+// underground lines (docs/underground.md): their trains run in the bores, and the bores take the lines' colours
+net.on('metroLines', (m) => {
+  trains.setMetroLines(m.lines);
+  lines.setMetroNames(m.lines);
+  underground.setLines(m.lines.filter((l) => l.route).map((l) => ({ colour: l.color, sides: lineSides(l.route!, { under: (x, y) => world.underAt(x, y) }) })));
+});
+net.on('metroLoads', (m) => trains.setLoads(m.l));
+lines.onUnder = (on) => { if (on) { if (!underground.on) setUnder(true, true); } else if (underAuto) setUnder(false); }; // a metro line being edited shows the tunnels
 net.on('sitelist', (m) => {
   const p = world.parcels.get(m.id);
   if (p && m.id === selectedParcel) ui.showSites(m.id, m.sites, world.mayEdit(p.owner));
@@ -837,7 +848,7 @@ net.on('train', (m) => {
   }
   if (!tipTrain || m.line !== tipTrain.line || m.train !== tipTrain.train) return;
   if (!m.info) { ui.hideTip(); return; }
-  ui.showHtmlTip(trainHtml(m.info, trains.consistOf(m.line, m.train)));
+  ui.showHtmlTip(trainHtml(m.info, trains.consistOf(m.line, m.train), trains.lines.find((l) => l.id === m.line)?.name));
   ui.moveTip(mouse.x, mouse.y);
 });
 function hoverAgent(id: number) {
@@ -940,6 +951,7 @@ function frame(now: number) {
   vehTick = Math.abs(live - vehTick) > 4 ? live : vehTick + rdt + (live - vehTick) * Math.min(1, dt * 1.5);
   planes.frame(vehTick);
   helis.frame(vehTick);
+  trains.level = underground.level; citizens.underLevel = underground.level;
   trains.frame(vehTick);
   rail.frame(input.tool === 'rail' ? input.railPath : null);
   airfield.frame();
@@ -995,7 +1007,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { underground, setUnder, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

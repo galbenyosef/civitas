@@ -1,5 +1,6 @@
 import { InstancedMesh, RingGeometry, Mesh, MeshBasicMaterial, MeshLambertMaterial, Matrix4, Color, Vector3, Quaternion, Group, BufferGeometry, InstancedBufferAttribute, Frustum, Sphere, type Camera } from 'three';
-import { CitizenState, TICK_MS, Zone, VehicleClass, VehicleKind, citizenState, citizenMode, citizenKind, citizenClass, citizenQueued, citizenEmergency, citizenStage, citizenBag, citizenReversing, citizenIndicator, Indicator, LifeStage, hash2, citizenFleet, fleetLoaded, fleetWorking } from '@msimcity/shared';
+import { CitizenState, TICK_MS, Zone, VehicleClass, VehicleKind, citizenState, citizenMode, citizenKind, citizenClass, citizenQueued, citizenEmergency, citizenStage, citizenBag, citizenReversing, citizenIndicator, Indicator, LifeStage, hash2, citizenFleet, fleetLoaded, fleetWorking, citizenUnder } from '@msimcity/shared';
+import { METRO_Y } from './underground';
 import { Luggage } from './luggage';
 import { Kit } from './kit';
 import { P } from './models';
@@ -30,6 +31,8 @@ interface Agent {
   ind: number; rev: boolean; brake: number;
   /** a mobile worker's vehicle (shared FleetKind, render/fleet.ts), with a fare or delivery aboard, at a stop doing the job */
   fleet: number; loaded: boolean; working: boolean;
+  /** waiting on a metro platform (CITIZEN_UNDER): drawn only in the underground view */
+  under: boolean;
 }
 
 /** Where a first-person camera sits for an agent, in world units (a tile is 1). */
@@ -151,6 +154,14 @@ export class CitizensView {
    * first-person camera (layer 0 only) does not, so the view is never from inside the model.
    */
   private selPerson: Crowd;
+  /**
+   * Riders on metro platforms: a crowd of their own in `under`, outside `group` so the underground view does not ghost them.
+   * main.ts sets `underLevel` (how far the view is up) and `platformAlongX` (the platform's axis under a tile).
+   */
+  readonly under = new Group();
+  private platform = new Crowd(false, 1200, undefined, true);
+  underLevel = 0;
+  platformAlongX: (x: number, y: number) => boolean = () => true;
   private selVeh: Record<VType, InstancedMesh>;
   private ring: Mesh;
   /** per-instance lamp (seed, brake) for every mesh drawn with the vehicle material */
@@ -211,6 +222,7 @@ export class CitizensView {
       this.group.add(mesh);
       return mesh;
     };
+    this.under.add(this.platform.mesh);
     this.selPerson = this.people.twin(1);
     this.selPerson.mesh.layers.set(1);
     this.group.add(this.selPerson.mesh);
@@ -244,19 +256,19 @@ export class CitizensView {
       const a = this.agents.get(id);
       const ind = drives ? citizenIndicator(f) : Indicator.None, rev = citizenReversing(f);
       const fleet = citizenFleet(f), loaded = fleetLoaded(f), working = fleetWorking(f);
-      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f), ind, rev, brake: 0, fleet, loaded, working }); continue; }
+      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f), ind, rev, brake: 0, fleet, loaded, working, under: citizenUnder(f) }); continue; }
       const dx = x - a.tx, dy = y - a.ty;
       // slowing hard since the last tick: the brake lights come on for a moment
       if (drives && (dx * dx + dy * dy) < 0.5 * ((a.tx - a.px) ** 2 + (a.ty - a.py) ** 2) && (a.tx - a.px) ** 2 + (a.ty - a.py) ** 2 > 1e-4) a.brake = now + 700;
       // facing the way it moves, except a bus backing up in a three-point turn (server sim/traffic.ts)
       if (dx * dx + dy * dy > 1e-4) { const d = Math.hypot(dx, dy) * (rev ? -1 : 1); a.hx = dx / d; a.hy = dy / d; }
       a.px = a.x; a.py = a.y; a.tx = x; a.ty = y; a.t = 0; a.state = state; a.drives = drives; a.kind = kind; a.cls = cls; a.queued = queued; a.emergency = emergency; a.last = now; a.stage = stage; a.bag = citizenBag(f); a.ind = ind; a.rev = rev;
-      a.fleet = fleet; a.loaded = loaded; a.working = working;
+      a.fleet = fleet; a.loaded = loaded; a.working = working; a.under = citizenUnder(f);
     }
   }
 
   frame(now: number, dt: number) {
-    this.people.begin(); this.crowd.begin(); this.selPerson.begin(); this.luggage.begin();
+    this.people.begin(); this.crowd.begin(); this.selPerson.begin(); this.luggage.begin(); this.platform.begin();
     const evening = sceneUniforms.uNight.value > 0.5, cull = this.seen;
     const easeGait = 1 - Math.exp(-dt * 7), easePose = 1 - Math.exp(-dt * 3);
     const nv: Record<VType, number> = { sedan: 0, van: 0, truck: 0 };
@@ -322,6 +334,8 @@ export class CitizensView {
         if (a.ind) this.blinkers(x, this.p.y, z, a.ang, type, a.ind, id, mine);
         if (a.bag && type === 'sedan') this.luggage.car(x, z, a.ang, id);
         if (mine) sel[type] = 1; else nv[type]++;
+      } else if (a.under) {
+        if (this.underLevel > 0.5) this.platformRider(id, a, evening);
       } else {
         const look = a.look && a.dressed === a.state ? a.look : this.dress(id, a, evening);
         // gait: the stride swing follows walking speed (so feet roughly keep pace with the ground), eased in and out
@@ -349,7 +363,7 @@ export class CitizensView {
     this.count = this.agents.size;
     this.pools.end(); this.flares.end(); this.selFlares.end(); this.fleet.end();
     for (const attr of this.lamp.values()) attr.needsUpdate = true;
-    this.people.end(); this.crowd.end(); this.selPerson.end(); this.luggage.end();
+    this.people.end(); this.crowd.end(); this.selPerson.end(); this.luggage.end(); this.platform.end();
     for (const type of TYPES) {
       const mesh = this.vehicles[type];
       mesh.count = nv[type]; mesh.instanceMatrix.needsUpdate = true;
@@ -362,6 +376,29 @@ export class CitizensView {
       mesh.count = n; mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
+  }
+
+  /**
+   * Metro riders waiting on a platform (docs/underground.md section 4): in the underground view, on the island platform at
+   * METRO_Y. The server spreads them 0.30 to 0.42 tiles either side of the track, which the island between the two bores
+   * squeezes to its width; each faces its track, with a turn and a stoop of its own.
+   */
+  private platformRider(id: number, a: Agent, evening: boolean) {
+    const look = a.look && a.dressed === a.state ? a.look : this.dress(id, a, evening);
+    const alongX = this.platformAlongX(Math.floor(a.x), Math.floor(a.y));
+    const c = alongX ? a.y : a.x, side = c - Math.floor(c) - 0.5 < 0 ? -1 : 1;
+    const across = side * (0.03 + Math.min(1, Math.max(0, (Math.abs(c - Math.floor(c) - 0.5) - 0.3) / 0.12)) * 0.08);
+    const x = alongX ? a.x : Math.floor(a.x) + 0.5 + across, z = alongX ? Math.floor(a.y) + 0.5 + across : a.y;
+    const yaw = (alongX ? (side > 0 ? -Math.PI / 2 : Math.PI / 2) : side > 0 ? 0 : Math.PI) + look.turn * 0.8;
+    a.rx = x; a.rz = z;
+    this.platform.put(x, METRO_Y - 0.07, z, yaw, look, (performance.now() * look.pace + id) % PHASE_WRAP, 0, look.phone ? 1 : 0);
+  }
+
+  /** How many riders wait on the platform between two end tiles (for the station tooltip). */
+  platformCrowd(x0: number, y0: number, x1: number, y1: number): number {
+    let n = 0;
+    for (const a of this.agents.values()) if (a.under && a.x >= Math.min(x0, x1) && a.x < Math.max(x0, x1) + 1 && a.y >= Math.min(y0, y1) && a.y < Math.max(y0, y1) + 1) n++;
+    return n;
   }
 
   /** A pedestrian's look, re-dressed when they switch between work and leisure (walking home keeps what they had on). */
@@ -416,7 +453,8 @@ export class CitizensView {
   pick(px: number, py: number, camera: Camera, w: number, h: number, radius = 18): number {
     let best = 0, bestD = radius * radius;
     for (const [id, a] of this.agents) {
-      this.v.set(a.rx, 0.3, a.rz).project(camera);
+      if (a.under && this.underLevel <= 0.5) continue;
+      this.v.set(a.rx, a.under ? METRO_Y + 0.1 : 0.3, a.rz).project(camera);
       if (this.v.z > 1) continue;
       const sx = (this.v.x + 1) * 0.5 * w, sy = (1 - this.v.y) * 0.5 * h;
       const d = (sx - px) ** 2 + (sy - py) ** 2;

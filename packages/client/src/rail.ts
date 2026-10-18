@@ -2,7 +2,7 @@ import { Group, InstancedMesh, Matrix4, MeshBasicMaterial, PlaneGeometry, Color 
 import {
   planTrack, isRailAux, railMask, isCrossing, routeTiles, railStationAt, stationTrackProblem, stationStop, TICKS_PER_DAY, TICKS_PER_HOUR,
   RAIL_VEHICLE_NAMES, RAIL_FREIGHT_FEE, KIND_NAMES, isFreightYardKind,
-  type TrackPlan, type RailStationInfo, type RailLineDTO, type RailEnv, type TrainInfo,
+  type TrackPlan, type RailStationInfo, type MetroStationInfo, type RailLineDTO, type RailEnv, type TrainInfo,
 } from '@msimcity/shared';
 import type { ClientWorld } from './world';
 
@@ -40,7 +40,31 @@ export function railStationHtml(r: RailStationInfo, row: (k: string, v: string |
   return html;
 }
 
-const PLURALS = ['locomotives', 'carriages', 'driving trailers', 'container flats', 'tank wagons', 'hopper wagons', 'covered vans'];
+/** riders waiting on the platform between two end tiles (set by main.ts from the citizens drawn there; the server does not count them) */
+export let platformCrowd: (x0: number, y0: number, x1: number, y1: number) => number = () => 0;
+export const setPlatformCrowd = (f: typeof platformCrowd) => { platformCrowd = f; };
+/** The underground section of an entrance's or hall's tooltip (server sim/metro.ts describeStation): lines, next trains, the platform crowd, where to change. */
+export function metroStationHtml(m: MetroStationInfo, row: (k: string, v: string | number) => string): string {
+  let html = `<div class="sect">Underground: ${esc(m.name)}</div>`;
+  html += row('Platform', m.track === 'open' ? 'open' : `<span class="bad">${esc(m.track)}</span>`);
+  if (!m.lines.length) html += row('Lines', '<span class="bad">none call here yet</span>');
+  for (const l of m.lines) {
+    html += row(chip(l), l.status === 'running' ? `a train every ${l.headwayMin} min` : `<span class="bad">${esc(l.status)}</span>`);
+    if (l.next) html += row('&nbsp;&nbsp;next train', `${when(l.next.tick)}, ${esc(l.next.toward)}`);
+  }
+  if (m.platform) {
+    const n = platformCrowd(...m.platform);
+    html += row('On the platform', n ? `${plural(n, 'person', 'people')} waiting` : 'empty');
+  }
+  html += row('Trains today', `${plural(m.callsToday, 'call')} · ${m.boardedToday} on · ${m.alightedToday} off`);
+  if (m.changes.length) {
+    html += `<div class="sect">Change here for</div>`;
+    for (const c of m.changes) html += row(`${esc(c.name)} <span style="color:var(--muted)">${c.mode}</span>`, c.lines.map((l) => chip({ number: l.number, color: l.colour, name: l.name ?? `Line ${l.number}` })).join('<br>'));
+  }
+  return html;
+}
+
+const PLURALS = ['locomotives', 'carriages', 'driving trailers', 'container flats', 'tank wagons', 'hopper wagons', 'covered vans', 'driving motor cars', 'tube cars'];
 /** "locomotive + 3 container flats + 2 tank wagons": how many of each kind */
 export function consistText(kinds: readonly number[]): string {
   const counts = new Map<number, number>();
@@ -49,9 +73,9 @@ export function consistText(kinds: readonly number[]): string {
   return [...counts].map(([k, n]) => name(k, n)).join(' + ');
 }
 /** A train's tooltip: the line, what it is doing, its consist (worked out here) and what is on board (from the server). */
-export function trainHtml(t: TrainInfo, kinds: readonly number[] | null): string {
+export function trainHtml(t: TrainInfo, kinds: readonly number[] | null, name = `Line ${t.number}`): string {
   const row = (k: string, v: string) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
-  let html = `<h3>${chip({ number: t.number, color: t.colour, name: `Line ${t.number}` })} ${t.freight ? 'freight train' : 'train'}</h3>`;
+  let html = `<h3>${chip({ number: t.number, color: t.colour, name })} ${t.freight ? 'freight train' : kinds?.[0] === 7 ? 'tube train' : 'train'}</h3>`;
   html += row('Now', esc(t.state));
   if (kinds) html += row('Consist', esc(consistText(kinds)));
   html += row(t.freight ? 'Containers' : 'On board', `${t.load} / ${t.capacity}`);
