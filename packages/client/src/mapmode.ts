@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import { MAX_TAX, PARCEL_COLOURS, SECTOR_TILES, planCombine, planSplit, mapClassOf, type ParcelDTO, type ServerMsg } from '@msimcity/shared';
 import type { NetClient } from './net';
 import type { ClientWorld } from './world';
-import { CameraRig, MAP_PITCH, DIST_MAX } from './camera';
+import { CameraRig, MAP_PITCH, DIST_MAX, MAP_DIST_MIN, MAP_DIST_MAX } from './camera';
 import type { MapInput } from './input';
 import { MapView, type MapMark } from './render/worldmap';
 
@@ -22,6 +22,8 @@ interface Totals { area: number; buildings: number; population: number; employed
 const EASE_S = 0.4;
 /** sectors in view are asked again this often while the map is up (ms) */
 const REFRESH_MS = 3000;
+/** parcels messages are taken in at most this often while the map is up (ms) */
+const PARCELS_MS = 500;
 const CLASS_NAMES = ['grass', 'sand', 'water', 'road', 'railway', 'airfield', 'homes', 'shops', 'industry', 'offices', 'civic', 'transport', 'leisure'];
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-GB');
@@ -46,6 +48,8 @@ export class MapMode implements MapInput {
   private lastView = '';
   private tmp = new Vector3();
   private panelSig = '';
+  /** the status line holds a preview's verdict, to clear when the preview goes */
+  private saidStatus = false;
 
   constructor(private d: Deps) {
     this.view = new MapView(d.mount);
@@ -65,8 +69,12 @@ export class MapMode implements MapInput {
     else if (m.t === 'railLines') this.view.setRailLines(m.lines);
     else if (m.t === 'metroLines') this.view.setMetroLines(m.lines);
   }
-  /** parcels or players changed (main.ts) */
-  parcelsChanged() {
+  /** parcels or players changed (main.ts): taken in by the next frame, at most every PARCELS_MS (a parcels message comes with most ticks) */
+  parcelsChanged() { this.parcelsStale = true; }
+  private parcelsStale = true;
+  private parcelsAt = 0;
+  private takeParcels() {
+    this.parcelsStale = false;
     const w = this.d.world;
     this.view.setParcels(w.parcels.values(), w.players);
     this.sel = this.sel.filter((id) => w.parcels.has(id));
@@ -89,7 +97,7 @@ export class MapMode implements MapInput {
       this.saved = { pitch: r.pitch, yaw: r.yaw };
       const yaw = Math.round(r.yaw / (Math.PI * 2)) * Math.PI * 2; // north up, the shortest way round
       if (camera) this.ease = { t: 0, from: { pitch: r.pitch, yaw: r.yaw, dist: r.dist }, to: { pitch: MAP_PITCH, yaw, dist: Math.max(r.dist, 320) } };
-      this.parcelsChanged();
+      this.takeParcels();
     } else {
       this.splitFor = 0; this.cut = null; this.press = null;
       if (camera) this.ease = { t: 0, from: { pitch: r.pitch, yaw: r.yaw, dist: r.dist }, to: { pitch: this.saved.pitch, yaw: this.saved.yaw, dist: Math.min(r.dist, DIST_MAX - 20) } };
@@ -105,28 +113,33 @@ export class MapMode implements MapInput {
   /** Before the rig places the camera: the easing in or out of the map, and the map's own limits. */
   frameCamera(dt: number) {
     const r = this.d.rig;
+    if (!Number.isFinite(r.dist) || r.dist <= 0) r.dist = 320;
     if (this.ease) {
       const e = this.ease;
-      e.t = Math.min(1, e.t + dt / EASE_S);
+      e.t = Math.min(1, e.t + Math.max(0, dt) / EASE_S);
       const k = e.t * e.t * (3 - 2 * e.t);
       r.pitch = e.from.pitch + (e.to.pitch - e.from.pitch) * k;
       r.yaw = e.from.yaw + (e.to.yaw - e.from.yaw) * k;
       r.dist = Math.exp(Math.log(e.from.dist) + (Math.log(e.to.dist) - Math.log(e.from.dist)) * k);
       if (e.t >= 1) this.ease = null;
     } else if (this.on && !this.tourCam) r.pitch = MAP_PITCH;
+    if (this.on) r.dist = Math.min(MAP_DIST_MAX, Math.max(MAP_DIST_MIN * 0.8, r.dist));
     if (this.on) { r.camera.near = Math.max(0.5, r.dist * 0.05); r.camera.far = r.dist * 3; r.camera.updateProjectionMatrix(); }
   }
 
   /** The map's frame: sectors to ask for, cells to build, overlays and labels. */
   frame(now: number) {
     const r = this.d.rig, c = this.d.canvas, vh = c.clientHeight, vw = c.clientWidth;
+    if (this.parcelsStale && now - this.parcelsAt > PARCELS_MS) { this.parcelsAt = now; this.takeParcels(); }
     const wpp = r.worldPerPixel(vh);
     const v = this.view.view(r.camera, r.target.x, r.target.z, r.dist);
     const sx0 = Math.floor(v.x0 / SECTOR_TILES), sx1 = Math.floor(v.x1 / SECTOR_TILES), sy0 = Math.floor(v.z0 / SECTOR_TILES), sy1 = Math.floor(v.z1 / SECTOR_TILES);
+    if (![sx0, sx1, sy0, sy1].every(Number.isFinite)) return;
     const sig = `${sx0},${sx1},${sy0},${sy1}`;
     if ((sig !== this.lastView || now - this.lastAsk > 500) && this.d.net.connected) {
       this.lastView = sig; this.lastAsk = now;
-      const s = this.view.request(sx0, sy0, sx1, sy1, now, REFRESH_MS);
+      // a wide view asks again less often: its sectors are smaller than a few pixels
+      const s = this.view.request(sx0, sy0, sx1, sy1, now, REFRESH_MS * Math.max(1, ((sx1 - sx0 + 1) * (sy1 - sy0 + 1)) / 40));
       if (s.length) this.d.net.send({ t: 'map', s });
     }
     this.view.frame(r.camera, r.target.x, r.target.z, r.dist, wpp, vw, vh);
@@ -245,7 +258,8 @@ export class MapMode implements MapInput {
       }
     }
     this.view.setSelection(this.sel, marks);
-    if (status) this.d.status(status);
+    if (status || this.saidStatus) this.d.status(status);
+    this.saidStatus = !!status;
     return status;
   }
 
@@ -277,7 +291,8 @@ export class MapMode implements MapInput {
   }
   private statRows = [
     ['area', 'Area', (t: Totals) => `${t.area.toLocaleString('en-GB')} tiles`],
-    ['buildings', 'Buildings', (t: Totals) => `${t.buildings}${t.sites ? ` (+${t.sites} building)` : ''}`],
+    ['buildings', 'Buildings', (t: Totals) => t.buildings.toLocaleString('en-GB')],
+    ['sites', 'Building sites', (t: Totals) => String(t.sites)],
     ['population', 'Population', (t: Totals) => t.population.toLocaleString('en-GB')],
     ['jobs', 'Jobs filled', (t: Totals) => `${t.employed.toLocaleString('en-GB')} / ${t.jobs.toLocaleString('en-GB')}`],
     ['roads', 'Road tiles', (t: Totals) => String(t.roads)],

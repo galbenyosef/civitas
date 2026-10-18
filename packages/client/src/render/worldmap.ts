@@ -46,6 +46,9 @@ const LUT = new Uint8Array(256 * 3);
   }
 }
 
+/** the far view's land: the terrain's colours mixed this much into this tint */
+const FAR_TINT = [104, 132, 98], FAR_MIX = 0.35;
+
 interface SectorData { v: number; chunks: Map<number, Uint8Array> }
 interface Cell { lvl: number; cx: number; cy: number; mesh: Mesh; tex: DataTexture; data: Uint8Array; built: boolean; row: number; used: number }
 export interface MapLabel { text: string; x: number; z: number; w: number; h: number; kind: 'owner' | 'parcel' | 'line'; colour: number; el?: HTMLDivElement }
@@ -87,7 +90,7 @@ export class MapView {
   private metroLines: RailLineDTO[] = [];
   private tmp = new Vector3();
   /** cell textures built since start and the time they took, ms (docs/world-map.md section 4) */
-  stats = { built: 0, ms: 0, cells: 0, drawn: 0 };
+  stats = { built: 0, ms: 0, cells: 0, drawn: 0, pending: 0 };
 
   constructor(mount: HTMLElement) {
     this.scene.background = new Color(0x1d232b);
@@ -108,7 +111,7 @@ export class MapView {
   /** A new game: the seed's terrain, and nothing known of any sector. */
   reset(seed: number) {
     this.sampler = makeTerrainSampler(seed);
-    this.sectors.clear(); this.asked.clear();
+    this.sectors.clear(); this.asked.clear(); this.parcelSig = '';
     for (const c of this.cells.values()) this.dropCell(c);
     this.cells.clear();
   }
@@ -158,14 +161,47 @@ export class MapView {
     return out;
   }
 
+  /** The parcels and owners; redrawn only when what is drawn changed (a parcels message mostly carries new stats). */
   setParcels(parcels: Iterable<ParcelDTO>, players: Map<string, PlayerDTO>) {
     this.parcels = [...parcels]; this.players = players;
+    let sig = '';
+    for (const p of this.parcels) sig += `${p.id},${p.owner},${p.name},${p.x},${p.y},${p.w},${p.h},${p.group},${p.color};`;
+    for (const o of new Set(this.parcels.map((p) => p.owner))) { const pl = players.get(o); sig += `${o}=${pl?.name},${pl?.color};`; }
+    if (sig === this.parcelSig) return;
+    this.parcelSig = sig;
+    this.outlines = null;
     this.overlayDirty = true; this.labelsDirty = true;
   }
-  setSelection(ids: Iterable<number>, marks: MapMark[]) { this.selected = new Set(ids); this.markList = marks; this.overlayDirty = true; }
-  setBusLines(l: LineInfo[]) { this.busLines = l.filter((x) => x.mode === 'bus'); this.overlayDirty = true; this.labelsDirty = true; }
-  setRailLines(l: RailLineDTO[]) { this.railLines = l; this.overlayDirty = true; this.labelsDirty = true; }
-  setMetroLines(l: RailLineDTO[]) { this.metroLines = l; this.overlayDirty = true; this.labelsDirty = true; }
+  private parcelSig = '';
+  setSelection(ids: Iterable<number>, marks: MapMark[]) {
+    const sel = [...ids], sig = JSON.stringify([sel, marks]);
+    if (sig === this.selSig) return;
+    this.selSig = sig;
+    this.selected = new Set(sel); this.markList = marks; this.overlayDirty = true;
+  }
+  private selSig = '';
+  setBusLines(l: LineInfo[]) { this.busLines = l.filter((x) => x.mode === 'bus'); this.linesChanged(); }
+  setRailLines(l: RailLineDTO[]) { this.railLines = l; this.linesChanged(); }
+  setMetroLines(l: RailLineDTO[]) { this.metroLines = l; this.linesChanged(); }
+  /** every line's path (flat tile x, y) with its label and colour, worked out once per lines message */
+  private linePaths: { text: string; pts: number[]; colour: number }[] = [];
+  private linesChanged() {
+    const rail = (l: RailLineDTO) => {
+      if (!l.route) return l.stations.flat();
+      const t = routeTiles(l.route), pts: number[] = [];
+      for (const q of t) pts.push(q.x, q.y);
+      if (l.route.loop && t.length) pts.push(t[0].x, t[0].y);
+      return pts;
+    };
+    this.linePaths = [
+      ...this.busLines.map((l) => ({ text: l.name || `Bus ${l.number}`, pts: l.path?.length ? l.path : l.stops.flatMap((s) => [s.x, s.y]), colour: l.colour })),
+      ...this.railLines.map((l) => ({ text: l.name || `${l.freight ? 'Freight' : 'Rail'} ${l.number}`, pts: rail(l), colour: l.color })),
+      ...this.metroLines.map((l) => ({ text: `${l.name || `Line ${l.number}`} (underground)`, pts: rail(l), colour: l.color })),
+    ];
+    this.overlayDirty = true; this.labelsDirty = true;
+  }
+  /** outlines of each estate or lone parcel, and of each owner's land, worked out when the parcels change (not with the zoom) */
+  private outlines: { shapes: OutlineRun[][]; owners: { colour: number; runs: OutlineRun[] }[] } | null = null;
 
   // ---- per frame -------------------------------------------------------------------------------------
   /** The ground area in view, in tiles (a top-down camera: the view's half extents round the target, a little over). */
@@ -176,10 +212,12 @@ export class MapView {
   frame(cam: PerspectiveCamera, tx: number, tz: number, dist: number, wpp: number, vw: number, vh: number) {
     this.frameNo++;
     const v = this.view(cam, tx, tz, dist);
+    if (![v.x0, v.x1, v.z0, v.z1].every(Number.isFinite)) return; // no sane view yet
     const want = wpp < 1 ? 0 : wpp < 4 ? 1 : 2;
     const needed: Cell[] = [];
     for (let lvl = 2; lvl >= want; lvl--) {
       const T = CELL_TILES[lvl];
+      if ((Math.floor(v.x1 / T) - Math.floor(v.x0 / T) + 1) * (Math.floor(v.z1 / T) - Math.floor(v.z0 / T) + 1) > 80) continue; // too fine for this view: the coarser level shows
       for (let cy = Math.floor(v.z0 / T); cy <= Math.floor(v.z1 / T); cy++) for (let cx = Math.floor(v.x0 / T); cx <= Math.floor(v.x1 / T); cx++) {
         const key = `${lvl}:${cx},${cy}`;
         let c = this.cells.get(key);
@@ -193,9 +231,10 @@ export class MapView {
     this.stats.drawn = drawn; this.stats.cells = this.cells.size;
     // build: coarse levels first (one L2 cell is a backdrop for the whole view), nearest the centre first
     const todo = needed.filter((c) => c.row >= 0).sort((a, b) => b.lvl - a.lvl || dist2(a, tx, tz) - dist2(b, tx, tz));
+    this.stats.pending = todo.length;
     const t0 = performance.now();
     for (const c of todo) {
-      while (c.row >= 0 && performance.now() - t0 < BUILD_BUDGET) this.buildRows(c, 16);
+      while (c.row >= 0 && performance.now() - t0 < BUILD_BUDGET) this.buildRows(c, 4);
       if (performance.now() - t0 >= BUILD_BUDGET) break;
     }
     this.stats.ms += performance.now() - t0;
@@ -227,24 +266,35 @@ export class MapView {
   private buildRows(c: Cell, n: number) {
     const T = CELL_TILES[c.lvl], s = T / RES, x0 = c.cx * T, y0 = c.cy * T, d = c.data;
     const end = Math.min(RES, c.row + n);
+    const span = CHUNK_SIZE / s; // texels per chunk (s is at most 16, so a texel never straddles chunks)
     for (let r = c.row; r < end; r++) {
       const ty = y0 + r * s;
-      const cyy = Math.floor(ty / CHUNK_SIZE), syy = Math.floor(cyy / SECTOR_CHUNKS);
-      for (let q = 0; q < RES; q++) {
-        const tx = x0 + q * s, o = (r * RES + q) * 4;
-        const cxx = Math.floor(tx / CHUNK_SIZE), sxx = Math.floor(cxx / SECTOR_CHUNKS);
+      const cyy = Math.floor(ty / CHUNK_SIZE), syy = Math.floor(cyy / SECTOR_CHUNKS), ly = ty - cyy * CHUNK_SIZE;
+      for (let q0 = 0; q0 < RES; q0 += span) {
+        // one chunk's worth of texels: its summary looked up once
+        const cxx = Math.floor((x0 + q0 * s) / CHUNK_SIZE), sxx = Math.floor(cxx / SECTOR_CHUNKS);
         const ch = this.sectors.get(skey(sxx, syy))?.chunks.get((cyy - syy * SECTOR_CHUNKS) * SECTOR_CHUNKS + (cxx - sxx * SECTOR_CHUNKS));
-        if (!ch) {
-          const b = terrainClass(this.sampler(tx + (s >> 1), ty + (s >> 1))) * 3;
-          d[o] = LUT[b]; d[o + 1] = LUT[b + 1]; d[o + 2] = LUT[b + 2]; d[o + 3] = 255;
-          continue;
+        for (let q = q0; q < q0 + span; q++) {
+          const tx = x0 + q * s, o = (r * RES + q) * 4;
+          if (!ch) {
+            if (c.lvl < 2) { const b = terrainClass(this.sampler(tx + (s >> 1), ty + (s >> 1))) * 3; d[o] = LUT[b]; d[o + 1] = LUT[b + 1]; d[o + 2] = LUT[b + 2]; d[o + 3] = 255; continue; }
+            // far out, four samples averaged, so lakes smaller than a texel read as a tint, not speckle
+            let rr = 0, gg = 0, bb = 0;
+            for (let k = 0; k < 4; k++) {
+              const b = terrainClass(this.sampler(tx + ((k & 1) * 2 + 1) * (s >> 2), ty + ((k >> 1) * 2 + 1) * (s >> 2))) * 3;
+              rr += LUT[b]; gg += LUT[b + 1]; bb += LUT[b + 2];
+            }
+            // far out the land is muted towards one tint (the lakes are smaller than a few pixels), so what people built stands out
+            d[o] = (rr / 4) * FAR_MIX + FAR_TINT[0] * (1 - FAR_MIX); d[o + 1] = (gg / 4) * FAR_MIX + FAR_TINT[1] * (1 - FAR_MIX); d[o + 2] = (bb / 4) * FAR_MIX + FAR_TINT[2] * (1 - FAR_MIX); d[o + 3] = 255;
+            continue;
+          }
+          const lx = tx - cxx * CHUNK_SIZE;
+          if (s === 1) { const b = ch[ly * CHUNK_SIZE + lx] * 3; d[o] = LUT[b]; d[o + 1] = LUT[b + 1]; d[o + 2] = LUT[b + 2]; d[o + 3] = 255; continue; }
+          let rr = 0, gg = 0, bb = 0;
+          for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) { const b = ch[(ly + j) * CHUNK_SIZE + lx + i] * 3; rr += LUT[b]; gg += LUT[b + 1]; bb += LUT[b + 2]; }
+          const k = s * s;
+          d[o] = rr / k; d[o + 1] = gg / k; d[o + 2] = bb / k; d[o + 3] = 255;
         }
-        const lx = tx - cxx * CHUNK_SIZE, ly = ty - cyy * CHUNK_SIZE;
-        if (s === 1) { const b = ch[ly * CHUNK_SIZE + lx] * 3; d[o] = LUT[b]; d[o + 1] = LUT[b + 1]; d[o + 2] = LUT[b + 2]; d[o + 3] = 255; continue; }
-        let rr = 0, gg = 0, bb = 0;
-        for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) { const b = ch[(ly + j) * CHUNK_SIZE + lx + i] * 3; rr += LUT[b]; gg += LUT[b + 1]; bb += LUT[b + 2]; }
-        const k = s * s;
-        d[o] = rr / k; d[o + 1] = gg / k; d[o + 2] = bb / k; d[o + 3] = 255;
       }
     }
     c.row = end >= RES ? -1 : end;
@@ -267,26 +317,31 @@ export class MapView {
     };
     const colourOf = (owner: string) => this.players.get(owner)?.color ?? 0xffffff;
     // fills, in the parcel's own colour or its owner's
-    const byOwner = new Map<string, ParcelDTO[]>(), byShape = new Map<string, ParcelDTO[]>();
     for (const p of this.parcels) {
       col.setHex(p.color ?? colourOf(p.owner));
       quad(fp, fc, p.x, p.y, p.x + p.w, p.y + p.h, col, this.selected.has(p.id) ? 0.42 : 0.24);
-      let l = byOwner.get(p.owner); if (!l) byOwner.set(p.owner, (l = [])); l.push(p);
-      const shape = p.group !== undefined ? `g${p.group}` : `p${p.id}`;
-      let s = byShape.get(shape); if (!s) byShape.set(shape, (s = [])); s.push(p);
+    }
+    if (!this.outlines) {
+      const byOwner = new Map<string, ParcelDTO[]>(), byShape = new Map<string, ParcelDTO[]>();
+      for (const p of this.parcels) {
+        let l = byOwner.get(p.owner); if (!l) byOwner.set(p.owner, (l = [])); l.push(p);
+        const shape = p.group !== undefined ? `g${p.group}` : `p${p.id}`;
+        let s = byShape.get(shape); if (!s) byShape.set(shape, (s = [])); s.push(p);
+      }
+      this.outlines = { shapes: [...byShape.values()].map((l) => unionOutline(l)), owners: [...byOwner].map(([o, l]) => ({ colour: colourOf(o), runs: unionOutline(l) })) };
     }
     // between one owner's estates and lone parcels a thin dark line, round each owner's land a ribbon in its colour
     const thin = Math.max(0.06, wpp * 0.7), thick = Math.max(0.12, wpp * 1.6);
     col.setHex(0x111418);
-    for (const list of byShape.values()) ribbon(rp, rc, unionOutline(list), thin, col, 0.55);
-    for (const [owner, list] of byOwner) { col.setHex(colourOf(owner)); ribbon(rp, rc, unionOutline(list), thick, col, 0.95); }
+    for (const runs of this.outlines.shapes) ribbon(rp, rc, runs, thin, col, 0.55);
+    for (const o of this.outlines.owners) { col.setHex(o.colour); ribbon(rp, rc, o.runs, thick, col, 0.95); }
     // selected parcels and their estates: white
     const sel = this.parcels.filter((p) => this.selected.has(p.id));
     if (sel.length) {
       const groups = new Set(sel.map((p) => p.group).filter((g) => g !== undefined));
       const estate = this.parcels.filter((p) => p.group !== undefined && groups.has(p.group) && !this.selected.has(p.id));
       col.setHex(0xffffff);
-      if (estate.length) ribbon(rp, rc, unionOutline([...sel, ...estate]), thick * 0.7, col, 0.5);
+      if (estate.length) ribbon(rp, rc, unionOutline([...sel, ...estate]), thick, col, 0.7);
       for (const p of sel) ribbon(rp, rc, unionOutline([p]), thick * 1.1, col, 1);
     }
     // previews
@@ -307,11 +362,7 @@ export class MapView {
         for (let k = 0; k < 6; k++) lc.push(col.r, col.g, col.b, 0.9);
       }
     };
-    for (const l of this.busLines) if (l.path?.length) path(l.path, l.colour);
-    for (const l of [...this.railLines, ...this.metroLines]) {
-      if (l.route) { const t = routeTiles(l.route); const pts: number[] = []; for (const q of t) pts.push(q.x, q.y); if (l.route.loop && t.length) pts.push(t[0].x, t[0].y); path(pts, l.color); }
-      else path(l.stations.flat(), l.color);
-    }
+    for (const l of this.linePaths) path(l.pts, l.colour);
     for (const [mesh, pos, cols] of [[this.fills, fp, fc], [this.ribbons, rp, rc], [this.lineRibbons, lp, lc], [this.marks, mp, mc]] as const) {
       const g = new BufferGeometry();
       g.setAttribute('position', new Float32BufferAttribute(pos, 3));
@@ -355,9 +406,7 @@ export class MapView {
       for (let i = 0; i < pts.length; i += 2) { x0 = Math.min(x0, pts[i]); x1 = Math.max(x1, pts[i]); y0 = Math.min(y0, pts[i + 1]); y1 = Math.max(y1, pts[i + 1]); }
       out.push({ text, x: pts[m] + 0.5, z: pts[m + 1] + 0.5, w: x1 - x0 + 1, h: y1 - y0 + 1, kind: 'line', colour });
     };
-    for (const l of this.busLines) lineLabel(l.name || `Bus ${l.number}`, l.path ?? l.stops.flatMap((s) => [s.x, s.y]), l.colour);
-    for (const l of this.railLines) lineLabel(l.name || `${l.freight ? 'Freight' : 'Rail'} ${l.number}`, l.route ? routeTiles(l.route).flatMap((q) => [q.x, q.y]) : l.stations.flat(), l.color);
-    for (const l of this.metroLines) lineLabel(`${l.name || `Line ${l.number}`} (underground)`, l.route ? routeTiles(l.route).flatMap((q) => [q.x, q.y]) : l.stations.flat(), l.color);
+    for (const l of this.linePaths) lineLabel(l.text, l.pts, l.colour);
     for (const l of out) {
       const el = document.createElement('div');
       el.className = `mlabel ${l.kind}`;
@@ -379,15 +428,18 @@ export class MapView {
     if (sig === this.lastLayout) return;
     this.lastLayout = sig;
     const far = wpp > 1.2;
-    const rank = (l: MapLabel) => (l.kind === 'owner' ? (far ? 0 : 2) : l.kind === 'line' ? 1 : far ? 3 : 0) * 1e9 - l.w * l.h;
+    // owners first (far out every owner's name, nearer only where their land has room for it), then lines, then estates and
+    // parcels by size; a parcel name already shown is not repeated (sample cities name several parcels after one area)
+    const rank = (l: MapLabel) => (l.kind === 'owner' ? 0 : l.kind === 'line' ? 1 : 2) * 1e9 - l.w * l.h;
     const order = [...this.labels].sort((a, b) => rank(a) - rank(b));
     const taken: [number, number, number, number][] = [];
+    const said = new Set<string>();
     let shown = 0;
     for (const l of order) {
       const el = l.el!;
       const tw = l.text.length * (l.kind === 'owner' ? 7.4 : 6.4) + 14, th = l.kind === 'owner' ? 22 : 18;
       const sw = l.w / wpp, sh = l.h / wpp; // its size on screen
-      let ok = shown < 160 && (l.kind === 'owner' ? (far ? sw > 24 || sh > 24 : sw > tw * 2.5) : l.kind === 'line' ? Math.max(sw, sh) > 60 : sw > tw * 0.8 && sh > 14);
+      let ok = shown < 160 && (l.kind === 'owner' ? far || (sw > tw * 1.3 && sh > 40) : l.kind === 'line' ? Math.max(sw, sh) > 60 : !far && sw > tw * 0.8 && sh > 14 && !said.has(l.text));
       let px = 0, py = 0;
       if (ok) {
         this.tmp.set(l.x, 0, l.z).project(cam);
@@ -400,6 +452,7 @@ export class MapView {
         if (ok) taken.push(box);
       }
       if (ok) {
+        if (l.kind === 'parcel') said.add(l.text);
         if (!el.isConnected) this.labelsEl.appendChild(el);
         el.style.transform = `translate(${px.toFixed(1)}px, ${py.toFixed(1)}px) translate(-50%, -50%)`;
         shown++;

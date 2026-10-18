@@ -79,8 +79,11 @@ scene.add(hoverMesh, rectMesh);
 const footprint = new FootprintOverlay(); // outline, door arrow and marks of the structure being placed or hovered
 scene.add(footprint.group);
 
+const sized = { w: 0, h: 0 };
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return; // not laid out yet (the stylesheet still loading): the frame loop tries again
+  sized.w = w; sized.h = h;
   renderer.setSize(w, h, false);
   rig.resize(w / h);
 }
@@ -960,8 +963,9 @@ let vehTick = 0, vehAt = performance.now();
 function frame(now: number) {
   requestAnimationFrame(frame);
   perf.frame(now);
-  const dt = Math.min(0.1, (now - last) / 1000);
+  const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)); // a first rAF stamp can be older than the module's clock
   last = now;
+  if (canvas.clientWidth !== sized.w || canvas.clientHeight !== sized.h) resize(); // the window changed, or was not laid out at the first resize
   input.update(dt);
   tour?.frame(dt); // the tour's camera flight, before the rig places the camera
   mapMode.frameCamera(dt);
@@ -1113,6 +1117,7 @@ async function connect(name: string) {
   }
   net.connect(name);
 }
+if (params.has('map')) mapMode.set(true); // ?map opens on the world map
 if (autoName) void connect(autoName);
 else {
   const picker = viaWs || demoParam || local ? null : new WorldPicker(document.getElementById('worlds')!, cityParam || remembered());

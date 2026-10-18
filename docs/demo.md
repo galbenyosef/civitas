@@ -384,6 +384,7 @@ Some entries are typed against the union they come from, the way `SURFACE_TOOLS`
 | bus turnaround | a saved bus line whose buses turn round at a dead end (`BusService.plan(line).turns` has a kind 0) | `line-bus-3` |
 | metro line with an interchange | a metro line calls within the change walk (`TRANSIT.transferWalk`, 4 tiles) of a stop of a bus or rail line, in the scenario and among the saved lines | `line-metro-1` |
 | mobile-job bases (docs/mobile-jobs.md): a cab office, a takeaway, a waste and recycling depot, a parcel depot | the lot at the tour spot's door holds that role (shared/src/fleet.ts `isCabOffice`, `isFoodVenue`, `isWasteDepot`, `isCourierDepot`, tile hashes): (5, 0), (6, 0), (16, 0), (14, 0) downtown | `cab-office`, `takeaway`, `waste-depot`, `parcel-depot` |
+| world map | the scenario has a `world-map` spot with `view: 'map'` and an estate (`DemoSection.estates`: the South railway and Riverside lands, combined at seeding by `planCombine`); the seeded world has an estate of two or more parcels (`SeededDemo.parcels`). docs/world-map.md | `world-map` |
 | metro crossover | in **London**: an under byte with all four sides (one line's tunnel straight across another's). Rule: the showcase runs one underground line; lines cross in London | London's `tube-crossover` |
 
 ### Adding a feature to the showcase
