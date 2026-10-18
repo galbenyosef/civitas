@@ -24,7 +24,7 @@ import {
 } from '../src';
 import {
   BOAT_TYPES, boatTimetable, boatsAt, harbourFleet, deriveHarbourLanes, harbourLaneSpecs, boatLane, clearBoatTimetables, voyageEvents, boatEvents,
-  boatLifts, catchOf, callCargo, boatName, boatOwner, boatCrew, fishingReg, starboardOffset, HARBOUR_KIND_IDS, BOAT_DAY_FROM, BOAT_DAY_TO,
+  boatLifts, catchOf, callCargo, boatName, boatOwner, boatCrew, fishingReg, starboardOffset, HARBOUR_KIND, harbourBerths, placedBerths, placedFromDoor, BOAT_DAY_FROM, BOAT_DAY_TO,
   basculeOpen, basculeLifts, bridgeClearance, TICKS_PER_DAY, TICKS_PER_HOUR, BASCULE_RAISE, BASCULE_HOLD,
   hash2, type BoatHarbour, type Berth, type BoatState, type BoatType, type Voyage,
 } from '../src';
@@ -293,16 +293,16 @@ const row = (n: number, x: number, z: number, dx: number, h: number, maxLen: num
   Array.from({ length: n }, (_, i) => ({ x: x + i * dx, z, h, maxLen: Array.isArray(maxLen) ? maxLen[i % maxLen.length] : maxLen, alongside }));
 const HDEFS: HarbourDef[] = [
   // a marina on the river between the suspension bridge (x 40) and the bascule (x 55): its tall boats meet the lifts
-  { id: 1001, kind: HARBOUR_KIND_IDS.marina, name: 'Swanmere', fairway: [47, 22], berths: row(10, 43.6, 20.3, 0.85, 0, [0.7, 0.55], true) },
+  { id: 1001, kind: HARBOUR_KIND.marina, name: 'Swanmere', fairway: [47, 22], berths: row(10, 43.6, 20.3, 0.85, 0, [0.7, 0.55], true) },
   // a cargo port on the basin's south shore: big berth, small berth, tug berth
-  { id: 1002, kind: HARBOUR_KIND_IDS.cargoPort, name: 'Eastport', fairway: [114, 45], berths: [
+  { id: 1002, kind: HARBOUR_KIND.port, name: 'Eastport', fairway: [114, 45], berths: [
     { x: 112.5, z: 48.6, h: 0, maxLen: 5, alongside: true }, { x: 119.6, z: 48.6, h: 0, maxLen: 3, alongside: true },
     { x: 116.2, z: 48.7, h: 0, maxLen: 0.5, alongside: true, tug: true }] },
   // a fishing harbour on the basin's north shore (its grounds are beyond the gate) and one on the lake (grounds in it)
-  { id: 1003, kind: HARBOUR_KIND_IDS.fishingHarbour, name: 'Fishbourne', fairway: [131, 3], berths: row(3, 129.8, 0.35, 0.9, 0, 0.7, true) },
-  { id: 1004, kind: HARBOUR_KIND_IDS.fishingHarbour, name: 'Lakeby', fairway: [13, 62], berths: row(2, 12.4, 60.35, 1.2, 0, 0.7, true) },
+  { id: 1003, kind: HARBOUR_KIND.fishing, name: 'Fishbourne', fairway: [131, 3], berths: row(3, 129.8, 0.35, 0.9, 0, 0.7, true) },
+  { id: 1004, kind: HARBOUR_KIND.fishing, name: 'Lakeby', fairway: [13, 62], berths: row(2, 12.4, 60.35, 1.2, 0, 0.7, true) },
   // a jetty on the lake: two bow-in slots
-  { id: 1005, kind: HARBOUR_KIND_IDS.jetty, name: 'Lake Jetty', fairway: [25, 72], berths: row(2, 25.2, 74.55, 0.5, Math.PI / 2, 0.45, false) },
+  { id: 1005, kind: HARBOUR_KIND.jetty, name: 'Lake Jetty', fairway: [25, 72], berths: row(2, 25.2, 74.55, 0.5, Math.PI / 2, 0.45, false) },
 ];
 function harboursFrom(g: WaterGrid): { hs: BoatHarbour[]; refused: string[] } {
   const refused: string[] = [];
@@ -334,6 +334,18 @@ ok(harbours[0].lanes.some((l) => l.sig === 16 && l.route.bridges.some((b) => b.s
 console.log(`  derived in ${laneMs.toFixed(1)} ms; the same from the client's tiles`);
 
 console.log('=== B3: fleets');
+{
+  // B2's berths, placed and turned, as the schedule takes them; a fleet fits them
+  for (const role of ['jetty', 'marina', 'fishing', 'pier', 'port'] as const) for (const r of [0, 1, 2, 3]) {
+    const p = placedFromDoor(HARBOUR_KIND[role], 500, 500, r), pb = placedBerths(p), bs = harbourBerths(p);
+    ok(bs.length === pb.length && bs.length > 0 && bs.every((b, i) => b.x === pb[i].x && b.z === pb[i].y && b.h === pb[i].angle && b.maxLen === pb[i].len && b.alongside === (pb[i].mode === 'alongside')), `${role} r${r}: harbourBerths`);
+    if (r) continue;
+    const h: BoatHarbour = { ...harbours.find((q) => HDEFS.find((d) => d.id === q.id)!.kind === HARBOUR_KIND[role]) ?? { id: 1, kind: HARBOUR_KIND[role], x: 0, y: 0, active: true, lanes: [], berths: [] }, berths: bs };
+    const f = harbourFleet(h);
+    ok(f.every((b) => bs[b.berth].maxLen >= BOAT_TYPES[b.type].len), `${role}: a boat too long for B2's berth`);
+    console.log(`  ${role} on B2's ${bs.length} berths (${[...new Set(bs.map((b) => `${b.maxLen}${b.alongside ? ' alongside' : ' bow-in'}`))].join(', ')}): ${f.map((b) => BOAT_TYPES[b.type].name).join(', ') || 'none based'}`);
+  }
+}
 {
   for (const h of harbours) {
     const f = harbourFleet(h), name = HDEFS.find((q) => q.id === h.id)!.name;

@@ -3,6 +3,8 @@ import { hash2 } from './noise';
 import { nameFor, surnameFor } from './names';
 import { CITIES, type CrewMember } from './crews';
 import { BridgeStyle, bridgeClearance, basculeOpen, basculeLifts, BASCULE_RAISE, BASCULE_HOLD } from './bridges';
+import { HARBOUR_OF, placedBerths, type HarbourRole } from './harbours';
+import type { Placed } from './structures';
 import {
   waterGeometry, waterPoint, passSig, waterLane, cruiseLane, cruiseWaypoints, fishingGrounds, seaGateGoals, waterRouteKey, waterTiles,
   WIDTH_CLEARANCE, SEA_GATE_FADE, SEA_GATE_LOW_AIR, type WaterGeometry, type WaterLane, type WidthClass, type LanePurpose, type WaterGrid,
@@ -73,18 +75,15 @@ export const boatSig = (type: BoatType) => passSig(BOAT_TYPES[type].air);
 export const needsLift = (type: BoatType) => BOAT_TYPES[type].air >= bridgeClearance(BridgeStyle.Bascule);
 
 // ---- harbours ------------------------------------------------------------------------------------------
-/** The harbour kinds (docs/boats.md section 5; their catalogue ids, KIND_ID 'jetty' and so on, are these). */
-export const HARBOUR_KIND_IDS = { jetty: 24, marina: 25, fishingHarbour: 26, ferryPier: 27, cargoPort: 28 } as const;
-export type HarbourKindName = keyof typeof HARBOUR_KIND_IDS;
-export const harbourKindName = (kind: number): HarbourKindName | undefined =>
-  (Object.keys(HARBOUR_KIND_IDS) as HarbourKindName[]).find((k) => HARBOUR_KIND_IDS[k] === kind);
-/** The types each kind bases or receives (a ferry pier's river buses are ferry lines: B5). */
-export const HARBOUR_BOATS: Record<HarbourKindName, readonly BoatType[]> = {
+/** A harbour kind's role (harbours.ts HARBOUR_OF), or undefined for any other kind. */
+const roleOf = (kind: number): HarbourRole | undefined => HARBOUR_OF[kind]?.role;
+/** The types each harbour role bases or receives (a ferry pier's river buses are ferry lines: B5). */
+export const HARBOUR_BOATS: Record<HarbourRole, readonly BoatType[]> = {
   jetty: ['dinghy', 'motorCruiser'],
   marina: ['motorCruiser', 'sailboat', 'narrowboat', 'dinghy', 'sailingBarge'],
-  fishingHarbour: ['trawler'],
-  ferryPier: [],
-  cargoPort: ['containerShip', 'ropax', 'coaster', 'barge', 'tug'],
+  fishing: ['trawler'],
+  pier: [],
+  port: ['containerShip', 'ropax', 'coaster', 'barge', 'tug'],
 };
 /** The lane purposes a type sails, best first: a barge comes down the river from a low gate, else in from the sea. */
 export const BOAT_PURPOSES: Partial<Record<BoatType, readonly LanePurpose[]>> = {
@@ -102,6 +101,13 @@ export interface Berth {
   alongside: boolean;
   /** the cargo port's tug berth: only the tug lies there */
   tug?: boolean;
+}
+/**
+ * The berths of a placed harbour as the schedule takes them (harbours.ts placedBerths: world tile space, so x and y
+ * here are world x and z). A slot labelled 'tug' is the port's tug berth.
+ */
+export function harbourBerths(p: Placed): Berth[] {
+  return placedBerths(p).map((b) => ({ x: b.x, z: b.y, h: b.angle, maxLen: b.len, alongside: b.mode === 'alongside', ...(b.label === 'tug' ? { tug: true } : {}) }));
 }
 /** A harbour lane as the `harbours` message carries it: WaterLane, and the sea gate its far end leaves by, if any. */
 export interface BoatLane extends WaterLane { gate?: string }
@@ -123,7 +129,7 @@ export interface BoatHarbour {
 
 /** The lanes a harbour kind wants derived: one per distinct purpose, width class and signature of its types. */
 export function harbourLaneSpecs(kind: number): { purpose: LanePurpose; cls: WidthClass; sig: number; types: BoatType[] }[] {
-  const name = harbourKindName(kind);
+  const name = roleOf(kind);
   const out: { purpose: LanePurpose; cls: WidthClass; sig: number; types: BoatType[] }[] = [];
   for (const type of name ? HARBOUR_BOATS[name] : []) {
     for (const purpose of BOAT_PURPOSES[type] ?? []) {
@@ -221,7 +227,7 @@ export function harbourFleet(h: BoatHarbour): readonly BasedBoat[] {
   const hit = fleetCache.get(h);
   if (hit) return hit;
   const out: BasedBoat[] = [];
-  const name = harbourKindName(h.kind), hk = hkOf(h.id);
+  const name = roleOf(h.kind), hk = hkOf(h.id);
   const H = (a: number, b: number) => hash2(hk * 7 + a, b + 401);
   const sails = (t: BoatType) => boatLane(h, t) >= 0;
   const add = (berth: number, type: BoatType) => out.push({ id: boatIdOf(h.id, berth), harbour: h.id, berth, type, seed: H(berth, 1) });
@@ -246,9 +252,9 @@ export function harbourFleet(h: BoatHarbour): readonly BasedBoat[] {
       const pick = mix.find(([, w]) => (r -= w) < 0)?.[0] ?? mix[mix.length - 1][0];
       add(i, pick); placed++;
     });
-  } else if (name === 'fishingHarbour') {
+  } else if (name === 'fishing') {
     if (sails('trawler')) h.berths.forEach((b, i) => { if (fits(b, 'trawler')) add(i, 'trawler'); });
-  } else if (name === 'cargoPort') {
+  } else if (name === 'port') {
     const i = h.berths.findIndex((b) => b.tug && b.maxLen >= BOAT_TYPES.tug.len);
     if (i >= 0 && sails('tug')) add(i, 'tug');
   }
@@ -774,7 +780,7 @@ function generate(hsIn: readonly BoatHarbour[], day: number): BoatTimetable {
         });
       }
     }
-    if (harbourKindName(h.kind) === 'cargoPort') {
+    if (roleOf(h.kind) === 'port') {
       CALLS.forEach((c, ci) => {
         // by the type's lanes, best first: a barge down the river when that fits the day, else in from the sea
         const cls = BOAT_TYPES[c.type].cls, sig = boatSig(c.type);

@@ -337,11 +337,13 @@ B8 (scenarios) do. Checked by the B3 sections of `packages/shared/scripts/boats-
 
 - **What the schedule reads.** A list of `BoatHarbour`s, which the `harbours` message carries:
   - `{ id, kind, x, y, name?, active, berths: Berth[], lanes: BoatLane[] }`.
-  - A `Berth` is in world space: `{ x, z, h, maxLen, alongside, tug? }`. B4 resolves it from B2's slots and the placing.
+  - A `Berth` is in world space: `{ x, z, h, maxLen, alongside, tug? }`. `harbourBerths(p)` builds the list from a
+    placed harbour, using B2's `placedBerths`. A slot labelled `'tug'` is the port's tug berth. B2's cargo port has no
+    such slot yet, so until it gets one, real ports have no tug and no escorts.
   - A `BoatLane` is B1's `WaterLane` plus `gate?`, the name of the sea gate its far end leaves by. Every lane of a
-    harbour starts at its fairway tile.
-  - The kinds are `HARBOUR_KIND_IDS` (jetty 24, marina 25, fishingHarbour 26, ferryPier 27, cargoPort 28), which must
-    match B2's `KIND_ID`.
+    harbour starts at one fairway tile (B4 picks it from `fairwayTiles`, the middle one, say). The manoeuvres run from
+    each berth to that tile.
+  - The kinds' roles come from B2's `HARBOUR_OF[kind].role`, and `HARBOUR_BOATS` is keyed by role.
   - The caches are keyed by object (`WeakMap`), so treat a list as immutable: a change makes a new array, and a changed
     harbour is a new object.
 - **Lanes (for B4).**
@@ -461,6 +463,9 @@ B8 (scenarios) do. Checked by the B3 sections of `packages/shared/scripts/boats-
     - Their lanes are derived on the server's tiles and on the client's, and must be identical. Each lane passes B1's
       lane checks.
   - **Fleets.** Each boat has its own berth and a lane, and the fleets agree on the wire's copy.
+    - `harbourBerths` equals `placedBerths` for every kind in all four turns.
+    - Fleets on B2's own slots: the jetty has a dinghy, the marina 7 boats on its ten 0.65 bow-in slots, and the
+      fishing harbour 3 trawlers.
   - **A week of timetables.** The same on a second derivation, from the wire's JSON copy, and from the client's
     harbours. Every voyage runs within 04:00 to 04:00, and its segments are end to end.
     - Every lift passage lies inside a scheduled lift's hold, with the leaves at 1. Two boats never use one span at
