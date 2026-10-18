@@ -14,7 +14,7 @@ a line you drag, **rename** and **colour** it, and read its stats (area, buildin
 
 | | |
 | --- | --- |
-| Toggle | **Tab**, the **map** chip, or wheel/pinch past the 3D limit (`DIST_MAX` 220). Zooming back in below 150 returns to 3D at the tilt you left. Every letter key was taken (tools, camera, H N T M I O); Tab is free and is what many games use for a map. Esc leaves the map too. |
+| Toggle | **Tab**, the **map** chip, or wheel/pinch past the 3D limit (`DIST_MAX` 220). Zooming back in below 150 returns to 3D at the tilt you left. Every letter key was taken (tools, camera, H N T M I O); Tab is free and is what many games use for a map. Esc leaves the map too (after dropping a cut, then the selection). `?map` opens on it. |
 | Camera | the ordinary `CameraRig`, eased to north-up (yaw 0) and straight down (`MAP_PITCH` 1.565), with the zoom range widened to `MAP_DIST_MAX` 6000 (about 9000 tiles across on a 16:10 window). Near and far planes follow the distance. |
 | Rendering | a separate `Scene` (`render/worldmap.ts` `MapView`): the main scene is not rendered at all, so no buildings, agents, shadows or fog cost anything. Everything is `MeshBasicMaterial`, unlit, not tone mapped. |
 | Streaming | the chunk subscription set becomes empty: no chunk geometry, agents or traffic bytes arrive while the map is up. Leaving the map subscribes again as usual. |
@@ -23,11 +23,15 @@ a line you drag, **rename** and **colour** it, and read its stats (area, buildin
 ### Ground: sectors and levels of detail
 
 The world is cut into **sectors** of 8×8 chunks (256×256 tiles). Each sector is one textured quad. Its texture is built
-on the CPU at one of three resolutions, picked from the zoom: a texel per tile (L0, 256²), per 4×4 tiles (L1, 64²) or
-per 16×16 tiles (L2, 16²). L0 is used while a tile is at least about two thirds of a pixel. Building a texture costs
-the terrain samples it needs (13 ms for a whole L0 sector of untouched land, 1 ms for L1) plus a copy of the summary
-bytes, so the map builds a few sectors a frame within a 6 ms budget, nearest the view centre first, and shows a coarser
-texture of the same sector until the finer one is ready. Textures are kept in an LRU of 400.
+on the CPU. A **cell** is one textured quad with a 256² texture at one of three levels, picked from the zoom: L0 covers
+one sector at a texel per tile, L1 4×4 sectors at a texel per 4×4 tiles, L2 16×16 sectors at a texel per 16×16 tiles.
+L0 is used while a tile is less than a pixel across (`levelFor`), L1 up to 4 tiles a pixel, L2 beyond. Painting costs
+one terrain sample per texel of untouched land (four, averaged and muted towards one tint, at L2, where the lakes are
+smaller than a pixel and would otherwise speckle; about 13 ms for a whole cell in Node, more in a busy browser) plus
+a copy of the summary bytes, so cells are painted a few rows at a time within a 6 ms budget a frame, coarsest first and
+nearest the view centre first; the coarser cells stay underneath as a backdrop until the finer ones are done. At most
+80 cells a level are drawn (else the coarser level shows), and 160 are kept. When a sector's summary changes only the
+chunks whose bytes differ are repainted, in every cell over them (a 32×32, 8×8 or 2×2 texel patch), then uploaded once.
 
 Colours: grass, sand and water as the 3D ground; roads dark grey; track brown; runways grey; zones in their tool
 colours (homes green, shops blue, industry amber, offices violet), civic red, transport slate, leisure deep green. A
@@ -38,19 +42,22 @@ colour; a site under construction is hatched.
 
 One byte per tile: bits 0-3 the class (`MapClass`), bits 4-6 the level (0-7), bit 7 under construction. Classes:
 grass, sand, water, road, track, airfield, residential, commercial, industrial, office, civic, transport, leisure.
-`mapByte(tile, aux, kindId)` is the one function both sides use. A chunk's 1024 bytes are run-length coded as
-(run-1, byte) pairs and base64'd: a district chunk is typically 300-600 bytes on the wire, a field of grass 8.
+`mapByte(tile, aux)` is the one function both sides use. A chunk's 1024 bytes are run-length coded as (run-1, byte)
+pairs and base64'd: a built-up district chunk is about 1 KB on the wire. The coarser **detail levels** keep one byte
+per 4×4 or 16×16 tiles, each block's most common byte (`downsample`; roads drop out, zones stay): 64 or 4 bytes a chunk,
+75 and 15 bytes on the wire. The client asks at the level its view draws.
 
 ### Wire
 
 ```
-client  { t: 'map', s: [sx, sy, ver, sx, sy, ver, …] }        visible sectors and the version held (0: none), at most 512
-server  { t: 'mapSector', sx, sy, v, c: [[cx, cy, rle], …] }   only for sectors whose version differs; c lists modified chunks
+client  { t: 'map', s: [sx, sy, ver, sx, sy, ver, …], l? }       sectors in view, the version held (0: none), at most 512; detail level l
+server  { t: 'mapSector', sx, sy, v, l?, c: [[cx, cy, rle], …] } only for sectors whose version differs; c lists modified chunks
 ```
 
-The client asks for the visible sectors when the view settles and every 3 s while the map is up. The server keeps a
-version per sector (`server/src/worldmap.ts` `MapSummaries`), bumped by `Net.flush` for every tile, aux and sub change
-it sends, and a cache of the encoded message per sector, rebuilt on the first request after a change. A request for
+The client asks for the sectors in view when the view moves and every 3 s while the map is up (less often for a wide
+view: 3 s for every 40 sectors). The server keeps a version per sector (`server/src/worldmap.ts` `MapSummaries`),
+bumped by `Net.flush` for every tile, aux and sub change it sends, and a cache of the encoded message per sector and
+level, rebuilt on the first request after a change. A request for
 unchanged sectors costs a version compare each. Nothing is pushed, so the server holds no per-client map state. Chunks
 not listed are untouched: the client samples `makeTerrainSampler(seed)`, the server's own generator, for them.
 
@@ -122,9 +129,30 @@ the stop in the scenario and an estate of two or more parcels in the seeded worl
 
 ## 4. Costs
 
-Measured in section 5 of the card's report: summary bytes per sector, server encode time, map frame time zoomed right
-out over a large world. The map draws one quad per visible sector, two meshes of ribbons and fills, and the line
-ribbons: a handful of draw calls plus one per sector.
+`npm run parcels:check` measures the wire (Node, this machine, October 2026):
+
+| World | View | First answer | Bytes | Cached / unchanged |
+| --- | --- | --- | --- | --- |
+| 8×8-district test city (36 chunks) | all of it, full detail | 7 ms | 37 KB, 1 KB a chunk | 0.5 ms |
+| 2048×2048 tiles all built on (4096 chunks, 64 sectors, a street every 5 tiles and dense lots) | all of it, full detail | 250 ms | 8.0 MB, 2 KB a chunk | 0.6 ms; versions held: nothing sent |
+| the same | a byte per 4×4 tiles | 123 ms | 300 KB | |
+| the same | a byte per 16×16 tiles (what a view that wide asks for) | 72 ms | 62 KB | |
+
+Untouched chunks cost nothing on the wire, and a sector nobody touched is a 45-byte answer once. The client's map frame
+(headless Chrome on Metal, 1440×900, a machine under heavy load from other jobs, load average 10-26, so wall-clock
+frames are noisy; CPU is the time inside `MapMode.frame`):
+
+| World and view | CPU per frame, mean / p95 | Frame interval, mean / p95 | Draw calls |
+| --- | --- | --- | --- |
+| 8×8 test city (80,000 people), whole city at dist 300 | 3.6-4.3 / 1.2-9 ms | 22-23 / 33-67 ms | 20 |
+| the same, zoomed right out (dist 6000, 9000 tiles across) | 0.4-0.7 / 0.5-1.9 ms | 17.0 / 16.8 ms (vsync) | 16 |
+| the same, panning 10 tiles a frame at dist 900 (cells painting as they come in) | 3.4-12.6 / 9-57 ms | 22-33 / 67-100 ms | 41-43 |
+| London (194 parcels of 25 boroughs, 9,187 buildings), whole city | 4-12 / 19-30 ms | 27-39 / 83-183 ms | 20-24 |
+| London zoomed right out | 0.4-3.4 / 0.2-7 ms | 16.7 / 16.8 ms (vsync) | 16 |
+
+Before chunk-level repainting, a live city's changing sectors rebuilt whole cells every few seconds (8×8 city: 18 ms
+mean, 82 ms p95). For scale, the 3D view of the Showcase on the same machine at the time took from a third of a second
+to several seconds a frame.
 
 ## 5. Follow-ups
 
