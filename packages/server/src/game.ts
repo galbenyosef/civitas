@@ -4,6 +4,8 @@ import { Simulation } from './sim/simulation';
 import { Airports } from './sim/airports';
 import { Rail } from './sim/rail';
 import { Metro } from './sim/metro';
+import { Ferry } from './sim/ferry';
+import { Harbours } from './sim/harbours';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
 import { TickWindow } from './tickstats';
@@ -25,6 +27,10 @@ export interface Game {
   rail: Rail;
   /** underground railways (sim/metro.ts): the 'metro' mode of the transit registry, its tunnels and platforms */
   metro: Metro;
+  /** river buses (sim/ferry.ts): the 'ferry' mode of the transit registry, its routes on the water and piers */
+  ferry: Ferry;
+  /** harbours (sim/harbours.ts): their lanes and the 'harbours' message, the catch, ship calls, the cargo port's gateway */
+  harbours: Harbours;
   net: Net;
   /** tick time over the last minute (300 loops), for the stats message, /healthz and the client's perf readout */
   tickWin: TickWindow;
@@ -56,25 +62,31 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const metro = new Metro(world, sim.transit);
   sim.transit.register(metro);
   sim.transit.sandbox = sim.buses.sandbox = rail.sandbox = metro.sandbox = cfg.sandbox; // lines are anyone's to edit in a sandbox
+  const ferry = new Ferry(world, sim.transit);
+  sim.transit.register(ferry);
+  ferry.sandbox = cfg.sandbox;
   // rail freight: deliveries from industry near a freight yard go by train when a freight line reaches a yard near the shop
   sim.freight = rail;
   rail.trucks = { spawn: (from, to, owner) => sim.spawnFreightTruck(from, to, owner) };
   sim.traffic.barrier = (x, y) => rail.barrierDown(x, y); // level crossings: traffic waits while a train passes
+  const harbours = new Harbours(world, sim); // hooks itself into the gateways (sea route, ships berthing) and freight (port exports)
   const net = new Net(world, sim, source, cfg);
+  net.harbours = harbours;
   net.airports = airports;
   net.rail = rail;
   net.metro = metro;
+  net.ferry = ferry;
   const tickWin = new TickWindow(300);
   let slow = 0, loops = 0;
   // city history for the charts (history.ts): one sample per game hour, pushed to the clients that have the panel open
   const hist = historyOf(world);
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const game: Game = {
-    world, sim, airports, rail, metro, net, tickWin, steps,
-    step() { sim.tick(); airports.tick(); net.flush(); sampleHistory(); },
+    world, sim, airports, rail, metro, ferry, harbours, net, tickWin, steps,
+    step() { sim.tick(); airports.tick(); harbours.tick(); net.flush(); sampleHistory(); },
     loop() {
       const t0 = performance.now();
-      for (let i = 0; i < game.steps; i++) { sim.tick(); airports.tick(); }
+      for (let i = 0; i < game.steps; i++) { sim.tick(); airports.tick(); harbours.tick(); }
       net.flush();
       sampleHistory();
       const dt = performance.now() - t0;

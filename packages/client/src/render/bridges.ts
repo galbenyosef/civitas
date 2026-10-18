@@ -5,7 +5,7 @@ import {
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
   CHUNK_SIZE, hash2, isRoad, terrainOf, Terrain, isBridgeAux, bridgeNS, bridgeStyle, bridgeDeckH, BridgeStyle, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES,
-  hasFeature, planBridge, basculeSeed, basculeLiftAt, BASCULE_LIFT, BASCULE_CLOSE_BEFORE, BASCULE_OPEN_AFTER,
+  hasFeature, planBridge, bridgeClearance, basculeSeed, basculeLiftAt, BASCULE_LIFT, BASCULE_CLOSE_BEFORE, BASCULE_OPEN_AFTER,
   type BridgeStyleId, type BridgePlan,
 } from '@msimcity/shared';
 import type { ClientChunk, ClientWorld } from '../world';
@@ -109,6 +109,28 @@ class Glow {
 }
 
 const UP = new Vector3(0, 1, 0);
+
+/**
+ * The stretch of deck boats pass under (shared/src/bridges.ts bridgeChannel): the middle tile of an odd span, the middle
+ * two of an even one. The deck runs from u = 1 to L + 1, so the channel is centred on 1 + L / 2 and half a tile or a
+ * whole tile either side of it.
+ */
+const channelOf = (L: number) => ({ c: 1 + L / 2, hw: L % 2 ? 0.5 : 1 });
+/**
+ * Pier positions (the first and last are the abutments) with none standing in the channel: an interior pier that falls
+ * in it, or within `pad` of it, moves to the channel's edge on its own side, so the channel is one clear span, and a pier
+ * that would then crowd another (closer than `gap`) or the bank goes. Everything else keeps its place.
+ */
+function clearOfChannel(piers: number[], L: number, pad: number, gap: number): number[] {
+  const { c, hw } = channelOf(L), edge = hw + pad, last = piers.length - 1;
+  const moved = piers.map((p, i) => (i > 0 && i < last && Math.abs(p - c) < edge ? { p: p < c ? c - edge : c + edge, fixed: true } : { p, fixed: false }));
+  return moved.filter((o, i) => {
+    if (i === 0 || i === last) return true;
+    if (o.p < 1 + gap || o.p > L + 1 - gap) return false;
+    if (o.fixed) return !moved.some((q, j) => j < i && q.fixed && Math.abs(q.p - o.p) < 1e-6);
+    return !moved.some((q) => q.fixed && Math.abs(q.p - o.p) < gap);
+  }).map((o) => o.p).sort((a, b) => a - b);
+}
 
 /** A bascule span's gates: the barrier arms on its approaches and their pairs of warning lights. */
 interface Gate { root: Group; booms: [Group, number][]; lights: Mesh[][]; seed: number; phase: number }
@@ -348,9 +370,11 @@ export class BridgeView {
     lampOn: (n: number) => number, stone: number, l: Lift,
   ) {
     const iron = IRON[Math.floor(r(3) * IRON.length)];
-    const n = Math.max(1, Math.round(L / (1 + r(4) * 1.2)));
-    const piers = Array.from({ length: n + 1 }, (_, i) => 1 + (L * i) / n);
     const ph = 0.055 + 0.03 * r(5), spring = 0.02 + 0.035 * r(6), flat = 0.55 + 0.4 * r(7); // pier half-width, springing height, how round the arch is
+    const n0 = Math.max(1, Math.round(L / (1 + r(4) * 1.2)));
+    // no pier in the channel: its arch is the widest, and its crown (never under BRIDGE_CLEARANCE) is where boats pass
+    const piers = clearOfChannel(Array.from({ length: n0 + 1 }, (_, i) => 1 + (L * i) / n0), L, ph + 0.1, 0.4);
+    const n = piers.length - 1;
     const under = (u: number) => y(u) - 0.004;
     // the spandrel wall the arches are cut from, extruded across the deck: its top follows the road
     const sh = new Shape();
@@ -416,7 +440,7 @@ export class BridgeView {
     lampOn: (n: number) => number, l: Lift,
   ) {
     const paint = PAINT[Math.floor(r(3) * PAINT.length)], conc = CONCRETE[Math.floor(r(4) * CONCRETE.length)];
-    const T = 0.04, gd = 0.04 + 0.05 * r(5);
+    const T = 0.04, gd = Math.min(0.04 + 0.05 * r(5), l.h - T - bridgeClearance(BridgeStyle.Girder)); // the plates stay above the boats' clearance
     const n = Math.max(1, Math.round(L / (2 + 1.5 * r(6))));
     const truss = L >= 3 && r(7) < 0.35;
     // deck slab and its fascia, plate girders under its edges
@@ -429,8 +453,10 @@ export class BridgeView {
     // abutment seats on the banks, piers between: twin columns under a cap beam, or a wall with rounded ends
     for (const u of [1, L + 1]) box(u - 0.05, u + 0.05, -0.03, y(u) - T, -0.5, 0.5, conc);
     const twin = r(8) < 0.6;
-    for (let i = 1; i < n; i++) {
-      const p = 1 + (L * i) / n, capY = y(p) - T - (truss ? 0 : gd);
+    // piers keep out of the channel: the clear span runs between the two nearest, whatever the span
+    const piers = clearOfChannel(Array.from({ length: n + 1 }, (_, i) => 1 + (L * i) / n), L, 0.16, 0.5);
+    for (const p of piers.slice(1, -1)) {
+      const capY = y(p) - T - (truss ? 0 : gd);
       if (twin) {
         for (const w of [-0.3, 0.3]) strut(new Vector3(p, -0.03, w), new Vector3(p, capY - 0.04, w), 0.055, conc, 8);
         box(p - 0.06, p + 0.06, capY - 0.05, capY, -0.5, 0.5, conc);
@@ -489,7 +515,10 @@ export class BridgeView {
     const cable = r(5) < 0.5 ? 0x5a5e66 : tower;
     const T = 0.035;
     const inset = L >= 4 ? Math.max(0.6, L * (0.18 + 0.08 * r(6))) : 0.3;
-    const t1 = 1 + inset, t2 = L + 1 - inset;
+    // the towers' caissons (±0.12) keep out of the channel; on a span too short to, they sit at the banks and stand on their legs alone
+    const { c, hw } = channelOf(L), room = c - hw - 0.17;
+    const t1 = Math.max(1.13, Math.min(1 + inset, room)), t2 = 2 * c - t1;
+    const blocks = t1 + 0.12 > c - hw;
     const Ht = Math.min(1.3, Math.max(0.5, 0.42 + 0.075 * L)) * (0.9 + 0.2 * r(7));
     // the deck: a slab with a stiffening girder along each edge
     sheet(1, L + 1, -0.5, 0.5, (u) => y(u) - T, deckPaint);
@@ -499,8 +528,9 @@ export class BridgeView {
     const legW = 0.05 + 0.02 * r(8), cw = 0.56;
     let li = 0;
     for (const t of [t1, t2]) {
-      box(t - 0.12, t + 0.12, -0.03, 0.05, -0.68, 0.68, CONCRETE[1]);
+      if (!blocks) box(t - 0.12, t + 0.12, -0.03, 0.05, -0.68, 0.68, CONCRETE[1]);
       for (const s of [-1, 1]) {
+        if (blocks) box(t - 0.1, t + 0.1, -0.03, 0.05, s * cw - 0.1, s * cw + 0.1, CONCRETE[1]);
         box(t - legW, t + legW, 0.05, H + Ht, s * cw - legW, s * cw + legW, tower);
         box(t - legW * 0.8, t + legW * 0.8, H + Ht, H + Ht + 0.03, s * cw - legW * 0.8, s * cw + legW * 0.8, tower);
         head(new BoxGeometry(0.03, 0.03, 0.03).translate(0, 0.015, 0), t, H + Ht + 0.03, s * cw, 0xff3a2a, li % 2 ? 0.05 : 0.08); // aircraft warning light

@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, type TransitLine } from '@msimcity/shared';
+import { CHUNK_SIZE, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, type TransitLine, type SeaGate } from '@msimcity/shared';
 import { World, emptyProgress, lifeDefaults, type Citizen, type Parcel, type Player, type Site } from './world';
 import { LIFE, seededAge } from './sim/life';
 import { historyOf, type HistoryJSON } from './history';
@@ -30,6 +30,8 @@ export interface Snapshot {
   stopNames?: [number, number, string][];
   /** city history for the charts (history.ts, docs/charts.md); optional, so saves without it still load and no version bump is needed */
   history?: HistoryJSON;
+  /** a scenario's sea gates (World.seaGates, docs/boats.md 2.3); optional, absent in a procedural world */
+  seaGates?: SeaGate[];
 }
 
 /**
@@ -56,6 +58,7 @@ export function snapshotOf(w: World): Snapshot {
     transitLines: [...w.transitLines.values()], nextLineId: w.nextLineId,
     stopNames: [...w.stopNames].map(([k, name]) => { const [x, y] = parseKey(k); return [x, y, name] as [number, number, string]; }),
     history: historyOf(w).toJSON(),
+    ...(w.seaGates.length ? { seaGates: w.seaGates.map((g) => ({ ...g })) } : {}),
   };
 }
 
@@ -95,6 +98,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   for (const l of snap.transitLines ?? []) if (l && Number.isInteger(l.id) && Array.isArray(l.stops) && typeof l.owner === 'string') w.transitLines.set(l.id, { ...l, mode: l.mode ?? 'bus', loop: l.loop !== false });
   for (const n of snap.stopNames ?? []) if (Array.isArray(n) && Number.isInteger(n[0]) && Number.isInteger(n[1]) && typeof n[2] === 'string' && n[2]) w.stopNames.set(tileKey(n[0], n[1]), n[2]);
   historyOf(w).load(snap.history);
+  for (const g of snap.seaGates ?? []) if (g && Number.isInteger(g.x) && Number.isInteger(g.y) && typeof g.name === 'string') w.seaGates.push({ x: g.x, y: g.y, name: g.name, ...(g.low ? { low: true } : {}) });
   w.nextLineId = Math.max(snap.nextLineId ?? 1, 1 + Math.max(0, ...w.transitLines.keys()));
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {

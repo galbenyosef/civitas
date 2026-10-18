@@ -48,6 +48,23 @@ export function trainCrew(lineId: number, train: number, freight: boolean, vehic
   return out;
 }
 
+/**
+ * The crew of river bus `boat` of a ferry line at `tick` (docs/boats.md 6.2): a master, a mate and one or two
+ * deckhands, on the same early and late turns as a train's crew, now and then a trainee mate.
+ */
+export function ferryCrew(lineId: number, boat: number, tick: number): CrewMember[] {
+  const day = Math.floor(tick / TICKS_PER_DAY);
+  const hour = (tick - day * TICKS_PER_DAY) / TICKS_PER_HOUR;
+  const turn = hour < 5 ? day * 2 - 1 : hour < crewChangeHour(lineId, boat) ? day * 2 : day * 2 + 1;
+  const k = lineId * 977 + boat * 131 + turn * 7 + 5;
+  const roll = (n: number) => hash2(k, 641 + n);
+  const out: CrewMember[] = [{ name: person(k, 643), role: 'master' }, { name: person(k, 647), role: 'mate' }];
+  if (roll(1) < 0.12) out.push({ name: person(k, 653), role: 'trainee mate' });
+  out.push({ name: person(k, 659), role: 'deckhand' });
+  if (roll(2) < 0.5) out.push({ name: person(k, 661), role: 'deckhand' });
+  return out;
+}
+
 // ---- planes -----------------------------------------------------------------------------------------
 
 export interface Airline {

@@ -87,7 +87,11 @@ const S = CitizenState;
  * junction rules a step reads round it, the World.jobEdits count it ran at, and the full workplaces it passed.
  */
 interface JobMiss { x0: number; y0: number; x1: number; y1: number; edits: number; full: Building[] }
-interface DispatchJob { vkind: number; b: Building | null; entry: [number, number] | null }
+interface DispatchJob {
+  vkind: number; b: Building | null; entry: [number, number] | null;
+  /** harbour freight (sim/harbours.ts): the buyer is already chosen, and what it pays on delivery */
+  to?: [number, number]; fee?: number;
+}
 const VEHICLE_LABEL: Record<number, string> = { [VehicleKind.Freight]: 'delivery truck', [VehicleKind.Visitor]: 'visitor', [VehicleKind.Patrol]: 'police patrol', [VehicleKind.FireEngine]: 'fire engine', [VehicleKind.Ambulance]: 'ambulance' };
 
 /**
@@ -2551,6 +2555,13 @@ export class Simulation {
    * naming the yard the truck drives to instead, and hears when that truck arrives.
    */
   freight: { consign(from: [number, number], to: [number, number], owner: string | null): { id: number; yard: [number, number] } | null; truckStarted(id: number, vid: number | null): void; truckArrived(vid: number): boolean } | null = null;
+  /**
+   * Cargo ports (sim/harbours.ts, set by game.ts): the road in front of each open port is an export point beside the
+   * motorway connections, and a truck arriving there leaves its box in the port's export stack.
+   */
+  ports: { exportPoints(): readonly [number, number][]; exported(x: number, y: number): boolean } | null = null;
+  /** Queue a delivery from a harbour (sim/harbours.ts): fish to a buyer, or a container off a ship to a shop; the buyer pays `fee` on delivery. */
+  harbourFreight(b: Building, to: [number, number], fee: number) { this.dispatchQueue.push({ vkind: VehicleKind.Freight, b, entry: null, to, fee }); }
   /** A delivery truck from (from) to (to) for its owner: the last mile of rail freight, from a yard to the shop. */
   spawnFreightTruck(from: [number, number], to: [number, number], owner: string | null): number | null { return this.spawnVehicle(VehicleKind.Freight, from, to, owner)?.id ?? null; }
 
@@ -2609,8 +2620,9 @@ export class Simulation {
     if (v.vkind === VehicleKind.Freight) {
       v.until = w.tick + FREIGHT_DWELL;
       if (this.motorway && this.entries.some((e) => e[0] === v.to[0] && e[1] === v.to[1])) { v.until = w.tick; if (v.owner) w.credit(v.owner, FREIGHT_FEE, 'fees'); return; } // an export, handed over at the motorway junction and paid for by the buyer out of town
+      if (this.ports?.exported(v.to[0], v.to[1])) { v.until = w.tick; if (v.owner) w.credit(v.owner, FREIGHT_FEE, 'fees'); return; } // the same, into a cargo port's export stack (sim/harbours.ts)
       if (this.freight?.truckArrived(v.id)) return; // a container left at a freight yard for the train: the shop pays on the last mile
-      if (parcel && v.owner) w.transfer(parcel.owner, v.owner, FREIGHT_FEE);
+      if (parcel && v.owner) w.transfer(parcel.owner, v.owner, v.fee ?? FREIGHT_FEE);
     } else if (v.vkind === VehicleKind.Visitor) {
       v.until = w.tick + Math.round(TPH * (1 + 2 * Math.random()));
       if (parcel) { const tax = VISITOR_SPEND * parcel.taxRate; w.credit(parcel.owner, tax); parcel.stats.taxToday += tax; w.dirtyParcels.add(parcel.id); }
@@ -2726,10 +2738,23 @@ export class Simulation {
     const b = job.b!;
     if (w.buildings.get(tileKey(b.x, b.y)) !== b || b.level === 0) return 0; // bulldozed or rezoned meanwhile
     const owner = w.parcelAt(b.x, b.y)?.owner ?? null;
-    if (job.vkind === VehicleKind.Freight && this.motorway && Math.random() < EXPORT_SHARE) {
-      // an export: the truck takes the goods out to the nearest motorway connection and comes back empty
+    if (job.vkind === VehicleKind.Freight && job.to) {
+      // from a harbour to a buyer it chose (sim/harbours.ts); rail freight may take it, as for any works
+      const to = job.to, byRail = this.freight?.consign([b.x, b.y], to, owner);
+      if (byRail) {
+        const v = this.spawnVehicle(VehicleKind.Freight, [b.x, b.y], byRail.yard, owner);
+        this.freight!.truckStarted(byRail.id, v?.id ?? null);
+        if (v) return 1;
+      }
+      const v = this.spawnVehicle(VehicleKind.Freight, [b.x, b.y], to, owner);
+      if (v) v.fee = job.fee;
+      return 1;
+    }
+    const seaPts = job.vkind === VehicleKind.Freight ? this.ports?.exportPoints() ?? [] : [];
+    if (job.vkind === VehicleKind.Freight && (this.motorway || seaPts.length) && Math.random() < EXPORT_SHARE) {
+      // an export: the truck takes the goods out to the nearest motorway connection or cargo port and comes back empty
       let best: [number, number] | null = null, bd = Infinity;
-      for (const e of this.entries) { const d = Math.abs(e[0] - b.x) + Math.abs(e[1] - b.y); if (d < bd) { bd = d; best = e; } }
+      for (const e of this.motorway ? [...this.entries, ...seaPts] : seaPts) { const d = Math.abs(e[0] - b.x) + Math.abs(e[1] - b.y); if (d < bd) { bd = d; best = e; } }
       const v = best && this.spawnVehicle(VehicleKind.Freight, [b.x, b.y], best, owner);
       if (v) { if (v.leg) v.leg.arrive = 'none'; return 1; } // handed over on the junction road, no parking
     }

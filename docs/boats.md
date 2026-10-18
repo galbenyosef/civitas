@@ -520,7 +520,7 @@ schedule.
 | **marina** (25) | 4×4, 2, `[1, 3]` | 10 on a pontoon spine with fingers | narrow | Harbours | $4,000, $60 | 8 (harbourmaster, dock hands, café) | 6-10 boats based, by hash, sized to the water (narrowboats on narrow or river bodies, sailboats only with clearance 2+); berth fees $4 a boat a day to the owner; a leisure venue |
 | **fishing harbour** (26) | 4×3, 1, `[1, 2]` | 3 trawler slots along the quay | river | Harbours | $5,000, $80 | 26: 20 crew (04:00-16:00, Mon-Sat) and 6 market porters (05:00-13:00) | 3 trawlers; the catch is landed at the fish market and sold to food venues and industry (6.3) |
 | **ferry pier** (27) | 2×2, 1 (the pontoon), `[0, 1]` | the 2-tile row **outside**, behind the pontoon (`pierStop`, like rail's `stationStop`) | narrow, with a river lane | River buses | $1,500, $20 | 3 pier staff | a stop for a ferry line (6.2); one line a pier (question 2) |
-| **cargo port** (28) | 8×6, 1, `[3, 5]` | 5-tile big berth and 3-tile small berth on row 0; 2 gantry cranes on the quay; truck gate in front | open, and the body reaches a sea gate | Seaport | $14,000, $200 | 70: dockers and crane drivers (06:00, 14:00, 22:00) | the `'sea'` gateway: `gateway: 'sea'`, `gatewayModes: ['foot', 'taxi']`, `arrivalsPerHour: 6`, `needsWater: true`; ship calls; imports and exports (6.4) |
+| **cargo port** (28) | 8×6, 1, `[3, 5]` | 5-tile big berth, 2.4-tile small berth and a tug berth on row 0; 2 gantry cranes on the quay; truck gate in front | open, and the body reaches a sea gate | Seaport | $14,000, $200 | 70: dockers and crane drivers (06:00, 14:00, 22:00) | the `'sea'` gateway: `gateway: 'sea'`, `gatewayModes: ['foot', 'taxi']`, `arrivalsPerHour: 6`, `needsWater: true`; ship calls; imports and exports (6.4) |
 
 **Tech**, in `tech.ts`:
 
@@ -607,6 +607,44 @@ showcase does not place.
   rows.
 - **For B8.** Drop `draft` on the five kinds and on the `harbour` group.
 
+### Built: B7, harbour models (2026-10-18)
+
+Two designs per kind in `buildings/harbour.ts` (the kinds stay drafts), and channel-aware piers in `render/bridges.ts`.
+No kind data, berth or footprint changed.
+
+- **The designs.** A tile picks one of a kind's two by hash.
+
+| Kind | Design 1 | Design 2 |
+| --- | --- | --- |
+| jetty | timber jetty on piles: boathouse, slipway, ladder, cleats, lifebuoy, lamp | floating hire pontoon on a hinged gangway: tackle hut with an awning, racked dinghies, flagstaff |
+| marina | harbourmaster's office with lookout and balcony, café with tables, car park, fuel dock | sailing club with a verandah over the water, rigged dinghy park, boat hoist over a yacht, timber pontoons |
+| fishing harbour | open auction canopy, market hall, ice plant and pipe, derrick, nets, floats, gulls | harbour arms with a striped lighthouse, tarred net lofts, smokehouse, café, stalls, a boat hauled out |
+| ferry pier | covered floating pontoon with a folded-plate canopy, kiosk and two roundel signs | timber pier head on piles with a cast-iron pavilion and lantern, trestle bridge, clock-turret office |
+| cargo port | two gantry cranes with stays, stacks, straddle carriers, lorries, control tower, transit shed | two slewing harbour cranes, grain silos and gallery, sawtooth warehouses, log piles, rail siding |
+
+- **What stays clear.**
+  - Wet rows hold only what a berth allows: pontoon and jetty decks inside |x| < 0.12, quay walls and fenders, mooring
+    piles in the gaps between berths, the fishing harbour's two arms outside the trawler slots, and the marina's
+    fingers and fuel dock outside the ten bow-in slots.
+  - The ferry pier's geometry ends at z = -1.0, so its berth row stays open.
+  - Crane booms, trolleys and jibs stay above 1.1, over any ship.
+  - A check (`buildings:check` "footprints") already keeps every part inside the footprint.
+  - The cargo port's small berth is 2.4 tiles (the 2-tile coaster and 1.6-tile ro-pax fit), with a 0.5-tile `'tug'` berth in
+    the freed end (x 7.45-7.95) for the container ships' escorts.
+- **Helpers.** `gull`, `lifebuoy`, `lamp`, `car`, `bench`, `dinghy`, `fenders`, `roundel`, `stack`, `lorry`, `straddle`
+  and `gantry` are local to the file. A `taper` with `shift` draws the leaning stays and jibs.
+- **Night.** Lamp heads, the cranes' warning lights and the lighthouse lantern use window classes, so they light after
+  dark; windowed boxes carry facades and pass the window-collision check.
+- **Bridges.** `bridges.ts` has `channelOf(L)` (the deck stretch boats pass under, matching `bridgeChannel`) and
+  `clearOfChannel`:
+  - arches and girders never put a pier in the channel: a pier that falls in it moves to the channel's edge on its own
+    side, so the channel is one clear span, and a pier that would crowd another goes;
+  - an arch's widest span is then over the channel, its crown at 0.12 or more;
+  - a girder's plates are capped so their underside stays above `BRIDGE_CLEARANCE`;
+  - a suspension span's towers and caissons keep out of the channel, and on a span too short for that the caisson is
+    only two footings.
+  Checked on spans of 1 to 9 tiles with a channel marker drawn under each deck.
+
 ## 6. The simulation
 
 ### 6.1 What is scheduled and what is simulated
@@ -674,6 +712,114 @@ Pleasure boats and the marina:
 - **Selection.** The ferry's panel reuses `inspectTrain`: vehicle ids are `trainVehicleId`, and line ids are unique
   across modes. `trainCrew` gets a ferry variant: a master, a mate and deckhands.
 
+### Built: B5, ferries (2026-10-18)
+
+- **Mode and stops.** `TransitMode` has `'ferry'` and `STOP_KINDS[27] = 'ferry'` (`shared/src/transit.ts`). A line names
+  its piers by their doors, as rail names stations.
+- **The stop** (`shared/src/ferry.ts` `pierStop`, `ferryStop`, `pierAt`, `pierBuilt`). The stop row is the 2-tile berth
+  (`fairwayTiles(p, 0)`) plus one tile of open water beyond each end, so it is 4 tiles long, as a `StationStop` with
+  `len` 4. Every tile must be open water with no deck, or the pier says why ("needs open water beyond each end of its
+  berth for the boats to come alongside"). The end tiles matter: a boat that came in across the row's end would lie on
+  the rounded corner, and with them the hull of a boat at either berth position lies on the straight.
+- **The route** (`routeWater(def, grid, env)`). Both ways through the first pier are tried, and the cheaper is kept.
+  - Each leg is a `waterLane` for `cls: 'river'` and `FERRY_SIG` (`passSig(0.10, false)`, every style closed). It runs
+    from the end of one stop row to either end of the next.
+  - A loop's closing leg goes back into the first row's first tile.
+  - The lane search runs on a `BerthGrid` wrapper of the grid, which counts every stop row's end tiles as wide enough
+    (they lie beside the bank, clearance 1) and its berth tiles as land. So a leg reaches a row only at an end, from
+    outside, and never through a berth.
+  - A refusal names the two piers and the lane's reason: "the piers at (x, y) and (x, y) are not joined by water a river
+    bus can sail: the water is too narrow at (x, y)".
+  - Water is shared, so a route may cross itself and other lines.
+  - The result is a `RailRoute` with `water: true`, `room` and `bridges` (new optional fields on `RailRoute`).
+- **Timing** (`rail.ts`).
+  - `RailLineDef.ferry` is set, with `FERRY_TIMING` as designed.
+  - `RailVehicle.RiverBus` (9) is a "river bus", 0.95 long. `consistKinds` gives one.
+  - `RailService.ferry` is set. `stationDwell` takes `ferry`.
+  - A there-and-back line spaces its boats on the unfolded ring, as the metro does. The `railService` cache key gains
+    `f`.
+  - Each call stands at `stopS ± FERRY_BERTH_OFF` (0.5) in the way the boat is going. At the ends of a there-and-back
+    line it is where it came in: -0.5 at the first pier and +0.5 at the last. So the dwell and run pieces join up.
+  - `railGeometry` hands a `water` route to `waterGeometry(route, 2)`. `RailGeometry.water` keeps it, and `railPoint`
+    follows `waterPoint`. `geom.s` holds approximate tile-entry arclengths.
+  - **A correction to waterGeometry's `stopS`.** It is computed from the row's first tile. That tile is a rounded corner
+    when a boat comes in across the row's end, so its `tileS` is the arc's middle and not the tile's centre, which
+    put the stop 0.11 off. `railGeometry` takes each stop row's middle from its second tile instead, which is always a
+    straight vertex. Lanes without stops are unaffected.
+  - Non-ferry lines are unchanged: rail-check and metro-check print byte-identical output before and after.
+- **`server/src/sim/ferry.ts`, `Ferry extends Timetabled`** (mode `'ferry'`). It is registered in `game.ts` after the metro,
+  with `sandbox`, so local mode has it too.
+  - **Routes** are cached per line shape with a hash of the water they were found on. The hash covers every route tile
+    with its 4 neighbours (tile word and aux byte) and the piers' doors.
+    - Re-deriving every 10 ticks costs a few thousand tile reads.
+    - A changed hash, or a new game day, reads the water into a fresh `WaterGrid` and searches again.
+    - A refusal is retried after 50 ticks.
+  - **The grid's terrain fallback.** It reads `World.peekTile` and falls back to the terrain sampler, so water in a
+    chunk nobody has generated is still water.
+  - **`route`** refuses a pier that is not the owner's (outside a sandbox), and a pier another ferry line calls at: "The
+    pier at (x, y) already serves line 1; build another pier for this line".
+  - **`plan`** is the editor's preview: the lap, `lapTicks` and `LinePreview.sail`, the sailing line sampled every
+    0.25 tiles (`sailPoints`).
+  - **`commit`** applies the cap of 24 lines an owner, and requires the `'ferry'` feature (River buses), except in a
+    sandbox or with dev funds.
+  - **Riders.** `capacity` is 120 places a boat. `rideTicks` adds `FERRY.access` (2 ticks for the gangway).
+    `waitSpot` is `pontoonSpot`: a hashed spot of each rider's own on the pier's wet row.
+  - **`describeStation`** answers `BuildingInfo.ferry`, in the `MetroStationInfo` shape. `track` is the berth's state,
+    `platform` is the stop row's end tiles, and it lists the lines with their next boat and where to change.
+  - **`describeTrain`** answers `inspectTrain`: "alongside at …", "sailing to …", and the riders.
+- **Wire.**
+  - `{ t: 'ferryLines', lines: FerryLineDTO[] }` (`RailLineDTO` plus `names`) is sent on hello and when `changed`, as
+    `metroLines` is.
+  - `net.ts` routes `inspectTrain` to the ferry after rail and the metro, fills `BuildingInfo.ferry` for kind 27, and
+    toasts a ferry save ("… saved: 2 piers, 4 boats asked for").
+- **Client.**
+  - The Lines panel has a ferry mode: the first pier clicked picks it, and the tool asks for River buses.
+  - The panel has a name field, up to 8 boats and 12 piers, and its own hint.
+  - The draft is drawn along `preview.sail`, and saved ferry lines along `sailPoints` of their routes (from
+    `ferryLines`, `LinesPanel.setFerryLines`).
+  - The pier tooltip is `metroStationHtml(info, row, true)`, which reads "River bus", "Berth" and "a boat every N min".
+  - `main.ts` keeps the DTOs in `ferryMeta` (also `window.msc.ferryMeta`).
+- **Crews.** `shared/src/crews.ts` `ferryCrew(lineId, boat, tick)` gives a master, a mate and one or two deckhands
+  (sometimes a trainee mate), on a train crew's turns.
+- **Showcase.** `LINE_MODES.ferry` is `true`. The existing draft skip in `showcaseProblems` passes over it while the pier
+  is a draft, so the type did not need to widen. `LINE_CAPTIONS.ferry` is a first draft. A ferry `DemoLine`'s stops
+  must be `ferry-pier` placements.
+- **Load test.** `npx tsx packages/server/src/loadtest/ferry.ts [--districts 3] [--hours 24] [--off] [--no-fill]
+  [--save path]`.
+  - **The city.** A 3×3 seedCity whose middle row of districts is a lake 24 tiles across. Only a causeway at the west
+    edge joins the two shores by land, because a commute needs a walk to work.
+  - **The piers** stand on the bank between the lake and the first street. They are placed with the tool, and the lines
+    are previewed and saved through `Net.handle`.
+  - **The lines.** Line 1 is a loop of 4 piers (158 tiles, 8 boats every 36 min). Line 2 runs there and back across
+    the middle (58 tiles, 4 boats every 30 min).
+  - **The feeders.** Buses in the two middle districts end at stops on the bank, 4 tiles from line 2's piers.
+  - **The commuters.** Half the workers of each shore district then work across the water.
+  - **Measured over a day** (46 checks pass):
+    - `Ferry.tick` costs 0.06 to 0.07 ms a tick;
+    - every pier has exactly the timetable's calls;
+    - riders board and alight on both lines;
+    - 39 trips went by river bus, 36 of them changing to or from a bus;
+    - every ferry rider waiting stood on a pontoon;
+    - nobody overstayed a wait or rode a boat that was not running;
+    - a bulldozed pier grounds its line.
+  - **Ridership** is small because the test city's commutes mostly drive, as in the metro test.
+  - **`--save path`** writes the city once line 1 is saved and stops. That is a test city for a server
+    (`CITY_DISTRICTS=3 WORLD_FILE=path`), which gave the Lines editor screenshot of line 2's draft.
+- **For B6.**
+  - Run each `FerryLineDTO` with `railService(dto, dto.route)` and `trainsAt(svc, tick)`.
+  - `trainPoses` gives the one hull, kind 9, between bogie points 0.3 either side, so it follows the sailing line.
+  - `svc.geom.water` is the `WaterGeometry`: `decks` for the bridges, and `waterPoint(...).c` for the keep-to-starboard
+    offset.
+  - Vehicle ids are `trainVehicleId(line, boat)`, and the panel comes from `inspectTrain`.
+  - Add `boats.setFerryLines(m.lines)` in `main.ts`'s `ferryLines` handler.
+  - No loads message exists yet, unlike `metroLoads`.
+- **For B8.**
+  - Place piers whose berth row and one tile beyond each end are open water, on river-class water (a 4-wide river
+    leaves clearance 2 in the row beyond the berth).
+  - Save ferry lines (`mode: 'ferry'`, pier doors as stops).
+  - Register a `Ferry` in the demo seeder and `demo/check.ts` where they build their own services, as for the metro.
+  - Refine `LINE_CAPTIONS.ferry`.
+
 ### 6.3 Fishing
 
 - **Crew.** The crew are real citizens on the harbour's payroll. `boatRole(kindId, wx, wy, citizenId)` hash-seeds crew
@@ -733,6 +879,137 @@ Pleasure boats and the marina:
 - **Tick cost.** `Harbours.tick` advances a pointer through the day's sorted events, and the ferries cost what a metro
   line costs. Lane derivation happens on change only. The target is under 3% more sim time on the boats load test
   (section 9).
+
+### 6.6 Built: B4, server harbours (2026-10-18)
+
+Sections 2.2 (derivation), 2.3 (sea gates) and 6.3-6.5 are built in `server/src/sim/harbours.ts` (`Harbours`, owned by
+`game.ts` beside `Airports`). Checked by the B4 section of `boats-check.ts` and by `server/src/loadtest/boats.ts`.
+
+- **The list.** Every finished harbour kind (ids 24-28, level 1 or more) is a `HarbourDTO` (`protocol.ts`): B3's
+  `BoatHarbour` plus `r`, `door`, `owner`, `fairway` and `refused?`.
+  - `id` is `harbourId(ax, ay)`, stable and under 2^31. `x, y` is the anchor. `active` is "has staff on the books".
+  - `name` is the stop name given to the door (`World.stopNames`, so B8 can name London's), else a generated
+    "Okafor Marina", "Chen Harbour", "Zhang Docks", "Mahmood Jetty" or "Flores Pier".
+  - `berths` is `harbourBerths(p)`.
+  - Ferry piers are listed too, with no lanes and no boats: their river buses are B5's.
+- **The fairway.** Every lane starts at one tile: behind the middle column, on row `c - 1` out, where `c` is the widest
+  class any of the kind's lanes needs (a marina's sailboats need river water, so row 1; a port's ships row 2). If that
+  tile is too narrow, a nearer row is used, down to row 0, and the wider lanes are refused with the reason. `entry` is
+  the side facing the harbour, so a boat leaving heads out.
+- **When lanes are derived.**
+  - A scan every 10 ticks reads the built harbours. It re-derives when a harbour is built or removed, or its staffing,
+    owner or name changes (the lanes are cached per kind, anchor and rotation, so a staffing change derives nothing).
+  - It also re-derives when a water tile's navigability changes. `World.onTileChanged` is chained: a water tile that
+    reads differently to boats (open, a deck of some style, or blocked) invalidates the `WaterGrid` there and marks
+    every derivation stale. A harbour's wet tiles changing as it is built or levels up are not edits. The first change
+    seen at a tile counts as one, because the harbours did not watch it being placed.
+  - A daily sweep clears the grid and marks every derivation stale.
+  - Stale harbours are re-derived for 8 ms a scan (`DERIVE_BUDGET_MS`), and the rest keep their lanes for one more
+    scan. A new harbour is always derived at once.
+  - Water turned into land is not reported by the hook (no tool does it yet); a fill tool calls
+    `harbours.waterFilled(x, y)`.
+- **A new list only on change.** Each derivation builds new objects. If the JSON is the same as the last list, the old
+  list is kept, so B3's caches stay warm. Otherwise `list` is a new array and `changed` is set.
+- **Sea gates.**
+  - `World.seaGates: SeaGate[]` is new. It is persisted as an optional snapshot field `seaGates` (no format bump) and
+    is empty in a procedural world. B8's seeder writes it.
+  - With declared gates, every harbour derives against them.
+  - Without any, each harbour fills from its fairway (`openWater`). Open water (1,500 tiles or more) gives an offing,
+    passed as a gate named `the open sea` (`OFFING_NAME`). Each harbour's fill starts at its own fairway, so two
+    harbours on one lake may have different offings with the same name.
+  - A smaller lake has no gate. Trawlers then fish its roomiest water, and a port there has no sea lanes.
+- **The cargo port as a gateway.**
+  - `Gateways.seaRoute(x, y)` (set by `Harbours`) is checked in `refresh`. A `'sea'` gate opens only while the port is
+    staffed and has a `sea` lane to a gate.
+  - `Gateways.shipBerthed(x, y, passengers)` is `planeLanded`'s twin. A ro-pax `alongside` event calls it with 80-300
+    passengers, and 8% of them are newcomers.
+  - The gateway tooltip says "closed: no staff yet, or no sea route".
+- **The port is refused on a small lake.** `net.ts` `placeStructure` asks `harbours.placeProblem(placed)`. In a world
+  with no declared gates, a port whose fairway water is not open is refused: "A cargo port needs open water that
+  reaches the sea: this lake is 300 tiles". A port in a declared-gate world is never refused there; its panel shows
+  the lane refusal instead.
+- **Events.** Each tick walks `boatEvents` of days d - 1 and d, between the last tick and this one. The clock is
+  `w.day * TICKS_PER_DAY + tick % TICKS_PER_DAY`, the same as `Airports.flightTick` and the clients. The events are
+  cached per `harboursKey` and day. They are walked from start-up on; events before a restart are not replayed.
+  - `berthed` of a fishing voyage lands `catchOf(v)` boxes on the harbour's quay.
+  - `alongside` of a call lands `callCargo(v).imports` containers in the port's import queue (at most 240), with port
+    dues of $5 a box to the owner from outside. A ro-pax call also brings passengers (`shipBerthed`).
+  - `castOff` of a call takes up to `exportRoom` boxes from the export stack, oldest first, at $5 a box in dues.
+- **Lorries** (`Simulation.harbourFreight(b, to, fee)`, a new optional `to` and `fee` on the dispatch job, and
+  `Vehicle.fee`).
+  - **Fish.** From 05:00 to 20:00, every 20 ticks, each staffed harbour with 10 boxes or more sends a lorry of 10. 75%
+    go to the best food venue within 60 tiles (`isFoodVenue`) and the rest to a staffed works. The buyer pays $30 on
+    delivery.
+  - **Containers.** From 06:00 to 20:00, every 8 ticks, each staffed port sends one container to a shop anywhere in
+    town, chosen as a motorway lorry's shop is. The shop pays the port's owner $3.
+  - Rail freight's `consign` is asked first for both, as for any works. A consignment that goes by train pays the last
+    mile's usual `FREIGHT_FEE`.
+  - **Exports.** `Simulation.ports` gives the road in front of each open port as an export point beside the motorway
+    entries, and the export roll (`EXPORT_SHARE`) takes the nearest. A truck arriving there puts its box in the port's
+    export stack (at most 400; boxes are written off after 1.5 days), and the exporter is paid `FREIGHT_FEE` from
+    outside, as at a motorway. Without a motorway, open ports alone are export points.
+- **Marina berth fees.** At each day's start, every staffed harbour whose kind has `berthFee` (the marina) pays its
+  owner the fee for each boat in `harbourFleet`.
+- **Fishing crews** (section 6.3).
+  - `crewBoat(citizenId, trawlers)` hash-seeds 20 in 26 of the payroll as crew, each on one trawler; the rest are
+    market porters.
+  - `inspectBoat` lists a trawler's crew as citizens.
+  - `inspectCitizen` adds `atSea: { boat, name }` while the citizen is at `Work` and their trawler is on a fishing
+    voyage.
+- **Nothing is saved.** Stocks, queues and stacks start empty after a restart, as the gateways' queues do.
+
+**Wire API (for B6 and B8).**
+
+- `{ t: 'harbours', list: HarbourDTO[], gates: SeaGate[] }` is sent on hello and in `flush` whenever `changed`. Each
+  message is a new list. Clients call `boatsAt(list, tick)` with `tick = day * TICKS_PER_DAY + dayFrac *
+  TICKS_PER_DAY`. `gates` holds the declared gates plus the offings the lanes use.
+- `{ t: 'inspectBoat', id }` (read-only, allowed in spectate) is answered by `{ t: 'boat', id, info: BoatInfo | null }`.
+  `BoatInfo` is `{ id, harbour, harbourName?, crew?: { id, name }[], landedToday?, cargo?: { imports, exports,
+  passengers } }`. It is null for a boat that is neither based nor on a voyage now.
+- `BuildingInfo.harbour: HarbourInfo` drives the harbour tooltip (`ui.ts` `harbourHtml`):
+  - status, boats based and out, the sea gate or the lake's size, the lanes and refusals;
+  - fishing: landed, sold and the stock on the quay;
+  - port: calls, containers in and out, the queues, passengers and dues;
+  - marina: berth fees.
+- `CitizenInfo.atSea` is `{ boat, name }`.
+- For B8:
+  - write `World.seaGates` in the seeder;
+  - name harbours through `stopNames` at the door;
+  - `demo:check --run` can read `game.harbours.totals` (landed, sold, calls, imports, importLorries, exports,
+    passengers, dues, berthFees, derivations, deriveMs) and `today()`.
+
+**Measured.**
+
+- **`boats-check.ts` (the B4 section).** It places a real jetty, marina, fishing harbour and cargo port on the
+  basin's south shore and runs `Harbours` on the server World.
+  - All the lanes are derived and pass B1's lane checks, from the fairway and entered from the harbour. The sea and
+    grounds lanes leave by the open sea.
+  - Re-levelling a wet tile derives nothing and keeps the same list object.
+  - Losing staff gives a new list with the harbour inactive; it sails nothing and nothing is derived.
+  - A port on the 300-tile lake is refused.
+  - The wire's JSON copy gives the same timetable.
+  - Two days walked tick by tick match the schedule's own events: 200 boxes landed, 9 calls landing 133 containers,
+    94 taken on from a stack of 400, $1,135 in dues and $56 in berth fees, all credited to the owner.
+  - After a girder is built over the river and gates are declared, the lanes equal a fresh derivation. The barges then
+    come down from the upper river under the new deck, and the estuary replaces the offing.
+  - Bulldozing the jetty gives three harbours with fresh-equal lanes.
+  - The sea gates survive a save.
+  - A derivation takes about 6 ms a harbour.
+- **`loadtest/boats.ts --days 2`.**
+  - **The city.** 2×2 districts fully built (about 5,000 people), a motorway connection, and a lake of about
+    11,000 tiles. On the shore: a jetty, a ferry pier, a marina, 2 fishing harbours and a cargo port, all staffed.
+  - **The harbours' own cost.** `harbours.tick` averages 26-29 µs a tick, 0.6-0.7% of the tick. Its worst tick is
+    18-26 ms: a scan re-deriving after the daily sweep (at most about 15 ms), or a new day's timetable and events (at
+    most about 12 ms). A derivation takes 6-8 ms a harbour. The message is 5 KB.
+  - **Whole tick.** With the module disconnected (`--off`), 3.20-3.38 ms a tick. With harbours, 3.61-3.82 ms. With
+    harbours but no lorries (`--no-lorries`), 3.67 ms. The runs diverge by their random streams; with the harbours
+    the city ends about 100 people bigger (ferry newcomers), and runs on a shared machine vary by about ±5%. So beyond
+    the 0.7% the module measures, the difference is mostly a different city, not harbour work.
+  - **A day.** 15 voyages: 6 fishing trips, 5 cruises, and a container ship, a coaster, a ro-pax and 1-3 barges.
+  - **Two days.** 318 boxes landed and 330 sent to market (33 lorries); 8 ship calls landing 121 containers (121
+    lorries to shops); 155 containers taken on from trucks; 245 ro-pax passengers; $1,380 in dues and $48 in berth
+    fees. 63 of the 536 newcomers came through the cargo port, the motorway taking the rest. Without the motorway,
+    all 294 came through the port.
 
 ## 7. Rendering
 
@@ -922,10 +1199,10 @@ There are eight subtasks, about 5 hours of agent time, in four waves. Each runs 
 | B1 | Waterways: nav grid, clearance, lanes, `waterGeometry`, bridge clearance | opus | — | B2 | M (30 min) | new `shared/src/waterways.ts`; `bridges.ts` (`BRIDGE_CLEARANCE`, `bridgeChannel`); new `shared/scripts/boats-check.ts` (lanes) | `shared/src/index.ts` (one export line) |
 | B2 | Harbour kinds (ids 24-28, drafts, one placeholder design each), wet footprints, placement, tech. **Built** (section 5) | opus | — | B1 | M (35 min) | new `buildings/harbour.ts`; `schema.ts`; catalogue registration; `structures.ts` `checkPlaced`; `tech.ts`; `chunkView.ts` (water under wet tiles); `worldmap.ts` (`mapClassOf`) | `compiled.ts` (generated: re-run `buildings:compile` on merge); `chunkView.ts` |
 | B3 | Boat types and the schedule: `BOAT_TYPES`, `boatTimetable`, berth and bascule booking, `boatsAt`, names and crews | opus | B1 (B2's ids by `KIND_ID`) | B5, B7 | L (45 min) | new `shared/src/boats.ts`; `boats-check.ts` (schedule sections) | `boats-check.ts` (append sections) |
-| B4 | Server harbours: lanes on change, sea gates, `harbours` message, fishing and port economy, `shipBerthed`, `inspectBoat`, tooltips, load test | opus | B1, B2, B3 | B6 | L (50 min) | new `server/src/sim/harbours.ts`; `simulation.ts` (`dispatch` `to`, export point); `gateways.ts`; `world.ts`, `snapshot.ts` (`seaGates`); `game.ts`; `net.ts`; `protocol.ts`; new `loadtest/boats.ts` | `net.ts`, `protocol.ts`, `game.ts` (also B5); `simulation.ts` |
-| B5 | Ferries: the `'ferry'` mode, `Ferry extends Timetabled`, `routeWater`, `FERRY_TIMING`, berth offsets, `ferryLines`, the lines editor | opus | B1, B2 | B3, B7 | M (35 min) | `shared/src/transit.ts`; `rail.ts` (`ferry`, `RiverBus`, geometry dispatch); new `server/src/sim/ferry.ts`; `game.ts`; `net.ts`; `protocol.ts`; `client/src/lines.ts`; `showcase.ts` (`LINE_MODES` todo) | `rail.ts`; `net.ts`, `protocol.ts`, `game.ts` (also B4: append-only hunks); `showcase.ts` (also B8) |
+| B4 | Server harbours: lanes on change, sea gates, `harbours` message, fishing and port economy, `shipBerthed`, `inspectBoat`, tooltips, load test. **Built** (section 6.6) | opus | B1, B2, B3 | B6 | L (50 min) | new `server/src/sim/harbours.ts`; `simulation.ts` (`dispatch` `to`, export point); `gateways.ts`; `world.ts`, `snapshot.ts` (`seaGates`); `game.ts`; `net.ts`; `protocol.ts`; new `loadtest/boats.ts` | `net.ts`, `protocol.ts`, `game.ts` (also B5); `simulation.ts` |
+| B5 | Ferries: the `'ferry'` mode, `Ferry extends Timetabled`, `routeWater`, `FERRY_TIMING`, berth offsets, `ferryLines`, the lines editor. **Built** (section 6.2) | opus | B1, B2 | B3, B7 | M (35 min) | `shared/src/transit.ts`; `rail.ts` (`ferry`, `RiverBus`, geometry dispatch); new `server/src/sim/ferry.ts`; `game.ts`; `net.ts`; `protocol.ts`; `client/src/lines.ts`; `showcase.ts` (`LINE_MODES` todo) | `rail.ts`; `net.ts`, `protocol.ts`, `game.ts` (also B4: append-only hunks); `showcase.ts` (also B8) |
 | B6 | Boat rendering: models, liveries, motion, sails, wakes, lights, moored boats, picking, panels, helm FPV, barge hand-off | sonnet | B3 (B5 for ferries; mock until merged) | B4 | L (50 min) | new `client/src/render/boats.ts`; `vehicles.ts`; `main.ts`; `vehicleInterior.ts`; `fpv.ts` (`CabEye.helm`); `landmarks.ts` | `main.ts`; `vehicles.ts` |
-| B7 | Harbour models: two designs per kind (pontoons, jetty, market hall, pier, cranes and stacks); channel-aware arches and piers in `render/bridges.ts` | sonnet | B2 | B3, B5 | S (25 min) | `buildings/harbour.ts` (designs only); `render/bridges.ts` (`bridgeChannel`) | `compiled.ts` (re-run compile) |
+| B7 | Harbour models: two designs per kind (pontoons, jetty, market hall, pier, cranes and stacks); channel-aware arches and piers in `render/bridges.ts`. **Built** (section 5) | sonnet | B2 | B3, B5 | S (25 min) | `buildings/harbour.ts` (designs only); `render/bridges.ts` (`bridgeChannel`) | `compiled.ts` (re-run compile) |
 | B8 | Scenarios and checks: showcase `harbour` section, registry, tour, London (gates, piers, RB1, St Katharine, port), seeder `seaGates`, `demo:check` report, drafts off, `LINE_MODES.ferry = true` | opus | all | — | L (45 min) | `showcase.ts`; `london.ts`; `londonMap.ts` (`DOCKS`); `server/src/demo/seed.ts`; `demo/check.ts`; `harbour.ts` (draft flags) | `showcase.ts`; London's `startHash` changes (reset the demos) |
 
 Shared hot spots, in order of risk:

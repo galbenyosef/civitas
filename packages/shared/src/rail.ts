@@ -4,6 +4,7 @@ import { isRoad, zoneOf, levelOf, underConstruction, isBuildable, isGrowableId, 
 import { FRONT, structureAt, type Placed } from './structures';
 import { hash2 } from './noise';
 import { TICKS_PER_DAY, TICKS_PER_HOUR, gameMin } from './constants';
+import { waterGeometry, waterPoint, WIDTH_CLEARANCE, type WaterGeometry, type WaterRoute } from './waterways';
 
 /**
  * Railways (docs/rail.md). Three things a player builds, and one thing they define:
@@ -307,6 +308,8 @@ export interface RailLineDef {
   freight?: boolean;
   /** an underground line (metro.ts): twin bores, so a there-and-back line runs many trains; tube stock and METRO timing */
   metro?: boolean;
+  /** a river bus line (ferry.ts, docs/boats.md 6.2): one boat a "train", FERRY_TIMING, a route on the water (RailRoute.water) */
+  ferry?: boolean;
   /** round and round (the track must close), or there and back */
   loop: boolean;
 }
@@ -327,6 +330,13 @@ export interface RailRoute {
   loop: boolean;
   /** per station in calling order: index of its first platform-row tile in the route, and the platform length */
   stops: { k: number; len: number }[];
+  /**
+   * A ferry's route on the water (ferry.ts routeWater): a waterways.ts WaterRoute, with `room` (a clearance digit a
+   * tile) and the decks it passes under. railGeometry hands it to waterGeometry, so boats sail the rounded line.
+   */
+  water?: boolean;
+  room?: string;
+  bridges?: { k: number; style: number; x0: number; y0: number }[];
 }
 
 /** Expand a route into tiles with their entry and exit sides. */
@@ -493,17 +503,33 @@ export interface RailGeometry {
   loop: boolean;
   /** arclength of each station's stopping point (the middle of its platform row) */
   stopS: number[];
+  /** a water route's sailing line (waterways.ts), which railPoint follows instead of the tiles */
+  water?: WaterGeometry;
 }
 const CURVE_LEN = Math.PI / 4; // quarter circle of radius 1/2
 /** side midpoints of a tile, relative to its min corner */
 const MID: readonly (readonly [number, number])[] = [[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]];
 
 const geomCache = new Map<string, RailGeometry>();
-export const routeKey = (r: RailRoute) => `${r.x},${r.y},${r.entry},${r.loop ? 1 : 0},${r.sides},${r.stops.map((s) => `${s.k}:${s.len}`).join(';')}`;
+export const routeKey = (r: RailRoute) => `${r.x},${r.y},${r.entry},${r.loop ? 1 : 0},${r.sides},${r.stops.map((s) => `${s.k}:${s.len}`).join(';')}${r.water ? `|w${r.room}|${(r.bridges ?? []).map((b) => `${b.k}:${b.style}:${b.x0}:${b.y0}`).join(';')}` : ''}`;
 export function railGeometry(route: RailRoute): RailGeometry {
   const key = routeKey(route);
   const hit = geomCache.get(key);
   if (hit) return hit;
+  if (route.water) {
+    // a ferry's route: the sailing line through river-class water, its berth rows kept straight (stopS their middles)
+    const w = waterGeometry(route as WaterRoute, WIDTH_CLEARANCE.river);
+    const s = new Float64Array(w.tiles.length + 1);
+    for (let k = 1; k < w.tiles.length; k++) s[k] = (w.tileS[k - 1] + w.tileS[k]) / 2;
+    s[w.tiles.length] = w.L;
+    // the middle of each stop row, from its second tile: the row's first may be a rounded corner (a boat comes in
+    // across the row's end), whose tileS is the arc's middle, not the tile's centre
+    const stopS = route.stops.map((st, i) => (st.len >= 3 ? w.tileS[st.k + 1] + (st.len - 3) / 2 : w.stopS[i]));
+    const g: RailGeometry = { route, tiles: w.tiles, s, L: w.L, loop: route.loop, stopS, water: w };
+    if (geomCache.size > 256) geomCache.clear();
+    geomCache.set(key, g);
+    return g;
+  }
   const tiles = routeTiles(route);
   const s = new Float64Array(tiles.length + 1);
   for (let k = 0; k < tiles.length; k++) s[k + 1] = s[k] + (tiles[k].o === oppSide(tiles[k].i) ? 1 : CURVE_LEN);
@@ -516,6 +542,7 @@ export function railGeometry(route: RailRoute): RailGeometry {
 
 /** Point and heading (atan2(dz, dx), world x/z in tiles) on the centreline at arclength S. Shuttles extend straight past their ends. */
 export function railPoint(g: RailGeometry, S: number, out: { x: number; z: number; h: number } = { x: 0, z: 0, h: 0 }) {
+  if (g.water) { waterPoint(g.water, S, WP); out.x = WP.x; out.z = WP.z; out.h = WP.h; return out; }
   const n = g.tiles.length;
   if (g.loop) S = ((S % g.L) + g.L) % g.L;
   if (S < 0 || S > g.L) {
@@ -548,6 +575,8 @@ export function railPoint(g: RailGeometry, S: number, out: { x: number; z: numbe
   return out;
 }
 
+const WP = { x: 0, z: 0, h: 0, c: 0 };
+
 // ---- timetable ------------------------------------------------------------------------------------
 /** tiles per tick at line speed (cars cruise at 0.5), and the acceleration and braking rate */
 export const TRAIN_VMAX = 0.6;
@@ -568,18 +597,30 @@ const SERVICE_HARD_END_HOUR = 28.8;
  * trains a line runs. Twin bores let a there-and-back line run many trains.
  */
 export const METRO_TIMING = { vmax: 0.55, accel: 0.045, dwell: [3, 5], terminusDwell: [10, 14], trainsMax: 12 } as const;
+/**
+ * River buses (RailLineDef.ferry, ferry.ts FERRY): line speed and acceleration, dwells at a pier (longer at the ends
+ * of a there-and-back line, where the boat turns round), and the most boats a line runs. The river is two-way, so a
+ * there-and-back line runs many boats, spaced like the metro's (unfoldedS).
+ */
+export const FERRY_TIMING = { vmax: 0.4, accel: 0.02, dwell: [4, 6], terminusDwell: [12, 18], trainsMax: 8 } as const;
+/**
+ * Where a boat lies at a call, off the middle of its pier's berth (docs/boats.md 6.2): half a tile ahead in the way it
+ * is going, so an outbound and an inbound boat lie nose to tail; at the ends of a there-and-back line, where it came in.
+ */
+export const FERRY_BERTH_OFF = 0.5;
 
 /**
  * Vehicle types: RAIL_VEHICLE_LEN gives each body's length, and every pair of neighbours is RAIL_VEHICLE_GAP apart. Passenger trains
  * are a locomotive, carriages and a driving trailer; freight trains a locomotive and 4 to 8 short wagons (a locomotive
  * at each end on a there-and-back line, which has nowhere to run round).
  */
-export const RailVehicle = { Loco: 0, Carriage: 1, Trailer: 2, Flat: 3, Tank: 4, Hopper: 5, Van: 6, TubeCab: 7, TubeCar: 8 } as const;
-export const RAIL_VEHICLE_NAMES = ['locomotive', 'carriage', 'driving trailer', 'container flat', 'tank wagon', 'hopper wagon', 'covered van', 'driving motor car', 'tube car'];
-export const RAIL_VEHICLE_LEN = [CAR_LEN, CAR_LEN, CAR_LEN, 0.58, 0.58, 0.58, 0.58, CAR_LEN, CAR_LEN];
+export const RailVehicle = { Loco: 0, Carriage: 1, Trailer: 2, Flat: 3, Tank: 4, Hopper: 5, Van: 6, TubeCab: 7, TubeCar: 8, RiverBus: 9 } as const;
+export const RAIL_VEHICLE_NAMES = ['locomotive', 'carriage', 'driving trailer', 'container flat', 'tank wagon', 'hopper wagon', 'covered van', 'driving motor car', 'tube car', 'river bus'];
+/** body lengths; a river bus (a catamaran, docs/boats.md section 4) is 0.95 */
+export const RAIL_VEHICLE_LEN = [CAR_LEN, CAR_LEN, CAR_LEN, 0.58, 0.58, 0.58, 0.58, CAR_LEN, CAR_LEN, 0.95];
 export const RAIL_VEHICLE_GAP = CAR_PITCH - CAR_LEN;
 /** containers (or container-loads of bulk) a wagon carries */
-export const WAGON_LOAD = [0, 0, 0, 2, 1, 1, 1, 0, 0];
+export const WAGON_LOAD = [0, 0, 0, 2, 1, 1, 1, 0, 0, 0];
 export const FREIGHT_WAGONS = { min: 4, max: 8 } as const;
 const isWagon = (k: number) => k >= RailVehicle.Flat && k <= RailVehicle.Van;
 /** a driving cab at either end of a train: the locomotive, or a tube train's motor car (drawn facing outwards at the back) */
@@ -589,7 +630,8 @@ export const consistLength = (kinds: readonly number[]) => kinds.reduce((a, k) =
  * Vehicles in a passenger line's trains: the locomotive plus its carriages, as many as the shortest platform takes.
  * A metro train fills the shortest platform with cars, whatever `cars` says.
  */
-export function consistFor(def: Pick<RailLineDef, 'cars' | 'metro'>, route: RailRoute): number {
+export function consistFor(def: Pick<RailLineDef, 'cars' | 'metro' | 'ferry'>, route: RailRoute): number {
+  if (def.ferry) return 1; // one river bus
   const shortestRoom = () => Math.floor((Math.min(...route.stops.map((s) => s.len)) - CAR_LEN) / CAR_PITCH + 1e-9) + 1;
   if (def.metro) return Math.max(2, shortestRoom());
   const want = 1 + Math.max(RAIL_LIMITS.carsMin, Math.min(RAIL_LIMITS.carsMax, Math.round(def.cars)));
@@ -602,7 +644,8 @@ export const trainLength = (vehicles: number) => (vehicles - 1) * CAR_PITCH + CA
  * own (4-8 by hash, as many as the shortest dock takes) and the same for all its trains, so they all have one length;
  * which wagons they are is seeded per train, in runs of a kind (organic rule).
  */
-export function consistKinds(def: Pick<RailLineDef, 'id' | 'cars' | 'freight' | 'metro'>, route: RailRoute, train: number): number[] {
+export function consistKinds(def: Pick<RailLineDef, 'id' | 'cars' | 'freight' | 'metro' | 'ferry'>, route: RailRoute, train: number): number[] {
+  if (def.ferry) return [RailVehicle.RiverBus];
   if (def.metro) {
     const n = consistFor(def, route);
     return Array.from({ length: n }, (_, j) => (j === 0 || j === n - 1 ? RailVehicle.TubeCab : RailVehicle.TubeCar));
@@ -646,6 +689,8 @@ export interface RailService {
   freight: boolean;
   /** an underground line: there and back runs out in one bore and home in the other (`unfoldedS`) */
   metro: boolean;
+  /** a river bus line: one boat, FERRY_TIMING, a water route; there and back is spaced as the metro's (`unfoldedS`) */
+  ferry: boolean;
   /** each train's vehicles, front first (Vehicle kinds) */
   consists: number[][];
   /** dwell at each station (by calling order), ticks */
@@ -674,10 +719,10 @@ function runPiece(t0: number, s0: number, s1: number, dir: 1 | -1, V = TRAIN_VMA
  * Dwell at a station, ticks: 8 to 13 (5-8 game minutes) by the station, longer at the ends of a there-and-back line.
  * Freight trains stand 36 to 60 ticks at a yard while they are loaded and unloaded.
  */
-export function stationDwell(door: [number, number], terminus: boolean, freight = false, metro = false): number {
+export function stationDwell(door: [number, number], terminus: boolean, freight = false, metro = false, ferry = false): number {
   const h = hash2(door[0] * 31 + 7, door[1] * 17 + 3);
   if (freight) return Math.round(36 + 24 * h);
-  if (metro) { const [a, b] = terminus ? METRO_TIMING.terminusDwell : METRO_TIMING.dwell; return Math.round(a + (b - a) * h); }
+  if (metro || ferry) { const t = ferry ? FERRY_TIMING : METRO_TIMING, [a, b] = terminus ? t.terminusDwell : t.dwell; return Math.round(a + (b - a) * h); }
   return Math.round((terminus ? 22 : 8) + (terminus ? 10 : 5) * h);
 }
 
@@ -686,32 +731,34 @@ const ahead = (a: number, b: number, L: number) => ((a - b) % L + L) % L;
 
 const serviceCache = new Map<string, RailService>();
 export function railService(def: RailLineDef, route: RailRoute): RailService {
-  const metro = !!def.metro && !def.freight;
-  const key = `${def.id}|${def.trains}|${def.cars}|${def.freight ? 1 : 0}${metro ? 'm' : ''}|${def.stations.map((s) => s.join(',')).join(';')}|${routeKey(route)}`;
+  const metro = !!def.metro && !def.freight, ferry = !!def.ferry && !def.freight && !metro;
+  const key = `${def.id}|${def.trains}|${def.cars}|${def.freight ? 1 : 0}${metro ? 'm' : ''}${ferry ? 'f' : ''}|${def.stations.map((s) => s.join(',')).join(';')}|${routeKey(route)}`;
   const hit = serviceCache.get(key);
   if (hit) return hit;
   const geom = railGeometry(route);
   const n = geom.stopS.length;
-  const dwell = def.stations.map((d, i) => stationDwell(d, !route.loop && (i === 0 || i === n - 1), !!def.freight, metro));
-  const V = metro ? METRO_TIMING.vmax : TRAIN_VMAX, A = metro ? METRO_TIMING.accel : TRAIN_ACCEL;
-  const maxTrains = metro ? METRO_TIMING.trainsMax : RAIL_LIMITS.trainsMax;
+  const dwell = def.stations.map((d, i) => stationDwell(d, !route.loop && (i === 0 || i === n - 1), !!def.freight, metro, ferry));
+  const V = metro ? METRO_TIMING.vmax : ferry ? FERRY_TIMING.vmax : TRAIN_VMAX, A = metro ? METRO_TIMING.accel : ferry ? FERRY_TIMING.accel : TRAIN_ACCEL;
+  const maxTrains = metro ? METRO_TIMING.trainsMax : ferry ? FERRY_TIMING.trainsMax : RAIL_LIMITS.trainsMax;
+  // where a call stands: the platform's middle, or for a boat half a tile ahead along its berth (FERRY_BERTH_OFF)
+  const at = (i: number, dir: 1 | -1) => (ferry ? geom.stopS[i] + FERRY_BERTH_OFF * (!route.loop && i === 0 ? -1 : !route.loop && i === n - 1 ? 1 : dir) : geom.stopS[i]);
   const pieces: Piece[] = [];
   let t = 0;
-  const visit = (i: number, dir: 1 | -1) => { pieces.push({ t0: t, dur: dwell[i], s0: geom.stopS[i], d: 0, dir, stop: i, vp: 0, tAcc: 0, a: A }); t += dwell[i]; };
+  const visit = (i: number, dir: 1 | -1) => { pieces.push({ t0: t, dur: dwell[i], s0: at(i, dir), d: 0, dir, stop: i, vp: 0, tAcc: 0, a: A }); t += dwell[i]; };
   const run = (a: number, b: number, dir: 1 | -1) => { const p = runPiece(t, a, b, dir, V, A); pieces.push(p); t += p.dur; };
   if (route.loop) {
-    for (let i = 0; i < n; i++) { visit(i, 1); run(geom.stopS[i], i + 1 < n ? geom.stopS[i + 1] : geom.stopS[0] + geom.L, 1); }
+    for (let i = 0; i < n; i++) { visit(i, 1); run(at(i, 1), i + 1 < n ? at(i + 1, 1) : at(0, 1) + geom.L, 1); }
   } else {
-    for (let i = 0; i < n - 1; i++) { visit(i, 1); run(geom.stopS[i], geom.stopS[i + 1], 1); }
-    for (let i = n - 1; i > 0; i--) { visit(i, -1); run(geom.stopS[i], geom.stopS[i - 1], -1); }
+    for (let i = 0; i < n - 1; i++) { visit(i, 1); run(at(i, 1), at(i + 1, 1), 1); }
+    for (let i = n - 1; i > 0; i--) { visit(i, -1); run(at(i, -1), at(i - 1, -1), -1); }
   }
   const T = t;
-  const consists = Array.from({ length: maxTrains }, (_, i) => consistKinds({ ...def, metro }, route, i));
+  const consists = Array.from({ length: maxTrains }, (_, i) => consistKinds({ ...def, metro, ferry }, route, i));
   const vehicles = consists[0].length;
   const length = consistLength(consists[0]);
-  const svc: RailService = { lineId: def.id, geom, pieces, T, trains: 1, headway: T, vehicles, length, dwell, freight: !!def.freight, metro, consists };
+  const svc: RailService = { lineId: def.id, geom, pieces, T, trains: 1, headway: T, vehicles, length, dwell, freight: !!def.freight, metro, ferry, consists };
   const want = Math.max(1, Math.min(maxTrains, Math.round(def.trains)));
-  if (!route.loop && !metro) {
+  if (!route.loop && !metro && !ferry) {
     if (want > 1) svc.note = 'a there-and-back line on one track runs one train; make it a loop for more';
   } else {
     // as many trains as keep a train length plus TRAIN_GAP apart at every moment of the cycle; twin bores unfold a
@@ -728,7 +775,7 @@ export function railService(def: RailLineDef, route: RailRoute): RailService {
       if (min >= need) break;
     }
     svc.trains = k; svc.headway = T / k;
-    if (k < want) svc.note = `the ${route.loop ? 'loop' : 'line'} has room for ${k} train${k === 1 ? '' : 's'}`;
+    if (k < want) svc.note = `the ${route.loop ? 'loop' : 'line'} has room for ${k} ${ferry ? 'boat' : 'train'}${k === 1 ? '' : 's'}`;
   }
   if (serviceCache.size > 128) serviceCache.clear();
   serviceCache.set(key, svc);

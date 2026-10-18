@@ -4,7 +4,7 @@ import {
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
-  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName, planCombine, planSplit, KIND_NAMES, isBuildable,
+  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate,
 } from '@msimcity/shared';
 import { LIFE, stageFor } from './sim/life';
 import type { GoalState } from './goals';
@@ -114,6 +114,8 @@ export interface Vehicle extends Mover {
   parkedAt: string | null; parkKerb: boolean;
   owner: string | null;                 // parcel owner who dispatched it (freight, patrols)
   legs: Leg[]; leg: Leg | null;
+  /** what the buyer pays on delivery when it is not FREIGHT_FEE (harbour freight: fish by the box, sim/harbours.ts) */
+  fee?: number;
 }
 export interface Citizen extends Mover {
   hx: number; hy: number;               // home tile
@@ -232,6 +234,11 @@ export class World {
   underVersion = 0;
   /** station names by tileKey of the entrance (docs/underground.md); persisted (snapshot v8) */
   stopNames = new Map<string, string>();
+  /**
+   * Where bodies of water leave a scenario world (docs/boats.md 2.3): boats come and go there. Written by the seeder,
+   * persisted (an optional snapshot field). Empty in a procedural world, where open water gets its own offing.
+   */
+  seaGates: SeaGate[] = [];
   dirtyParcels = new Set<number>();
   removedParcels = new Set<number>();
   playersDirty = false;

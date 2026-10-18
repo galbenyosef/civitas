@@ -458,8 +458,11 @@ export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER |
  */
 type SurfaceTool = Exclude<Tool, 'road' | 'bulldoze' | KindToolId>;
 export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true };
-/** Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. */
-export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, freight: true };
+/**
+ * Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. The ferry is
+ * not asked for while its pier is a draft (the draft skip in showcaseProblems): docs/boats.md B8 places the piers and line 1.
+ */
+export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, ferry: true, freight: true };
 
 interface Caption { title: string; what: string; how: string; facts: [string, string][] }
 const money = (n: number) => `$${n.toLocaleString('en-GB')}`;
@@ -580,6 +583,11 @@ const LINE_CAPTIONS: Record<TransitMode | 'freight', Omit<Caption, 'title'>> = {
     what: `An underground line. Each station is a kiosk or a hall on the surface with a platform straight below it; the tunnel between them is bored when the line is saved, under roads, blocks and rivers alike. Trains of tube cars (${METRO.carRiders} riders a car, as many cars as the shortest platform has tiles) run rail's timetable, 05:00 to 01:00, out in one bore and back in the other, so a there-and-back line runs many trains, and they are never in traffic. Riders change to a bus or a train at any stop within a ${TRANSIT.transferWalk}-tile walk of the entrance. Press N for the underground view.`,
     how: `Pick Underground station in the Transport group (Z and C turn the platform), put the entrances on your land beside a road, then open the lines panel and click them in calling order. The preview shows the new tunnel and its cost (${money(METRO.tunnelCost)} a tile, ${money(METRO.wetTunnelCost)} under water, ${money(METRO.crossoverCost)} more to cross another line); tunnel that already exists is free. Lines never share tunnel or a platform: they cross at right angles.`,
     facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('metrostation')], ['Fare', '$2 a ride, children free, retirees half']],
+  },
+  ferry: {
+    what: 'A river bus line between ferry piers. Catamarans of 120 places run rail\'s timetable on the water, 05:00 to 01:00, on river-class water under every bridge; a there-and-back line runs several boats, which pass each other on the river, and the outbound and inbound boats lie nose to tail at each pier. Riders change to a bus, a train or the underground within a short walk.',
+    how: 'Put ferry piers on your land on the water\'s edge, their pontoons over the water with open water behind and beyond each end of the berth, then open the lines panel and click the piers in calling order. One line calls at a pier.',
+    facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('ferrypier')], ['Fare', '$2 a ride, children free, retirees half']],
   },
   freight: {
     what: 'A freight line between two yards. Deliveries from factories within 12 tiles of one yard to shops within 12 tiles of the other go by train when that is shorter: a truck to the yard, containers on the train, a truck for the last mile. The shipper pays the line owner $4 a container.',
@@ -984,7 +992,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   for (const kind of placed) if (!toured.has(kindIdOf(kind))) out.push(`${kind} is placed but no tour stop shows it`);
   out.push(...featureProblems());
   for (const s of sections) for (const l of s.lines ?? []) {
-    const want = l.mode === 'bus' ? ['bus-stop'] : l.freight ? ['freight-yard'] : l.mode === 'metro' ? ['metro-entrance', 'metro-station'] : ['rail-halt', 'rail-station'];
+    const want = l.mode === 'bus' ? ['bus-stop'] : l.freight ? ['freight-yard'] : l.mode === 'metro' ? ['metro-entrance', 'metro-station'] : l.mode === 'ferry' ? ['ferry-pier'] : ['rail-halt', 'rail-station'];
     for (const st of l.stops) {
       const p = sections.flatMap((q) => q.placements ?? []).find((q) => q.door[0] === st[0] && q.door[1] === st[1]);
       if (!p || !want.includes(p.kind)) out.push(`${l.id} stops at (${st[0]}, ${st[1]}), which is not a ${want.join(' or ')} placement`);
