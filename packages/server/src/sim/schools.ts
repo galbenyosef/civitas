@@ -78,6 +78,8 @@ export class Schools {
   /** stages some school in town takes, with the widest catchment (Infinity: city-wide), refreshed by the census */
   private reach = new Map<number, number>();
   private counted = false;
+  /** called when a pass raises a citizen's level (E4 wires Skills.graduated here: the "graduated" mood and brain drain) */
+  onGraduated: ((c: Citizen) => void) | null = null;
   /** since the simulation started (probes read these) */
   events = {
     enrolled: 0, graduations: 0, nurseryDone: 0, failed: 0, dropOuts: 0, left: 0, attended: 0,
@@ -325,7 +327,7 @@ export class Schools {
       s.passed++;
       if (c.study === Study.Nursery) { c.eduBits |= EDU_NURSERY; this.events.nurseryDone++; }
       else {
-        if (spec.earns > c.edu) c.edu = spec.earns;
+        if (spec.earns > c.edu) { c.edu = spec.earns; this.onGraduated?.(c); }
         // the track follows the course: A-levels at a sixth form (STEM or arts by inclination), vocational at an FE college
         if (c.study === Study.SixthForm) c.track = s.spec.stage === Study.FeCourse ? EduTrack.Trades : hash2(c.id, 233) < 0.5 ? EduTrack.Stem : EduTrack.Arts;
         if (c.study === Study.Degree && c.track === EduTrack.Trades && hash2(c.id, 247) < 0.8) c.track = EduTrack.Stem; // engineering

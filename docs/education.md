@@ -660,6 +660,9 @@ census and a pass over the citizens at midnight and at 03:30, and the census alo
 - `schools.describe(b)` → `BuildingInfo.school: SchoolInfo` (`shared/src/protocol.ts`): stage, pupils, present,
   places, admitting, teachers, teachersNeeded, postgrads and postgradsNeeded (university and research), catchment,
   hours, quality, passed/failed/droppedOut (the latest results day), waiting. **E7** draws the tooltip from it.
+- `schools.onGraduated: (c) => void`: called when a pass raises `edu` (before the leaver goes on to a degree). **E4**
+  sets it to `Skills.graduated` in the Simulation constructor (the "graduated" mood, and brain drain after
+  `EDU.drainDays`). `EDU=0` turns off both E3 (`SCHOOLS.on`) and E4 (`SKILLS.on`).
 - `schools.events` (probes, and E7's charts): enrolled, graduations, nurseryDone, failed, dropOuts, left, attended,
   escort `{ lift, sibling, adult, onTheWay, missed }`, fetched, walkedHomeAlone, admissions, waitingAtLast,
   noSchoolAtLast, wentOn. `Simulation.lifeEvents` gains `graduations` and `dropOuts`. `schools.list()` and
