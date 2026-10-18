@@ -6,7 +6,7 @@ teaching it.
 
 | Demo | Port | Sections | Tour stops |
 | --- | --- | --- | --- |
-| **Showcase** | 8190 | all eight | 88 |
+| **Showcase** | 8190 | all eight | 89 |
 | Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 29 |
 | Leisure demo | 8192 | Downtown, Leisure | 23 |
 | Civic demo | 8193 | Downtown, Civic services | 28 |
@@ -219,7 +219,7 @@ Some choices make every system busy:
 - **Districts A1 and A3 hold civic and leisure.** They replace job blocks, never homes, so the town keeps a few more jobs than people. All 10,000 people are employed, and every placed building is fully staffed, the airport and freight yards included.
 - **The industrial estate's nearest shops are by the east yard.** The estate is in C1 beside the west yard. Every shop nearer to it is homes, so its deliveries qualify for rail.
 - **The stadium faces the north road next to the rail station.** The halt sits among the homes of A2, 30 tiles away, inside the 40-tile limit on a night out.
-- **The riverside quarter is reached only over its bridges.** A river four tiles wide runs east-west south of the freight line, on rows 44 to 47. The bascule's model, Tower Bridge, is drawn for a 4-tile span. Four streets run down from the south perimeter road over the railway land and cross the river: a steel girder bridge at x = -20, a stone arch at 5, a bascule at 15 and a suspension bridge at 25. The freight line's track crosses the first street on a level crossing. Beyond the river, ten 4×4 blocks lie between the river road (y = 49) and y = 54. Together they hold one of every merged lot: works to the west, then shops, offices and homes. The last block is a ring of homes round a communal garden. Everyone who lives or works there crosses a bridge, so all four carry traffic. The traffic waits at the bascule's barriers while it lifts for a barge, and at the level crossing while a freight train passes.
+- **The riverside quarter is reached only over its bridges.** A river four tiles wide runs east-west south of the freight line, on rows 44 to 47. The bascule's model, Tower Bridge, is drawn for a 4-tile span. Four streets run down from the south perimeter road over the railway land and cross the river: a steel girder bridge at x = -20, a stone arch at 5, a bascule at 15 and a suspension bridge at 25. The freight line's track crosses the first street on a level crossing. Beyond the river, ten 4×4 blocks lie between the river road (y = 49) and y = 54. Together they hold one of every merged lot: works to the west, then shops, offices and homes. The last block is a ring of homes round a communal garden. Bus line 3 runs there and back from the street down to the stone bridge, over it and along the river road. The road runs on past the quarter to a dead end at x = 33, where the buses turn round by themselves. Everyone who lives or works there crosses a bridge, so all four carry traffic. The traffic waits at the bascule's barriers while it lifts for a barge, and at the level crossing while a freight train passes.
 - **The runway is 20 tiles,** long enough for the jumbo (`PLANE_TYPES.jumbo.minRunway`). Every plane type therefore lands at the showcase airport.
 
 ## How seeding uses the players' planners
@@ -300,7 +300,8 @@ Some entries are typed against the union they come from, the way `SURFACE_TOOLS`
 | royal flight | the same, in **London**. Rule: only Buckingham Palace has a royal pad, and landmarks stand in their own city's demo | London's `buckingham-palace` |
 | every merged lot | the non-deep ones placed and built; the deep plots built (they settle into block middles by themselves) | the kind's own stop, `block-deep` |
 | communal garden | built | `block-garden` |
-| bus turnaround | **todo**: a bus line that turns round at a dead end, turned on once automatic turnarounds land | none yet |
+| bus turnaround | a saved bus line whose buses turn round at a dead end (`BusService.plan(line).turns` has a kind 0) | `line-bus-3` |
+| metro line with an interchange | **todo**: turned on when U8 places a real metro line and undrafts the station kinds (docs/underground.md) | none yet |
 
 ### Adding a feature to the showcase
 
