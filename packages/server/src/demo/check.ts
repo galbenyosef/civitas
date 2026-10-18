@@ -14,13 +14,16 @@
  * 3. With --run, the showcase (or --demo) runs that many game days under a seeded Math.random (after the live demo's
  *    fast fill with --fill: fillDemo, so the town is as a visitor finds it, about 75 s for the showcase) and prints who uses
  *    what: staff per placement, venue visits, bus and train riders, flights by plane type, helicopter flights by
- *    service, bascule lifts, level-crossing closures, gateway arrivals and containers, and for the underground: trips
- *    by metro, changes between it and the other modes, peak train load and Metro.tick's cost. `--no-tube` runs London
- *    without its Underground section, for the tick cost without the metro.
+ *    service, bascule lifts, level-crossing closures, gateway arrivals and containers, for the underground: trips
+ *    by metro, changes between it and the other modes, peak train load and Metro.tick's cost, and for the boats
+ *    (docs/boats.md): voyages by type, tall boats through each bascule's lifts, the harbours' totals (catch, port
+ *    calls, containers, ferry passengers), river bus trips and the ferry's and harbours' tick cost. `--no-tube` runs
+ *    London without its Underground section, for the tick cost without the metro.
  */
 import {
   KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, DEMOS, demoSections, showcaseProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
-  isBridgeAux, bridgeStyle, BridgeStyle, basculeSeed, basculeLiftAt, isCrossing, isTunnel, isPlatform, underMask, type DemoId, type SeededDemo,
+  isBridgeAux, bridgeStyle, BridgeStyle, basculeSeed, basculeLiftAt, isCrossing, isTunnel, isPlatform, underMask, boatTimetable, boatLifts, HARBOUR_OF,
+  type DemoId, type SeededDemo,
 } from '@msimcity/shared';
 import { chunkPads } from '@msimcity/shared/src/helipads';
 import { World } from '../world';
@@ -28,6 +31,8 @@ import { Simulation } from '../sim/simulation';
 import { Airports } from '../sim/airports';
 import { Rail } from '../sim/rail';
 import type { Metro } from '../sim/metro';
+import type { Ferry } from '../sim/ferry';
+import { Harbours } from '../sim/harbours';
 import type { TransitPlan } from '../sim/transit';
 import { seedDemoTown, seedDemoNetwork, worldHash, seededRandom, fillDemo } from './seed';
 import { GARDEN_KIND } from '../sim/blocks';
@@ -48,18 +53,22 @@ function build(id: DemoId) {
   sim.freight = rail;
   rail.trucks = { spawn: (from, to, owner) => sim.spawnFreightTruck(from, to, owner) };
   sim.traffic.barrier = (x, y) => rail.barrierDown(x, y);
-  const p2 = seedDemoNetwork(w, sim, rail, id); // registers a Metro beside the Rail when the scenario has stations
+  const p2 = seedDemoNetwork(w, sim, rail, id); // registers a Metro and a Ferry beside the Rail when the scenario has their lines
   const metro = sim.transit.services.get('metro') as Metro | undefined;
-  return { w, sim, airports, rail, metro, problems: [...p1, ...p2] };
+  const ferry = sim.transit.services.get('ferry') as Ferry | undefined;
+  // the harbours, as game.ts runs them: the port's gateway (its sea route, ships berthing), the port as an export point
+  const harbours = new Harbours(w, sim);
+  return { w, sim, airports, rail, metro, ferry, harbours, problems: [...p1, ...p2] };
 }
 
 /** What the feature registry's `seeded` tests read of a seeded world (shared/src/demo/showcase.ts SeededDemo). */
-function seededOf(w: World, airports: Airports, sim: Simulation): SeededDemo {
+function seededOf(w: World, airports: Airports, sim: Simulation, harbours: Harbours): SeededDemo {
   const kinds = new Map<number, number>();
   for (const b of w.buildings.values()) kinds.set(b.id, (kinds.get(b.id) ?? 0) + 1);
   const chunks = [...w.chunks.values()].filter((c) => c.modified);
   const env = { tile: (x: number, y: number) => w.peekTile(x, y), aux: (x: number, y: number) => w.auxAt(x, y), sub: (x: number, y: number) => w.subAt(x, y) };
   airports.rebuild();
+  harbours.scan();
   return {
     kinds,
     scan: (f) => { for (const c of chunks) for (let i = 0; i < c.tiles.length; i++) f(c.cx * CHUNK + (i % CHUNK), c.cy * CHUNK + Math.floor(i / CHUNK), c.tiles[i], c.aux[i], c.under[i]); },
@@ -69,6 +78,9 @@ function seededOf(w: World, airports: Airports, sim: Simulation): SeededDemo {
     busTurns: [...w.transitLines.values()].filter((l) => l.mode === 'bus').map((l) => ({ number: l.number, turns: sim.buses.plan(l).turns })),
     lines: [...w.transitLines.values()].map((l) => ({ mode: l.mode, number: l.number, stops: l.stops.map((s): [number, number] => [s.x, s.y]) })),
     parcels: [...w.parcels.values()].map((p) => ({ id: p.id, name: p.name, group: p.group })),
+    // as staffed: nobody works anywhere before the fill, and an unstaffed harbour sails nothing
+    harbours: harbours.list.map((h) => ({ ...h, active: true })),
+    seaGates: w.seaGates,
   };
 }
 
@@ -85,7 +97,7 @@ for (const d of DEMOS) {
   if (ha !== hb) fail(`seeding twice gave different towns (${ha} vs ${hb})`);
   a.sim.tick(); // routes the rail and metro lines
   for (const l of a.sim.transit.lineInfos((id) => id)) {
-    const rl = a.rail.dtos().find((r) => r.id === l.id) ?? a.metro?.dtos().find((r) => r.id === l.id);
+    const rl = a.rail.dtos().find((r) => r.id === l.id) ?? a.metro?.dtos().find((r) => r.id === l.id) ?? a.ferry?.dtos().find((r) => r.id === l.id);
     const status = rl ? rl.status : l.status;
     if (rl && rl.status !== 'running') fail(`${l.mode} line ${l.number}: ${rl.status}`);
     else console.log(`  ${l.mode} line ${l.number}${rl && 'names' in rl ? ` (${rl.name})` : ''}: ${l.stops.length} stops, ${status || 'routed'}`);
@@ -110,7 +122,13 @@ for (const d of DEMOS) {
   if (inner) console.log(`  note: ${inner} grown lots of the grid town have no road beside them (seedCity's inner lots)`);
   const want = demoSections(d.id).reduce((n, s) => n + (s.lines?.length ?? 0), 0);
   if (a.w.transitLines.size !== want) fail(`${want} lines in the scenario, ${a.w.transitLines.size} saved`);
-  const featureMisses = seededFeatureProblems(d.id, seededOf(a.w, a.airports, a.sim));
+  const seededA = seededOf(a.w, a.airports, a.sim, a.harbours);
+  for (const h of seededA.harbours) {
+    const why = h.refused?.length ? `: ${h.refused.join('; ')}` : '';
+    console.log(`  ${HARBOUR_OF[h.kind]!.role} ${h.name} at (${h.x}, ${h.y}): ${h.lanes.map((l) => `${l.purpose}/${l.cls}${l.gate ? ` to ${l.gate}` : ''} ${l.route.sides.length}`).join(', ') || 'no lanes'}${why}`);
+  }
+  if (seededA.seaGates.length) console.log(`  sea gates: ${seededA.seaGates.map((g) => `${g.name} (${g.x}, ${g.y})${g.low ? ' low' : ''}`).join(', ')}`);
+  const featureMisses = seededFeatureProblems(d.id, seededA);
   for (const m of featureMisses) fail(m);
   if (!a.problems.length && ha === hb) console.log(`  ok: ${a.w.buildings.size} buildings, ${a.w.transitLines.size} lines, hash ${ha}`);
 }
@@ -122,10 +140,10 @@ if (days > 0) {
   console.log(`running ${id} for ${days} game day(s)${argv.includes('--no-tube') ? ' without the Underground' : ''}`);
   const real = Math.random;
   Math.random = seededRandom(7);
-  const { w, sim, airports, rail, metro } = build(id);
+  const { w, sim, airports, rail, metro, ferry, harbours } = build(id);
   if (argv.includes('--fill')) {
     const f0 = performance.now();
-    const r = await fillDemo(w, () => { sim.tick(); airports.tick(); }, () => {});
+    const r = await fillDemo(w, () => { sim.tick(); airports.tick(); harbours.tick(); }, () => {});
     console.log(`  filled: ${r.pop} citizens after ${(r.ticks / TICKS_PER_DAY).toFixed(2)} days in ${((performance.now() - f0) / 1000).toFixed(1)} s`);
   }
   const t0 = performance.now(), day0 = w.day;
@@ -135,29 +153,34 @@ if (days > 0) {
   const crossingTicks = new Map<string, number>();
   const crossings: [number, number][] = [];
   for (const c of w.chunks.values()) for (let i = 0; i < c.tiles.length; i++) if (isCrossing(c.tiles[i], c.aux[i])) crossings.push([c.cx * CHUNK + (i % CHUNK), c.cy * CHUNK + Math.floor(i / CHUNK)]);
-  // the underground: trips by metro and changes between it and the other modes (Transit.legsFor, as loadtest/metro.ts
-  // counts them), riders per train at its fullest, and what Metro.tick costs
+  // the underground and the river buses: trips by metro or ferry and changes between them and the other modes
+  // (Transit.legsFor, as loadtest/metro.ts counts them), riders per train at its fullest, and each service's tick cost
   const tube = { trips: 0, changes: {} as Record<string, number>, peakLoad: 0, tickMs: 0 };
-  if (metro) {
+  const boats = { trips: 0, changes: {} as Record<string, number>, tickMs: 0, harbourMs: 0 };
+  if (metro || ferry) {
     const tr = sim.transit as unknown as { legsFor(p: TransitPlan, ...a: number[]): unknown };
     const legsFor = tr.legsFor.bind(sim.transit);
     tr.legsFor = (p: TransitPlan, ...a: number[]) => {
       const r = legsFor(p, ...a);
-      if (r && p.rides.some((x) => x.line.mode === 'metro')) {
-        tube.trips++;
+      if (r) for (const [mode, c] of [['metro', tube], ['ferry', boats]] as const) {
+        if (!p.rides.some((x) => x.line.mode === mode)) continue;
+        c.trips++;
         for (let k = 1; k < p.rides.length; k++) {
           const m = [p.rides[k - 1].line.mode, p.rides[k].line.mode];
-          if (m.includes('metro')) { const key = m.sort().join('-'); tube.changes[key] = (tube.changes[key] ?? 0) + 1; }
+          if (m.includes(mode)) { const key = m.sort().join('-'); c.changes[key] = (c.changes[key] ?? 0) + 1; }
         }
       }
       return r;
     };
-    const mTick = metro.tick.bind(metro);
-    metro.tick = () => { const t = performance.now(); mTick(); tube.tickMs += performance.now() - t; };
   }
+  if (metro) { const mTick = metro.tick.bind(metro); metro.tick = () => { const t = performance.now(); mTick(); tube.tickMs += performance.now() - t; }; }
+  if (ferry) { const fTick = ferry.tick.bind(ferry); ferry.tick = () => { const t = performance.now(); fTick(); boats.tickMs += performance.now() - t; }; }
   for (let i = 0; i < n; i++) {
     const a = performance.now();
     sim.tick(); airports.tick();
+    const h0 = performance.now();
+    harbours.tick();
+    boats.harbourMs += performance.now() - h0;
     for (const [x, y] of crossings) if (rail.barrierDown(x, y)) crossingTicks.set(`${x},${y}`, (crossingTicks.get(`${x},${y}`) ?? 0) + 1);
     if (i >= n - TICKS_PER_DAY) last.push(performance.now() - a);
     if (metro) for (let k = 0; k < metro.loads.length;) { const t = metro.loads[k + 1]; for (let q = 0; q < t; q++) tube.peakLoad = Math.max(tube.peakLoad, metro.loads[k + 2 + q]); k += 2 + t; }
@@ -178,13 +201,15 @@ if (days > 0) {
     if (info.venue) bits.push(`visits ${info.venue.visitsToday} today, ${info.venue.visitsYesterday} yesterday`);
     if (bld.id === kid('airport')) { const a = airports.describe(x, y); if (a) bits.push(`airport ${JSON.stringify(a).slice(0, 220)}`); }
     if (info.transit) bits.push(`stop: ${JSON.stringify(info.transit).slice(0, 160)}`);
+    const hb = harbours.describe(bld);
+    if (hb) bits.push(`harbour: ${JSON.stringify({ ...hb, lanes: hb.lanes.length }).slice(0, 220)}`);
     console.log(`  ${(p.id ?? p.kind).padEnd(22)} ${KIND_NAMES[bld.id]}: ${bits.join(' · ')}`);
   }
   for (const l of sim.transit.lineInfos((i) => i)) console.log(`  line ${l.mode} ${l.number}: ${l.status || 'running'}, in service ${l.inService}, riders today ${l.ridersToday}, yesterday ${l.ridersYesterday}`);
   console.log(`  freight: ${JSON.stringify(rail.freightStats)}`);
   console.log(`  transit: ${JSON.stringify(sim.transit.stats)}`);
   // the registry's features in use over the days run (docs/demo.md "Keeping it complete")
-  const seeded = seededOf(w, airports, sim), runDays = Array.from({ length: w.day - day0 + 1 }, (_, d) => day0 + d);
+  const seeded = seededOf(w, airports, sim, harbours), runDays = Array.from({ length: w.day - day0 + 1 }, (_, d) => day0 + d);
   const count = <T extends string>(xs: T[]) => xs.reduce((m, x) => ({ ...m, [x]: (m[x] ?? 0) + 1 }), {} as Record<string, number>);
   for (const ap of seeded.airports) console.log(`  planes scheduled at airport ${ap.id} (runway ${ap.runwayLen}), days ${day0}-${w.day}, by type: ${JSON.stringify(count(runDays.flatMap((d) => timetable(ap, d).map((f) => f.type))))}`);
   console.log(`  helicopter flights by service (${seeded.pads.length} pads): ${JSON.stringify(count(runDays.flatMap((d) => heliTimetable(seeded.pads, d).map((f) => f.kind))))}`);
@@ -199,6 +224,23 @@ if (days > 0) {
   if (metro) {
     for (const l of metro.dtos()) console.log(`  metro ${l.name}: ${l.status}, ${l.running} of ${l.trains} trains running, headway ${l.headwayMin ?? '-'} min`);
     console.log(`  metro: ${tube.trips} trips planned by metro, changes ${JSON.stringify(tube.changes)}, peak train load ${tube.peakLoad}, Metro.tick ${(tube.tickMs / n).toFixed(3)} ms a tick`);
+  }
+  // the boats (docs/boats.md): the schedule over the days run (the harbours as they were, staffed or not), what the
+  // harbours made of it, and the river buses
+  if (harbours.list.length) {
+    const hs = harbours.list;
+    console.log(`  harbours: ${hs.length} (${hs.filter((h) => h.active).length} staffed), ${hs.reduce((k, h) => k + h.lanes.length, 0)} lanes, ${hs.filter((h) => h.refused?.length).length} with a refusal`);
+    console.log(`  voyages by type, days ${day0}-${w.day}: ${JSON.stringify(count(runDays.flatMap((d) => boatTimetable(hs, d).voyages.map((v) => v.type))))}`);
+    console.log(`  voyages by kind: ${JSON.stringify(count(runDays.flatMap((d) => boatTimetable(hs, d).voyages.map((v) => v.kind))))}`);
+    for (const d of runDays) for (const [seed, ps] of boatLifts(hs, d)) {
+      console.log(`  bascule lift seed ${seed}, day ${d}: ${ps.length} passage(s), ${ps.filter((p) => p.voyage.kind !== 'lift').map((p) => `${p.voyage.type} (${p.voyage.kind})`).join(', ') || 'only the lift barge'}`);
+    }
+    console.log(`  harbour totals: ${JSON.stringify({ ...harbours.totals, deriveMs: Math.round(harbours.totals.deriveMs) })}`);
+    console.log(`  harbours today: ${JSON.stringify(harbours.today())}, Harbours.tick ${(boats.harbourMs / n).toFixed(3)} ms a tick`);
+  }
+  if (ferry) {
+    for (const l of ferry.dtos()) console.log(`  river bus ${l.name}: ${l.status}, ${l.running} of ${l.trains} boats running, headway ${l.headwayMin ?? '-'} min`);
+    console.log(`  ferry: ${boats.trips} trips planned by river bus, changes ${JSON.stringify(boats.changes)}, Ferry.tick ${(boats.tickMs / n).toFixed(3)} ms a tick`);
   }
 }
 

@@ -6,11 +6,11 @@ teaching it.
 
 | Demo | Port | Sections | Tour stops |
 | --- | --- | --- | --- |
-| **Showcase** | 8190 | all eight | 96 |
-| Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 32 |
-| Leisure demo | 8192 | Downtown, Leisure | 23 |
-| Civic demo | 8193 | Downtown, Civic services | 28 |
-| **London** | 8194 | Areas, Landmarks, Rail and Heathrow, Buses, The Underground (its own map, below) | 81 |
+| **Showcase** | 8190 | all nine | 105 |
+| Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 36 |
+| Leisure demo | 8192 | Downtown, Leisure | 27 |
+| Civic demo | 8193 | Downtown, Civic services | 32 |
+| **London** | 8194 | Areas, Landmarks, Rail and Heathrow, Buses, The Thames, The Underground (its own map, below) | 92 |
 
 Code:
 
@@ -238,8 +238,31 @@ How the map is made:
   by Tottenham Court Road, the Central and the Jubilee by Marble Arch, the Jubilee and the Northern by Waterloo). The
   tour stops at Tottenham Court Road, each line, under Waterloo (`tube-crossover`, with the underground view on) and
   Canary Wharf.
-- **Margin.** A 24-tile ring of plain grass round the map, with the river running on out of it, so the noise terrain's
-  lakes do not read as more river from above. It has no parcels; players can buy it.
+- **The Thames** (section `london-river`, docs/boats.md 8.1). Each pier and harbour is fitted as a landmark is, before
+  the streets (so a road runs along its front), as near its real place as fits: its back rows over the Thames or a dock,
+  its front on the real one's bank, open water behind it as deep as its boats need and at least three rows, with the
+  second row out and a tile beyond each end of it water all round (so the river keeps a channel a river bus or a barge
+  can pass), a tile clear of every bridge deck. A pier also needs a tile of open water beyond each end of its berth.
+  - **River bus RB1** (`0x1d3e8a`, 5 boats) runs there and back under every bridge between five piers named with
+    `World.setStopName`: Millbank (by Vauxhall Bridge; Westminster's banks are Parliament, New Scotland Yard and the
+    Eye), Embankment (below Waterloo Bridge), Tower (below Tower Bridge: the Pool is four tiles long here, and from
+    Waterloo to Tower Bridge the bridges are three tiles apart, which leaves no room for Bankside or London Bridge
+    City), Canary Wharf and Greenwich. It changes with the Jubilee line at Canary Wharf, the 25 at Embankment and
+    Tower, and the D3 at Greenwich.
+  - **St Katharine Docks** is a new `DOCKS` basin (4×3) east of the Tower, opening on to the river where it bulges
+    north, with a marina in it: motor cruisers and narrowboats, and yachts that sail up into the Pool of London through
+    Tower Bridge's lifts (`demo:check`'s `tower-bridge-lift`). A jetty on Chelsea Reach (up river of Battersea the
+    river is three and a half tiles wide, and a jetty there would leave the barges no channel to Teddington).
+  - **Down river of every bridge** (Blackwall and Woolwich stay bridges): Dagenham Docks, a cargo port on the north
+    bank with container ships, coasters and ro-ro ferries from the estuary, a tug, and barges all the way up to
+    Teddington under every bridge; Thamesmead Fish Quay across the river, whose trawlers fish beyond the estuary.
+  - **Sea gates** (`londonSeaGates`): "the estuary" where the Thames leaves the margin's east edge and "Teddington"
+    (low) at the south-west, each the middle water tile of the river's run along that edge.
+  - The tour stops at Embankment Pier, RB1 and Millbank Pier by Westminster, the Pool of London (`pool-of-london`, a
+    spot) with St Katharine Docks and Tower Pier after Tower Bridge, the Chelsea jetty with Clapham, Canary Wharf's and
+    Greenwich's piers, and the port and fish quay in the Thames Gateway.
+- **Margin.** A 24-tile ring of plain grass round the map (`LONDON_MARGIN`), with the river running on out of it, so
+  the noise terrain's lakes do not read as more river from above. It has no parcels; players can buy it.
 
 What a fill gives (2026-10-17, machine shared with other agents, load average 12-26). With the 4×4 grid: about 29,000
 citizens after 2.4 game days in 140 s, 62,500 jobs, 8 lines running. With the street plan: about 31,500 citizens in
@@ -286,6 +309,7 @@ A section (`DemoSection`) lists:
 | `lines` | bus, rail or metro lines: stops in calling order (bus stop tiles or station doors), loop or there and back, vehicles. `freight: true` for a line between yards; `name` for a line known by name (the Central) |
 | `blocks` | grown land the tour stops at: zones nobody places, and block middles (deep plots, a communal garden) |
 | `spots` | a tour stop on something that is neither a kind nor a drag, such as a level crossing, the river, the helipads or a Tube crossover. The caption is `SPOT_CAPTIONS[spot]`; `view: 'under'` turns the underground view on there |
+| `seaGates` | where the scenario's water leaves the playable world (docs/boats.md 2.3): `{ x, y, name, low? }`, written to `World.seaGates`; every harbour derives its sea, fishing and river lanes to them |
 
 A placement of a merged lot (a zone kind bigger than 1×1 that growth assembles, `GROW_FORMS` in shared/src/zones.ts) takes a `level`. Nobody places these. The seeder builds each on lots of its zone, as growth would: through `planStructure` with those lots seen as empty, before the block middles round it are settled.
 
@@ -299,6 +323,17 @@ Some choices make every system busy:
 - **The stadium faces the north road next to the rail station.** The halt sits among the homes of A2, 30 tiles away, inside the 40-tile limit on a night out.
 - **The riverside quarter is reached only over its bridges.** A river four tiles wide runs east-west south of the freight line, on rows 44 to 47. The bascule's model, Tower Bridge, is drawn for a 4-tile span. Four streets run down from the south perimeter road over the railway land and cross the river: a steel girder bridge at x = -20, a stone arch at 5, a bascule at 15 and a suspension bridge at 25. The freight line's track crosses the first street on a level crossing. Beyond the river, ten 4×4 blocks lie between the river road (y = 49) and y = 54. Together they hold one of every merged lot: works to the west, then shops, offices and homes. The last block is a ring of homes round a communal garden. Bus line 3 runs there and back from the street down to the stone bridge, over it and along the river road. The road runs on past the quarter to a dead end at x = 33, where the buses turn round by themselves. Everyone who lives or works there crosses a bridge, so all four carry traffic. The traffic waits at the bascule's barriers while it lifts for a barge, and at the level crossing while a freight train passes.
 - **The runway is 20 tiles,** long enough for the jumbo (`PLANE_TYPES.jumbo.minRunway`). Every plane type therefore lands at the showcase airport.
+- **The harbour** (section `harbour`, docs/boats.md 8.1), on the land east of the town (`Harbour`, x 35-79, y 31-56).
+  The river runs on past the riverside quarter into a basin (x 45-95, rows 39-55) that opens to the sea in the east:
+  a declared sea gate, "the sea", at (95, 47). A quay road along y = 33 from the east perimeter road serves the cargo
+  port, Eastport Docks (its quay the basin's north edge), and a bay (rows 36-38) with Eastport Fish Quay and Harbour
+  Pier. Between the lifting bridge and the suspension bridge, a pool off the north bank, as wide as the marina, holds
+  Lifting Bridge Marina, its door on a spur from the street down to the lifting bridge: its yachts, sailing barges and
+  dinghies are too tall for a closed bascule, so they cruise out through its lifts (on day 4 of the first week).
+  Past the suspension bridge the Quarter Jetty and Riverside Pier stand by the river road, the pier two tiles from
+  bus line 3's stop at (32, 48): river bus line 1 runs there and back to Harbour Pier with 3 boats. Every boat type
+  but the launches sails within the first week. The tour stops at the marina, the jetty, both piers and the line, the
+  fish quay, the port and the sea gate.
 - **One underground line, the Crosstown** (metro line 1, in the rail section, so the transport demo has it too): a kiosk, Station Road, 3 tiles from the rail station's door on the railway land at (17, -36); a kiosk by the arena, Arena, at (27, -19); a hall, Eastgate, at (27, -2), 2 tiles from bus line 1's stop at (25, -2). Every platform runs north-south (`rot: 1`), so the tunnel leaves Station Road southwards, turns once under the stadium's district and runs straight down x = 27 under the roads and blocks between: 39 tiles bored, 2 trains of 4 cars, there and back. Riders change to the passenger line or bus line 1 on foot. The tour stops at the kiosk, the line (with the underground view on) and the hall.
 
 ## How seeding uses the players' planners
@@ -317,10 +352,13 @@ Seeding has two phases, because stops, track and lines need the simulation's ser
 | bridges | `planBridge` with the scenario's style, then `World.placeBridge` | `Net.road` over water |
 | bus stops | bulldoze the lot, then `BusService.stopProblem` (no junction) | `Net.build`, `busstop` |
 | track | `Rail.paint(owner, trackDragPath(a, b))` (planTrack) | `Net.track` |
-| metro stations | the 1×1 or `planStructure` rules above, then `Metro.platformFor` with the placement's `rot` (the platform along x for an even turn) and `Metro.lay`; a placement's `name` goes to `World.setStopName` | `Net.build` and `Net.placeStructure`, which lay the platform with the site |
-| lines | `Transit.saveLine` (a metro line bores its tunnel and is charged in `Metro.commit`) | the lines panel |
+| metro stations | the 1×1 or `planStructure` rules above, then `Metro.platformFor` with the placement's `rot` (the platform along x for an even turn) and `Metro.lay` | `Net.build` and `Net.placeStructure`, which lay the platform with the site |
+| harbours and piers | `planStructure` like any multi-tile kind: its wet back rows over the scenario's water, a band of open water behind | `Net.placeStructure` |
+| names | a placement's `name` goes to `World.setStopName` at its door: a station's, a pier's, a harbour's | the station and harbour panels |
+| sea gates | `World.seaGates` from the sections' `seaGates` (scenario only) | none |
+| lines | `Transit.saveLine` (a metro line bores its tunnel and is charged in `Metro.commit`; a ferry line finds its route on the water, `Ferry.route`) | the lines panel |
 
-`saveLine` validates the stops, routes bus lines on the roads, rail lines through the track (`Rail.route`) and metro lines through the tunnels it has just bored, and refuses shared track or tunnel. Every refusal is collected. The child exits with the list if there is any, so a broken scenario never seeds quietly. Everything is pre-built complete.
+`saveLine` validates the stops, routes bus lines on the roads, rail lines through the track (`Rail.route`), metro lines through the tunnels it has just bored and ferry lines on the water between the piers (`routeWater`), and refuses shared track or tunnel and a second line at a pier. The seeder registers a `Metro` and a `Ferry` with the transit registry when the scenario has their lines and the caller has none (demo:check and the load tests build their own `Rail`); a demo child has them from `game.ts`. Every refusal is collected. The child exits with the list if there is any, so a broken scenario never seeds quietly. Everything is pre-built complete.
 
 `fillDemo` then has two stages:
 
@@ -336,7 +374,7 @@ A visitor therefore arrives in the morning with yesterday's counters filled in: 
 - Every placeable catalogue kind is placed in the showcase. Placeable means it has a tool and is neither a draft nor a growing zone. This covers every kind bigger than 1×1, every size-ladder rung, the bus depot and stop, the stations and the freight yard.
 - Every zoning tool has a grown block on the tour. Grown kinds without a tool are exempt, such as merged lots.
 - Every surface tool is painted (runway, track). `SURFACE_TOOLS` is typed against `Tool`, so a new surface tool fails the typecheck until it is listed.
-- Every line mode runs (bus, rail, freight). `LINE_MODES` is typed against `TransitMode`, so a new mode fails the typecheck too.
+- Every line mode runs (bus, rail, metro, ferry, freight). `LINE_MODES` is typed against `TransitMode`, so a new mode fails the typecheck too.
 - Every placed kind has a tour stop, and tour ids and placement ids are unique and resolve.
 - Each line's stops are placements of the right kind.
 - Every feature in the registry is in its demo, with a tour stop. See "The feature registry" below.
@@ -348,6 +386,7 @@ The check then seeds every demo through the real planners. It fails on any refus
 - the bascule's lifts for a barge and how long the level crossing's barriers were down
 - gateway arrivals and freight containers
 - for the underground: each metro line's trains and headway, the trips planned by metro, the changes between the metro and the other modes (`bus-metro`, `metro-rail`, `metro-metro`), the peak train load and what `Metro.tick` costs a tick. `--no-tube` runs London without its Underground, for the tick cost without the metro.
+- for the boats (docs/boats.md): seeding prints each harbour's lanes (purpose, class, gate, length) and any refusal, and the sea gates; the run prints the harbours (staffed, lanes), the voyages by type and by kind over the days run, the passages booked through each bascule's lifts (a tall boat, or only the lift barge), the harbours' totals (`Harbours.totals`: catch landed and sold, port calls, containers in and out, ro-pax passengers, dues and berth fees) and today's figures, each river bus line's boats and headway, the trips planned by river bus with their changes, and what `Ferry.tick` and `Harbours.tick` cost a tick.
 
 ```sh
 npm run demo:check
@@ -386,6 +425,12 @@ Some entries are typed against the union they come from, the way `SURFACE_TOOLS`
 | mobile-job bases (docs/mobile-jobs.md): a cab office, a takeaway, a waste and recycling depot, a parcel depot | the lot at the tour spot's door holds that role (shared/src/fleet.ts `isCabOffice`, `isFoodVenue`, `isWasteDepot`, `isCourierDepot`, tile hashes): (5, 0), (6, 0), (16, 0), (14, 0) downtown | `cab-office`, `takeaway`, `waste-depot`, `parcel-depot` |
 | world map | the scenario has a `world-map` spot with `view: 'map'` and an estate (`DemoSection.estates`: the South railway and Riverside lands, combined at seeding by `planCombine`); the seeded world has an estate of two or more parcels (`SeededDemo.parcels`). docs/world-map.md | `world-map` |
 | metro crossover | in **London**: an under byte with all four sides (one line's tunnel straight across another's). Rule: the showcase runs one underground line; lines cross in London | London's `tube-crossover` |
+| every harbour kind finds its lanes (`harbour-<role>`) | a harbour of that kind in the seeded showcase with no refusal and, but for a pier, lanes (`SeededDemo.harbours`: the server's `harbours` list, taken as staffed) | the kind's placement: `jetty`, `marina`, `fishing-harbour`, `ferry-pier`, `cargo-port` |
+| every boat type (`boat-<type>`) | scheduled at a showcase harbour within 7 days (`boatTimetable` over the seeded harbours); the river bus by a saved ferry line. Typed as a `Record<BoatType, …>`. The police launch and fire boat are todos until a station by the water bases them | the harbour that bases or receives it, `line-ferry-1`, or `bridge-bascule` for the sailing barge |
+| a tall boat through a lift (`boat-lift`) | a voyage that is not the bascule's own lift barge booked into a lift within 7 days (`boatLifts`) | `bridge-bascule` |
+| a sea gate (`sea-gate`) | the scenario declares one, and a seeded harbour's lane ends at a gate | `sea-gate` |
+| a river bus interchange (`ferry-interchange`) | a ferry line calls within the change walk of a bus, rail or metro stop, in the scenario and among the saved lines | `line-ferry-1` |
+| St Katharine's tall boats through Tower Bridge (`tower-bridge-lift`) | in **London**: a tall boat booked into a lift within 7 days. Rule: Tower Bridge and St Katharine Docks are London's | London's `st-katharine` |
 
 ### Adding a feature to the showcase
 
@@ -453,6 +498,13 @@ The showcase after `--run 2.3`, matching what the live tooltips showed in the ru
 | containers | 144 delivered by train in 2.3 days, and about 160 trucked into the west yard on a day |
 
 The riverside, measured with `--fill --run 1` (2026-10-18, machine shared with other agents): 15,700 citizens and 16,842 jobs. Every merged lot is staffed or full but the heavy plant (39 of 420) and the factory complex (113 of 210). The bascule lifts twice on day 3. The level crossing's barriers are down 388 ticks of the day's 2,400. 47 helipads give 26 air ambulance, 4 police and 41 executive flights over days 2 and 3.
+
+The harbour, measured with `--fill --run 1` (2026-10-18): every harbour fully staffed (the homes behind the quay road
+work at the docks and the fish quay). Over days 2 and 3, 6 fishing trips landed 208 boxes, 15 port calls landed 286
+containers and took 213, 673 ro-ro passengers came ashore, and the marina's 10 cruises and the bascule's lift barges
+sailed; river bus line 1 ran 3 boats but carried nobody. London's Thames over the same run: 13 calls at Dagenham Docks,
+183 boxes landed at Thamesmead, a St Katharine yacht out and back through Tower Bridge's lifts on day 3, and RB1's 5
+boats with 12 trips planned, 6 changing to the Tube. docs/boats.md 8.1 has the rest.
 
 Rail riders are few. Everyone takes the nearest job, so nobody commutes 30 tiles. The riders are the occasional night out at the stadium from the homes by the halt.
 

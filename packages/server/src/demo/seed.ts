@@ -12,13 +12,16 @@ import { fillCity, yieldNow } from '../fill';
 import type { Simulation } from '../sim/simulation';
 import type { Rail } from '../sim/rail';
 import { Metro } from '../sim/metro';
+import { Ferry } from '../sim/ferry';
 
 /**
  * The demo seeder (docs/demo.md): builds a demo scenario (shared/src/demo/showcase.ts) into a fresh World through the
  * planners players go through: `planStructure` with the scenario's rotation for every multi-tile kind, the 1×1 rules
  * of the build tool (own land, a road beside it), `planRunway`, `Rail.paint` (planTrack) for every track drag,
  * `BusService.stopProblem` for bus stops, `Metro.platformFor` for the platform under a metro station and
- * `Transit.saveLine` (the registry's validation and routing, and the metro's boring) for every line.
+ * `Transit.saveLine` (the registry's validation and routing, the metro's boring, the ferry's route on the water) for
+ * every line. Harbours are multi-tile kinds like any other (their back rows over the scenario's water), and the
+ * scenario's sea gates go to World.seaGates.
  * Anything a planner refuses is a problem; the caller fails loudly on any, so a broken scenario never seeds quietly.
  * Everything is pre-built complete (no waiting for builders).
  *
@@ -167,6 +170,8 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
     }
   }
   for (const pid of w.parcels.keys()) w.recountRoads(pid);
+  // where the scenario's water meets the sea (docs/boats.md 2.3): every harbour derives its lanes to these
+  w.seaGates = sections.flatMap((s) => (s.seaGates ?? []).map((g) => ({ ...g })));
   // estates (docs/world-map.md): land parcels combined by the players' rule, then named
   for (const s of sections) for (const e of s.estates ?? []) {
     const ids = e.lands.map((name) => [...w.parcels.values()].find((p) => p.name === name)?.id);
@@ -180,9 +185,9 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
 
 /**
  * Phase 2: bus stops (BusService.stopProblem), track (Rail.paint), the platforms under the metro stations
- * (Metro.platformFor, as the station tools lay them) and their names, then every line through the transit registry.
- * The metro service is the one registered with the registry (game.ts); a caller that registers none (a check that
- * builds its own Rail) gets one registered here when the scenario has metro stations.
+ * (Metro.platformFor, as the station tools lay them), every named stop's and harbour's name, then every line through
+ * the transit registry. The metro and ferry services are the ones registered with the registry (game.ts); a caller
+ * that registers none (a check that builds its own Rail) gets one registered here when the scenario needs it.
  */
 export function seedDemoNetwork(w: World, sim: Simulation, rail: Rail, id: DemoId): string[] {
   const problems: string[] = [];
@@ -220,8 +225,14 @@ export function seedDemoNetwork(w: World, sim: Simulation, rail: Rail, id: DemoI
       const writes = metro.platformFor(k, x, y, p.rot);
       if (typeof writes === 'string') problems.push(`${s.id}: ${p.id ?? p.kind} at ${at(p.door)}: ${writes}`);
       else metro.lay(writes);
-      if (p.name) w.setStopName(x, y, p.name);
     }
+  }
+  // names at the door: a station's on its platform, a pier's on its line, a harbour's on its boats (sim/harbours.ts)
+  for (const s of sections) for (const p of s.placements ?? []) if (p.name && w.kindIdAt(p.door[0], p.door[1]) === kindId(p.kind)) w.setStopName(p.door[0], p.door[1], p.name);
+  if (sections.some((s) => s.lines?.some((l) => l.mode === 'ferry'))) {
+    let ferry = sim.transit.services.get('ferry') as Ferry | undefined;
+    if (!ferry) sim.transit.register(ferry = new Ferry(w, sim.transit));
+    ferry.sandbox = true;
   }
   for (const s of sections) for (const l of s.lines ?? []) {
     const r = sim.transit.saveLine(DEMO_OWNER, { number: l.number, colour: l.colour, loop: l.loop, vehicles: l.vehicles, stops: l.stops.map(([x, y]) => ({ x, y })), ...(l.name ? { name: l.name } : {}) });
@@ -262,7 +273,10 @@ export function seededRandom(seed: number): () => number {
   };
 }
 
-/** FNV-1a over every modified chunk's tile words, aux, sub and under bytes (sorted by chunk), the station names and the transit lines. */
+/**
+ * FNV-1a over every modified chunk's tile words, aux, sub and under bytes (sorted by chunk), the station names, the sea
+ * gates (when there are any, so a world without leaves its hash as it was) and the transit lines.
+ */
 export function worldHash(w: World): string {
   let h = 0x811c9dc5;
   const byte = (b: number) => { h ^= b & 0xff; h = Math.imul(h, 0x01000193) >>> 0; };
@@ -273,6 +287,7 @@ export function worldHash(w: World): string {
     for (let i = 0; i < c.tiles.length; i++) { byte(c.tiles[i]); byte(c.tiles[i] >> 8); byte(c.aux[i]); byte(c.sub[i]); byte(c.under[i]); }
   }
   for (const ch of JSON.stringify([...w.stopNames].sort((a, b) => (a[0] < b[0] ? -1 : 1)))) byte(ch.charCodeAt(0));
+  if (w.seaGates.length) for (const ch of JSON.stringify(w.seaGates)) byte(ch.charCodeAt(0));
   const lines = [...w.transitLines.values()].sort((a, b) => a.id - b.id).map((l) => [l.id, l.owner, l.mode, l.number, l.colour, l.loop, l.vehicles, l.stops.map((s) => [s.x, s.y]), l.name ?? '']);
   for (const ch of JSON.stringify(lines)) byte(ch.charCodeAt(0));
   return h.toString(16).padStart(8, '0');

@@ -1,7 +1,7 @@
 import {
   DEFAULT_TAX, Terrain, Zone, KIND_ID, ALL_TECH_IDS, packTile, isRoad, levelOf, zoneOf, isGrowableId, familyOf, subFor, hash2, placedFromAnchor, planStructure, workOf,
   planBridge, BridgeStyle, type BridgeStyleId,
-  LONDON_MAP, PARKS, PLACES, RESERVED, BOROUGHS, LT, geoF, lidx, inLondon, londonBase, londonScenario, placeAt, eachThamesTile, isDemoOwner,
+  LONDON_MAP, LONDON_MARGIN, PARKS, PLACES, RESERVED, BOROUGHS, LT, geoF, lidx, inLondon, londonBase, londonScenario, placeAt, eachThamesTile, isDemoOwner,
   type Character, type DemoRect, type PlaceEnv,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS } from '../world';
@@ -347,7 +347,7 @@ export function seedLondon(w: World, ownerId: string, keep: DemoRect[]): LondonS
 
   // round the map, a margin of plain country with the river running on out of it, so the noise terrain's lakes do not
   // read as more river from above
-  const M = 24, wet = new Set<number>(), key = (x: number, y: number) => (x + 4096) * 8192 + y + 4096;
+  const M = LONDON_MARGIN, wet = new Set<number>(), key = (x: number, y: number) => (x + 4096) * 8192 + y + 4096;
   eachThamesTile(MX - M, MY - M, MX + MW + M, MY + MH + M, (x, y) => wet.add(key(x, y)));
   for (let y = MY - M; y < MY + MH + M; y++) for (let x = MX - M; x < MX + MW + M; x++) {
     if (!inLondon(x, y)) w.setTile(x, y, packTile(wet.has(key(x, y)) ? Terrain.Water : Terrain.Grass, false, 0, 0));

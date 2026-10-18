@@ -12,9 +12,9 @@ import { repeat } from './helpers';
  * run from z = -h/2 to -h/2 + wet. The water surface is y = 0 (chunkView draws water under wet tiles); pontoons float
  * on it, piles and quay walls stand on it. Boats are not part of a recipe: render/boats.ts draws them at the berths.
  *
- * These are drafts with two designs each (B7). The berths below are kind data the schedule (boats.ts) and the renderer
- * share, so a design leaves them clear: nothing but a quay wall, fenders and mooring posts stands where a boat lies, and
- * the cranes' booms stay up at 1.25 and over. The wet rows are recipe z < -h/2 + wet and the water surface is y = 0.
+ * Two designs each (B7), live since the showcase and London place them (B8). The berths below are kind data the
+ * schedule (boats.ts) and the renderer share, so a design leaves them clear: nothing but a quay wall, fenders and
+ * mooring posts stands where a boat lies, and the cranes' booms stay up at 1.25 and over. The wet rows are recipe z < -h/2 + wet and the water surface is y = 0.
  * Each tile picks one of a kind's designs by hash, so two harbours of a kind rarely look alike.
  */
 
@@ -163,7 +163,7 @@ const JETTY_DESIGNS: Design[] = [
 
 export const jetty: KindDef = {
   id: 'jetty', name: 'jetty', code: Zone.Hub, kindId: 24, family: 'transport',
-  flags: { civic: true, workplace: true, leisureReady: true }, draft: true,
+  flags: { civic: true, workplace: true, leisureReady: true },
   windows: 'civic',
   footprint: { w: 1, h: 2, door: [0, 1], wet: 1, fairwayClearance: 1, marks: [
     { kind: 'berth', at: [0, 0], label: 'two boat slots by the planks' },
@@ -261,7 +261,7 @@ const MARINA_DESIGNS: Design[] = [
 
 export const marina: KindDef = {
   id: 'marina', name: 'marina', code: Zone.Hub, kindId: 25, family: 'transport',
-  flags: { civic: true, workplace: true, leisureReady: true }, draft: true,
+  flags: { civic: true, workplace: true, leisureReady: true },
   windows: 'civic',
   footprint: { w: 4, h: 4, door: [1, 3], wet: 2, fairwayClearance: 1, marks: [
     { kind: 'berth', at: { edge: 'back', depth: 2 }, label: 'ten berths on the pontoons' },
@@ -374,7 +374,7 @@ const FISH_DESIGNS: Design[] = [
 
 export const fishingHarbour: KindDef = {
   id: 'fishing-harbour', name: 'fishing harbour', code: Zone.Hub, kindId: 26, family: 'transport',
-  flags: { civic: true, workplace: true }, draft: true,
+  flags: { civic: true, workplace: true },
   windows: 'factory',
   footprint: { w: 4, h: 3, door: [1, 2], wet: 1, fairwayClearance: 2, marks: [
     { kind: 'berth', at: { edge: 'back', depth: 1 }, label: 'three trawler berths' },
@@ -466,7 +466,7 @@ const FERRY_DESIGNS: Design[] = [
 
 export const ferryPier: KindDef = {
   id: 'ferry-pier', name: 'ferry pier', code: Zone.Hub, kindId: 27, family: 'transport',
-  flags: { civic: true, workplace: true }, draft: true,
+  flags: { civic: true, workplace: true },
   windows: 'civic',
   footprint: { w: 2, h: 2, door: [0, 1], wet: 1, fairwayClearance: 1, marks: [
     { kind: 'quay', at: { edge: 'back', depth: 1 }, label: 'pontoon' },
@@ -608,7 +608,7 @@ const PORT_DESIGNS: Design[] = [
 
 export const cargoPort: KindDef = {
   id: 'cargo-port', name: 'cargo port', code: Zone.Hub, kindId: 28, family: 'transport',
-  flags: { civic: true, workplace: true }, draft: true,
+  flags: { civic: true, workplace: true },
   windows: 'factory',
   footprint: { w: 8, h: 6, door: [3, 5], wet: 1, fairwayClearance: 3, marks: [
     { kind: 'berth', at: { edge: 'back', from: 0, to: 4, depth: 1 }, label: 'big berth (5 tiles)' },

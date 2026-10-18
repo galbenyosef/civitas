@@ -17,6 +17,10 @@ import { GROW_FORMS, firstLevelOf } from '../zones';
 import { capacityOf, isGrowableId, terrainOf, Terrain } from '../tile';
 import { PLANE_TYPES, timetable, type PlaneType, type Airport } from '../flights';
 import { heliTimetable, type Pad, type PadKind } from '../helicopters';
+import { boatTimetable, boatLifts, type BoatType, type BoatHarbour } from '../boats';
+import { FERRY } from '../ferry';
+import { HARBOUR_OF, type HarbourRole } from '../harbours';
+import type { SeaGate } from '../waterways';
 import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
 import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
 import { zoneOf, levelOf, Zone } from '../tile';
@@ -39,8 +43,8 @@ import { zoneOf, levelOf, Zone } from '../tile';
  * would click (the door) and its rotation (FRONT order: 0 the door faces +y/south, 1 east, 2 north, 3 west).
  */
 
-export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside'
-  | 'london-areas' | 'london-landmarks' | 'london-rail' | 'london-buses' | 'london-tube';
+export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour'
+  | 'london-areas' | 'london-landmarks' | 'london-rail' | 'london-buses' | 'london-river' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
 /** x, y, width, height in tiles */
@@ -60,7 +64,10 @@ export interface DemoPlacement {
    * never placed by a player): the seeder builds it on lots of its zone as growth would. Default its first level.
    */
   level?: number;
-  /** a metro station's name (World.setStopName), shown on the platform, the Tube map and the tooltips */
+  /**
+   * A stop's or harbour's name (World.setStopName at the door): a metro station's, shown on the platform, the Tube map
+   * and the tooltips; a ferry pier's, on the river bus line; any harbour's, for its boats and tooltip (sim/harbours.ts)
+   */
   name?: string;
 }
 export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 'office'; rect: DemoRect }
@@ -123,6 +130,11 @@ export interface DemoSection {
   blocks?: DemoBlock[];
   spots?: DemoSpot[];
   estates?: DemoEstate[];
+  /**
+   * Sea gates (docs/boats.md 2.3): where the scenario's water leaves the playable world. The seeder writes them to
+   * World.seaGates; every harbour then derives its sea, grounds and river lanes against them.
+   */
+  seaGates?: SeaGate[];
 }
 export interface DemoDef {
   id: DemoId; name: string; blurb: string;
@@ -168,15 +180,42 @@ const RIVER_BRIDGES: { id: string; name: string; x: number; style: keyof typeof 
 ];
 /** bus line 3's stops: beside the street down to the stone bridge, then the river road's north side out to its dead end at x = 33 */
 const RIVER_LINE_STOPS: DemoXY[] = [[6, 40], [12, RIVER_ROWS[1] + 1], [22, RIVER_ROWS[1] + 1], [32, RIVER_ROWS[1] + 1]];
-/** A merged lot (docs/buildings.md "Merged lots") with its footprint's top-left corner at (ax, ay): the door that puts it there. */
-function mergedAt(kind: string, ax: number, ay: number, rot: 0 | 1 | 2 | 3, level: number): DemoPlacement {
+/** The door that puts a structure's footprint's top-left corner at (ax, ay) on that turn. */
+function doorAt(kind: string, ax: number, ay: number, rot: 0 | 1 | 2 | 3): DemoXY {
   const k = (KIND_ID as Record<string, number>)[kind], fp = footprintOf(k), [w, h] = rot & 1 ? [fp.h, fp.w] : [fp.w, fp.h];
   for (let y = ay; y < ay + h; y++) for (let x = ax; x < ax + w; x++) {
     const p = placedFromDoor(k, x, y, rot);
-    if (p.ax === ax && p.ay === ay) return { kind, door: [x, y], rot, level };
+    if (p.ax === ax && p.ay === ay) return [x, y];
   }
   throw new Error(`no door puts ${kind} at (${ax}, ${ay})`);
 }
+/** A merged lot (docs/buildings.md "Merged lots") with its footprint's top-left corner at (ax, ay). */
+const mergedAt = (kind: string, ax: number, ay: number, rot: 0 | 1 | 2 | 3, level: number): DemoPlacement => ({ kind, door: doorAt(kind, ax, ay, rot), rot, level });
+
+/**
+ * The harbour (docs/boats.md section 8), east of the town: the river runs on past the riverside quarter into a basin
+ * that opens to the sea in the east (a declared sea gate, SEA_GATE). A quay road (y = 33) runs from the east perimeter
+ * road along its north shore: the cargo port's quay is the basin's north edge (row 39), and a bay (rows 36-38) takes
+ * the fishing harbour and a ferry pier, each with its back rows over the water and its door on the quay road.
+ * On the river between the lifting bridge and the suspension bridge, a pool off the north bank (rows 41-43, as wide
+ * as the marina, so the cruises find no dead ends) holds the marina, its door on a spur from the street down to the
+ * lifting bridge (x = 15): its sailing yachts and barges, too tall for a closed bascule or the suspension span,
+ * cruise out through the lifts (on day 4 of the first week, which demo:check's boat-lift feature holds it to; its
+ * place was chosen for that, and for a fleet with every pleasure type). Past the suspension bridge a jetty stands by
+ * the river road (row 47), and a pier beside bus line 3's stop at (32, 48) changes with the buses; its river buses run
+ * out to the bay.
+ */
+const QUAY_ROAD = 33;
+const BASIN: DemoRect = [45, 39, 51, 17], BAY: DemoRect = [56, 36, 40, 3], POOL: DemoRect = [19, 41, 4, 3];
+const SEA_GATE: SeaGate = { x: 95, y: 47, name: 'the sea' };
+const HARBOUR_AT: Record<'jetty' | 'pier-river' | 'pier-bay' | 'marina' | 'fishing' | 'port', DemoPlacement> = {
+  jetty: { kind: 'jetty', door: doorAt('jetty', 27, RIVER_ROWS[1], 0), rot: 0, name: 'Quarter Jetty' },
+  'pier-river': { kind: 'ferry-pier', door: doorAt('ferry-pier', 30, RIVER_ROWS[1], 0), rot: 0, name: 'Riverside Pier' },
+  'pier-bay': { id: 'ferry-pier-2', kind: 'ferry-pier', door: doorAt('ferry-pier', 71, QUAY_ROAD + 1, 2), rot: 2, name: 'Harbour Pier' },
+  marina: { kind: 'marina', door: doorAt('marina', POOL[0], POOL[1] - 2, 2), rot: 2, name: 'Lifting Bridge Marina' },
+  fishing: { kind: 'fishing-harbour', door: doorAt('fishing-harbour', 58, QUAY_ROAD + 1, 2), rot: 2, name: 'Eastport Fish Quay' },
+  port: { kind: 'cargo-port', door: doorAt('cargo-port', 46, QUAY_ROAD + 1, 2), rot: 2, name: 'Eastport Docks' },
+};
 
 /** Mobile-job bases on the tour (shared/src/fleet.ts): the door of a cab office, a takeaway, a waste depot and a parcel depot downtown. */
 const MOBILE_SPOTS: [MobileSpot, number, number, string][] = [
@@ -403,6 +442,25 @@ export const SECTIONS: DemoSection[] = [
     // the railway land and the quarter beyond it: together 70×26, past the 48-tile parcel edge, so an estate (not a merge)
     estates: [{ name: 'Riverside estate', lands: ['South railway', 'Riverside'] }],
   },
+  {
+    id: 'harbour', name: 'Harbour',
+    blurb: 'The river runs on into a basin that opens to the sea: a cargo port with container ships, coasters and ro-ro ferries met by a tug, a fishing harbour whose trawlers sail before dawn, a marina of pleasure boats, a jetty by the lifting bridge whose dinghies sail through its lifts, and a river bus line between two piers.',
+    // the land east of the town; the river across it (dried with the land) is painted back below
+    land: [{ name: 'Harbour', rect: [35, QUAY_ROAD - 6, 45, 30] }],
+    // homes behind the quay road, between it and a street on y = 28, whose nearest jobs are the docks' and the fish
+    // quay's (the town has more jobs than people, and its own nearer)
+    zones: [{ zone: 'residential', rect: [44, QUAY_ROAD - 4, 36, 4] }],
+    water: [[35, RIVER_ROWS[0], 10, RIVER_ROWS[1] - RIVER_ROWS[0] + 1], BASIN, BAY, POOL,
+      // the pier's pontoon row in the bay's shore
+      [71, QUAY_ROAD + 2, 2, 1]],
+    // the quay road, and the marina's spur off the street down to the lifting bridge (x = 15) over the railway land
+    roads: [[[35, QUAY_ROAD], [79, QUAY_ROAD]], [[35, QUAY_ROAD - 5], [79, QUAY_ROAD - 5]], [[16, POOL[1] - 3], [HARBOUR_AT.marina.door[0], POOL[1] - 3]]],
+    placements: Object.values(HARBOUR_AT),
+    // river buses from the riverside quarter (beside bus line 3's stop at (22, 48)) out to the bay
+    lines: [{ id: 'line-ferry-1', mode: 'ferry', number: 1, colour: 0x1f8a8a, loop: false, vehicles: 3, stops: [HARBOUR_AT['pier-river'].door, HARBOUR_AT['pier-bay'].door] }],
+    seaGates: [SEA_GATE],
+    spots: [{ id: 'sea-gate', spot: 'sea-gate', name: 'To the sea', rect: [SEA_GATE.x - 8, SEA_GATE.y - 6, 9, 12], inspect: HARBOUR_AT.port.door }],
+  },
 ];
 
 /** Tour order: placement, block, runway, track, junction and line ids, plus 'welcome' (the whole town). */
@@ -426,19 +484,20 @@ export const TOUR: string[] = [
   'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3', 'world-map',
   'ind-plant', 'ind-works', 'ind-row', 'ind-depot', 'com-centre', 'com-parade', 'com-store', 'com-hotel',
   'off-tower', 'off-hq', 'off-centre', 'res-estate', 'res-terrace', 'res-midrise', 'res-tower', 'res-block',
+  'marina', 'jetty', 'ferry-pier', 'line-ferry-1', 'ferry-pier-2', 'fishing-harbour', 'cargo-port', 'sea-gate',
 ];
 
 export const DEMOS: DemoDef[] = [
-  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'civic', 'rail', 'leisure', 'airport', 'industry', 'riverside'],
-    blurb: 'A lived-in town with one of every large building and every merged lot, both kinds of line, an airport every plane type flies to, helicopters, and a river with every style of bridge, all running. Take the guided tour.' },
+  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'civic', 'rail', 'leisure', 'airport', 'industry', 'riverside', 'harbour'],
+    blurb: 'A lived-in town with one of every large building and every merged lot, buses, trains, an underground and river buses, an airport every plane type flies to, helicopters, a river with every style of bridge, and a harbour with every kind of boat, all running. Take the guided tour.' },
   { id: 'transport', name: 'Transport demo', slot: 91, sections: ['downtown', 'transport', 'rail', 'airport', 'industry'],
     blurb: 'Buses, parking, rail, freight and the airport, in the same town.' },
   { id: 'leisure', name: 'Leisure demo', slot: 92, sections: ['downtown', 'leisure'],
     blurb: 'Parks, cinemas, theatres, sport and libraries, every size.' },
   { id: 'civic', name: 'Civic demo', slot: 93, sections: ['downtown', 'civic'],
     blurb: 'Health, police, fire and builders, every size.' },
-  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-rail', 'london-buses', 'london-tube'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
-    blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, and the Central, Northern and Jubilee lines underneath.' },
+  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-rail', 'london-buses', 'london-river', 'london-tube'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
+    blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, the Central, Northern and Jubilee lines underneath, and on the river the RB1 river buses, yachts through Tower Bridge and ships from the estuary.' },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
 export const isDemoId = (s: unknown): s is DemoId => typeof s === 'string' && DEMO_BY_ID.has(s as DemoId);
@@ -458,10 +517,7 @@ export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER |
  */
 type SurfaceTool = Exclude<Tool, 'road' | 'bulldoze' | KindToolId>;
 export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true };
-/**
- * Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. The ferry is
- * not asked for while its pier is a draft (the draft skip in showcaseProblems): docs/boats.md B8 places the piers and line 1.
- */
+/** Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. */
 export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, ferry: true, freight: true };
 
 interface Caption { title: string; what: string; how: string; facts: [string, string][] }
@@ -511,7 +567,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'cab-office': {
     title: 'Cab office',
@@ -561,6 +617,18 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     how: `Tab, the map chip, or zoom out past the 3D view's limit; zoom back in to return. Drag to pan, click a parcel for its area, buildings, population, jobs and book value. On your own land: shift-click neighbouring parcels and Combine them (a pair that makes a rectangle of up to ${MAX_PARCEL_EDGE} a side merges, the rest become one estate sharing name, colour and tax rate), Split one along a line you drag, rename it or give it a colour.`,
     facts: [['Key', 'Tab (or the map chip; Esc leaves)'], ['Combine', `rectangles up to ${MAX_PARCEL_EDGE} a side merge; the rest form an estate`], ['Split', 'a straight cut; both parts keep dry land; never through a building'], ['Book value', 'land, roads, zoning, building work and civic prices']],
   },
+  'sea-gate': {
+    title: 'To the sea',
+    what: 'Where the basin opens to the sea, beyond the edge of the town. Container ships, coasters and ro-ro ferries come in over the horizon here for the cargo port, a tug meets each container ship and leads it in, and the trawlers go out this way to the fishing grounds before dawn. Boats work to a pure timetable, so everyone sees the same ships: each harbour sails lanes over the water, found round the bridges its boats cannot clear, and a ship too tall for a bridge waits for a bascule to lift.',
+    how: 'Nothing to build. A scenario declares where its water meets the sea; in a world of its own, a lake of 1,500 tiles or more counts as open water reaching the sea, and its ships come in over its far horizon. A cargo port needs a way to the sea: a smaller lake gets pleasure boats, fishing and ferries only.',
+    facts: [['Ships', 'container ships, coasters, ro-ro ferries, barges'], ['Fishing', 'trawlers out from about 04:00, home from noon, not on Sundays'], ['Bridges', 'each style has a clearance; tall boats book a bascule\'s lifts']],
+  },
+  'pool-of-london': {
+    title: 'The Pool of London',
+    what: 'The reach between London Bridge and Tower Bridge, the old heart of the port. Tower Bridge is the one bridge here a tall boat can pass, and only with its leaves up: St Katharine Docks\' yachts and sailing barges are booked into its lifts (a few a day, on a clock), wait below the bridge for the next one if they must, and come up into the Pool until London Bridge, too low for them, turns them round. Everything else on the river, from the RB1 river buses to the barges, passes under every bridge.',
+    how: 'Nothing to build: a bascule bridge lifts on its own clock, and a boat too tall for the closed span books a lift. Each style of bridge has a clearance (a stone arch is the lowest, then a steel girder, a suspension span, the bascule closed), and a boat\'s lanes go only under the bridges it clears.',
+    facts: [['Tower Bridge', 'lifts 0-3 times a day, 07:00-21:00'], ['Tall boats', 'yachts, sailing barges, dinghies, ships'], ['Under every bridge', 'river buses, barges, narrowboats, motor cruisers']],
+  },
   'tube-crossover': {
     title: 'Under Waterloo',
     what: 'The Northern and Jubilee lines meet under Waterloo: two entrances a short walk apart and from the rail station\'s door, so riders change between the two lines and the trains to Clapham Junction. Underground, lines never share a tunnel; where one must cross another it bores straight across it at a crossover, the north-south bore dipping under the east-west one. In the underground view (N) each line glows in its colour, platforms are lit, and the trains run in twin bores, out in one and back in the other.',
@@ -585,8 +653,8 @@ const LINE_CAPTIONS: Record<TransitMode | 'freight', Omit<Caption, 'title'>> = {
     facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('metrostation')], ['Fare', '$2 a ride, children free, retirees half']],
   },
   ferry: {
-    what: 'A river bus line between ferry piers. Catamarans of 120 places run rail\'s timetable on the water, 05:00 to 01:00, on river-class water under every bridge; a there-and-back line runs several boats, which pass each other on the river, and the outbound and inbound boats lie nose to tail at each pier. Riders change to a bus, a train or the underground within a short walk.',
-    how: 'Put ferry piers on your land on the water\'s edge, their pontoons over the water with open water behind and beyond each end of the berth, then open the lines panel and click the piers in calling order. One line calls at a pier.',
+    what: `A river bus line between ferry piers. Catamarans of ${FERRY.riders} places run a timetable on the water, 05:00 to 01:00, under every bridge (they are low enough for all of them) and never in traffic; a there-and-back line runs several boats, which keep to their side of the river as they pass, and lie nose to tail at each pier, the one coming in behind the one going out. Riders wait on the pontoon and change to a bus, a train or the underground within a ${TRANSIT.transferWalk}-tile walk.`,
+    how: 'Put ferry piers on your land at the water\'s edge, the pontoon over the water with open water behind it and a tile beyond each end of the berth, then open the lines panel and click the piers in calling order. The route is found on water at least three tiles wide; one line calls at a pier.',
     facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('ferrypier')], ['Fare', '$2 a ride, children free, retirees half']],
   },
   freight: {
@@ -751,8 +819,9 @@ export function demoTour(id: DemoId): TourStop[] {
       if (l) {
         const mode = l.freight ? 'freight' : l.mode;
         const box = bbox(l.stops);
-        const title = l.freight ? `Freight line ${l.number}` : l.mode === 'bus' ? `Bus line ${l.number}` : l.mode === 'metro' ? `${l.name ?? `Line ${l.number}`} (underground)` : `Rail line ${l.number}`;
-        const facts: [string, string][] = [['Stops', `${l.stops.length}, ${l.loop ? 'a loop' : 'there and back'}`], [l.mode === 'bus' ? 'Buses' : 'Trains', `${l.vehicles}`], ...LINE_CAPTIONS[mode].facts];
+        const title = l.freight ? `Freight line ${l.number}` : l.mode === 'bus' ? `Bus line ${l.number}` : l.mode === 'metro' ? `${l.name ?? `Line ${l.number}`} (underground)`
+          : l.mode === 'ferry' ? `${l.name ?? `River bus ${l.number}`}` : `Rail line ${l.number}`;
+        const facts: [string, string][] = [[l.mode === 'ferry' ? 'Piers' : 'Stops', `${l.stops.length}, ${l.loop ? 'a loop' : 'there and back'}`], [l.mode === 'bus' ? 'Buses' : l.mode === 'ferry' ? 'Boats' : 'Trains', `${l.vehicles}`], ...LINE_CAPTIONS[mode].facts];
         // a metro line's stop turns the underground view on (client/src/tour.ts)
         out.push({ id: sid, ...base, title, what: LINE_CAPTIONS[mode].what, how: LINE_CAPTIONS[mode].how, facts, ...framing(box[0], box[1], box[2], box[3], 0, 0.8), rect: box, path: [...l.stops], inspect: l.stops[0], line: { mode: l.mode, number: l.number, colour: l.colour }, ...(l.mode === 'metro' ? { view: 'under' as const } : {}) });
       }
@@ -783,6 +852,13 @@ export interface SeededDemo {
   lines: readonly { mode: TransitMode; number: number; stops: readonly DemoXY[] }[];
   /** every parcel: its name and the estate it is in (docs/world-map.md) */
   parcels: readonly { id: number; name: string; group?: number }[];
+  /**
+   * Every harbour as the server lists it (sim/harbours.ts, the `harbours` message) with its lanes and refusals, taken
+   * as staffed: what its boats can do once the town has filled (docs/boats.md)
+   */
+  harbours: readonly (BoatHarbour & { refused?: readonly string[] })[];
+  /** the world's sea gates (World.seaGates) */
+  seaGates: readonly SeaGate[];
 }
 
 /**
@@ -811,9 +887,10 @@ export const FEATURE_DAYS = 7;
 const days = () => Array.from({ length: FEATURE_DAYS }, (_, d) => d);
 const placedKind = (kind: string) => (ss: readonly DemoSection[]) => ss.some((s) => s.placements?.some((p) => p.kind === kind));
 const anyTile = (d: SeededDemo, f: (x: number, y: number, t: number, a: number, u: number) => boolean) => { let hit = false; d.scan((x, y, t, a, u) => { if (!hit && f(x, y, t, a, u)) hit = true; }); return hit; };
-/** A metro line calls within the change walk (TRANSIT.transferWalk, Manhattan) of a stop of another mode's line. */
-const metroInterchange = (lines: readonly { mode: TransitMode; stops: readonly DemoXY[] }[]) => lines.some((m) => m.mode === 'metro' && m.stops.some(([x, y]) =>
-  lines.some((o) => o.mode !== 'metro' && o.stops.some(([ox, oy]) => Math.abs(ox - x) + Math.abs(oy - y) <= TRANSIT.transferWalk))));
+/** A line of `mode` calls within the change walk (TRANSIT.transferWalk, Manhattan) of a stop of another mode's line. */
+const interchange = (mode: TransitMode) => (lines: readonly { mode: TransitMode; stops: readonly DemoXY[] }[]) => lines.some((m) => m.mode === mode && m.stops.some(([x, y]) =>
+  lines.some((o) => o.mode !== mode && o.stops.some(([ox, oy]) => Math.abs(ox - x) + Math.abs(oy - y) <= TRANSIT.transferWalk))));
+const metroInterchange = interchange('metro'), ferryInterchange = interchange('ferry');
 
 // Typed against the source unions, so a new bridge style, junction tool, plane type or helicopter service fails the
 // typecheck here until it has an entry, and demo:check then fails until the showcase shows it.
@@ -829,6 +906,32 @@ const HELI_SERVICES: Record<PadKind, Pick<ShowcaseFeature, 'caption' | 'tour' | 
   royal: { caption: 'the royal flight (Buckingham Palace)', tour: 'buckingham-palace', demo: 'london',
     rule: 'only Buckingham Palace has a royal pad, and landmarks stand in their own city\'s demo (the London landmarks in London), not the showcase' },
 };
+
+/**
+ * Every boat type is scheduled at a showcase harbour within FEATURE_DAYS (boats.ts boatTimetable over the seeded
+ * harbours, staffed), or runs on a ferry line: the harbour that shows it is its tour stop.
+ */
+const BOAT_FEATURES: Record<BoatType, Pick<ShowcaseFeature, 'caption' | 'tour' | 'todo'>> = {
+  dinghy: { caption: 'a dinghy (a jetty or a marina)', tour: 'jetty' },
+  motorCruiser: { caption: 'a motor cruiser (a jetty or a marina)', tour: 'marina' },
+  sailboat: { caption: 'a sailing yacht (a marina on water three tiles wide)', tour: 'marina' },
+  narrowboat: { caption: 'a narrowboat (a marina whose cruise keeps to narrow water)', tour: 'marina' },
+  sailingBarge: { caption: 'a sailing barge (a marina, or through a bascule\'s lift)', tour: 'bridge-bascule' },
+  trawler: { caption: 'a trawler (a fishing harbour)', tour: 'fishing-harbour' },
+  riverBus: { caption: 'a river bus (a ferry line)', tour: 'line-ferry-1' },
+  ropax: { caption: 'a ro-ro ferry calling at a cargo port', tour: 'cargo-port' },
+  barge: { caption: 'a barge calling at a cargo port', tour: 'cargo-port' },
+  coaster: { caption: 'a coaster calling at a cargo port', tour: 'cargo-port' },
+  containerShip: { caption: 'a container ship calling at a cargo port (open water to the sea)', tour: 'cargo-port' },
+  tug: { caption: 'a tug escorting a container ship in', tour: 'cargo-port' },
+  policeLaunch: { caption: 'a police launch', todo: 'not scheduled yet: it needs a police station by the water (docs/boats.md 4.1)' },
+  fireBoat: { caption: 'a fire boat', todo: 'not scheduled yet: it needs a fire station by the water (docs/boats.md 4.1)' },
+};
+/** Each harbour kind's tour stop: its placement in the harbour section. */
+const HARBOUR_TOUR: Record<HarbourRole, string> = { jetty: 'jetty', marina: 'marina', fishing: 'fishing-harbour', pier: 'ferry-pier', port: 'cargo-port' };
+const boatDays = (d: SeededDemo, f: (day: number) => boolean) => d.harbours.length > 0 && days().some(f);
+/** A voyage that is not the bascule's own lift barge booked into a lift: a tall boat through a lifting bridge. */
+const tallThroughLift = (d: SeededDemo) => boatDays(d, (day) => [...boatLifts(d.harbours, day).values()].some((ps) => ps.some((p) => p.voyage.kind !== 'lift')));
 
 /** Every bascule span in the seeded demo lifts at least once in FEATURE_DAYS (shared/src/bridges.ts basculeLiftAt). */
 function basculeLifts(d: SeededDemo): boolean {
@@ -903,6 +1006,24 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   { id: 'metro-crossover', caption: 'a metro crossover (one line\'s tunnel straight across another\'s)', tour: 'tube-crossover', demo: 'london',
     rule: 'the showcase runs one underground line; lines cross in London, where the Tube\'s Central, Northern and Jubilee lines meet',
     seeded: (d) => anyTile(d, (_x, _y, _t, _a, u) => isTunnel(u) && !isPlatform(u) && underMask(u) === 15) },
+  // ---- boats and harbours (docs/boats.md): every harbour kind finds the lanes its boats need, every boat type sails,
+  // a tall boat books a bascule's lift, the water meets the sea at a gate, and the river buses change with the buses
+  ...(Object.keys(HARBOUR_TOUR) as HarbourRole[]).map((role): ShowcaseFeature => ({
+    id: `harbour-${role}`, caption: `a ${role === 'port' ? 'cargo port' : role === 'pier' ? 'ferry pier' : role === 'fishing' ? 'fishing harbour' : role} whose boats find every lane they need`, tour: HARBOUR_TOUR[role],
+    seeded: (d) => d.harbours.some((h) => HARBOUR_OF[h.kind]?.role === role && !h.refused?.length && (role === 'pier' || h.lanes.length > 0)),
+  })),
+  ...(Object.keys(BOAT_FEATURES) as BoatType[]).map((type): ShowcaseFeature => ({
+    id: `boat-${type}`, ...BOAT_FEATURES[type],
+    seeded: type === 'riverBus' ? (d) => d.lines.some((l) => l.mode === 'ferry') : (d) => boatDays(d, (day) => boatTimetable(d.harbours, day).voyages.some((v) => v.type === type)),
+  })),
+  { id: 'boat-lift', caption: 'a tall boat booked through a bascule\'s lift', tour: 'bridge-bascule', seeded: (d) => tallThroughLift(d) },
+  { id: 'sea-gate', caption: 'a sea gate that the harbours\' lanes reach', tour: 'sea-gate',
+    scenario: (ss) => ss.some((s) => s.seaGates?.length), seeded: (d) => d.seaGates.length > 0 && d.harbours.some((h) => h.lanes.some((l) => !!l.gate)) },
+  { id: 'ferry-interchange', caption: 'a river bus line with an interchange (a pier within the change walk of a bus, rail or metro stop)', tour: 'line-ferry-1',
+    scenario: (ss) => ferryInterchange(ss.flatMap((s) => s.lines ?? [])), seeded: (d) => ferryInterchange(d.lines) },
+  { id: 'tower-bridge-lift', caption: 'St Katharine Docks\' tall boats through Tower Bridge\'s lifts', tour: 'st-katharine', demo: 'london',
+    rule: 'Tower Bridge and St Katharine Docks are London\'s; the showcase\'s own lifting bridge has its tall boat (boat-lift)',
+    seeded: tallThroughLift },
 ];
 
 /** Problems with the feature registry that the scenario alone shows: a feature or its tour stop missing from its demo. */

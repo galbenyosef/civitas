@@ -2,6 +2,7 @@ import type { DemoRect, DemoXY } from './showcase';
 import type { Placed } from '../structures';
 import { hash2 } from '../noise';
 import { BRIDGE_MAX_SPAN } from '../bridges';
+import type { SeaGate } from '../waterways';
 
 /**
  * London's map (docs/demo.md "London"): the river, docks, places, parks, reserved land, main roads and boroughs as
@@ -26,6 +27,8 @@ export const geo = (lat: number, lon: number): DemoXY => { const [x, y] = geoF(l
 
 /** The map: x, y, width, height. Everything inside is the town's land. */
 export const LONDON_MAP: DemoRect = [-112, -56, 224, 112];
+/** The plain country round the map (server/src/demo/london.ts), the river running on out of it to the sea gates. */
+export const LONDON_MARGIN = 24;
 
 /** A point on the Thames' centre line: latitude, longitude, width in tiles, and the bridge there if any. */
 export type ThamesPoint = readonly [lat: number, lon: number, width: number, bridge?: string];
@@ -90,6 +93,9 @@ export const DOCKS: { name: string; rect: DemoRect }[] = [
   { name: 'West India Docks', rect: [26, 10, 4, 1] },
   { name: 'Royal Victoria Dock', rect: [46, -3, 9, 2] },
   { name: 'Royal Albert Dock', rect: [56, -3, 14, 2] },
+  // east of the Tower, opening on to the river where it bulges north (rows -2 to -1): as wide as the marina in it
+  // (london.ts HARBOURS), whose back two rows stand in it, so its boats' cruises find no dead ends
+  { name: 'St Katharine Docks', rect: [14, -5, 4, 3] },
 ];
 
 /**
@@ -435,6 +441,22 @@ export function eachThamesTile(x0: number, y0: number, x1: number, y1: number, v
       if (d <= (a.w + (b.w - a.w) * t) / 2) visit(x, y);
     }
   }
+}
+
+/**
+ * The sea gates (docs/boats.md 2.3): where the Thames runs out of the margin round the map, "the estuary" at the east
+ * edge and "Teddington" at the south-west, upstream (`low`: only boats low enough for the upper river come from there).
+ * Each is the middle water tile of the river's run along that edge.
+ */
+export function londonSeaGates(): SeaGate[] {
+  const x0 = MX - LONDON_MARGIN, y0 = MY - LONDON_MARGIN, x1 = MX + MW + LONDON_MARGIN - 1, y1 = MY + MH + LONDON_MARGIN - 1;
+  const east: number[] = [], south: number[] = [];
+  eachThamesTile(x0, y0, x1 + 1, y1 + 1, (x, y) => { if (x === x1) east.push(y); else if (y === y1) south.push(x); });
+  const mid = (a: number[]) => [...new Set(a)].sort((p, q) => p - q)[Math.floor(new Set(a).size / 2)];
+  const out: SeaGate[] = [];
+  if (east.length) out.push({ x: x1, y: mid(east), name: 'the estuary' });
+  if (south.length) out.push({ x: mid(south), y: y1, name: 'Teddington', low: true });
+  return out;
 }
 
 /** The direction the river runs nearest (x, y), as a vector. */

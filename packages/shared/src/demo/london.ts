@@ -1,10 +1,11 @@
 import type { DemoRect, DemoXY, DemoSection, DemoPlacement, DemoBlock, TourStop } from './showcase';
 import { KIND_ID } from '../buildings/compiled';
-import { FRONT, placedFromAnchor, placedFromDoor, type Placed } from '../structures';
+import { FRONT, placedFromAnchor, placedFromDoor, isWetTile, fairwayTiles, fairwayDepth, WET_OF, type Placed } from '../structures';
+import { HARBOUR_OF } from '../harbours';
 import { TRANSIT } from '../transit';
 import { platformSpan } from '../metro';
 import { stopTile } from '../rail';
-import { LONDON_MAP, LT, arterialPaths, geoF, inLondon, lidx, londonBase, londonBridges, londonPlan, type LondonPlan } from './londonMap';
+import { LONDON_MAP, LT, DOCKS, arterialPaths, geoF, inLondon, lidx, londonBase, londonBridges, londonPlan, londonSeaGates, type LondonPlan } from './londonMap';
 
 /**
  * London (docs/demo.md "London"): a sample city on the shape of the real one. The Thames runs through it as water
@@ -110,6 +111,36 @@ const ROUTE_159: Spot[] = [
 const ROUTE_D3: Spot[] = [
   ['stop-d3-poplar', 'bus-stop', 51.5110, -0.0170, 'N'], ['stop-d3-canary-wharf', 'bus-stop', 51.4980, -0.0198, 'E'],
   ['stop-d3-millwall', 'bus-stop', 51.4894, -0.0293, 'E'], ['stop-d3-island-gardens', 'bus-stop', 51.4830, -0.0149, 'N'],
+];
+
+/**
+ * The river (docs/boats.md section 8): the river bus piers on RB1 where the real ones are, in calling order up river to
+ * down, and the harbours. Each is fitted as a landmark is, before the streets (a road along its front), with its back
+ * rows over the Thames or a dock: id, kind, latitude, longitude, the name it goes by (World.setStopName at its door).
+ */
+type HarbourSpot = readonly [id: string, kind: string, lat: number, lon: number, name: string];
+const PIERS: HarbourSpot[] = [
+  // Westminster's banks are Parliament, New Scotland Yard and the Eye on the map, and from Waterloo to Tower Bridge the
+  // bridges are three tiles apart (no room for Bankside, Blackfriars or London Bridge City): RB1 calls at Millbank, by
+  // Vauxhall Bridge, and at Embankment, below Waterloo Bridge, for Westminster
+  ['pier-millbank', 'ferry-pier', 51.4917, -0.1265, 'Millbank Pier'],
+  ['pier-embankment', 'ferry-pier', 51.5075, -0.1217, 'Embankment Pier'],
+  // the real Tower Pier is in the Pool, which is four tiles long here: this one stands below Tower Bridge
+  ['pier-tower', 'ferry-pier', 51.5074, -0.0796, 'Tower Pier'],
+  ['pier-canary-wharf', 'ferry-pier', 51.5048, -0.0275, 'Canary Wharf Pier'],
+  ['pier-greenwich', 'ferry-pier', 51.4835, -0.0092, 'Greenwich Pier'],
+];
+const HARBOURS: HarbourSpot[] = [
+  // the marina in St Katharine Docks (londonMap.ts DOCKS), east of the Tower (at the map's basin, a few tiles east of
+  // the real one: the Tower's ground runs down to the Highway): its yachts and sailing barges are too tall for any
+  // bridge but Tower Bridge lifted, so they sail up into the Pool of London through its lifts
+  ['st-katharine', 'marina', 51.5164, -0.0462, 'St Katharine Docks'],
+  // on Chelsea Reach, where the river is four tiles wide (up river of Battersea it is three and a half, and a jetty
+  // there would leave the barges no channel to Teddington)
+  ['chelsea-jetty', 'jetty', 51.4860, -0.1640, 'Chelsea Boathouse'],
+  // down river of every bridge, where the Thames is 9 to 13 tiles wide: container ships from the estuary
+  ['london-port', 'cargo-port', 51.5180, 0.1350, 'Dagenham Docks'],
+  ['thamesmead-quay', 'fishing-harbour', 51.5044, 0.1172, 'Thamesmead Fish Quay'],
 ];
 
 /**
@@ -261,6 +292,78 @@ export function londonScenario(): LondonScenario {
     structures.push({ id, kind, door: [best.doorX, best.doorY], rot: best.r as 0 | 1 | 2 | 3 });
   }
 
+  // ---- the river's harbours and piers: the back rows over the water a tile clear of every bridge deck, the front on
+  // the real one's bank facing a road, open water off the decks behind as deep as the kind's boats need and at least
+  // three rows (so the river keeps a channel a river bus can pass); a pier's berth with open water beyond each end
+  /** 2 on a bridge deck, 1 beside one */
+  const deck = new Uint8Array(MW * MH), wetTaken = new Uint8Array(MW * MH);
+  for (const b of londonBridges()) for (let k = 0; k < b.len; k++) for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+    const x = b.x + (b.ns ? 0 : k) + ox, y = b.y + (b.ns ? k : 0) + oy;
+    if (inLondon(x, y)) deck[lidx(x, y)] = Math.max(deck[lidx(x, y)], ox || oy ? 1 : 2);
+  }
+  const openAt = (x: number, y: number) => inLondon(x, y) && !!water[lidx(x, y)] && deck[lidx(x, y)] < 2 && !wetTaken[lidx(x, y)];
+  const wetAt = (x: number, y: number) => inLondon(x, y) && !!water[lidx(x, y)];
+  const inDock = (x: number, y: number) => DOCKS.some(({ rect: [rx, ry, rw, rh] }) => x >= rx && y >= ry && x < rx + rw && y < ry + rh);
+  /** a row of tiles with one more beyond each end */
+  const alongRow = (row: [number, number][]): [number, number][] => {
+    const [ax, ay] = row[0], [bx, by] = row[row.length - 1], dx = Math.sign(bx - ax), dy = Math.sign(by - ay);
+    return [[ax - dx, ay - dy], ...row, [bx + dx, by + dy]];
+  };
+  /** the water a harbour stands in and keeps clear: its wet tiles, the rows behind it and a pier's berth ends */
+  const harbourWater = (p: Placed): [number, number][] => {
+    const spec = WET_OF[p.kind]!, out: [number, number][] = [];
+    for (let y = p.ay; y < p.ay + p.h; y++) for (let x = p.ax; x < p.ax + p.w; x++) if (isWetTile(p, x, y)) out.push([x, y]);
+    for (let row = 0; row < Math.max(3, fairwayDepth(spec.fairwayClearance)); row++) out.push(...fairwayTiles(p, row));
+    if (HARBOUR_OF[p.kind]?.role === 'pier') { const ends = alongRow(fairwayTiles(p, 0)); out.push(ends[0], ends[ends.length - 1]); }
+    return out;
+  };
+  const fitsHarbour = (p: Placed, side: number) => {
+    for (let y = p.ay; y < p.ay + p.h; y++) for (let x = p.ax; x < p.ax + p.w; x++) {
+      if (!inLondon(x, y)) return false;
+      const i = lidx(x, y);
+      if (isWetTile(p, x, y)) { if (deck[i]) return false; continue; }
+      if (water[i] || reserved[i] >= 0 || taken[i] || bank[i] !== side) return false;
+    }
+    if (!harbourWater(p).every(([x, y]) => openAt(x, y))) return false;
+    // on the river (not in a dock), the second row out and a tile beyond each end of it have water all round: the
+    // river keeps a channel three tiles wide past the harbour (clearance 2, waterways.ts) for river buses and barges
+    if (!fairwayTiles(p, 0).some(([x, y]) => inDock(x, y)) && !alongRow(fairwayTiles(p, 1)).every(([x, y]) => FRONT.every(([dx, dy]) => wetAt(x + dx, y + dy)))) return false;
+    const [fx, fy] = FRONT[p.r];
+    for (let s = 0; s < (fx ? p.h : p.w); s++) {
+      const x = fx ? (fx > 0 ? p.ax + p.w : p.ax - 1) : p.ax + s, y = fy ? (fy > 0 ? p.ay + p.h : p.ay - 1) : p.ay + s;
+      if (!inLondon(x, y)) return false;
+      const i = lidx(x, y);
+      if (water[i] || reserved[i] >= 0 || taken[i] === 2) return false;
+    }
+    return true;
+  };
+  /** the dry rows of a harbour: what the street plan keeps clear and fronts with a road (its wet rows are river) */
+  const dryPart = (p: Placed): Placed => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let y = p.ay; y < p.ay + p.h; y++) for (let x = p.ax; x < p.ax + p.w; x++) if (!isWetTile(p, x, y)) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    return { ...p, ax: x0, ay: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  };
+  const harbours: DemoPlacement[] = [];
+  for (const [id, kind, lat, lon, name] of [...PIERS, ...HARBOURS]) {
+    const k = K[kind], [px, py] = geoF(lat, lon), side0 = bankOf(px, py);
+    let best: Placed | null = null, bd = Infinity;
+    // on the real one's bank, else the other
+    for (const side of [side0, 3 - side0]) for (let r = 0; r < 4 && !(best && side !== side0); r++) {
+      const p0 = placedFromAnchor(k, 0, 0, r), ax0 = Math.round(px - p0.w / 2), ay0 = Math.round(py - p0.h / 2);
+      for (const [dx, dy, n] of NEAR) {
+        if (n - 1 >= bd) break;
+        const p = placedFromAnchor(k, ax0 + dx, ay0 + dy, r), d = Math.hypot(p.ax + p.w / 2 - px, p.ay + p.h / 2 - py);
+        if (d < bd && fitsHarbour(p, side)) { bd = d; best = p; }
+      }
+    }
+    if (!best) { problems.push(`${id}: no bank near (${Math.round(px)}, ${Math.round(py)}) with the water it needs`); continue; }
+    const dry = dryPart(best);
+    claim(dry);
+    for (const [x, y] of harbourWater(best)) wetTaken[lidx(x, y)] = 1;
+    keeps.push(dry);
+    harbours.push({ id, kind, door: [best.doorX, best.doorY], rot: best.r as 0 | 1 | 2 | 3, name });
+  }
+
   const plan = londonPlan(keeps);
   problems.push(...plan.problems);
   const used = new Set<number>();
@@ -381,6 +484,11 @@ export function londonScenario(): LondonScenario {
   const towerFrom: DemoXY = tower ? [tower.x, tower.y] : [0, 0];
   const towerTo: DemoXY = tower ? [tower.x + (tower.ns ? 0 : tower.len - 1), tower.y + (tower.ns ? tower.len - 1 : 0)] : [0, 0];
   const byId = new Map(structures.map((p) => [p.id, p]));
+  const harbourById = new Map(harbours.map((p) => [p.id, p]));
+  const piers = PIERS.map(([id]) => harbourById.get(id)).filter((p): p is DemoPlacement => !!p);
+  // the Pool of London: the reach between London Bridge and Tower Bridge, where St Katharine's tall boats come up
+  const london = plan.bridges.find((b) => b.name === 'London Bridge');
+  const pool: DemoRect = tower && london ? [london.x, Math.min(london.y, tower.y) - 1, tower.x - london.x + 1, Math.max(london.len, tower.len) + 2] : [0, 0, 1, 1];
   const pick = (...ids: string[]) => ids.map((id) => byId.get(id)).filter((p): p is DemoPlacement => !!p);
 
   const sections: DemoSection[] = [
@@ -445,6 +553,16 @@ export function londonScenario(): LondonScenario {
       ],
     },
     {
+      id: 'london-river', name: 'The Thames',
+      blurb: 'River bus RB1 from Westminster to Greenwich under every bridge, St Katharine Docks\' yachts and sailing barges up into the Pool of London through Tower Bridge\'s lifts, a jetty at Putney, and down river of every bridge Dagenham\'s container port and a fish quay, with ships from the estuary and barges up the river to Teddington.',
+      placements: harbours,
+      // there and back down the river under every bridge, changing with the Jubilee line at Canary Wharf and the
+      // buses at Embankment and Tower (the 25) and Greenwich (the D3 from Island Gardens, across the river)
+      lines: piers.length > 1 ? [{ id: 'line-ferry-rb1', mode: 'ferry', number: 1, name: 'RB1', colour: 0x1d3e8a, loop: false, vehicles: 5, stops: piers.map((p) => p.door) }] : [],
+      seaGates: londonSeaGates(),
+      spots: [{ id: 'pool-of-london', spot: 'pool-of-london', name: 'The Pool of London', rect: pool, inspect: harbourById.get('st-katharine')?.door }],
+    },
+    {
       id: 'london-tube', name: 'The Underground',
       blurb: 'The Central line from Shepherd\'s Bush under Oxford Street and the City to Stratford, the Northern from Camden Town under the river to Balham, and the Jubilee from Baker Street by Westminster, Waterloo and Canary Wharf to Stratford: their tunnels cross at right angles, under the Thames and every street, and they change with each other, the rail termini and the buses.',
       placements: tubeStations,
@@ -458,13 +576,13 @@ export function londonScenario(): LondonScenario {
 /** Tour order: west to east along the river, then the rings round it. */
 export const LONDON_TOUR: string[] = [
   'welcome',
-  'area-westminster', 'parliament', 'london-eye', 'buckingham-palace', 'new-scotland-yard', 'st-thomas', 'lambeth-fire',
+  'area-westminster', 'parliament', 'london-eye', 'pier-embankment', 'line-ferry-rb1', 'pier-millbank', 'buckingham-palace', 'new-scotland-yard', 'st-thomas', 'lambeth-fire',
   'area-west-end', 'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'leicester-square', 'line-bus-25', 'line-bus-159',
   'tube-central-tottenham-court-road', 'line-tube-central', 'line-tube-northern',
-  'area-city', 'gherkin', 'walkie-talkie', 'tower-of-london', 'tower-bridge', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
-  'area-south-bank', 'shard', 'waterloo', 'tube-crossover', 'line-tube-jubilee', 'line-south-western', 'clapham-junction', 'area-clapham', 'victoria-garage', 'stockwell-garage', 'area-brixton',
-  'area-canary-wharf', 'one-canada-square', 'tube-jubilee-canary-wharf', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'maritime-museum', 'o2-arena',
-  'area-royal-docks', 'area-thames-gateway', 'dagenham-yard', 'track-freight', 'barking-yard', 'line-freight',
+  'area-city', 'gherkin', 'walkie-talkie', 'tower-of-london', 'tower-bridge', 'pool-of-london', 'st-katharine', 'pier-tower', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
+  'area-south-bank', 'shard', 'waterloo', 'tube-crossover', 'line-tube-jubilee', 'line-south-western', 'clapham-junction', 'area-clapham', 'chelsea-jetty', 'victoria-garage', 'stockwell-garage', 'area-brixton',
+  'area-canary-wharf', 'one-canada-square', 'tube-jubilee-canary-wharf', 'pier-canary-wharf', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'pier-greenwich', 'maritime-museum', 'o2-arena',
+  'area-royal-docks', 'area-thames-gateway', 'london-port', 'thamesmead-quay', 'dagenham-yard', 'track-freight', 'barking-yard', 'line-freight',
   'royal-london', 'area-hackney', 'area-islington', 'kings-cross', 'british-library', 'line-east-coast', 'finsbury-park', 'british-museum',
   'area-camden', 'regents-park-lake', 'lords', 'serpentine', 'area-kensington', 'natural-history-museum',
   'paddington', 'line-heathrow', 'ealing-broadway', 'track-great-western', 'wembley', 'area-hammersmith', 'kew-gardens',

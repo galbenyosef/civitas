@@ -437,7 +437,9 @@ export function fishingGrounds(grid: WaterGrid, from: [number, number], cls: Wid
 export const CRUISE_RANGE = 40, CRUISE_SPACING = 6;
 /**
  * 1-3 waypoints for a pleasure cruise, hashed from `seed`: tiles of clearance 2 or more (or the class's own, on
- * narrower water) within CRUISE_RANGE by water, CRUISE_SPACING or more apart, visited nearest first.
+ * narrower water) within CRUISE_RANGE by water, CRUISE_SPACING or more apart, visited nearest first. A boat that has a
+ * bascule lifted for it (`sig` has PASS_LIFT) cruises through one when one is within reach: its first pick is the
+ * best-hashed tile it reaches only through a lift, as St Katharine Docks' yachts go up into the Pool of London.
  */
 export function cruiseWaypoints(grid: WaterGrid, from: [number, number], seed: number, cls: WidthClass, sig: number): [number, number][] {
   const reach = waterReach(grid, from, CRUISE_RANGE, cls, sig).filter((t) => !isBridgeAux(grid.env.aux(t.x, t.y)));
@@ -447,6 +449,11 @@ export function cruiseWaypoints(grid: WaterGrid, from: [number, number], seed: n
   const n = 1 + Math.floor(hash2(seed, 71) * 3);
   const ranked = cand.map((t) => ({ t, h: hash2(seed * 31 + t.x * 7, t.y * 13 + 5) })).sort((a, b) => a.h - b.h || a.t.x - b.t.x || a.t.y - b.t.y);
   const far = (a: [number, number], b: { x: number; y: number }) => Math.abs(a[0] - b.x) + Math.abs(a[1] - b.y) >= CRUISE_SPACING;
+  if (sig & PASS_LIFT) {
+    const near = new Set(waterReach(grid, from, CRUISE_RANGE, cls, sig & ~PASS_LIFT).map((t) => key(t.x, t.y)));
+    const i = ranked.findIndex(({ t }) => !near.has(key(t.x, t.y)) && far(from, t));
+    if (i > 0) ranked.unshift(...ranked.splice(i, 1));
+  }
   const picked: [number, number][] = [];
   for (const { t } of ranked) {
     if (picked.length >= n) break;

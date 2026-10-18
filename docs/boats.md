@@ -4,8 +4,9 @@ Card "boats and ports etc" (UTD 496c6b9c). It absorbs "Gateways 2: seaport" (f1b
 under bridges" (docs/structures.md section 3). Rich: "commercial boats for industry, fishing, for transport etc and also
 domestic pleasure boats just cruising around. will also need harbours of varying size etc."
 
-This is a design: nothing here is built yet. Every claim about the engine was read from source on 2026-10-18. Section 10
-splits the work into subtasks, and section 11 lists the questions for Rich.
+This began as a design, and every subtask is now built (B1-B8): each section's "Built" note says what was built and
+how it differs. Every claim about the engine was read from source on 2026-10-18. Section 10 splits the work into
+subtasks, and section 11 lists the questions for Rich.
 
 ## 0. The short version
 
@@ -1212,6 +1213,86 @@ Section 7 is built in `client/src/render/boats.ts` (`BoatsView`), `render/boatMo
 - **Captions.** `SURFACE_CAPTIONS`-style text for the gates and lanes. The kinds' `blurb` and `howTo` text comes from the
   catalogue.
 
+### 8.1 Built: B8, the showcase harbour and London's Thames (2026-10-18)
+
+The scenarios above, built in `shared/src/demo/showcase.ts`, `london.ts` and `londonMap.ts`, with the seeder
+(`server/src/demo/seed.ts`) and `demo:check` (`server/src/demo/check.ts`). docs/demo.md has what each looks like. The
+harbour kinds (24-28) and the Harbours group are no longer drafts, so `demo:check` enforces them.
+
+- **The showcase's `harbour` section** (land `Harbour`, x 35-79, y 31-56).
+  - The river runs on past the riverside quarter (repainted where the land dried it) into a basin, x 45-95, rows
+    39-55, which opens to the sea gate "the sea" at (95, 47).
+  - A quay road on y = 33 from the east perimeter road serves Eastport Docks (the cargo port, its quay the basin's
+    north edge) and a bay (rows 36-38) with Eastport Fish Quay and Harbour Pier (whose pontoon row is a one-tile notch).
+  - Between the bascule (x = 15) and the suspension bridge (x = 25), a pool off the north bank, exactly as wide as the
+    marina (a wider one left clearance-2 pockets the cruises could not turn in), holds Lifting Bridge Marina, its door
+    on a spur from the bascule's street. Row 48 could not take a marina (the river road is row 49), so the design's
+    river-road placement went to the pool.
+  - Past the suspension bridge, the Quarter Jetty and Riverside Pier stand by the river road (row 47 wet, row 48 dry).
+    The pier is two tiles from bus line 3's stop at (32, 48). A jetty or a pier between the two bridges narrowed the
+    river to one clearance-2 row, which trapped the yachts' cruises.
+  - River bus line 1, there and back between the two piers, 3 boats.
+  - The marina's position (x = 19) was chosen among the six the pool allows: its fleet then has every pleasure type
+    (narrowboats included) and a yacht books the bascule's two lifts on day 4. The schedule is pure, so this holds until
+    the schedule or the place changes; `demo:check` says so when it does.
+- **London's `london-river` section.**
+  - Piers and harbours are fitted before the streets, like the landmarks (`fitsHarbour`): wet rows on the Thames or a
+    dock and a tile clear of every deck, dry rows on the real one's bank, a road-able front, and behind them open water
+    off the decks, as deep as the kind's boats need and at least three rows. On the river, the second row out and a
+    tile beyond each end of it must have water all round, so a clearance-2 channel stays open past every harbour (the
+    first fits without that rule cut the barges off from Teddington). A pier also needs open water beyond each berth
+    end.
+  - Only the dry rows go to `londonPlan` as keeps, so the street plan fronts them with a road and leaves the wet rows
+    river.
+  - RB1 (5 boats) calls at Millbank, Embankment, Tower, Canary Wharf and Greenwich. The map's banks at Westminster are
+    Parliament, New Scotland Yard and the Eye, and its bridges from Waterloo to Tower Bridge are three tiles apart, so
+    Westminster, Bankside and London Bridge City have no room; Tower Pier stands below Tower Bridge.
+  - St Katharine Docks is a `DOCKS` basin (4×3 at (14, -5)) where the river bulges north east of the Tower; the
+    marina in it bases yachts, narrowboats and motor cruisers. A jetty on Chelsea Reach (the design's Putney jetty sat
+    on 3.5-tile water and blocked the barges). Dagenham Docks (cargo port, north bank) and Thamesmead Fish Quay (south
+    bank), both down river of every bridge. Blackwall and Woolwich stay bridges; the bascule stays on its clock.
+  - Sea gates `londonSeaGates()`: the estuary (135, 22) and Teddington (-109, 79, low). `LONDON_MARGIN` (24) is
+    shared with the server's margin.
+- **A change to B1's `cruiseWaypoints`.** A cruise whose signature has `PASS_LIFT` picks first the best-hashed tile it
+  reaches only through a lift, when one is within `CRUISE_RANGE`. Without it St Katharine's yachts cruised down river
+  and never met Tower Bridge (the Pool is a few tiles against forty down river). boats-check passes unchanged.
+- **Seeder.** `DemoSection.seaGates` goes to `World.seaGates`; every named placement (`DemoPlacement.name`) gets
+  `setStopName` at its door (stations, piers, harbours); a `Ferry` is registered when the scenario has ferry lines and
+  the caller has none. `worldHash` covers the sea gates only when there are any, so the other demos keep their hashes.
+- **Registry** (docs/demo.md table): `harbour-<role>` for each kind (lanes with no refusal), `boat-<type>` for every
+  `BoatType` (the launches as todos), `boat-lift`, `sea-gate`, `ferry-interchange`, and in London `tower-bridge-lift`.
+  `SeededDemo` gained `harbours` (the server's list, taken as staffed) and `seaGates`. Spots `sea-gate` and
+  `pool-of-london`; `LINE_CAPTIONS.ferry` rewritten; a ferry line's tour title is "River bus N" or its name.
+- **demo:check.** Seeding prints each harbour's lanes and refusals and the gates; `--run` registers `Harbours` as
+  game.ts does, ticks it in the fill and the run, and prints the boats (docs/demo.md).
+- **Homes for the harbour's staff.** The town has more jobs than people, and the docks and fish quay are its farthest
+  jobs, so after the first fill they had no staff (and an unstaffed harbour sails nothing). A street on y = 28 and a
+  strip of homes (x 44-79, rows 29-32) behind the quay road fix that: every harbour is fully staffed after the fill.
+- **Measured** (`--fill --run 1`, 2026-10-18, machine shared with other agents, load average 4-7).
+  - **Showcase.** 16,831 citizens, 16,670 jobs, 16,789 employed; tick 17.6 ms average over the last day. Every harbour
+    staffed (docks 70/70, fish quay 26/26, piers 3/3). Days 2-3: 6 fishing trips, 9 port calls with 3 tug escorts,
+    10 cruises and 2 lift barges; 208 boxes landed, 200 sold; 15 calls landing 286 containers (253 lorries to shops),
+    213 exports; 673 ro-pax passengers; $2,495 in dues, $72 in berth fees. River bus line 1 runs 3 boats every 64 min
+    but carried nobody that day. `Harbours.tick` 0.009 ms and `Ferry.tick` 0.016 ms a tick. The yacht's lift passages
+    are on day 4, outside the run; `demo:check` holds them.
+  - **London.** 32,641 citizens; tick 41.0 ms average over the last day against 38.0 ms before B8 (32,505 citizens,
+    the same fill run back to back; the two runs' random streams differ, and the river's own cost is 0.05 ms).
+    9 harbours (8 staffed: Embankment Pier was not), 11 lanes, no refusal; the barges' lane to Teddington is 411 tiles
+    under 18 bridges. Days 2-3: 6 fishing trips, 8 calls, 2 escorts, 15 cruises (6 yachts), 3 lift barges; on day 3
+    two of Tower Bridge's three lifts carry a St Katharine yacht out and back. Totals: 183 boxes landed, 180 sold; 13
+    calls, 221 containers in, 207 out; 483 ro-pax passengers; $2,140 in dues; $96 in berth fees. RB1 runs 5 boats
+    every 78 min: 12 trips planned by river bus, 6 of them changing to the Tube. `Harbours.tick` 0.025 ms and
+    `Ferry.tick` 0.027 ms a tick.
+- **Screenshots** (own server and Vite, the demos as their children), with `msc.boats.debugTick` and
+  `msc.landmarks.fixedHours` set together from the schedule: river buses at Tower Pier and Embankment, St Katharine
+  Docks, a yacht under Tower Bridge's raised leaves, Dagenham Docks with a container ship alongside, the fish quay,
+  the showcase's basin, port, pool marina, jetty and pier, and its bascule lifted for the yacht. (Pinning the leaves'
+  time leaves the live traffic on its own clock, so a car can be seen on a raised leaf.)
+- **Left.** The police launch and fire boat are registry todos. No visiting yachts or `through` lanes (B3 left them
+  out). A lift's tall boat is booked into the clock's lifts only, so on days with fewer than two lifts within a
+  cruise none passes. The showcase's river bus carries few riders: its piers join a corner of the quarter to the
+  harbour's homes, which work at the docks.
+
 ## 9. Checks
 
 - **`packages/shared/scripts/boats-check.ts [days]`**, modelled on `heli-check.ts` and `rail-check.ts`. It builds a server
@@ -1283,7 +1364,7 @@ There are eight subtasks, about 5 hours of agent time, in four waves. Each runs 
 | B5 | Ferries: the `'ferry'` mode, `Ferry extends Timetabled`, `routeWater`, `FERRY_TIMING`, berth offsets, `ferryLines`, the lines editor. **Built** (section 6.2) | opus | B1, B2 | B3, B7 | M (35 min) | `shared/src/transit.ts`; `rail.ts` (`ferry`, `RiverBus`, geometry dispatch); new `server/src/sim/ferry.ts`; `game.ts`; `net.ts`; `protocol.ts`; `client/src/lines.ts`; `showcase.ts` (`LINE_MODES` todo) | `rail.ts`; `net.ts`, `protocol.ts`, `game.ts` (also B4: append-only hunks); `showcase.ts` (also B8) |
 | B6 | Boat rendering: models, liveries, motion, sails, wakes, lights, moored boats, picking, panels, helm FPV, barge hand-off. **Built** (section 7.1) | sonnet | B3 (B5 for ferries; mock until merged) | B4 | L (50 min) | new `client/src/render/boats.ts`; `vehicles.ts`; `main.ts`; `vehicleInterior.ts`; `fpv.ts` (`CabEye.helm`); `landmarks.ts` | `main.ts`; `vehicles.ts` |
 | B7 | Harbour models: two designs per kind (pontoons, jetty, market hall, pier, cranes and stacks); channel-aware arches and piers in `render/bridges.ts`. **Built** (section 5) | sonnet | B2 | B3, B5 | S (25 min) | `buildings/harbour.ts` (designs only); `render/bridges.ts` (`bridgeChannel`) | `compiled.ts` (re-run compile) |
-| B8 | Scenarios and checks: showcase `harbour` section, registry, tour, London (gates, piers, RB1, St Katharine, port), seeder `seaGates`, `demo:check` report, drafts off, `LINE_MODES.ferry = true` | opus | all | — | L (45 min) | `showcase.ts`; `london.ts`; `londonMap.ts` (`DOCKS`); `server/src/demo/seed.ts`; `demo/check.ts`; `harbour.ts` (draft flags) | `showcase.ts`; London's `startHash` changes (reset the demos) |
+| B8 | Scenarios and checks: showcase `harbour` section, registry, tour, London (gates, piers, RB1, St Katharine, port), seeder `seaGates`, `demo:check` report, drafts off, `LINE_MODES.ferry = true`. **Built** (section 8.1) | opus | all | — | L (45 min) | `showcase.ts`; `london.ts`; `londonMap.ts` (`DOCKS`); `server/src/demo/seed.ts`; `demo/check.ts`; `harbour.ts` (draft flags) | `showcase.ts`; London's `startHash` changes (reset the demos) |
 
 Shared hot spots, in order of risk:
 
