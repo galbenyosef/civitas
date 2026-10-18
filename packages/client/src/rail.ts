@@ -43,20 +43,24 @@ export function railStationHtml(r: RailStationInfo, row: (k: string, v: string |
 /** riders waiting on the platform between two end tiles (set by main.ts from the citizens drawn there; the server does not count them) */
 export let platformCrowd: (x0: number, y0: number, x1: number, y1: number) => number = () => 0;
 export const setPlatformCrowd = (f: typeof platformCrowd) => { platformCrowd = f; };
-/** The underground section of an entrance's or hall's tooltip (server sim/metro.ts describeStation): lines, next trains, the platform crowd, where to change. */
-export function metroStationHtml(m: MetroStationInfo, row: (k: string, v: string | number) => string): string {
-  let html = `<div class="sect">Underground: ${esc(m.name)}</div>`;
-  html += row('Platform', m.track === 'open' ? 'open' : `<span class="bad">${esc(m.track)}</span>`);
+/**
+ * The underground section of an entrance's or hall's tooltip (server sim/metro.ts describeStation): lines, next trains,
+ * the platform crowd, where to change. `pier`: a ferry pier's (sim/ferry.ts), the same shape with boats and a berth.
+ */
+export function metroStationHtml(m: MetroStationInfo, row: (k: string, v: string | number) => string, pier = false): string {
+  const unit = pier ? 'boat' : 'train';
+  let html = `<div class="sect">${pier ? 'River bus' : 'Underground'}: ${esc(m.name)}</div>`;
+  html += row(pier ? 'Berth' : 'Platform', m.track === 'open' ? 'open' : `<span class="bad">${esc(m.track)}</span>`);
   if (!m.lines.length) html += row('Lines', '<span class="bad">none call here yet</span>');
   for (const l of m.lines) {
-    html += row(chip(l), l.status === 'running' ? `a train every ${l.headwayMin} min` : `<span class="bad">${esc(l.status)}</span>`);
-    if (l.next) html += row('&nbsp;&nbsp;next train', `${when(l.next.tick)}, ${esc(l.next.toward)}`);
+    html += row(chip(l), l.status === 'running' ? `a ${unit} every ${l.headwayMin} min` : `<span class="bad">${esc(l.status)}</span>`);
+    if (l.next) html += row(`&nbsp;&nbsp;next ${unit}`, `${when(l.next.tick)}, ${esc(l.next.toward)}`);
   }
-  if (m.platform) {
+  if (m.platform && !pier) {
     const n = platformCrowd(...m.platform);
     html += row('On the platform', n ? `${plural(n, 'person', 'people')} waiting` : 'empty');
   }
-  html += row('Trains today', `${plural(m.callsToday, 'call')} · ${m.boardedToday} on · ${m.alightedToday} off`);
+  html += row(pier ? 'Boats today' : 'Trains today', `${plural(m.callsToday, 'call')} · ${m.boardedToday} on · ${m.alightedToday} off`);
   if (m.changes.length) {
     html += `<div class="sect">Change here for</div>`;
     for (const c of m.changes) html += row(`${esc(c.name)} <span style="color:var(--muted)">${c.mode}</span>`, c.lines.map((l) => chip({ number: l.number, color: l.colour, name: l.name ?? `Line ${l.number}` })).join('<br>'));
@@ -64,7 +68,7 @@ export function metroStationHtml(m: MetroStationInfo, row: (k: string, v: string
   return html;
 }
 
-const PLURALS = ['locomotives', 'carriages', 'driving trailers', 'container flats', 'tank wagons', 'hopper wagons', 'covered vans', 'driving motor cars', 'tube cars'];
+const PLURALS = ['locomotives', 'carriages', 'driving trailers', 'container flats', 'tank wagons', 'hopper wagons', 'covered vans', 'driving motor cars', 'tube cars', 'river buses'];
 /** "locomotive + 3 container flats + 2 tank wagons": how many of each kind */
 export function consistText(kinds: readonly number[]): string {
   const counts = new Map<number, number>();

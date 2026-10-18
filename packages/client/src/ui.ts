@@ -472,6 +472,7 @@ export class UI {
     if (info.airport) html += airportHtml(info.airport, row);
     if (info.rail) html += railStationHtml(info.rail, row);
     if (info.metro) html += metroStationHtml(info.metro, row);
+    if (info.ferry) html += metroStationHtml(info.ferry, row, true);
     if (info.gateway) html += gatewayHtml(info.gateway, row);
     if (info.transit) html += stopHtml(info.transit, row);
     if (info.venue) {

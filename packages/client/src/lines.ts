@@ -1,5 +1,5 @@
 import { Group, Mesh, MeshBasicMaterial, RingGeometry, PlaneGeometry, BufferGeometry, Float32BufferAttribute, DoubleSide, Sprite, SpriteMaterial, CanvasTexture, SRGBColorSpace } from 'three';
-import { isFreightYardKind, stopName, stopModeOf, hasFeature, techFor, TRANSIT, METRO, TICKS_PER_DAY, TICKS_PER_HOUR, type MetroLineDTO, type LineInfo, type StopInfo, type BusInfo, type StopRef, type ServerMsg, type TransitMode, type LinePreview } from '@msimcity/shared';
+import { isFreightYardKind, stopName, stopModeOf, hasFeature, techFor, sailPoints, TRANSIT, METRO, FERRY, TICKS_PER_DAY, TICKS_PER_HOUR, type MetroLineDTO, type FerryLineDTO, type RailRoute, type LineInfo, type StopInfo, type BusInfo, type StopRef, type ServerMsg, type TransitMode, type LinePreview } from '@msimcity/shared';
 import { Ribbon } from './render/route';
 import { METRO_Y } from './render/underground';
 import type { NetClient } from './net';
@@ -56,7 +56,10 @@ export function busHtml(b: BusInfo, row: (k: string, v: string | number) => stri
 
 /** `mode` comes from the first stop clicked: bus stops make a bus line, rail stations a rail line (docs/rail.md) */
 interface Draft { id?: number; number: number; colour: number; loop: boolean; vehicles: number; stops: StopRef[]; mode?: TransitMode; name?: string }
-const VEHICLE: Record<TransitMode, [string, string]> = { bus: ['bus', 'buses'], rail: ['train', 'trains'], metro: ['train', 'trains'] };
+const VEHICLE: Record<TransitMode, [string, string]> = { bus: ['bus', 'buses'], rail: ['train', 'trains'], metro: ['train', 'trains'], ferry: ['boat', 'boats'] };
+/** stations a line of each mode may call at, and vehicles it may ask for */
+const STOPS_MAX = (m: TransitMode) => (m === 'metro' ? METRO.stationsMax : m === 'ferry' ? FERRY.stationsMax : TRANSIT.maxStops);
+const VEHICLES_MAX = (m?: TransitMode) => (m === 'metro' ? METRO.trainsMax : m === 'ferry' ? FERRY.trainsMax : TRANSIT.maxVehicles);
 const DIG = 0xffc233, CROSS = 0xff7a1f;
 
 export class LinesPanel {
@@ -87,6 +90,9 @@ export class LinesPanel {
   private underOn = false;
   /** station names by door tile, from 'metroLines' (a draft's stops are doors) */
   private metroNames = new Map<string, string>();
+  /** pier names by door tile and each ferry line's route, from 'ferryLines' (saved ferry lines draw the line their boats sail) */
+  private ferryNames = new Map<string, string>();
+  private ferryRoutes = new Map<number, RailRoute>();
   /** the draft's overlay (rings, ribbons, badges) sits at tunnel depth while a metro line is edited */
   private yShift = 0;
 
@@ -148,7 +154,17 @@ export class LinesPanel {
     for (const l of lines) l.stations.forEach(([x, y], i) => { if (l.names[i]) this.metroNames.set(`${x},${y}`, l.names[i]); });
     if (this.open) this.render();
   }
-  private nameOf(x: number, y: number) { return this.metroNames.get(`${x},${y}`) ?? stopName(x, y); }
+  /** The ferry lines ('ferryLines'): the piers' names, and the routes their ribbons follow. */
+  setFerryLines(lines: FerryLineDTO[]) {
+    this.ferryNames.clear(); this.ferryRoutes.clear();
+    for (const l of lines) {
+      l.stations.forEach(([x, y], i) => { if (l.names[i]) this.ferryNames.set(`${x},${y}`, l.names[i]); });
+      if (l.route) this.ferryRoutes.set(l.id, l.route);
+    }
+    this.dirty = true;
+    if (this.open) this.render();
+  }
+  private nameOf(x: number, y: number) { return this.metroNames.get(`${x},${y}`) ?? this.ferryNames.get(`${x},${y}`) ?? stopName(x, y); }
   /** A 'lineStats' message: buses in service, riders and status since the last full list, and the livery map. */
   applyStats(m: Extract<ServerMsg, { t: 'lineStats' }>) {
     const byId = new Map(m.lines.map((s) => [s.id, s]));
@@ -162,15 +178,17 @@ export class LinesPanel {
     if (!this.open || !this.draft) return false;
     const kind = this.world.kindIdAt(x, y);
     const mode = stopModeOf(kind);
-    if (!mode) { this.toast('error', 'Click bus stops, rail stations or underground stations to add them to the line'); return true; }
-    if (this.draft.mode && this.draft.stops.length && mode !== this.draft.mode) { this.toast('error', this.draft.mode === 'rail' ? 'This is a rail line: click rail stations' : this.draft.mode === 'metro' ? 'This is an underground line: click underground stations' : 'This is a bus line: click bus stops'); return true; }
-    if (mode === 'rail' || mode === 'metro') [x, y] = this.world.doorOf(x, y); // a station is several tiles: the line knows it by its door
+    if (!mode) { this.toast('error', 'Click bus stops, rail stations, underground stations or ferry piers to add them to the line'); return true; }
+    if (this.draft.mode && this.draft.stops.length && mode !== this.draft.mode) { this.toast('error', this.draft.mode === 'rail' ? 'This is a rail line: click rail stations' : this.draft.mode === 'metro' ? 'This is an underground line: click underground stations' : this.draft.mode === 'ferry' ? 'This is a river bus line: click ferry piers' : 'This is a bus line: click bus stops'); return true; }
+    const me = this.world.myPlayer;
+    if (mode === 'ferry' && me && !hasFeature(me.tech, 'ferry') && !me.devUnlimited) { this.toast('error', `${techFor('ferry')?.name ?? 'River buses'} is needed before you can run ferry lines (T for the tech tree)`); return true; }
+    if (mode === 'rail' || mode === 'metro' || mode === 'ferry') [x, y] = this.world.doorOf(x, y); // a station or pier is several tiles: the line knows it by its door
     const p = this.world.parcelAt(x, y);
     if (!p || !this.world.mayEdit(p.owner)) { this.toast('error', 'Lines can only use stops on your own land'); return true; }
     const st = this.draft.stops;
     if (st.length && st[st.length - 1].x === x && st[st.length - 1].y === y) return true;
-    const most = mode === 'metro' ? METRO.stationsMax : TRANSIT.maxStops;
-    if (st.length >= most) { this.toast('error', `A line has at most ${most} ${mode === 'metro' ? 'stations' : 'stops'}`); return true; }
+    const most = STOPS_MAX(mode);
+    if (st.length >= most) { this.toast('error', `A line has at most ${most} ${mode === 'metro' ? 'stations' : mode === 'ferry' ? 'piers' : 'stops'}`); return true; }
     st.push({ x, y });
     this.draft.mode = mode;
     this.changed();
@@ -235,7 +253,7 @@ export class LinesPanel {
     } else if (act === 'edit') { const l = this.lines.find((x) => x.id === id); if (l) this.startDraft(l); }
     else if (act === 'delete') { if (confirm(`Delete line ${this.lines.find((x) => x.id === id)?.number}?`)) this.net.send({ t: 'line', op: 'delete', id }); }
     else if (act === 'cancel') { this.draft = null; this.preview = null; this.render(); this.dirty = true; }
-    else if (act === 'save' && d) this.net.send({ t: 'line', op: 'save', line: { id: d.id, number: d.number, colour: d.colour, loop: d.loop, vehicles: d.vehicles, stops: d.stops, ...(d.mode === 'metro' ? { name: (d.name ?? '').trim() } : {}) } });
+    else if (act === 'save' && d) this.net.send({ t: 'line', op: 'save', line: { id: d.id, number: d.number, colour: d.colour, loop: d.loop, vehicles: d.vehicles, stops: d.stops, ...(d.mode === 'metro' || d.mode === 'ferry' ? { name: (d.name ?? '').trim() } : {}) } });
     else if (act === 'rm' && d) { d.stops.splice(id, 1); if (!d.stops.length && !d.id) d.mode = undefined; this.changed(); }
     else if (act === 'undo' && d) this.undoStop();
     else if (act === 'swatch' && d) { d.colour = Number(t.dataset.c); this.render(); this.dirty = true; }
@@ -245,7 +263,7 @@ export class LinesPanel {
     const t = e.target as HTMLInputElement, d = this.draft;
     if (!d) return;
     if (t.name === 'number') d.number = Math.max(1, Math.min(999, Math.floor(Number(t.value) || 1)));
-    else if (t.name === 'vehicles') d.vehicles = Math.max(0, Math.min(d.mode === 'metro' ? METRO.trainsMax : TRANSIT.maxVehicles, Math.floor(Number(t.value) || 0)));
+    else if (t.name === 'vehicles') d.vehicles = Math.max(0, Math.min(VEHICLES_MAX(d.mode), Math.floor(Number(t.value) || 0)));
     else if (t.name === 'lname') d.name = t.value.slice(0, 24);
     else if (t.name === 'colour') { d.colour = parseInt(t.value.slice(1), 16); this.dirty = true; if (e.type === 'change') this.render(); }
   }
@@ -260,26 +278,26 @@ export class LinesPanel {
       else if (!mine.length) html += `<div class="lempty">No lines yet. Place bus stops beside plain stretches of road (Bus stop tool), a bus depot nearby (its staff drive the buses), then make a line here.</div>`;
       for (const l of mine) {
         const ok = l.status === 'running';
-        html += `<div class="lrow"><div class="ltop">${lineBadge(l.number, l.colour)}<span class="lname">${l.mode === 'metro' ? `underground · ${l.name ? `${esc(l.name)} · ` : ''}` : l.mode === 'rail' ? (isFreightYardKind(this.world.kindIdAt(l.stops[0].x, l.stops[0].y)) ? 'freight · ' : 'rail · ') : ''}${l.loop ? 'loop' : 'there and back'} · ${l.stops.length} ${l.mode === 'bus' ? 'stops' : 'stations'}</span>
+        html += `<div class="lrow"><div class="ltop">${lineBadge(l.number, l.colour)}<span class="lname">${l.mode === 'metro' ? `underground · ${l.name ? `${esc(l.name)} · ` : ''}` : l.mode === 'ferry' ? `river bus · ${l.name ? `${esc(l.name)} · ` : ''}` : l.mode === 'rail' ? (isFreightYardKind(this.world.kindIdAt(l.stops[0].x, l.stops[0].y)) ? 'freight · ' : 'rail · ') : ''}${l.loop ? 'loop' : 'there and back'} · ${l.stops.length} ${l.mode === 'bus' ? 'stops' : l.mode === 'ferry' ? 'piers' : 'stations'}</span>
           ${ro ? '' : `<button class="chip" data-act="edit" data-id="${l.id}">edit</button><button class="chip" data-act="delete" data-id="${l.id}" title="delete">✕</button>`}</div>
           <div class="lstat"><span class="${ok ? '' : 'bad'}">${esc(l.status)}</span> · ${VEHICLE[l.mode]?.[1] ?? 'vehicles'} ${l.inService}/${l.vehicles}</div>
           <div class="lstat">riders ${l.ridersToday} today, ${l.ridersYesterday} yesterday · fares $${Math.round(l.faresToday)}</div>
           <div class="lstops">${l.stops.map((s, i) => `<span title="${l.stopBoardings[i] ?? 0} boarded today">${esc(this.nameOf(s.x, s.y))}</span>`).join(' → ')}${l.loop ? ' ↺' : ' ⇄'}</div></div>`;
       }
       if (!ro) html += `<button class="chip lnew" data-act="new">+ new line</button>`;
-      if (!ro) html += `<div class="lhint">Fares $${TRANSIT.fare} a ride (children free, retirees half) go to you. Buses run ${hm(TRANSIT.serviceStart * TICKS_PER_HOUR)}–${hm(TRANSIT.serviceEnd * TICKS_PER_HOUR)}, one per driver on shift at your depot. Trains run 05:00–01:00 on your track between your rail stations (click stations instead of stops); click freight yards for a freight line, which carries industry's containers instead of passengers. Underground lines run on tunnels the server bores between your underground stations (click those instead): the view drops below ground while you edit.</div>`;
+      if (!ro) html += `<div class="lhint">Fares $${TRANSIT.fare} a ride (children free, retirees half) go to you. Buses run ${hm(TRANSIT.serviceStart * TICKS_PER_HOUR)}–${hm(TRANSIT.serviceEnd * TICKS_PER_HOUR)}, one per driver on shift at your depot. Trains run 05:00–01:00 on your track between your rail stations (click stations instead of stops); click freight yards for a freight line, which carries industry's containers instead of passengers. Underground lines run on tunnels the server bores between your underground stations (click those instead): the view drops below ground while you edit. River buses sail between your ferry piers (click those for a ferry line).</div>`;
     } else {
       html += `<div class="lform">
         <label>Number <input name="number" type="number" min="1" max="999" value="${d.number}"></label>
-        <label>${d.mode === 'bus' || !d.mode ? 'Buses' : 'Trains'} <input name="vehicles" type="number" min="0" max="${d.mode === 'metro' ? METRO.trainsMax : TRANSIT.maxVehicles}" value="${d.vehicles}"></label>
+        <label>${d.mode === 'bus' || !d.mode ? 'Buses' : d.mode === 'ferry' ? 'Boats' : 'Trains'} <input name="vehicles" type="number" min="0" max="${VEHICLES_MAX(d.mode)}" value="${d.vehicles}"></label>
       </div>
-      ${d.mode === 'metro' ? `<label class="lname-in">Name <input name="lname" type="text" maxlength="24" placeholder="Central" value="${esc(d.name ?? '')}"></label>` : ''}
+      ${d.mode === 'metro' || d.mode === 'ferry' ? `<label class="lname-in">Name <input name="lname" type="text" maxlength="24" placeholder="${d.mode === 'ferry' ? 'RB1' : 'Central'}" value="${esc(d.name ?? '')}"></label>` : ''}
       <div class="lsw">${PALETTE.map((c) => `<button class="sw${c === d.colour ? ' on' : ''}" data-act="swatch" data-c="${c}" style="background:${hex(c)}" title="${hex(c)}"></button>`).join('')}<input name="colour" type="color" value="${hex(d.colour)}" title="any colour"></div>
       <div class="lmode"><button class="chip${d.loop ? ' on' : ''}" data-act="mode" data-v="loop">loop ↺</button><button class="chip${d.loop ? '' : ' on'}" data-act="mode" data-v="back">there and back ⇄</button></div>
       <div class="lsect">Stops in order <span>${d.stops.length}</span></div>
       ${d.stops.length ? `<ol class="lstoplist">${d.stops.map((s, i) => `<li>${esc(this.nameOf(s.x, s.y))} <span class="lxy">(${s.x}, ${s.y})</span><button class="lrm" data-act="rm" data-id="${i}" title="remove">✕</button></li>`).join('')}</ol>` : ''}
       ${this.routeHtml(d)}
-      <div class="lhint">${d.mode === 'metro' ? `Click your underground stations in the order trains should call. The tunnel is bored when you save: new tunnel in amber, crossovers ringed, the cost on the button. Lines share no tunnel except at crossovers, and every station needs its own platform. ${d.loop ? 'The last station runs back round to the first, one way.' : 'Trains run out in one bore and home in the other.'}` : d.mode === 'rail' ? `Click your rail stations in the order trains should call; consecutive stations must be joined by track, and no other line may use it. ${d.loop ? 'The track must lead from the last station back round to the first; the loop takes as many trains as fit.' : 'Trains reverse at the ends and call everywhere on the way back; one track runs one train.'}` : `Click your bus stops (or rail stations, for a rail line) on the map in the order the bus should call: the road between them fills in, the shortest way a bus can drive. ${d.loop ? 'The last stop runs back to the first.' : 'Buses call at every stop on the way back.'} Where a bus has to turn round it goes round a block or a roundabout, or turns at a dead end or a junction. Backspace or right-click takes the last stop off.`}</div>
+      <div class="lhint">${d.mode === 'ferry' ? `Click your ferry piers in the order the river buses should call: they sail the water between them, under every bridge, on water at least three tiles wide. One line calls at a pier. ${d.loop ? 'The last pier runs back round to the first.' : 'Boats call everywhere on the way back, and pass each other on the river.'}` : d.mode === 'metro' ? `Click your underground stations in the order trains should call. The tunnel is bored when you save: new tunnel in amber, crossovers ringed, the cost on the button. Lines share no tunnel except at crossovers, and every station needs its own platform. ${d.loop ? 'The last station runs back round to the first, one way.' : 'Trains run out in one bore and home in the other.'}` : d.mode === 'rail' ? `Click your rail stations in the order trains should call; consecutive stations must be joined by track, and no other line may use it. ${d.loop ? 'The track must lead from the last station back round to the first; the loop takes as many trains as fit.' : 'Trains reverse at the ends and call everywhere on the way back; one track runs one train.'}` : `Click your bus stops (or rail stations, for a rail line) on the map in the order the bus should call: the road between them fills in, the shortest way a bus can drive. ${d.loop ? 'The last stop runs back to the first.' : 'Buses call at every stop on the way back.'} Where a bus has to turn round it goes round a block or a roundabout, or turns at a dead end or a junction. Backspace or right-click takes the last stop off.`}</div>
       <div class="lbtns"><button class="chip" data-act="undo" ${d.stops.length ? '' : 'disabled'}>undo stop</button><button class="chip" data-act="cancel">cancel</button><button class="chip on" data-act="save" ${d.stops.length >= 2 && !this.current()?.problem?.fatal ? '' : 'disabled'}>save line${d.mode === 'metro' && this.current()?.cost ? ` · $${this.current()!.cost!.toLocaleString('en-GB')}` : ''}</button></div>`;
     }
     this.el.innerHTML = html;
@@ -328,7 +346,8 @@ export class LinesPanel {
     mine.forEach((l, i) => {
       if (this.draft?.id === l.id) return;
       if (l.mode === 'metro') return; // its tunnel is drawn, in the line's colour, by the underground view
-      const pts = lanePoints(l.path, true, l.mode === 'rail' ? 0 : 0.19); // trains run on the track's centre line
+      const fr = l.mode === 'ferry' ? this.ferryRoutes.get(l.id) : undefined;
+      const pts = fr ? sailPoints(fr) : lanePoints(l.path, true, l.mode === 'rail' || l.mode === 'ferry' ? 0 : 0.19); // trains run on the track's centre line, boats on their sailing line
       if (pts.length < 4) return;
       const r = new Ribbon(new MeshBasicMaterial({ color: l.colour, transparent: true, opacity: 0.85, depthWrite: false, side: DoubleSide, toneMapped: false }), RIBBON_Y + 0.002 * i);
       r.mesh.renderOrder = 5;
@@ -344,9 +363,9 @@ export class LinesPanel {
     if (d) {
       (this.editRibbon.mesh.material as MeshBasicMaterial).color.setHex(d.colour);
       // the road the bus will take, once the server has routed it (the last answer while it works on the next)
-      const p = this.preview, rail = d.mode === 'rail' || metro;
+      const p = this.preview, rail = d.mode === 'rail' || d.mode === 'ferry' || metro;
       if (p && p.path.length >= 4 && d.stops.length >= 2) {
-        const pts = lanePoints(p.path, p.ok, rail ? 0 : 0.19);
+        const pts = p.sail && p.sail.length >= 4 ? p.sail : lanePoints(p.path, p.ok, rail ? 0 : 0.19); // a ferry's draft: the line its boats would sail
         if (pts.length >= 4) this.editRibbon.set(pts, new Array(pts.length / 2).fill(RIBBON_W));
       } else {
         const pts: number[] = [];

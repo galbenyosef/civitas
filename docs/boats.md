@@ -712,6 +712,114 @@ Pleasure boats and the marina:
 - **Selection.** The ferry's panel reuses `inspectTrain`: vehicle ids are `trainVehicleId`, and line ids are unique
   across modes. `trainCrew` gets a ferry variant: a master, a mate and deckhands.
 
+### Built: B5, ferries (2026-10-18)
+
+- **Mode and stops.** `TransitMode` has `'ferry'` and `STOP_KINDS[27] = 'ferry'` (`shared/src/transit.ts`). A line names
+  its piers by their doors, as rail names stations.
+- **The stop** (`shared/src/ferry.ts` `pierStop`, `ferryStop`, `pierAt`, `pierBuilt`). The stop row is the 2-tile berth
+  (`fairwayTiles(p, 0)`) plus one tile of open water beyond each end, so it is 4 tiles long, as a `StationStop` with
+  `len` 4. Every tile must be open water with no deck, or the pier says why ("needs open water beyond each end of its
+  berth for the boats to come alongside"). The end tiles matter: a boat that came in across the row's end would lie on
+  the rounded corner, and with them the hull of a boat at either berth position lies on the straight.
+- **The route** (`routeWater(def, grid, env)`). Both ways through the first pier are tried, and the cheaper is kept.
+  - Each leg is a `waterLane` for `cls: 'river'` and `FERRY_SIG` (`passSig(0.10, false)`, every style closed). It runs
+    from the end of one stop row to either end of the next.
+  - A loop's closing leg goes back into the first row's first tile.
+  - The lane search runs on a `BerthGrid` wrapper of the grid, which counts every stop row's end tiles as wide enough
+    (they lie beside the bank, clearance 1) and its berth tiles as land. So a leg reaches a row only at an end, from
+    outside, and never through a berth.
+  - A refusal names the two piers and the lane's reason: "the piers at (x, y) and (x, y) are not joined by water a river
+    bus can sail: the water is too narrow at (x, y)".
+  - Water is shared, so a route may cross itself and other lines.
+  - The result is a `RailRoute` with `water: true`, `room` and `bridges` (new optional fields on `RailRoute`).
+- **Timing** (`rail.ts`).
+  - `RailLineDef.ferry` is set, with `FERRY_TIMING` as designed.
+  - `RailVehicle.RiverBus` (9) is a "river bus", 0.95 long. `consistKinds` gives one.
+  - `RailService.ferry` is set. `stationDwell` takes `ferry`.
+  - A there-and-back line spaces its boats on the unfolded ring, as the metro does. The `railService` cache key gains
+    `f`.
+  - Each call stands at `stopS ± FERRY_BERTH_OFF` (0.5) in the way the boat is going. At the ends of a there-and-back
+    line it is where it came in: -0.5 at the first pier and +0.5 at the last. So the dwell and run pieces join up.
+  - `railGeometry` hands a `water` route to `waterGeometry(route, 2)`. `RailGeometry.water` keeps it, and `railPoint`
+    follows `waterPoint`. `geom.s` holds approximate tile-entry arclengths.
+  - **A correction to waterGeometry's `stopS`.** It is computed from the row's first tile. That tile is a rounded corner
+    when a boat comes in across the row's end, so its `tileS` is the arc's middle and not the tile's centre, which
+    put the stop 0.11 off. `railGeometry` takes each stop row's middle from its second tile instead, which is always a
+    straight vertex. Lanes without stops are unaffected.
+  - Non-ferry lines are unchanged: rail-check and metro-check print byte-identical output before and after.
+- **`server/src/sim/ferry.ts`, `Ferry extends Timetabled`** (mode `'ferry'`). It is registered in `game.ts` after the metro,
+  with `sandbox`, so local mode has it too.
+  - **Routes** are cached per line shape with a hash of the water they were found on. The hash covers every route tile
+    with its 4 neighbours (tile word and aux byte) and the piers' doors.
+    - Re-deriving every 10 ticks costs a few thousand tile reads.
+    - A changed hash, or a new game day, reads the water into a fresh `WaterGrid` and searches again.
+    - A refusal is retried after 50 ticks.
+  - **The grid's terrain fallback.** It reads `World.peekTile` and falls back to the terrain sampler, so water in a
+    chunk nobody has generated is still water.
+  - **`route`** refuses a pier that is not the owner's (outside a sandbox), and a pier another ferry line calls at: "The
+    pier at (x, y) already serves line 1; build another pier for this line".
+  - **`plan`** is the editor's preview: the lap, `lapTicks` and `LinePreview.sail`, the sailing line sampled every
+    0.25 tiles (`sailPoints`).
+  - **`commit`** applies the cap of 24 lines an owner, and requires the `'ferry'` feature (River buses), except in a
+    sandbox or with dev funds.
+  - **Riders.** `capacity` is 120 places a boat. `rideTicks` adds `FERRY.access` (2 ticks for the gangway).
+    `waitSpot` is `pontoonSpot`: a hashed spot of each rider's own on the pier's wet row.
+  - **`describeStation`** answers `BuildingInfo.ferry`, in the `MetroStationInfo` shape. `track` is the berth's state,
+    `platform` is the stop row's end tiles, and it lists the lines with their next boat and where to change.
+  - **`describeTrain`** answers `inspectTrain`: "alongside at …", "sailing to …", and the riders.
+- **Wire.**
+  - `{ t: 'ferryLines', lines: FerryLineDTO[] }` (`RailLineDTO` plus `names`) is sent on hello and when `changed`, as
+    `metroLines` is.
+  - `net.ts` routes `inspectTrain` to the ferry after rail and the metro, fills `BuildingInfo.ferry` for kind 27, and
+    toasts a ferry save ("… saved: 2 piers, 4 boats asked for").
+- **Client.**
+  - The Lines panel has a ferry mode: the first pier clicked picks it, and the tool asks for River buses.
+  - The panel has a name field, up to 8 boats and 12 piers, and its own hint.
+  - The draft is drawn along `preview.sail`, and saved ferry lines along `sailPoints` of their routes (from
+    `ferryLines`, `LinesPanel.setFerryLines`).
+  - The pier tooltip is `metroStationHtml(info, row, true)`, which reads "River bus", "Berth" and "a boat every N min".
+  - `main.ts` keeps the DTOs in `ferryMeta` (also `window.msc.ferryMeta`).
+- **Crews.** `shared/src/crews.ts` `ferryCrew(lineId, boat, tick)` gives a master, a mate and one or two deckhands
+  (sometimes a trainee mate), on a train crew's turns.
+- **Showcase.** `LINE_MODES.ferry` is `true`. The existing draft skip in `showcaseProblems` passes over it while the pier
+  is a draft, so the type did not need to widen. `LINE_CAPTIONS.ferry` is a first draft. A ferry `DemoLine`'s stops
+  must be `ferry-pier` placements.
+- **Load test.** `npx tsx packages/server/src/loadtest/ferry.ts [--districts 3] [--hours 24] [--off] [--no-fill]
+  [--save path]`.
+  - **The city.** A 3×3 seedCity whose middle row of districts is a lake 24 tiles across. Only a causeway at the west
+    edge joins the two shores by land, because a commute needs a walk to work.
+  - **The piers** stand on the bank between the lake and the first street. They are placed with the tool, and the lines
+    are previewed and saved through `Net.handle`.
+  - **The lines.** Line 1 is a loop of 4 piers (158 tiles, 8 boats every 36 min). Line 2 runs there and back across
+    the middle (58 tiles, 4 boats every 30 min).
+  - **The feeders.** Buses in the two middle districts end at stops on the bank, 4 tiles from line 2's piers.
+  - **The commuters.** Half the workers of each shore district then work across the water.
+  - **Measured over a day** (46 checks pass):
+    - `Ferry.tick` costs 0.06 to 0.07 ms a tick;
+    - every pier has exactly the timetable's calls;
+    - riders board and alight on both lines;
+    - 39 trips went by river bus, 36 of them changing to or from a bus;
+    - every ferry rider waiting stood on a pontoon;
+    - nobody overstayed a wait or rode a boat that was not running;
+    - a bulldozed pier grounds its line.
+  - **Ridership** is small because the test city's commutes mostly drive, as in the metro test.
+  - **`--save path`** writes the city once line 1 is saved and stops. That is a test city for a server
+    (`CITY_DISTRICTS=3 WORLD_FILE=path`), which gave the Lines editor screenshot of line 2's draft.
+- **For B6.**
+  - Run each `FerryLineDTO` with `railService(dto, dto.route)` and `trainsAt(svc, tick)`.
+  - `trainPoses` gives the one hull, kind 9, between bogie points 0.3 either side, so it follows the sailing line.
+  - `svc.geom.water` is the `WaterGeometry`: `decks` for the bridges, and `waterPoint(...).c` for the keep-to-starboard
+    offset.
+  - Vehicle ids are `trainVehicleId(line, boat)`, and the panel comes from `inspectTrain`.
+  - Add `boats.setFerryLines(m.lines)` in `main.ts`'s `ferryLines` handler.
+  - No loads message exists yet, unlike `metroLoads`.
+- **For B8.**
+  - Place piers whose berth row and one tile beyond each end are open water, on river-class water (a 4-wide river
+    leaves clearance 2 in the row beyond the berth).
+  - Save ferry lines (`mode: 'ferry'`, pier doors as stops).
+  - Register a `Ferry` in the demo seeder and `demo/check.ts` where they build their own services, as for the metro.
+  - Refine `LINE_CAPTIONS.ferry`.
+
 ### 6.3 Fishing
 
 - **Crew.** The crew are real citizens on the harbour's payroll. `boatRole(kindId, wx, wy, citizenId)` hash-seeds crew
@@ -961,7 +1069,7 @@ There are eight subtasks, about 5 hours of agent time, in four waves. Each runs 
 | B2 | Harbour kinds (ids 24-28, drafts, one placeholder design each), wet footprints, placement, tech. **Built** (section 5) | opus | — | B1 | M (35 min) | new `buildings/harbour.ts`; `schema.ts`; catalogue registration; `structures.ts` `checkPlaced`; `tech.ts`; `chunkView.ts` (water under wet tiles); `worldmap.ts` (`mapClassOf`) | `compiled.ts` (generated: re-run `buildings:compile` on merge); `chunkView.ts` |
 | B3 | Boat types and the schedule: `BOAT_TYPES`, `boatTimetable`, berth and bascule booking, `boatsAt`, names and crews | opus | B1 (B2's ids by `KIND_ID`) | B5, B7 | L (45 min) | new `shared/src/boats.ts`; `boats-check.ts` (schedule sections) | `boats-check.ts` (append sections) |
 | B4 | Server harbours: lanes on change, sea gates, `harbours` message, fishing and port economy, `shipBerthed`, `inspectBoat`, tooltips, load test | opus | B1, B2, B3 | B6 | L (50 min) | new `server/src/sim/harbours.ts`; `simulation.ts` (`dispatch` `to`, export point); `gateways.ts`; `world.ts`, `snapshot.ts` (`seaGates`); `game.ts`; `net.ts`; `protocol.ts`; new `loadtest/boats.ts` | `net.ts`, `protocol.ts`, `game.ts` (also B5); `simulation.ts` |
-| B5 | Ferries: the `'ferry'` mode, `Ferry extends Timetabled`, `routeWater`, `FERRY_TIMING`, berth offsets, `ferryLines`, the lines editor | opus | B1, B2 | B3, B7 | M (35 min) | `shared/src/transit.ts`; `rail.ts` (`ferry`, `RiverBus`, geometry dispatch); new `server/src/sim/ferry.ts`; `game.ts`; `net.ts`; `protocol.ts`; `client/src/lines.ts`; `showcase.ts` (`LINE_MODES` todo) | `rail.ts`; `net.ts`, `protocol.ts`, `game.ts` (also B4: append-only hunks); `showcase.ts` (also B8) |
+| B5 | Ferries: the `'ferry'` mode, `Ferry extends Timetabled`, `routeWater`, `FERRY_TIMING`, berth offsets, `ferryLines`, the lines editor. **Built** (section 6.2) | opus | B1, B2 | B3, B7 | M (35 min) | `shared/src/transit.ts`; `rail.ts` (`ferry`, `RiverBus`, geometry dispatch); new `server/src/sim/ferry.ts`; `game.ts`; `net.ts`; `protocol.ts`; `client/src/lines.ts`; `showcase.ts` (`LINE_MODES` todo) | `rail.ts`; `net.ts`, `protocol.ts`, `game.ts` (also B4: append-only hunks); `showcase.ts` (also B8) |
 | B6 | Boat rendering: models, liveries, motion, sails, wakes, lights, moored boats, picking, panels, helm FPV, barge hand-off | sonnet | B3 (B5 for ferries; mock until merged) | B4 | L (50 min) | new `client/src/render/boats.ts`; `vehicles.ts`; `main.ts`; `vehicleInterior.ts`; `fpv.ts` (`CabEye.helm`); `landmarks.ts` | `main.ts`; `vehicles.ts` |
 | B7 | Harbour models: two designs per kind (pontoons, jetty, market hall, pier, cranes and stacks); channel-aware arches and piers in `render/bridges.ts`. **Built** (section 5) | sonnet | B2 | B3, B5 | S (25 min) | `buildings/harbour.ts` (designs only); `render/bridges.ts` (`bridgeChannel`) | `compiled.ts` (re-run compile) |
 | B8 | Scenarios and checks: showcase `harbour` section, registry, tour, London (gates, piers, RB1, St Katharine, port), seeder `seaGates`, `demo:check` report, drafts off, `LINE_MODES.ferry = true` | opus | all | — | L (45 min) | `showcase.ts`; `london.ts`; `londonMap.ts` (`DOCKS`); `server/src/demo/seed.ts`; `demo/check.ts`; `harbour.ts` (draft flags) | `showcase.ts`; London's `startHash` changes (reset the demos) |

@@ -181,6 +181,8 @@ export interface BuildingInfo {
   rail?: RailStationInfo;
   /** metro entrances and halls: the platform under the door, the lines calling, today's riders and where to change (sim/metro.ts) */
   metro?: MetroStationInfo;
+  /** ferry piers: the berth (`track` says whether boats can call, `platform` its stop row), the lines calling, today's riders, where to change (sim/ferry.ts) */
+  ferry?: MetroStationInfo;
   /** gateways (motorway connection, stations, coach depot, airport): arrivals and departures through it (shared/src/gateways.ts) */
   gateway?: GatewayInfo;
   /** named lists of everyone tied to this building; present only for a `full` inspect */
@@ -236,6 +238,13 @@ export interface RailStationInfo {
  * the under layer, plus its stations' names in calling order. Clients run its trains with railService, as on the surface.
  */
 export interface MetroLineDTO extends RailLineDTO {
+  names: string[];
+}
+/**
+ * A ferry line on the wire ('ferryLines', docs/boats.md 6.2): a rail line with `ferry` set, whose route runs on the
+ * water (RailRoute.water), plus its piers' names in calling order. Clients run its boats with railService.
+ */
+export interface FerryLineDTO extends RailLineDTO {
   names: string[];
 }
 /** A metro station's tooltip section: the rail section's fields (`track` says how the platform is), plus its name and the changes. */
@@ -457,6 +466,8 @@ export type ServerMsg =
   | { t: 'metroLines'; lines: MetroLineDTO[] }
   /** riders on board each running metro train, every 25 ticks while it changes: flat [lineId, trains, load0, load1, …, lineId, …] */
   | { t: 'metroLoads'; l: number[] }
+  /** every ferry line (sim/ferry.ts), sent with the welcome and whenever any line's definition, status or route changes */
+  | { t: 'ferryLines'; lines: FerryLineDTO[] }
   | { t: 'train'; line: number; train: number; info: TrainInfo | null }
   | { t: 'pong'; n: number }
   /** every transit line, and which line each bus on the road runs (flat [busId, lineId, …], for the livery) */

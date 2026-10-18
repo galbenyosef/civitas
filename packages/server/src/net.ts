@@ -8,7 +8,7 @@ import {
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
   isBridgeAux, planBridge, joinsBridgeSide, BRIDGE_STYLE_NAMES, type BridgePlan,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
-  isMetroStationKind, CITIZEN_UNDER,
+  isMetroStationKind, CITIZEN_UNDER, isFerryPierKind,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -16,6 +16,7 @@ import { interiorLots } from './sim/blocks';
 import type { Airports } from './sim/airports';
 import type { Rail } from './sim/rail';
 import type { Metro } from './sim/metro';
+import type { Ferry } from './sim/ferry';
 import { Onboarding } from './goals';
 import { historyOf, type History } from './history';
 import { MapSummaries } from './worldmap';
@@ -80,6 +81,8 @@ export class Net {
   rail: Rail | null = null;
   /** underground railways (sim/metro.ts): platforms under new stations, the underground bulldozer, station tooltips and the 'metroLines' and 'metroLoads' messages; set by game.ts */
   metro: Metro | null = null;
+  /** river buses (sim/ferry.ts): pier tooltips, boat tooltips and the 'ferryLines' message; set by game.ts */
+  ferry: Ferry | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
   tickStats: { avg: number; p95: number; max: number } | null = null;
   /** game ticks per TICK_MS of wall time, sent with the stats message when it is not 1 so the client's clock follows a paused or
@@ -150,7 +153,7 @@ export class Net {
       case 'dev': return this.dev(c, m.action, m.on);
       case 'sites': return this.siteList(c, m.id);
       case 'priority': return this.setPriority(c, m.x, m.y, m.priority);
-      case 'inspectTrain': return this.send(c, { t: 'train', line: Number(m.line), train: Number(m.train), info: this.rail?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.metro?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? null });
+      case 'inspectTrain': return this.send(c, { t: 'train', line: Number(m.line), train: Number(m.train), info: this.rail?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.metro?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.ferry?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? null });
       case 'lines': return this.send(c, this.linesMsg());
       case 'line': return this.editLine(c, m);
       case 'hist': return this.histOpen(c, m.open === true);
@@ -214,6 +217,7 @@ export class Net {
     this.send(c, this.linesMsg());
     if (this.rail) this.send(c, { t: 'railLines', lines: this.rail.dtos() });
     if (this.metro) { this.send(c, { t: 'metroLines', lines: this.metro.dtos() }); if (this.metro.loads.length) this.send(c, { t: 'metroLoads', l: this.metro.loads }); }
+    if (this.ferry) this.send(c, { t: 'ferryLines', lines: this.ferry.dtos() });
     c.goalsSig = undefined; this.goals(c);
   }
 
@@ -265,6 +269,7 @@ export class Net {
       if (typeof r === 'string') return this.toast(c, r);
       const bored = r.mode === 'metro' ? this.metro?.lastBore : null;
       if (r.mode === 'metro') this.toast(c, `${r.name ? `The ${r.name} line` : `Line ${r.number}`} saved: ${r.stops.length} stations, ${r.vehicles} train${r.vehicles === 1 ? '' : 's'} asked for${bored?.tiles ? `; ${bored.tiles} tiles of tunnel bored${bored.crossovers ? ` with ${bored.crossovers} crossover${bored.crossovers === 1 ? '' : 's'}` : ''} for $${bored.cost.toLocaleString('en-GB')}` : ''}`, 'info');
+      else if (r.mode === 'ferry') this.toast(c, `${r.name ? `The ${r.name} line` : `Line ${r.number}`} saved: ${r.stops.length} piers, ${r.vehicles} boat${r.vehicles === 1 ? '' : 's'} asked for`, 'info');
       else this.toast(c, r.mode === 'rail' ? `Line ${r.number} saved: ${r.stops.length} stations, ${r.vehicles} train${r.vehicles === 1 ? '' : 's'} asked for` : `Line ${r.number} saved: ${r.stops.length} stops, ${r.vehicles} bus${r.vehicles === 1 ? '' : 'es'}`, 'info');
       this.send(c, this.linesMsg(r.id));
     } else return;
@@ -771,6 +776,7 @@ export class Net {
     if (info && b!.id === Zone.Airport && this.airports) info.airport = this.airports.describe(dx, dy); // the airport kind, not every transport hub
     if (info && isRailStationKind(b!.id) && this.rail) info.rail = this.rail.describeStation(dx, dy);
     if (info && isMetroStationKind(b!.id) && this.metro) info.metro = this.metro.describeStation(dx, dy);
+    if (info && isFerryPierKind(b!.id) && this.ferry) info.ferry = this.ferry.describeStation(dx, dy);
     this.send(c, { t: 'building', x, y, info });
   }
 
@@ -968,6 +974,8 @@ export class Net {
     // metro lines likewise (sim/metro.ts), and riders per train for the carriage crowds when they change (every 25 ticks at most)
     if (this.metro?.changed) { this.metro.changed = false; this.broadcast({ t: 'metroLines', lines: this.metro.dtos() }); }
     if (this.metro?.loadsChanged) { this.metro.loadsChanged = false; this.broadcast({ t: 'metroLoads', l: this.metro.loads }); }
+    // ferry lines likewise (sim/ferry.ts)
+    if (this.ferry?.changed) { this.ferry.changed = false; this.broadcast({ t: 'ferryLines', lines: this.ferry.dtos() }); }
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed
     if (w.tick % 10 === 0) {
