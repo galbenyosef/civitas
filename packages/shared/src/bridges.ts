@@ -182,13 +182,15 @@ export const basculeSeed = (x0: number, y0: number) => x0 * 7919 + y0 * 104729;
 export function basculeLiftAt(seed: number, hours: number, before = 0, after = 0): number {
   const day = Math.floor(hours / 24);
   for (const d of [day, day - 1]) {
-    const n = Math.floor(hash2(seed + d * 13, 7) * 3.6);
-    for (let k = 0; k < n; k++) {
-      const start = d * 24 + 7 + 14 * hash2(seed + d * 31 + k * 5, 19);
-      if (hours >= start - before && hours < start + BASCULE_LIFT + after) return start;
-    }
+    for (const start of basculeLifts(seed, d)) if (hours >= start - before && hours < start + BASCULE_LIFT + after) return start;
   }
   return NaN;
+}
+/** The start hours (game hours since day 0) of a span's lifts on `day`, in schedule order (not sorted): 0-3 of them. */
+export function basculeLifts(seed: number, day: number): number[] {
+  const n = Math.floor(hash2(seed + day * 13, 7) * 3.6), out: number[] = [];
+  for (let k = 0; k < n; k++) out.push(day * 24 + 7 + 14 * hash2(seed + day * 31 + k * 5, 19));
+  return out;
 }
 /** How far the leaves are open (0 shut, 1 fully up) at `hours`. */
 export function basculeOpen(seed: number, hours: number): number {

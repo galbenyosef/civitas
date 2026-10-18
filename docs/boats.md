@@ -329,6 +329,149 @@ These fields come from the boat's seed, as for planes (`AIRLINES`, `liveryIndex`
 - **Crew.** `boatCrew(type, seed)` gives a skipper, a mate and hands. A ferry also has a pier hand. A fishing boat's crew
   are real citizens instead (section 6.3).
 
+### 4.1 Built: B3, boat types and the schedule (2026-10-18)
+
+Section 4 and section 6.1 are built in `shared/src/boats.ts` (pure, shared), with `basculeLifts(seed, day)` added to
+`bridges.ts` (`basculeLiftAt` now reads it; the lifts are unchanged). Nothing calls it yet: B4 (server), B6 (render) and
+B8 (scenarios) do. Checked by the B3 sections of `packages/shared/scripts/boats-check.ts`.
+
+- **What the schedule reads.** A list of `BoatHarbour`s, which the `harbours` message carries:
+  - `{ id, kind, x, y, name?, active, berths: Berth[], lanes: BoatLane[] }`.
+  - A `Berth` is in world space: `{ x, z, h, maxLen, alongside, tug? }`. B4 resolves it from B2's slots and the placing.
+  - A `BoatLane` is B1's `WaterLane` plus `gate?`, the name of the sea gate its far end leaves by. Every lane of a
+    harbour starts at its fairway tile.
+  - The kinds are `HARBOUR_KIND_IDS` (jetty 24, marina 25, fishingHarbour 26, ferryPier 27, cargoPort 28), which must
+    match B2's `KIND_ID`.
+  - The caches are keyed by object (`WeakMap`), so treat a list as immutable: a change makes a new array, and a changed
+    harbour is a new object.
+- **Lanes (for B4).**
+  - `harbourLaneSpecs(kind)` lists the lanes a kind wants: one per purpose, class and signature of its types. A marina
+    wants 3 cruises, a jetty 2, a fishing harbour 1 grounds lane. A port wants 5: `sea` for open/16, river/16, river/15
+    and river/14, and `river` for river/15.
+  - `deriveHarbourLanes(grid, { kind, fairway, entry?, seed, gates })` derives them and refuses with a reason ("no sea
+    route for container ships and ro-ro ferries: the steel girder bridge at (85, 21) is too low").
+  - `sea` and `grounds` lanes run to the nearest gate that is not low, and `river` lanes to a low gate. A procedural
+    world passes its offing as a gate.
+  - Grounds that cannot reach a gate fall back to `fishingGrounds`.
+- **Fleets.** `harbourFleet(h)` returns `BasedBoat { id, harbour, berth, type, seed }`, from the harbour's id, berths
+  and lanes:
+  - a jetty: 1-2 dinghies or a motor cruiser;
+  - a marina: 6-10 boats, by weight cruisers 36, sailboats 30, narrowboats 20 (only where the narrow cruise's median
+    room is 2 or less), dinghies 9 and sailing barges 5;
+  - a fishing harbour: a trawler per berth that fits;
+  - a cargo port: its tug, on the berth flagged `tug`.
+
+  A type is based only where it has a lane and a berth long enough. The ids are stable and under 2^31.
+- **`boatTimetable(hs, day)`** returns `{ voyages, byBoat }`, cached by `harboursKey` and day. A `Voyage` has:
+  - `{ id, day, kind, boat, type, seed, harbour, berth, lane, v, segs, tStart, tEnd, lifts, escorts? }`;
+  - `kind`: `'cruise' | 'fishing' | 'call' | 'escort' | 'lift'`;
+  - `segs`: curve, lane, hold, pivot and trawl pieces end to end.
+- **The voyages.**
+  - **Pleasure.** 0-2 trips a day, more at the weekend, leaving between 08:00 and 18:30.
+    - Durations by type are those of section 6.1. Speed is ±8% per trip, and a sailboat motors on 30% of its trips.
+    - A trip is whole laps of the cruise loop when they come within half of the wanted time. Otherwise it is out and
+      back: it pivots on the lane, and the starboard offset swings it through a half circle.
+  - **Fishing.**
+    - A trawler leaves between 04:06 and 06:00, Monday to Saturday.
+    - It fishes 4-8 h, aiming to be home between 12:00 and 17:00. It trawls a racetrack sized to the grounds' room,
+      at 0.06 tiles a tick, then pivots.
+    - Grounds beyond a gate are out of sight: `boatsAt` leaves the trawler out, and `boatVoyageAt` still finds it.
+    - It lies an hour `alongside` at its own berth to land the catch.
+  - **Port calls.** Per day: container ships 1-3 (berthing 07:00-15:00, alongside 4-10 h), coasters 0-2, ro-pax 1-2
+    (1 h alongside), barges 1-3.
+    - A call takes the first of its type's lanes that gets it in and out within the day. A barge tries the `river` lane
+      first, then `sea`.
+    - It berths at a free berth of the smallest size that takes it, so the small fry never block the big berth.
+  - **Escorts.** The port's tug meets each container ship `TUG_MEET` (8) lane tiles out. It turns, waits, leads the
+    ship in at the ship's speed, and goes back to its berth. An escort is skipped when the tug is busy or it would have
+    to leave before 04:00.
+  - **Lift barges.** A lift that no tall boat is booked into gets a `sailingBarge` passage on a lane through the span.
+    The barge fades in `LIFT_BARGE_RUN` (8) tiles short of the span and out as far beyond it, with its middle over the
+    deck at the middle of the open window.
+- **Booking.** Candidates are booked in time order, and a clash pushes a voyage back in `BOAT_SLOT` (10-tick) slots, up
+  to 36 times.
+  - **The day.** A voyage of day d runs within 04:00 on day d to 04:00 on day d + 1 (`BOAT_DAY_FROM`/`BOAT_DAY_TO`).
+    Days never share a berth or a lift, so each day is generated alone.
+  - **Berths.** A visitor reserves its berth from `BERTH_MARGIN` (10) ticks before its berthing curve to 10 after its
+    last unberthing curve. A based boat's berth is its own.
+  - **Bascules.**
+    - A tall boat (air draft of 0.20 or more) passes only while `basculeOpen` is 1. One boat is in the span at a time,
+      with `LIFT_GAP` (3 ticks) between boats.
+    - Each lane run checks a lift at speed first. Otherwise the boat holds `WAIT_GAP` (1 tile) short, in phase
+      `waiting`, then starts from rest to meet the earliest lift that fits within 4 h.
+    - When the first lift a voyage meets makes it wait, the departure is pushed back by the whole slots of that wait,
+      so the boat waits at its berth instead.
+    - After planning, the passages are measured again from the segments (`liftPasses`). A voyage whose hull is over a
+      deck outside a fully open lift is cancelled, never sailed.
+    - A tall pleasure boat that gets no lift turns short of the first bascule instead; any other voyage does not sail.
+- **Motion.**
+  - **Berthing.** Manoeuvres are Dubins paths (two turns and a straight) of radius `0.3 + 0.35 × length` (0.3 to 1.5),
+    so the heading never jumps. A bow-in berth is left straight astern, and so is an alongside berth with the lane
+    behind it; the boat then goes ahead. Berthing is always bow first.
+  - **Speeds.** A boat leaves at `0.4 × v` and speeds up to 0.7 v on a long way out to the fairway. On the lane it ramps
+    over 1.2 tiles.
+  - **Keeping to starboard** is in the schedule, not only the render: `boatsAt` positions include it, so the renderer
+    must not add it again. `laneOffset(g, S)` averages each piece's `starboardOffset(c)` over a tile of line, so the
+    offset has no step where the clearance changes, and fades it to 0 over 1.5 tiles at the lane ends, where the
+    curves join.
+- **`boatsAt(hs, tick, out?)`** returns every boat on the water: voyages of days d − 1 and d, and every based boat lying
+  at home (`mooredState`). A `BoatState` is:
+  - `{ id, voyage, type, seed, harbour, berth, phase, x, z, h, speed, astern, fade, lane, s, dir, lights }`;
+  - `phase`: moored, unberthing, underway, fishing, waiting, berthing or alongside;
+  - `lights`: `nav`, `anchor` (30% of moored boats), `trawling`, `deck` and `accommodation`.
+
+  Heave amplitude is `BOAT_TYPES[type].heave`; roll and pitch phases come from `seed`. One call takes about 5 µs
+  on the check world.
+- **Events (for B4).**
+  - `voyageEvents(v)` and `boatEvents(hs, day)` give `castOff`, `gateOut`, `gateIn`, `fishing`, `fished`, `berthed`,
+    `alongside` (calls only) and `lift`. Walk days d − 1 and d, because a day's events run on to 04:00.
+  - `catchOf(v)` gives 20-60 boxes, from `hoursFished` and the seed. It is landed at a fishing voyage's `berthed`.
+  - `callCargo(v)` gives `{ imports, exportRoom, passengers, vehicles }`. A ro-pax call has 80-300 passengers for
+    `shipBerthed`.
+  - `boatLifts(hs, day)` gives the passages booked per span seed.
+- **Names (fictional).**
+  - `boatName(type, seed)`: "Kittiwake", "Morning Star", "Sea Breeze II"; "Pride of Saltmere" for a ro-pax, "Meridian
+    Endeavour" for a container ship, "Riverway 12" for a barge, "Samson II" for a tug.
+  - `boatOperator` and `BOAT_OPERATORS`: container lines (navy, red, green, grey), ferry, coaster, lighterage and towage
+    firms, each with hull and funnel colours.
+  - `boatOwner(type, seed, harbourName?)`: a private owner, "X Boat Hire", "Surname & Sons" or "Fishbourne Fishing
+    Co.", or a sailing barge trust.
+  - `fishingReg(name, id, seed)`: "FS 127".
+  - `boatCrew(type, seed, voyage?)`: a skipper or master and the hands the type needs, guests on pleasure boats, and a
+    pier hand on a river bus.
+- **Not done here.**
+  - River buses are B5's ferry lines.
+  - Police and fire launches have specs but are not scheduled.
+  - There are no visiting yachts at marinas, and `through` lanes are not used yet.
+  - Hull corners over water in a real footprint are checked once B2's harbours exist (B4/B8).
+- **For B6.**
+  - Draw `boatsAt` as it is (offset included). Use `astern` for the wake.
+  - Hide the landmark's decorative barge on any span that `boatLifts` lists that day: such a span gets a voyage in
+    every lift.
+  - Paint ships by `boatOperator(...).hull`/`funnel`.
+- **For B8.** Every `BoatType` but `riverBus` (B5), `policeLaunch` and `fireBoat` is scheduled by a harbour of its kind.
+  "A tall boat through a lift" is a `boatLifts` entry whose voyage `kind` is not `'lift'`.
+- **Measured (the check world, 7 days from a Wednesday).**
+  - **Voyages.** 48 cruises, 30 fishing trips, 25 port calls, 8 tug escorts and 7 lift barges.
+  - **Bascule.** 17 passages in 15 lifts; 13 voyages waited at the bridge.
+  - **Cost.** About 10 ms a day to generate; the harbours' 12 lanes derive in 35 ms cold.
+- **`boats-check.ts` (the B3 sections).**
+  - **Harbours.** Five: a marina between the suspension bridge and the bascule, a cargo port on the basin, a fishing
+    harbour on the basin and one on the lake, and a jetty on the lake.
+    - Their lanes are derived on the server's tiles and on the client's, and must be identical. Each lane passes B1's
+      lane checks.
+  - **Fleets.** Each boat has its own berth and a lane, and the fleets agree on the wire's copy.
+  - **A week of timetables.** The same on a second derivation, from the wire's JSON copy, and from the client's
+    harbours. Every voyage runs within 04:00 to 04:00, and its segments are end to end.
+    - Every lift passage lies inside a scheduled lift's hold, with the leaves at 1. Two boats never use one span at
+      once.
+    - No trawler sails on a Sunday, and the catches and cargo are in range.
+  - **Every half tick of the week.**
+    - No two boats are in one berth.
+    - No boat's hull is over a deck it cannot clear, unless the deck is a bascule standing fully open.
+    - No boat steps further than 1.6 × its speed, or swings more than 0.5 rad.
+    - `boatsAt` cold (caches cleared, harbours from JSON) equals stepping, at 40 ticks.
+
 ## 5. Harbours
 
 These are Hub-family sub-kinds (`Zone.Hub`, code 15), so they share one scan, `builtOf(Zone.Hub)`, with gateways. The
