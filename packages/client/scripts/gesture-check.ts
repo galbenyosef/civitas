@@ -1,60 +1,27 @@
-// Trackpad / mouse wheel classification and what it does to the camera rig. Run: npx tsx packages/client/scripts/gesture-check.ts
+// Scroll, pinch, drag and key controls and what they do to the camera rig (gestures.ts, input.ts). Run: npx tsx packages/client/scripts/gesture-check.ts
 import { CameraRig } from '../src/camera';
-import { WheelClassifier, type WheelLike } from '../src/gestures';
+
+interface WheelLike { deltaX: number; deltaY: number; deltaMode: number; ctrlKey: boolean; shiftKey: boolean; timeStamp: number }
 
 const store = new Map<string, string>();
+const winHandlers = new Map<string, (e: any) => void>();
 Object.assign(globalThis, {
   localStorage: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) },
+  performance: globalThis.performance,
   document: { getElementById: () => null },
-  window: { addEventListener() {} },
+  window: { addEventListener: (t: string, f: any) => winHandlers.set(t, f) },
 });
 const { Input } = await import('../src/input');
 
 let fails = 0;
 const ok = (cond: boolean, what: string) => { if (!cond) { fails++; console.log('FAIL', what); } else console.log('ok  ', what); };
 
-// ---- classifier alone -------------------------------------------------------------------------
 type Ev = Partial<WheelLike>;
 const ev = (t: number, e: Ev): WheelLike => ({ deltaX: 0, deltaY: 0, deltaMode: 0, ctrlKey: false, shiftKey: false, timeStamp: t, ...e });
-const run = (c: WheelClassifier, mode: 'auto' | 'trackpad' | 'mouse', evs: WheelLike[]) => evs.map((e) => c.classify(e, mode));
-
-// a swipe: both axes, fractional, 16ms apart, then a momentum tail
-const swipe = Array.from({ length: 12 }, (_, i) => ev(1000 + i * 16, { deltaX: 1.5 - i * 0.1, deltaY: 6.25 - i * 0.4 }));
-let c = new WheelClassifier();
-let k = run(c, 'auto', swipe);
-ok(k[0] === 'scroll' && k.every((x) => x === 'scroll'), 'trackpad swipe -> scroll from the first event');
-// a vertical-only integer tail right after stays trackpad (hysteresis)
-k = run(c, 'auto', [ev(1300, { deltaY: 3 }), ev(1316, { deltaY: 2 }), ev(1332, { deltaY: 1 }), ev(1348, { deltaY: 1 })]);
-ok(k.every((x) => x === 'scroll'), 'integer momentum tail keeps scroll');
-// pinch
-k = run(c, 'auto', [ev(2000, { ctrlKey: true, deltaY: -2.5 })]);
-ok(k[0] === 'pinch', 'ctrl+wheel -> pinch');
-// the mouse is plugged in: big discrete steps
-k = run(c, 'auto', [ev(5000, { deltaY: 100 }), ev(5400, { deltaY: 100 }), ev(5800, { deltaY: -100 })]);
-ok(k.every((x) => x === 'wheel'), 'mouse notches flip back to wheel at once');
-// fresh classifier: mouse wheel from cold
-c = new WheelClassifier();
-k = run(c, 'auto', [ev(0, { deltaY: 100 }), ev(500, { deltaY: 100 }), ev(1000, { deltaY: 100 })]);
-ok(k.every((x) => x === 'wheel'), 'cold mouse wheel -> wheel');
-// Firefox lines
-c = new WheelClassifier();
-ok(run(c, 'auto', [ev(0, { deltaY: 3, deltaMode: 1 })])[0] === 'wheel', 'line-mode wheel -> wheel');
-// ambiguous: slow single integer events fall back to zoom
-c = new WheelClassifier();
-ok(run(c, 'auto', [ev(0, { deltaY: 4 }), ev(500, { deltaY: 4 }), ev(1000, { deltaY: 8 })]).every((x) => x === 'wheel'), 'ambiguous -> wheel (zoom)');
-// a fast-spun Mac mouse: small integers in a stream, no x -> still not a trackpad
-c = new WheelClassifier();
-ok(run(c, 'auto', Array.from({ length: 20 }, (_, i) => ev(i * 20, { deltaY: 10 + (i % 3) }))).every((x) => x === 'wheel'), 'fast integer stream alone stays wheel');
-// shift+mouse wheel in Chrome reports deltaX only
-c = new WheelClassifier();
-ok(run(c, 'auto', [ev(0, { deltaX: 100, shiftKey: true }), ev(400, { deltaX: 100, shiftKey: true })]).every((x) => x === 'wheel'), 'shift+wheel (deltaX only) -> wheel');
-// forced modes
-ok(run(new WheelClassifier(), 'mouse', [ev(0, { deltaX: 1.5, deltaY: 6.25 })])[0] === 'wheel', 'mouse mode forces wheel');
-ok(run(new WheelClassifier(), 'trackpad', [ev(0, { deltaY: 100 })])[0] === 'scroll', 'trackpad mode forces scroll');
-ok(run(new WheelClassifier(), 'mouse', [ev(0, { ctrlKey: true, deltaY: 3 })])[0] === 'pinch', 'ctrl+wheel zooms in every mode');
 
 // ---- Input + rig ------------------------------------------------------------------------------
-function make() {
+function make(onSelect: () => void = () => {}) {
+  winHandlers.clear();
   const handlers = new Map<string, (e: any) => void>();
   const canvas: any = {
     addEventListener: (t: string, f: any) => handlers.set(t, f),
@@ -63,7 +30,7 @@ function make() {
   };
   const rig = new CameraRig(1000 / 700);
   rig.update(); rig.camera.updateMatrixWorld();
-  const input = new Input(canvas, rig, { onBuild() {}, onBuy() {}, onSelect() {}, onHover() {}, onToolChange() {}, onRotate() {}, onKey() {} });
+  const input = new Input(canvas, rig, { onBuild() {}, onBuy() {}, onSelect, onHover() {}, onToolChange() {}, onRotate() {}, onKey() {} });
   let prevented = 0;
   let t = 100;
   const wheel = (e: Ev & { altKey?: boolean; metaKey?: boolean; offsetX?: number; offsetY?: number }, dtMs = 16) => {
@@ -72,37 +39,64 @@ function make() {
     handlers.get('wheel')!(full);
   };
   const settle = () => { for (let i = 0; i < 120; i++) input.update(1 / 60); rig.update(); };
-  return { rig, input, wheel, settle, prevented: () => prevented, handlers };
+  return { rig, input, wheel, settle, prevented: () => prevented, handlers, win: new Map(winHandlers) };
 }
 const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitch: r.pitch, dist: r.dist });
 
-{ // two-finger scroll pans, nothing else moves
+{ // scroll zooms about the cursor, the same for every device: a mouse notch, a smooth-scroll mouse, two fingers
+  for (const [what, evs] of [
+    ['a mouse wheel notch', [{ deltaY: 100 }]],
+    ['Firefox line-mode notches', [{ deltaY: 3, deltaMode: 1 }, { deltaY: 3, deltaMode: 1 }]],
+    ['a smooth-scrolling Mac mouse', Array.from({ length: 12 }, (_, i) => ({ deltaY: 4.73 + (i % 3) * 1.37 }))],
+    ['a two-finger trackpad scroll (with sideways drift)', Array.from({ length: 12 }, (_, i) => ({ deltaX: 1.5 - i * 0.1, deltaY: 6.25 - i * 0.4 }))],
+  ] as [string, Ev[]][]) {
+    const m = make(); const d0 = m.rig.dist; const cx = 800, cy = 450;
+    const before = m.rig.groundAt(cx, cy, 1000, 700)!.clone();
+    for (const e of evs) m.wheel({ ...e, offsetX: cx, offsetY: cy });
+    m.settle(); m.rig.camera.updateMatrixWorld();
+    const after = m.rig.groundAt(cx, cy, 1000, 700)!;
+    ok(m.rig.dist > d0 && m.rig.yaw === Math.PI / 4, `${what} zooms out (scroll down)`);
+    ok(Math.hypot(after.x - before.x, after.z - before.z) < 0.05, `${what}: the ground point under the cursor holds still`);
+    ok(m.prevented() === evs.length, `${what}: no page scroll`);
+  }
+  const up = make(); up.wheel({ deltaY: -100 }); up.settle();
+  ok(up.rig.dist < 48, 'scroll up zooms in');
+  const m = make(); m.wheel({ deltaY: 100 }); m.input.update(1 / 60);
+  const mid = m.rig.dist; m.settle();
+  ok(mid > 48 && mid < m.rig.dist, 'a notch is eased in over a few frames, not one jump');
+  ok(Math.abs(m.rig.dist - 48 * Math.exp(100 * 0.0015)) < 1e-3, `a notch zooms by exp(100 * 0.0015), as before (${m.rig.dist.toFixed(4)} vs ${(48 * Math.exp(0.15)).toFixed(4)})`);
+  const big = make(); big.wheel({ deltaY: 3000 }); big.settle();
+  ok(big.rig.dist <= 48 * Math.exp(150 * 0.0015) + 1e-6, 'one huge event is capped');
+}
+{ // Shift+scroll pans, nothing else moves
+  const m = make(); const a = snap(m.rig);
+  for (let i = 0; i < 10; i++) m.wheel({ deltaX: 3.5, deltaY: 8.25, shiftKey: true });
+  m.settle(); const b = snap(m.rig);
+  ok(Math.hypot(b.x - a.x, b.z - a.z) > 1 && b.yaw === a.yaw && b.pitch === a.pitch && b.dist === a.dist, 'Shift+scroll pans and only pans');
+}
+{ // the "scroll pans" setting: plain scroll pans, pinch still zooms
+  store.set('msimcity.scroll', 'pan');
   const m = make(); const a = snap(m.rig);
   for (let i = 0; i < 10; i++) m.wheel({ deltaX: 3.5, deltaY: 8.25 });
   m.settle(); const b = snap(m.rig);
-  ok(Math.hypot(b.x - a.x, b.z - a.z) > 1, 'scroll pans the target');
-  ok(b.yaw === a.yaw && b.pitch === a.pitch && b.dist === a.dist, 'scroll leaves yaw, pitch and distance alone');
-  ok(m.prevented() === 10, 'scroll events are prevented');
-  // direction: fingers up (natural scrolling: deltaY > 0) drags content up the screen = the view moves toward the camera, like dragging up
+  ok(Math.hypot(b.x - a.x, b.z - a.z) > 1 && b.dist === a.dist, 'scroll set to pan: two-finger scroll pans');
+  for (let i = 0; i < 8; i++) m.wheel({ ctrlKey: true, deltaY: -4.5 });
+  m.settle();
+  ok(m.rig.dist < a.dist, 'scroll set to pan: pinch still zooms');
+  // direction: fingers up (deltaY > 0, natural scrolling) moves the view the way dragging the map up does
   const m2 = make(); const f0 = m2.rig.forward().clone(); const t0 = m2.rig.target.clone();
-  for (let i = 0; i < 10; i++) m2.wheel({ deltaY: 8.25, deltaX: 0.5 });
-  m2.settle(); const d = m2.rig.target.clone().sub(t0);
+  for (let i = 0; i < 10; i++) m2.wheel({ deltaY: 8.25 });
+  m2.settle();
   const drag = make(); drag.rig.panPixels(0, -80, 700);
-  ok(d.dot(f0) < 0 && drag.rig.target.clone().sub(t0).dot(f0) < 0, 'deltaY>0 moves the view the way a drag up does');
-  // smoothing: the move is eased over frames, not applied in one
-  const m3 = make(); m3.wheel({ deltaX: 2.5, deltaY: 40.5 }); m3.input.update(1 / 60);
-  const mid = m3.rig.target.length(); m3.settle(); const end = m3.rig.target.length();
-  ok(mid > 0 && mid < end * 0.9, 'motion is eased in over several frames');
-}
-{ // mouse wheel: immediate zoom, exactly as before
-  const m = make(); const d0 = m.rig.dist;
-  m.wheel({ deltaY: 100 }, 400);
-  ok(Math.abs(m.rig.dist - d0 * Math.exp(100 * 0.0015)) < 1e-9, 'mouse wheel zooms immediately by exp(dy*0.0015)');
-  ok(m.rig.target.length() === 0, 'mouse wheel does not pan');
-  const m2 = make(); m2.wheel({ deltaY: 100 }, 400); m2.wheel({ deltaY: 100, altKey: true }, 400); m2.settle();
-  ok(m2.prevented() === 1 && m2.rig.yaw === Math.PI / 4, 'mouse Alt+wheel still does nothing and is not prevented');
-  const m3 = make(); m3.wheel({ deltaY: 100, metaKey: true }, 400);
-  ok(m3.prevented() === 0 && m3.rig.dist === 48, 'Cmd+wheel is left to the browser');
+  ok(m2.rig.target.clone().sub(t0).dot(f0) < 0 && drag.rig.target.clone().sub(t0).dot(f0) < 0, 'pan direction matches dragging the map');
+  store.set('msimcity.scroll', 'zoom');
+  store.delete('msimcity.scroll'); store.set('msimcity.padMode', 'trackpad');
+  const old = make(); old.wheel({ deltaY: 8 }); old.settle();
+  ok(old.rig.dist === 48 && old.rig.target.length() > 0, 'the old "trackpad" setting carries over as pan');
+  store.set('msimcity.padMode', 'auto');
+  const old2 = make(); old2.wheel({ deltaX: 1.5, deltaY: 6.25 }); old2.settle();
+  ok(old2.rig.dist > 48, 'the old "auto" setting becomes zoom');
+  store.clear();
 }
 { // pinch zooms about the cursor; page zoom prevented
   const m = make(); const d0 = m.rig.dist;
@@ -112,56 +106,45 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
   m.settle(); m.rig.camera.updateMatrixWorld();
   const after = m.rig.groundAt(cx, cy, 1000, 700)!;
   ok(m.rig.dist < d0 * 0.8, 'pinch out zooms in');
-  ok(Math.hypot(after.x - before.x, after.z - before.z) < 0.05, `the ground point under the cursor holds still (${Math.hypot(after.x - before.x, after.z - before.z).toExponential(1)})`);
+  ok(Math.hypot(after.x - before.x, after.z - before.z) < 0.05, 'pinch: the ground point under the cursor holds still');
   ok(m.prevented() === 8, 'pinch is prevented (no page zoom)');
-  const m2 = make(); m2.wheel({ ctrlKey: true, deltaY: 100 }, 500); m2.settle();
-  ok(m2.rig.dist > 48, 'Ctrl+mouse wheel zooms too, prevented: ' + m2.prevented());
+  const m2 = make(); m2.wheel({ ctrlKey: true, deltaY: 100 }); m2.settle();
+  ok(m2.rig.dist > 48, 'Ctrl+mouse wheel zooms too');
+  const m3 = make(); m3.wheel({ deltaY: 100, metaKey: true });
+  ok(m3.prevented() === 0 && m3.rig.dist === 48, 'Cmd+scroll is left to the browser');
 }
-{ // Alt + two-finger scroll orbits and tilts, about the cursor
+{ // Alt + scroll orbits and tilts about the cursor
   const m = make(); const a = snap(m.rig);
   const cx = 300, cy = 400, p = m.rig.groundAt(cx, cy, 1000, 700)!.clone();
   const r0 = Math.hypot(m.rig.target.x - p.x, m.rig.target.z - p.z);
-  m.wheel({ deltaX: 2.5, deltaY: 3.5, altKey: true, offsetX: cx, offsetY: cy }); // trackpad-ish so verdict is decided
   for (let i = 0; i < 20; i++) m.wheel({ deltaX: 6.5, deltaY: -4.25, altKey: true, offsetX: cx, offsetY: cy });
   m.settle(); const b = snap(m.rig);
-  ok(b.yaw > a.yaw && b.pitch > a.pitch, 'Alt+scroll turns and tilts (right -> yaw up; fingers down -> tilt up)');
+  ok(b.yaw > a.yaw && b.pitch > a.pitch, 'Alt+scroll turns and tilts');
   ok(b.dist === a.dist, 'Alt+scroll does not zoom');
   const r1 = Math.hypot(m.rig.target.x - p.x, m.rig.target.z - p.z);
-  ok(Math.abs(r1 - r0) < 1e-6 && Math.hypot(b.x - a.x, b.z - a.z) > 1, 'the view orbits the point under the cursor (target swings round it at a fixed radius)');
+  ok(Math.abs(r1 - r0) < 1e-6 && Math.hypot(b.x - a.x, b.z - a.z) > 1, 'the view orbits the point under the cursor');
 }
-{ // a Mac mouse with smooth scrolling: small fractional vertical-only pixel deltas in a quick stream must still zoom
-  const m = make();
-  const d0 = m.rig.dist;
-  for (let i = 0; i < 12; i++) m.wheel({ deltaY: 4.73 + (i % 3) * 1.37 }, 16);
-  m.settle();
-  ok(m.rig.dist > d0 && m.rig.target.length() === 0, 'a smooth-scroll Mac mouse wheel zooms, it does not pan');
-  // and after a trackpad swipe, going back to that mouse zooms again within a few events
-  for (let i = 0; i < 8; i++) m.wheel({ deltaX: 1.5, deltaY: 6.25 }, 16);
-  m.settle(); const d1 = m.rig.dist;
-  m.wheel({ deltaY: 5.1 }, 400);
-  for (let i = 0; i < 11; i++) m.wheel({ deltaY: 5.1 }, 16);
-  m.settle();
-  ok(m.rig.dist > d1, 'back on the smooth-scroll mouse after a swipe, the wheel zooms again');
+{ // select tool: a click selects on release; a drag grabs the map and pans, and selects nothing
+  let selected = 0;
+  const m = make(() => { selected++; });
+  const pd = (type: string, x: number, y: number, o: any = {}) => m.handlers.get(type)!({ type, button: 0, clientX: x, clientY: y, offsetX: x, offsetY: y, movementX: 0, movementY: 0, altKey: false, shiftKey: false, pointerId: 1, ...o });
+  pd('pointerdown', 500, 350); pd('pointermove', 502, 351, { movementX: 2, movementY: 1 }); pd('pointerup', 502, 351);
+  ok(selected === 1 && m.rig.target.length() === 0, 'a click (under the slop) selects and does not pan');
+  pd('pointerdown', 500, 350);
+  for (let i = 1; i <= 10; i++) pd('pointermove', 500, 350 - i * 8, { movementY: -8 });
+  pd('pointerup', 500, 270);
+  ok(selected === 1 && m.rig.target.length() > 1, 'a drag pans the map and selects nothing');
+  pd('pointerdown', 500, 350); pd('pointercancel', 500, 350);
+  ok(selected === 1, 'a cancelled press selects nothing');
 }
-{ // a mouse then a trackpad: the verdict follows, in the same Input
+{ // keys: + and - zoom
   const m = make();
-  m.wheel({ deltaY: 100 }, 400); const d1 = m.rig.dist;
-  m.wheel({ deltaX: 1.5, deltaY: 6.25 }, 400); m.wheel({ deltaX: 1.5, deltaY: 6.25 }, 16); const d2 = m.rig.dist; // the verdict takes two events to turn
-  for (let i = 0; i < 6; i++) m.wheel({ deltaX: 1.5, deltaY: 6.25 }, 16); m.settle();
-  ok(d1 > 48 && m.rig.dist === d2 && m.rig.target.length() > 0, 'switching device mid-session: wheel zooms, then swipe pans');
-}
-{ // setting
-  const m = make();
-  store.set('msimcity.padMode', 'trackpad');
-  const t = make(); t.wheel({ deltaY: 100 }, 400); t.settle();
-  ok(t.rig.dist === 48 && t.rig.target.length() > 0, 'stored "trackpad" mode makes even a big step pan');
-  store.set('msimcity.padMode', 'mouse');
-  const u = make(); u.wheel({ deltaX: 1.5, deltaY: 6.25 }); 
-  ok(u.rig.dist !== 48, 'stored "mouse" mode makes a swipe zoom');
-  store.set('msimcity.padMode', 'garbage');
-  const v = make(); v.wheel({ deltaX: 1.5, deltaY: 6.25 }); v.settle();
-  ok(v.rig.dist === 48 && v.rig.target.length() > 0, 'a bad stored value falls back to auto');
-  void m;
+  const kd = (code: string) => m.win.get('keydown')!({ code, key: code, target: null, repeat: false, metaKey: false, ctrlKey: false, altKey: false });
+  const ku = (code: string) => m.win.get('keyup')!({ code });
+  kd('Equal'); for (let i = 0; i < 30; i++) m.input.update(1 / 60); ku('Equal'); m.settle();
+  const zin = m.rig.dist;
+  kd('Minus'); for (let i = 0; i < 60; i++) m.input.update(1 / 60); ku('Minus'); m.settle();
+  ok(zin < 48 && m.rig.dist > zin, '+ zooms in, - zooms out');
 }
 { // Safari gestures
   const m = make(); const a = snap(m.rig);

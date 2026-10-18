@@ -1,14 +1,10 @@
 import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, KIND_ID, isMultiTile, trackDragPath, BRIDGE_MAX_SPAN, type KindToolId } from '@msimcity/shared';
 import type { CameraRig } from './camera';
 import { Vector3 } from 'three';
-import { WheelClassifier, pinchFactor, type PadMode } from './gestures';
+import { pinchFactor, readScrollMode, writeScrollMode, scrollZoom, wheelPixels, type ScrollMode } from './gestures';
 
-const PAD_KEY = 'msimcity.padMode';
-/** What two-finger scroll does: 'auto' tells a trackpad from a mouse wheel by the events (gestures.ts), the others force it. */
-function readPadMode(): PadMode {
-  try { const v = localStorage.getItem(PAD_KEY); if (v === 'auto' || v === 'trackpad' || v === 'mouse') return v; } catch { /* storage blocked: auto */ }
-  return 'auto';
-}
+/** how far a press may travel before it is a drag (a pan) rather than a click */
+const CLICK_SLOP = 5;
 /** Safari's trackpad pinch/rotate (GestureEvent is not in lib.dom) */
 interface GestureLike extends UIEvent { scale: number; rotation: number; clientX: number; clientY: number }
 
@@ -77,6 +73,8 @@ export class Input {
   private panning = false;
   /** where the right button went down, until the pointer has travelled far enough for it to be a pan rather than a click */
   private rightDown: { x: number; y: number; moved: boolean } | null = null;
+  /** a left press with the select tool: a click selects (on release), a drag grabs the map and pans it */
+  private selectDown: { x: number; y: number; px: number; py: number; moved: boolean } | null = null;
   private orbiting = false;
   private pivot = new Vector3();
   painting = false;
@@ -87,13 +85,13 @@ export class Input {
   private lastPaint: [number, number] | null = null;
   private buyStart: [number, number] | null = null;
   private tmp = new Vector3();
-  /** trackpad input (two-finger scroll, pinch, rotate) is gathered here and eased into the rig a frame at a time in update() */
+  /** wheel, trackpad and zoom-key input is gathered here and eased into the rig a frame at a time in update() */
   private pend = { panX: 0, panY: 0, yaw: 0, pitch: 0, zoom: 0 };
   private zoomAt: { x: number; y: number } | null = null;
   private gPivot = new Vector3();
   private gPivotAt = -1e9;
-  private pad: PadMode = readPadMode();
-  private cls = new WheelClassifier();
+  /** what plain scroll does (gestures.ts): zoom, the standard, or pan for trackpad users who prefer it */
+  private scroll: ScrollMode = readScrollMode();
   /** a Safari gesture in progress: the last scale/rotation seen, and whether the rotation has passed its dead zone */
   private gest: { scale: number; rot: number; armed: boolean } | null = null;
 
@@ -104,12 +102,12 @@ export class Input {
     canvas.addEventListener('pointercancel', this.up);
     canvas.addEventListener('wheel', this.wheel, { passive: false });
     for (const t of ['gesturestart', 'gesturechange', 'gestureend']) canvas.addEventListener(t, this.gesture as EventListener, { passive: false });
-    const sel = document.getElementById('padMode') as HTMLSelectElement | null;
+    const sel = document.getElementById('scrollMode') as HTMLSelectElement | null;
     if (sel) {
-      sel.value = this.pad;
+      sel.value = this.scroll;
       sel.addEventListener('change', () => {
-        this.pad = sel.value as PadMode;
-        try { localStorage.setItem(PAD_KEY, this.pad); } catch { /* not remembered */ }
+        this.scroll = sel.value === 'pan' ? 'pan' : 'zoom';
+        writeScrollMode(this.scroll);
         sel.blur(); // a focused select swallows the camera keys
       });
     }
@@ -156,6 +154,9 @@ export class Input {
     if (k.has('KeyE')) this.rig.rotate(-1.6 * dt);
     if (k.has('KeyR')) this.rig.rotate(0, 1.2 * dt);
     if (k.has('KeyF')) this.rig.rotate(0, -1.2 * dt);
+    // + / - (and Page Up / Down) zoom about the view centre
+    const zin = k.has('Equal') || k.has('NumpadAdd') || k.has('PageUp'), zout = k.has('Minus') || k.has('NumpadSubtract') || k.has('PageDown');
+    if (zin !== zout) { this.zoomAt = null; this.pend.zoom += (zin ? -1.4 : 1.4) * dt; }
     this.drain(dt);
   }
 
@@ -163,7 +164,10 @@ export class Input {
   private drain(dt: number) {
     const p = this.pend;
     if (!(p.panX || p.panY || p.yaw || p.pitch || p.zoom)) return;
-    const f = 1 - Math.exp(-Math.min(dt, 0.25) * 30);
+    // dt can be 0 or negative on the first frame (main.ts takes `last` from performance.now()): a negative step would
+    // make f negative and the pending motion grow without bound, so clamp it
+    if (!Number.isFinite(p.zoom) || !Number.isFinite(p.panX) || !Number.isFinite(p.panY)) { p.zoom = p.panX = p.panY = p.yaw = p.pitch = 0; return; }
+    const f = 1 - Math.exp(-Math.max(0, Math.min(dt, 0.25)) * 30);
     const take = (v: number) => (Math.abs(v) < 1e-4 ? v : v * f);
     const h = this.canvas.clientHeight;
     const px = take(p.panX), py = take(p.panY);
@@ -180,7 +184,7 @@ export class Input {
     if (Math.abs(p.panY) < 0.01) p.panY = 0;
     if (Math.abs(p.yaw) < 1e-5) p.yaw = 0;
     if (Math.abs(p.pitch) < 1e-5) p.pitch = 0;
-    if (Math.abs(p.zoom) < 1e-4) p.zoom = 0;
+    // zoom is not zeroed here: take() hands over the last sliver whole, so a notch adds up to exactly its zoom
   }
 
   private down = (e: PointerEvent) => {
@@ -196,7 +200,7 @@ export class Input {
     if (e.button !== 0) return;
     const tile = this.tileAt(e.offsetX, e.offsetY);
     if (!tile) return;
-    if (this.tool === 'select') { this.cb.onSelect(tile[0], tile[1], e.offsetX, e.offsetY); return; }
+    if (this.tool === 'select') { this.selectDown = { x: e.clientX, y: e.clientY, px: e.offsetX, py: e.offsetY, moved: false }; return; }
     if (this.tool === 'buy') { this.buyStart = tile; this.buyRect = { x: tile[0], y: tile[1], w: 1, h: 1 }; return; }
     if (this.tool === 'runway') { this.runwayStart = tile; this.runwayLine = [tile]; return; }
     if (this.tool === 'rail') { this.railStart = tile; this.railPath = [tile]; return; }
@@ -206,10 +210,15 @@ export class Input {
 
   private move = (e: PointerEvent) => {
     if (this.orbiting) { this.rig.orbitAround(this.pivot, -e.movementX * 0.006, e.movementY * 0.005); return; }
+    const sd = this.selectDown;
+    if (sd) {
+      if (!sd.moved && Math.hypot(e.clientX - sd.x, e.clientY - sd.y) >= CLICK_SLOP) { sd.moved = true; this.canvas.style.cursor = 'grabbing'; }
+      if (sd.moved) { this.rig.panPixels(e.movementX, e.movementY, this.canvas.clientHeight); return; }
+    }
     if (this.panning) {
       const rd = this.rightDown;
       if (rd && !rd.moved) { // a right press that has not yet travelled a few pixels may still be a click
-        if (Math.hypot(e.clientX - rd.x, e.clientY - rd.y) < 5) return;
+        if (Math.hypot(e.clientX - rd.x, e.clientY - rd.y) < CLICK_SLOP) return;
         rd.moved = true;
       }
       this.rig.panPixels(e.movementX, e.movementY, this.canvas.clientHeight);
@@ -245,6 +254,12 @@ export class Input {
   };
 
   private up = (e: PointerEvent) => {
+    const sd = this.selectDown;
+    this.selectDown = null;
+    if (sd) {
+      if (sd.moved) this.canvas.style.cursor = '';
+      else if (e.type === 'pointerup') { const tile = this.tileAt(sd.px, sd.py); if (tile) this.cb.onSelect(tile[0], tile[1], sd.px, sd.py); }
+    }
     if (this.rightDown && !this.rightDown.moved && e.type === 'pointerup' && e.button === 2) this.cb.onContext?.(e.offsetX, e.offsetY, e.clientX, e.clientY);
     this.rightDown = null;
     if (this.buyStart && this.buyRect) this.cb.onBuy(this.buyRect);
@@ -260,32 +275,28 @@ export class Input {
   };
 
   /**
-   * The wheel, by what produced it (gestures.ts): a mouse wheel zooms, as ever; a trackpad two-finger scroll pans (with Alt:
-   * orbits and tilts); a pinch (ctrl+wheel in Chrome/Firefox) zooms about the cursor. Cmd+wheel is left to the browser.
+   * Scroll, the same for every device (gestures.ts): zooms about the cursor (or pans, if the player set scroll to pan);
+   * Shift+scroll pans; Alt/Option+scroll rotates (sideways) and tilts (up and down); a pinch (ctrl+wheel) zooms about
+   * the cursor. All of it is eased in over a few frames. Cmd+scroll is left to the browser.
    */
   private wheel = (e: WheelEvent) => {
     if (e.metaKey) return;
-    const kind = this.cls.classify(e, this.pad);
-    const lines = e.deltaMode === 0 ? 1 : 16;
-    const dx = e.deltaX * lines, dy = e.deltaY * lines;
-    if (kind === 'pinch') {
-      e.preventDefault(); // otherwise the browser zooms the whole page
+    e.preventDefault(); // no page scroll, no page zoom
+    const dx = wheelPixels(e.deltaX, e.deltaMode), dy = wheelPixels(e.deltaY, e.deltaMode);
+    if (e.ctrlKey) {
       this.pend.zoom += Math.log(pinchFactor(e.deltaY, e.deltaMode));
       this.zoomAt = { x: e.offsetX, y: e.offsetY };
       return;
     }
     if (e.altKey) {
-      // Alt + two-finger scroll orbits; with a mouse Alt+wheel does nothing, as before
-      if (this.pad === 'mouse' || (this.pad === 'auto' && this.cls.verdict === 'mouse')) return;
-      e.preventDefault();
       this.setPivot(e.offsetX, e.offsetY, e.timeStamp);
       this.pend.yaw += dx * 0.006;
       this.pend.pitch -= dy * 0.005;
       return;
     }
-    e.preventDefault();
-    if (kind === 'scroll') { this.pend.panX -= dx; this.pend.panY -= dy; return; }
-    this.rig.zoom(Math.exp(e.deltaY * 0.0015));
+    if (e.shiftKey || this.scroll === 'pan') { this.pend.panX -= dx; this.pend.panY -= dy; return; }
+    this.pend.zoom += scrollZoom(dy);
+    this.zoomAt = { x: e.offsetX, y: e.offsetY };
   };
 
   /** the ground point a trackpad orbit turns about: under the cursor where the burst began, kept while it goes on */

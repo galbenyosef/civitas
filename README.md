@@ -83,12 +83,24 @@ runs the Commons through a rush hour with any traffic tunable changed (`docs/tra
 
 ## Controls
 
+The scheme follows city builders (Cities: Skylines, Anno) for the mouse and map apps (Google Maps, Mapbox) for the
+trackpad. It works the same on a three-button mouse, a two-button or Magic Mouse and a Mac trackpad, and never
+guesses the device: browsers cannot tell a smooth-scrolling mouse from a trackpad (`client/src/gestures.ts`).
+
+| | Three-button mouse | Two-button / Magic Mouse | Trackpad | Keys |
+| --- | --- | --- | --- | --- |
+| **Zoom** (about the cursor) | wheel | scroll | pinch, or two-finger scroll | + − (Page Up / Down) |
+| **Pan** | right drag, or drag the map with the select tool | right drag, or drag the map with the select tool | drag the map with the select tool; Shift + two-finger scroll | WASD / arrows |
+| **Rotate and tilt** (about the point under the cursor) | middle drag | Alt/Option + drag | Alt/Option + drag, Alt/Option + two-finger scroll (sideways turns, up and down tilts), twist (Safari) | Q E turn, R F tilt |
+| **Select** | click | click | click | 1, Esc |
+
+Shift+drag pans with any tool. The **scroll** setting in the help line (bottom left) makes plain scroll pan instead of
+zoom, trackpad style; pinch still zooms. A press that moves less than 5 pixels is a click, so a slightly shaky click
+still selects.
+
 | Action | Input |
 | --- | --- |
-| Pan | right drag, shift+drag, WASD / arrows |
 | Context menu | right-**click** (press and release without dragging) a person, car, train, plane, building, road, track or land for the actions that exist for it: inspect, follow, first-person view, go to home or work, build priority, parcel settings, buy this tile, demolish (asks again to confirm, shows the cost). Greyed entries say why in a tooltip. Esc closes; also on the FPV inset. `client/src/contextmenu.ts` |
-| Zoom | mouse wheel |
-| Rotate / tilt | middle drag (or alt+drag) orbits around the point under the cursor; Q E / R F keys |
 | Tools | 1 select · 2 buy land · 3 road (drag across water for a bridge) · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
 | Turn a footprint | Z turns the footprint of a building bigger than 1×1 anticlockwise, C clockwise, in quarter turns, while its tool is active (airport terminal, bus depot, rail halt and station). The choice sticks for that tool until you change it; before the first press the footprint faces a road by itself. The preview shows each tile's outline, an arrow from the door towards the road (green with a road, red without) and the building's marked parts (platform, apron, stands, vehicle gate); hovering a placed structure shows them faintly |
 | People and cars | hover anyone for who they are and what they are doing; click to select them in a side panel with a **follow** camera |
