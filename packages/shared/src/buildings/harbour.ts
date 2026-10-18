@@ -612,7 +612,7 @@ export const cargoPort: KindDef = {
   windows: 'factory',
   footprint: { w: 8, h: 6, door: [3, 5], wet: 1, fairwayClearance: 3, marks: [
     { kind: 'berth', at: { edge: 'back', from: 0, to: 4, depth: 1 }, label: 'big berth (5 tiles)' },
-    { kind: 'berth', at: { edge: 'back', from: 5, to: 7, depth: 1 }, label: 'small berth (3 tiles)' },
+    { kind: 'berth', at: { edge: 'back', from: 5, to: 7, depth: 1 }, label: 'small berth (2.4 tiles) and the tug' },
     ...[0, 1, 2, 3, 4, 5, 6, 7].map((x) => ({ kind: 'quay' as const, at: [x, 1] as [number, number], ...(x === 0 ? { label: 'quay and cranes' } : {}) })),
     { kind: 'gate', at: { edge: 'front', from: 2, to: 4 }, label: 'truck gate' },
   ] },
@@ -648,6 +648,7 @@ export const HARBOUR_BERTHS: Record<string, BerthSlot[]> = {
   'ferry-pier': [{ x: 1, y: -0.5, dir: 1, len: 2, mode: 'alongside', label: 'ferry berth' }],
   'cargo-port': [
     { x: 2.5, y: 0.6, dir: 3, len: 5, mode: 'alongside', label: 'big berth' },
-    { x: 6.5, y: 0.75, dir: 3, len: 3, mode: 'alongside', label: 'small berth' },
+    { x: 6.2, y: 0.75, dir: 3, len: 2.4, mode: 'alongside', label: 'small berth' },   // fits the 2-tile coaster and the 1.6-tile ro-pax
+    { x: 7.7, y: 0.75, dir: 3, len: 0.5, mode: 'alongside', label: 'tug' },          // the tug that escorts the container ships
   ],
 };

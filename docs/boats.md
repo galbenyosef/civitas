@@ -520,7 +520,7 @@ schedule.
 | **marina** (25) | 4×4, 2, `[1, 3]` | 10 on a pontoon spine with fingers | narrow | Harbours | $4,000, $60 | 8 (harbourmaster, dock hands, café) | 6-10 boats based, by hash, sized to the water (narrowboats on narrow or river bodies, sailboats only with clearance 2+); berth fees $4 a boat a day to the owner; a leisure venue |
 | **fishing harbour** (26) | 4×3, 1, `[1, 2]` | 3 trawler slots along the quay | river | Harbours | $5,000, $80 | 26: 20 crew (04:00-16:00, Mon-Sat) and 6 market porters (05:00-13:00) | 3 trawlers; the catch is landed at the fish market and sold to food venues and industry (6.3) |
 | **ferry pier** (27) | 2×2, 1 (the pontoon), `[0, 1]` | the 2-tile row **outside**, behind the pontoon (`pierStop`, like rail's `stationStop`) | narrow, with a river lane | River buses | $1,500, $20 | 3 pier staff | a stop for a ferry line (6.2); one line a pier (question 2) |
-| **cargo port** (28) | 8×6, 1, `[3, 5]` | 5-tile big berth and 3-tile small berth on row 0; 2 gantry cranes on the quay; truck gate in front | open, and the body reaches a sea gate | Seaport | $14,000, $200 | 70: dockers and crane drivers (06:00, 14:00, 22:00) | the `'sea'` gateway: `gateway: 'sea'`, `gatewayModes: ['foot', 'taxi']`, `arrivalsPerHour: 6`, `needsWater: true`; ship calls; imports and exports (6.4) |
+| **cargo port** (28) | 8×6, 1, `[3, 5]` | 5-tile big berth, 2.4-tile small berth and a tug berth on row 0; 2 gantry cranes on the quay; truck gate in front | open, and the body reaches a sea gate | Seaport | $14,000, $200 | 70: dockers and crane drivers (06:00, 14:00, 22:00) | the `'sea'` gateway: `gateway: 'sea'`, `gatewayModes: ['foot', 'taxi']`, `arrivalsPerHour: 6`, `needsWater: true`; ship calls; imports and exports (6.4) |
 
 **Tech**, in `tech.ts`:
 
@@ -629,6 +629,8 @@ No kind data, berth or footprint changed.
   - The ferry pier's geometry ends at z = -1.0, so its berth row stays open.
   - Crane booms, trolleys and jibs stay above 1.1, over any ship.
   - A check (`buildings:check` "footprints") already keeps every part inside the footprint.
+  - The cargo port's small berth is 2.4 tiles (the 2-tile coaster and 1.6-tile ro-pax fit), with a 0.5-tile `'tug'` berth in
+    the freed end (x 7.45-7.95) for the container ships' escorts.
 - **Helpers.** `gull`, `lifebuoy`, `lamp`, `car`, `bench`, `dinghy`, `fenders`, `roundel`, `stack`, `lorry`, `straddle`
   and `gantry` are local to the file. A `taper` with `shift` draws the leaning stays and jibs.
 - **Night.** Lamp heads, the cranes' warning lights and the lighthouse lantern use window classes, so they light after
