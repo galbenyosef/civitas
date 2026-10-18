@@ -607,6 +607,42 @@ showcase does not place.
   rows.
 - **For B8.** Drop `draft` on the five kinds and on the `harbour` group.
 
+### Built: B7, harbour models (2026-10-18)
+
+Two designs per kind in `buildings/harbour.ts` (the kinds stay drafts), and channel-aware piers in `render/bridges.ts`.
+No kind data, berth or footprint changed.
+
+- **The designs.** A tile picks one of a kind's two by hash.
+
+| Kind | Design 1 | Design 2 |
+| --- | --- | --- |
+| jetty | timber jetty on piles: boathouse, slipway, ladder, cleats, lifebuoy, lamp | floating hire pontoon on a hinged gangway: tackle hut with an awning, racked dinghies, flagstaff |
+| marina | harbourmaster's office with lookout and balcony, café with tables, car park, fuel dock | sailing club with a verandah over the water, rigged dinghy park, boat hoist over a yacht, timber pontoons |
+| fishing harbour | open auction canopy, market hall, ice plant and pipe, derrick, nets, floats, gulls | harbour arms with a striped lighthouse, tarred net lofts, smokehouse, café, stalls, a boat hauled out |
+| ferry pier | covered floating pontoon with a folded-plate canopy, kiosk and two roundel signs | timber pier head on piles with a cast-iron pavilion and lantern, trestle bridge, clock-turret office |
+| cargo port | two gantry cranes with stays, stacks, straddle carriers, lorries, control tower, transit shed | two slewing harbour cranes, grain silos and gallery, sawtooth warehouses, log piles, rail siding |
+
+- **What stays clear.**
+  - Wet rows hold only what a berth allows: pontoon and jetty decks inside |x| < 0.12, quay walls and fenders, mooring
+    piles in the gaps between berths, the fishing harbour's two arms outside the trawler slots, and the marina's
+    fingers and fuel dock outside the ten bow-in slots.
+  - The ferry pier's geometry ends at z = -1.0, so its berth row stays open.
+  - Crane booms, trolleys and jibs stay above 1.1, over any ship.
+  - A check (`buildings:check` "footprints") already keeps every part inside the footprint.
+- **Helpers.** `gull`, `lifebuoy`, `lamp`, `car`, `bench`, `dinghy`, `fenders`, `roundel`, `stack`, `lorry`, `straddle`
+  and `gantry` are local to the file. A `taper` with `shift` draws the leaning stays and jibs.
+- **Night.** Lamp heads, the cranes' warning lights and the lighthouse lantern use window classes, so they light after
+  dark; windowed boxes carry facades and pass the window-collision check.
+- **Bridges.** `bridges.ts` has `channelOf(L)` (the deck stretch boats pass under, matching `bridgeChannel`) and
+  `clearOfChannel`:
+  - arches and girders never put a pier in the channel: a pier that falls in it moves to the channel's edge on its own
+    side, so the channel is one clear span, and a pier that would crowd another goes;
+  - an arch's widest span is then over the channel, its crown at 0.12 or more;
+  - a girder's plates are capped so their underside stays above `BRIDGE_CLEARANCE`;
+  - a suspension span's towers and caissons keep out of the channel, and on a span too short for that the caisson is
+    only two footings.
+  Checked on spans of 1 to 9 tiles with a channel marker drawn under each deck.
+
 ## 6. The simulation
 
 ### 6.1 What is scheduled and what is simulated
@@ -925,7 +961,7 @@ There are eight subtasks, about 5 hours of agent time, in four waves. Each runs 
 | B4 | Server harbours: lanes on change, sea gates, `harbours` message, fishing and port economy, `shipBerthed`, `inspectBoat`, tooltips, load test | opus | B1, B2, B3 | B6 | L (50 min) | new `server/src/sim/harbours.ts`; `simulation.ts` (`dispatch` `to`, export point); `gateways.ts`; `world.ts`, `snapshot.ts` (`seaGates`); `game.ts`; `net.ts`; `protocol.ts`; new `loadtest/boats.ts` | `net.ts`, `protocol.ts`, `game.ts` (also B5); `simulation.ts` |
 | B5 | Ferries: the `'ferry'` mode, `Ferry extends Timetabled`, `routeWater`, `FERRY_TIMING`, berth offsets, `ferryLines`, the lines editor | opus | B1, B2 | B3, B7 | M (35 min) | `shared/src/transit.ts`; `rail.ts` (`ferry`, `RiverBus`, geometry dispatch); new `server/src/sim/ferry.ts`; `game.ts`; `net.ts`; `protocol.ts`; `client/src/lines.ts`; `showcase.ts` (`LINE_MODES` todo) | `rail.ts`; `net.ts`, `protocol.ts`, `game.ts` (also B4: append-only hunks); `showcase.ts` (also B8) |
 | B6 | Boat rendering: models, liveries, motion, sails, wakes, lights, moored boats, picking, panels, helm FPV, barge hand-off | sonnet | B3 (B5 for ferries; mock until merged) | B4 | L (50 min) | new `client/src/render/boats.ts`; `vehicles.ts`; `main.ts`; `vehicleInterior.ts`; `fpv.ts` (`CabEye.helm`); `landmarks.ts` | `main.ts`; `vehicles.ts` |
-| B7 | Harbour models: two designs per kind (pontoons, jetty, market hall, pier, cranes and stacks); channel-aware arches and piers in `render/bridges.ts` | sonnet | B2 | B3, B5 | S (25 min) | `buildings/harbour.ts` (designs only); `render/bridges.ts` (`bridgeChannel`) | `compiled.ts` (re-run compile) |
+| B7 | Harbour models: two designs per kind (pontoons, jetty, market hall, pier, cranes and stacks); channel-aware arches and piers in `render/bridges.ts`. **Built** (section 5) | sonnet | B2 | B3, B5 | S (25 min) | `buildings/harbour.ts` (designs only); `render/bridges.ts` (`bridgeChannel`) | `compiled.ts` (re-run compile) |
 | B8 | Scenarios and checks: showcase `harbour` section, registry, tour, London (gates, piers, RB1, St Katharine, port), seeder `seaGates`, `demo:check` report, drafts off, `LINE_MODES.ferry = true` | opus | all | — | L (45 min) | `showcase.ts`; `london.ts`; `londonMap.ts` (`DOCKS`); `server/src/demo/seed.ts`; `demo/check.ts`; `harbour.ts` (draft flags) | `showcase.ts`; London's `startHash` changes (reset the demos) |
 
 Shared hot spots, in order of risk:
