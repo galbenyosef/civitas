@@ -85,6 +85,8 @@ interface Deps {
   chipMount: HTMLElement;
   /** stop following anyone when the tour moves the camera */
   onFly: () => void;
+  /** the underground view (main.ts setUnder), on at a stop with `view: 'under'` (a metro line) and off again after it */
+  setUnder?: (on: boolean) => void;
 }
 
 export class TourPanel {
@@ -107,6 +109,8 @@ export class TourPanel {
   private ribbonFor = '';
   private poll = 0;
   private tmp = new Vector3();
+  /** the tour turned the underground view on, so it turns it off again at the next stop */
+  private under = false;
 
   constructor(private d: Deps) {
     this.stops = demoTour(d.demo);
@@ -166,6 +170,8 @@ export class TourPanel {
     this.d.onFly();
     this.fly = instant ? null : { at: performance.now(), from: { x: r.target.x, z: r.target.z, dist: r.dist, yaw: r.yaw, pitch: r.pitch }, to: s };
     if (instant) this.place(s, 1);
+    const under = s.view === 'under';
+    if (under !== this.under) { this.d.setUnder?.(under); this.under = under; }
     this.live = null;
     this.autoAt = performance.now() + (instant ? 0 : FLY_S * 1000) + DWELL_S * 1000;
     if (!this.open) this.setOpen(true); else this.show();

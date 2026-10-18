@@ -14,6 +14,15 @@
  *    stay a train length plus TRAIN_GAP apart on the unfolded loop (a train standing at a terminus in both bores),
  *    no two trains of a bore ever share a tile, every bogie is on the line's tiles, nobody runs before 05:00, every
  *    train dwells at every station, every call is a dwell and nextRide gets there; one-way loops too.
+ * Part two does it again on a server World through the Metro service (server/src/sim/metro.ts), as a player would:
+ *  - platforms laid by `platformFor` under kiosks and halls, and refused where they overlap or touch end to end;
+ *  - three lines saved through `Transit.saveLine` (one under the river, one crossing another at a crossover, a loop):
+ *    the editor's preview (`Metro.plan`) is deterministic and is what the save bores and charges, a second save costs
+ *    nothing, the route derived from the layer is the bored lap or shorter and meets another line only at crossovers;
+ *  - the bytes mirrored into a ClientWorld as the wire sends them: `metroStationAt` agrees from every tile;
+ *  - the server lines' timetables over whole days (as part one), the refusals (one station, a platform another line
+ *    calls at, another owner's station, short of money, another line's tunnel), a v8 snapshot round trip and a v7
+ *    upgrade, the underground bulldozer, and an orphaned platform turning back into tunnel and grounding its line.
  *   npx tsx packages/shared/scripts/metro-check.ts [days]
  */
 import {
@@ -24,6 +33,13 @@ import {
   metroStationAt, metroStop, planPlatform, orphanPlatform, underNet, planBore, lineSides, overrunTiles, metroBore,
   type MetroEnv, type RailLineDef, type RailRoute, type TrainState, type VehiclePose, type StationStop,
 } from '../src';
+import { DEFAULT_TAX, familyOf as famOf, u16ToB64, i32ToB64, u8ToB64, platformAlongX, type TransitLine, type LinePreview, type StopRef } from '../src';
+import { World, emptyStats } from '../../server/src/world';
+import { Simulation } from '../../server/src/sim/simulation';
+import { Metro } from '../../server/src/sim/metro';
+import { lapOf } from '../../server/src/sim/rail';
+import { snapshotOf, worldFromSnapshot, type Snapshot } from '../../server/src/snapshot';
+import { ClientWorld } from '../../client/src/world';
 
 const days = Number(process.argv[2] ?? 2);
 let failures = 0, checks = 0;
@@ -317,88 +333,259 @@ console.log('=== refusals');
 // ---- 5. trains -------------------------------------------------------------------------------------------------
 console.log(`=== trains over ${days} days, sampled every half tick`);
 const out: TrainState[] = [], poses: VehiclePose[] = [];
-for (const def of defs) {
-  const route = routes.get(def.id);
-  if (!route) continue;
-  const svc = railService(def, route), g = svc.geom;
-  const again = railService({ ...def, stations: def.stations.map((s) => [s[0], s[1]] as [number, number]) }, JSON.parse(JSON.stringify(route)));
-  ok(JSON.stringify({ ...svc, geom: undefined }) === JSON.stringify({ ...again, geom: undefined }), `${def.name}: the timetable is not deterministic`);
-  ok(svc.metro && svc.consists.slice(0, svc.trains).every((c) => c.length === svc.vehicles && c[0] === RailVehicle.TubeCab && c[c.length - 1] === RailVehicle.TubeCab && c.slice(1, -1).every((k) => k === RailVehicle.TubeCar)), `${def.name}: consists ${svc.consists[0].join(',')}`);
-  const shortest = Math.min(...route.stops.map((s) => s.len));
-  ok(svc.vehicles === shortest && svc.length <= shortest, `${def.name}: ${svc.vehicles} cars for a shortest platform of ${shortest}`);
-  ok(svc.dwell.every((d, i) => (!def.loop && (i === 0 || i === svc.dwell.length - 1) ? d >= METRO.terminusDwell[0] && d <= METRO.terminusDwell[1] : d >= METRO.dwell[0] && d <= METRO.dwell[1])), `${def.name}: dwells ${svc.dwell.join('/')}`);
-  ok(svc.trains > 1, `${def.name}: ${svc.trains} train(s): twin bores should run several`);
-  const ring = def.loop ? g.L : 2 * g.L, need = svc.length + TRAIN_GAP;
-  const own = new Set(routeTiles(route).map((t) => key(t.x, t.y)));
-  const ov = overrunTiles(route, w);
-  for (let i = 0; i < ov.length; i += 3) own.add(key(ov[i], ov[i + 1]));
-  let minGap = Infinity, maxTrains = 0, samples = 0, offTrack = 0, clashes = 0;
-  const dwelt = new Map<string, number>();
-  const n = def.stations.length;
-  for (let t = TICKS_PER_DAY; t < (1 + days) * TICKS_PER_DAY; t += 0.5) {
-    trainsAt(svc, t, out);
-    maxTrains = Math.max(maxTrains, out.length);
-    const hour = (t % TICKS_PER_DAY) / TICKS_PER_HOUR;
-    if (out.length && hour >= 4.8 && hour < SERVICE_START_HOUR) fail(`${def.name}: a train out at ${hhmm(t)}`);
-    const bores = [new Map<string, number>(), new Map<string, number>()]; // tile -> train, per bore (out, home)
-    const points: number[][] = [];
-    for (const s of out) {
-      samples++;
-      const terminus = !def.loop && s.phase === 'dwell' && (s.stop === 0 || s.stop === n - 1);
-      if (s.phase === 'dwell') {
-        dwelt.set(`${s.train}:${s.stop}`, (dwelt.get(`${s.train}:${s.stop}`) ?? 0) + 1);
-        ok(s.v === 0 && Math.abs(s.s - g.stopS[s.stop]) < 1e-9, `${def.name} t=${t}: dwelling train ${s.train} not stopped at its platform`);
-      }
-      // where it is on the unfolded loop: a train standing at a terminus is in both bores
-      const tau = t - s.day * TICKS_PER_DAY - SERVICE_START_HOUR * TICKS_PER_HOUR - s.train * svc.headway;
-      const u = def.loop ? s.s : unfoldedS(svc, tau);
-      points.push(terminus ? [u, unfoldedS(svc, tau, true)] : [u]);
-      ok(def.loop || Math.abs(u - (s.dir > 0 ? s.s : 2 * g.L - s.s)) < 1e-6, `${def.name} t=${t}: unfolded position ${u} disagrees with the train's state`);
-      const inBores = def.loop ? [0] : terminus ? [0, 1] : [s.dir > 0 ? 0 : 1];
-      const side = metroBore(svc, s);
-      ok(def.loop ? side === 1 : terminus ? Math.abs(side) <= 1 : side === s.dir, `${def.name} t=${t}: train ${s.train} in bore ${side}`);
-      for (const v of trainPoses(svc, s, poses)) {
-        for (const d of [-0.3, 0, 0.3]) {
-          const bx = v.x + Math.cos(v.h) * d, bz = v.z + Math.sin(v.h) * d, k = key(Math.floor(bx), Math.floor(bz));
-          if (!own.has(k)) { offTrack++; if (offTrack < 4) fail(`${def.name} t=${t}: train ${s.train} vehicle ${v.j} at (${bx.toFixed(2)}, ${bz.toFixed(2)}) is off its tunnel`); }
-          for (const b of inBores) {
-            const o = bores[b].get(k);
-            if (o !== undefined && o !== s.train) { clashes++; if (clashes < 4) fail(`${def.name} t=${t}: trains ${o} and ${s.train} on one tile (${k}) of bore ${b}`); }
-            bores[b].set(k, s.train);
+trainChecks(defs, routes, w);
+/** The timetable over whole days, sampled every half tick, for lines routed through `env`'s under layer (part two reuses it on a server World). */
+function trainChecks(defs: RailLineDef[], routes: Map<number, RailRoute>, env: MetroEnv) {
+  for (const def of defs) {
+    const route = routes.get(def.id);
+    if (!route) continue;
+    const svc = railService(def, route), g = svc.geom;
+    const again = railService({ ...def, stations: def.stations.map((s) => [s[0], s[1]] as [number, number]) }, JSON.parse(JSON.stringify(route)));
+    ok(JSON.stringify({ ...svc, geom: undefined }) === JSON.stringify({ ...again, geom: undefined }), `${def.name}: the timetable is not deterministic`);
+    ok(svc.metro && svc.consists.slice(0, svc.trains).every((c) => c.length === svc.vehicles && c[0] === RailVehicle.TubeCab && c[c.length - 1] === RailVehicle.TubeCab && c.slice(1, -1).every((k) => k === RailVehicle.TubeCar)), `${def.name}: consists ${svc.consists[0].join(',')}`);
+    const shortest = Math.min(...route.stops.map((s) => s.len));
+    ok(svc.vehicles === shortest && svc.length <= shortest, `${def.name}: ${svc.vehicles} cars for a shortest platform of ${shortest}`);
+    ok(svc.dwell.every((d, i) => (!def.loop && (i === 0 || i === svc.dwell.length - 1) ? d >= METRO.terminusDwell[0] && d <= METRO.terminusDwell[1] : d >= METRO.dwell[0] && d <= METRO.dwell[1])), `${def.name}: dwells ${svc.dwell.join('/')}`);
+    ok(svc.trains > 1, `${def.name}: ${svc.trains} train(s): twin bores should run several`);
+    const ring = def.loop ? g.L : 2 * g.L, need = svc.length + TRAIN_GAP;
+    const own = new Set(routeTiles(route).map((t) => key(t.x, t.y)));
+    const ov = overrunTiles(route, env);
+    for (let i = 0; i < ov.length; i += 3) own.add(key(ov[i], ov[i + 1]));
+    let minGap = Infinity, maxTrains = 0, samples = 0, offTrack = 0, clashes = 0;
+    const dwelt = new Map<string, number>();
+    const n = def.stations.length;
+    for (let t = TICKS_PER_DAY; t < (1 + days) * TICKS_PER_DAY; t += 0.5) {
+      trainsAt(svc, t, out);
+      maxTrains = Math.max(maxTrains, out.length);
+      const hour = (t % TICKS_PER_DAY) / TICKS_PER_HOUR;
+      if (out.length && hour >= 4.8 && hour < SERVICE_START_HOUR) fail(`${def.name}: a train out at ${hhmm(t)}`);
+      const bores = [new Map<string, number>(), new Map<string, number>()]; // tile -> train, per bore (out, home)
+      const points: number[][] = [];
+      for (const s of out) {
+        samples++;
+        const terminus = !def.loop && s.phase === 'dwell' && (s.stop === 0 || s.stop === n - 1);
+        if (s.phase === 'dwell') {
+          dwelt.set(`${s.train}:${s.stop}`, (dwelt.get(`${s.train}:${s.stop}`) ?? 0) + 1);
+          ok(s.v === 0 && Math.abs(s.s - g.stopS[s.stop]) < 1e-9, `${def.name} t=${t}: dwelling train ${s.train} not stopped at its platform`);
+        }
+        // where it is on the unfolded loop: a train standing at a terminus is in both bores
+        const tau = t - s.day * TICKS_PER_DAY - SERVICE_START_HOUR * TICKS_PER_HOUR - s.train * svc.headway;
+        const u = def.loop ? s.s : unfoldedS(svc, tau);
+        points.push(terminus ? [u, unfoldedS(svc, tau, true)] : [u]);
+        ok(def.loop || Math.abs(u - (s.dir > 0 ? s.s : 2 * g.L - s.s)) < 1e-6, `${def.name} t=${t}: unfolded position ${u} disagrees with the train's state`);
+        const inBores = def.loop ? [0] : terminus ? [0, 1] : [s.dir > 0 ? 0 : 1];
+        const side = metroBore(svc, s);
+        ok(def.loop ? side === 1 : terminus ? Math.abs(side) <= 1 : side === s.dir, `${def.name} t=${t}: train ${s.train} in bore ${side}`);
+        for (const v of trainPoses(svc, s, poses)) {
+          for (const d of [-0.3, 0, 0.3]) {
+            const bx = v.x + Math.cos(v.h) * d, bz = v.z + Math.sin(v.h) * d, k = key(Math.floor(bx), Math.floor(bz));
+            if (!own.has(k)) { offTrack++; if (offTrack < 4) fail(`${def.name} t=${t}: train ${s.train} vehicle ${v.j} at (${bx.toFixed(2)}, ${bz.toFixed(2)}) is off its tunnel`); }
+            for (const b of inBores) {
+              const o = bores[b].get(k);
+              if (o !== undefined && o !== s.train) { clashes++; if (clashes < 4) fail(`${def.name} t=${t}: trains ${o} and ${s.train} on one tile (${k}) of bore ${b}`); }
+              bores[b].set(k, s.train);
+            }
           }
         }
       }
-    }
-    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
-      for (const p of points[i]) for (const q of points[j]) {
-        const d0 = Math.abs(p - q) % ring, d = Math.min(d0, ring - d0);
-        minGap = Math.min(minGap, d);
-        if (d < need - 1e-6) fail(`${def.name} t=${t}: trains ${out[i].train} and ${out[j].train} ${d.toFixed(2)} apart on the unfolded loop (need ${need.toFixed(2)})`);
+      for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+        for (const p of points[i]) for (const q of points[j]) {
+          const d0 = Math.abs(p - q) % ring, d = Math.min(d0, ring - d0);
+          minGap = Math.min(minGap, d);
+          if (d < need - 1e-6) fail(`${def.name} t=${t}: trains ${out[i].train} and ${out[j].train} ${d.toFixed(2)} apart on the unfolded loop (need ${need.toFixed(2)})`);
+        }
       }
     }
-  }
-  for (let i = 0; i < svc.trains; i++) for (let k = 0; k < n; k++) ok((dwelt.get(`${i}:${k}`) ?? 0) > 0, `${def.name}: train ${i} never dwelt at station ${k}`);
-  ok(maxTrains > 1, `${def.name}: never more than one train out`);
-  console.log(`  ${def.name}: ${svc.trains}/${def.trains} trains of ${svc.vehicles} cars, cycle ${svc.T.toFixed(0)} ticks, headway ${svc.headway.toFixed(1)}${svc.note ? ` (${svc.note})` : ''}; ${samples} samples, up to ${maxTrains} at once, closest ${minGap.toFixed(2)} (need ${need.toFixed(2)}), ${offTrack} off-tunnel bogies, ${clashes} shared tiles in a bore`);
+    for (let i = 0; i < svc.trains; i++) for (let k = 0; k < n; k++) ok((dwelt.get(`${i}:${k}`) ?? 0) > 0, `${def.name}: train ${i} never dwelt at station ${k}`);
+    ok(maxTrains > 1, `${def.name}: never more than one train out`);
+    console.log(`  ${def.name}: ${svc.trains}/${def.trains} trains of ${svc.vehicles} cars, cycle ${svc.T.toFixed(0)} ticks, headway ${svc.headway.toFixed(1)}${svc.note ? ` (${svc.note})` : ''}; ${samples} samples, up to ${maxTrains} at once, closest ${minGap.toFixed(2)} (need ${need.toFixed(2)}), ${offTrack} off-tunnel bogies, ${clashes} shared tiles in a bore`);
 
-  const day = 1, d0 = day * TICKS_PER_DAY;
-  const calls = callsBetween(svc, d0, d0 + TICKS_PER_DAY);
-  ok(calls.length > 0, `${def.name}: no calls on day ${day}`);
-  for (const c of calls) {
-    trainsAt(svc, (c.arrive + c.depart) / 2, out);
-    const s = out.find((q) => q.train === c.train);
-    ok(!!s && s.phase === 'dwell' && s.stop === c.stop, `${def.name}: call of train ${c.train} at stop ${c.stop} (${hhmm(c.arrive)}) is not a dwell there`);
+    const day = 1, d0 = day * TICKS_PER_DAY;
+    const calls = callsBetween(svc, d0, d0 + TICKS_PER_DAY);
+    ok(calls.length > 0, `${def.name}: no calls on day ${day}`);
+    for (const c of calls) {
+      trainsAt(svc, (c.arrive + c.depart) / 2, out);
+      const s = out.find((q) => q.train === c.train);
+      ok(!!s && s.phase === 'dwell' && s.stop === c.stop, `${def.name}: call of train ${c.train} at stop ${c.stop} (${hhmm(c.arrive)}) is not a dwell there`);
+    }
+    for (const [a, b, at] of [[0, 1, 8], [1, 0, 12.3], [n - 1, 0, 17.7], [0, n - 1, 23.5]] as const) {
+      const tick = d0 + at * TICKS_PER_HOUR;
+      const ride = nextRide(svc, a, b, tick);
+      if (!ride) { ok(at > 23, `${def.name}: no ride ${a} -> ${b} after ${hhmm(tick)}`); continue; }
+      ok(ride.depart >= tick && ride.arrive > ride.depart && ride.depart - tick <= svc.headway + Math.max(...svc.dwell) + 1, `${def.name}: ride ${a} -> ${b} at ${hhmm(tick)} departs ${hhmm(ride.depart)} arrives ${hhmm(ride.arrive)}`);
+      trainsAt(svc, ride.arrive + 0.25, out);
+      const s = out.find((q) => q.train === ride.train);
+      ok(!!s && s.phase === 'dwell' && s.stop === b, `${def.name}: the ride ${a} -> ${b} does not arrive at ${b}`);
+    }
+    console.log(`    day ${day}: ${calls.length} calls, first ${hhmm(calls[0].arrive)}, last ${hhmm(calls[calls.length - 1].arrive)}; rides arrive`);
   }
-  for (const [a, b, at] of [[0, 1, 8], [1, 0, 12.3], [n - 1, 0, 17.7], [0, n - 1, 23.5]] as const) {
-    const tick = d0 + at * TICKS_PER_HOUR;
-    const ride = nextRide(svc, a, b, tick);
-    if (!ride) { ok(at > 23, `${def.name}: no ride ${a} -> ${b} after ${hhmm(tick)}`); continue; }
-    ok(ride.depart >= tick && ride.arrive > ride.depart && ride.depart - tick <= svc.headway + Math.max(...svc.dwell) + 1, `${def.name}: ride ${a} -> ${b} at ${hhmm(tick)} departs ${hhmm(ride.depart)} arrives ${hhmm(ride.arrive)}`);
-    trainsAt(svc, ride.arrive + 0.25, out);
-    const s = out.find((q) => q.train === ride.train);
-    ok(!!s && s.phase === 'dwell' && s.stop === b, `${def.name}: the ride ${a} -> ${b} does not arrive at ${b}`);
-  }
-  console.log(`    day ${day}: ${calls.length} calls, first ${hhmm(calls[0].arrive)}, last ${hhmm(calls[calls.length - 1].arrive)}; rides arrive`);
 }
+
+// ---- part two: a server World through the Metro service -------------------------------------------------------
+function partTwo() {
+  console.log('=== part two: a server World, the Metro service and the transit registry');
+  const sw = new World(77);
+  const RIVER2 = (x: number) => x >= 40 && x <= 43;
+  for (let y = -50; y <= 65; y++) for (let x = -45; x <= 130; x++) sw.setTile(x, y, packTile(RIVER2(x) ? Terrain.Water : Terrain.Grass, false, 0, 0));
+  const parcel = (owner: string, x: number, y: number, pw: number, ph: number) => {
+    const q = { id: sw.nextId++, owner, name: owner, x, y, w: pw, h: ph, taxRate: DEFAULT_TAX, stats: emptyStats() };
+    sw.parcels.set(q.id, q);
+    for (let ty = y; ty < y + ph; ty++) for (let tx = x; tx < x + pw; tx++) sw.setParcelId(tx, ty, q.id);
+  };
+  parcel('p1', -45, -50, 161, 116); parcel('poor', 116, -50, 15, 20);
+  const p1 = sw.getOrCreatePlayer('p1', 'P1', 1_000_000), poor = sw.getOrCreatePlayer('poor', 'Poor', 50);
+  const sim = new Simulation(sw), metro = new Metro(sw, sim.transit);
+  sim.transit.register(metro);
+  const env = metro.env;
+  /** a finished kiosk or hall, its platform laid by the service as the station tools lay it (net.ts) */
+  const build = (kind: number, x: number, y: number, alongX: boolean, r = alongX ? 0 : 1): string | null => {
+    if (kind === METRO_ENTRANCE) sw.setTile(x, y, packTile(Terrain.Grass, false, famOf(kind), 1), subFor(kind));
+    else sw.placeStructure(placedFromDoor(kind, x, y, r), { work: 300, priority: 0, built: true });
+    const wr = metro.platformFor(kind, x, y, kind === METRO_ENTRANCE ? (alongX ? 0 : 1) : r);
+    if (typeof wr === 'string') return wr;
+    metro.lay(wr);
+    return null;
+  };
+  // the same stations as part one: the Central east-west under the river, the Northern across it, a loop east
+  const S2: Record<string, St> = { ...ST };
+  for (const [name, st] of Object.entries(S2)) { const why = build(st.kind, st.x, st.y, st.alongX, st.r ?? (st.alongX ? 0 : 1)); ok(!why, `${name}: platform refused: ${why}`); }
+  ok(platformAlongX(0) && !platformAlongX(1), 'platformAlongX');
+  { // the platform refusals, through the service
+    const k1 = stops.get('k1')!;
+    const over = metro.platformFor(METRO_ENTRANCE, 1, 1, 1), end = metro.platformFor(METRO_ENTRANCE, k1.a1 + 3, 0, 0);
+    ok(typeof over === 'string' && /Another platform/.test(over), `a platform across another: ${JSON.stringify(over).slice(0, 80)}`);
+    ok(typeof end === 'string' && /end to end/.test(end), `a platform end to end with another: ${JSON.stringify(end).slice(0, 80)}`);
+    console.log(`  platforms laid under ${Object.keys(S2).length} stations; refused: "${over}", "${end}"`);
+  }
+  sw.setStopName(ST.k1.x, ST.k1.y, 'Bank');
+  const at = (n: string): StopRef => ({ x: ST[n].x, y: ST[n].y });
+  const specs = [
+    { name: 'Central', number: 1, colour: 0xdc241f, stops: [at('k1'), at('h2'), at('k3')], loop: false, vehicles: 12 },
+    { name: 'Northern', number: 2, colour: 0x333333, stops: [at('k4'), at('h5')], loop: false, vehicles: 8 },
+    { name: 'Circle', number: 3, colour: 0xffd329, stops: [at('k6'), at('k7'), at('h8'), at('k9')], loop: true, vehicles: 12 },
+  ];
+  const saved: TransitLine[] = [], previews = new Map<number, Omit<LinePreview, 'seq'>>();
+  for (const spec of specs) {
+    const draft: TransitLine = { id: 0, owner: 'p1', mode: 'metro', ...spec };
+    const a = metro.plan(draft), b = metro.plan(draft);
+    ok(JSON.stringify(a) === JSON.stringify(b), `${spec.name}: the preview is not deterministic`);
+    if (!a.ok) { fail(`${spec.name}: preview refused: ${a.problem?.message}`); continue; }
+    const money = p1.money, before = new Map<string, number>();
+    for (let i = 0; i < (a.bore ?? []).length; i += 2) before.set(key(a.bore![i], a.bore![i + 1]), sw.underAt(a.bore![i], a.bore![i + 1]));
+    const line = sim.transit.saveLine('p1', spec);
+    if (typeof line === 'string') { fail(`${spec.name}: save refused: ${line}`); continue; }
+    const lb = metro.lastBore!;
+    ok(!!lb && lb.cost === a.cost && lb.tiles === a.bore!.length / 2 && lb.crossovers === a.crossovers!.length / 2, `${spec.name}: saved ${JSON.stringify(lb)}, previewed $${a.cost}, ${a.bore!.length / 2} tiles, ${a.crossovers!.length / 2} crossovers`);
+    ok(money - p1.money === a.cost, `${spec.name}: charged $${money - p1.money}, previewed $${a.cost}`);
+    ok([...before.values()].every((u) => u === 0) && [...before.keys()].every((k) => { const [x, y] = k.split(',').map(Number); return isTunnel(sw.underAt(x, y)); }), `${spec.name}: the save did not bore the previewed tiles`);
+    let wet = 0;
+    for (let i = 0; i < a.bore!.length; i += 2) if (RIVER2(a.bore![i])) wet++;
+    const cross = a.crossovers!.length / 2, dry = a.bore!.length / 2 - wet;
+    ok(a.cost === dry * METRO.tunnelCost + wet * METRO.wetTunnelCost + cross * (METRO.crossoverCost + METRO.tunnelCost), `${spec.name}: cost ${a.cost} for ${dry} dry, ${wet} wet tiles, ${cross} crossovers`);
+    const again = sim.transit.saveLine('p1', { ...spec, id: line.id });
+    ok(typeof again !== 'string' && metro.lastBore?.cost === 0 && metro.lastBore.tiles === 0, `${spec.name}: a second save bored ${JSON.stringify(metro.lastBore)}`);
+    saved.push(line); previews.set(line.id, a);
+    console.log(`  ${spec.name}: previewed and saved alike, ${a.bore!.length / 2} tiles bored (${wet} under the river), ${cross} crossover(s), $${a.cost}; a second save $0`);
+  }
+  for (let i = 0; i < 3; i++) sim.tick();
+  const dtos = metro.dtos(), routes2 = new Map<number, RailRoute>();
+  ok(dtos.length === 3 && dtos.every((d) => d.status === 'running' && !!d.route), `lines running: ${dtos.map((d) => `${d.name} ${d.status}`).join(', ')}`);
+  ok(dtos[0]?.names[0] === 'Bank' && dtos[0]?.name === 'Central', `the Central's names: ${dtos[0]?.name} ${dtos[0]?.names.join(', ')}`);
+  const tilesOf = new Map<number, Set<string>>();
+  for (const d of dtos) if (d.route) { routes2.set(d.id, d.route); tilesOf.set(d.id, new Set(routeTiles(d.route).map((t) => key(t.x, t.y)))); }
+  for (const d of dtos) {
+    if (!d.route) continue;
+    const pv = previews.get(d.id)!, lap = lapOf(d.route, d.stations.length);
+    ok(lap.path.length / 2 <= pv.length, `${d.name}: the derived lap is ${lap.path.length / 2} tiles, the bore's ${pv.length}`);
+    for (const t of routeTiles(d.route)) {
+      const m = underMask(sw.underAt(t.x, t.y));
+      ok(isTunnel(sw.underAt(t.x, t.y)) && !!(m & (1 << t.i)) && !!(m & (1 << t.o)), `${d.name}: (${t.x}, ${t.y}) is not tunnel joined ${t.i}->${t.o}`);
+      for (const [oid, ts] of tilesOf) if (oid !== d.id && ts.has(key(t.x, t.y))) ok(m === 15, `${d.name} meets line ${oid} at (${t.x}, ${t.y}), not a crossover`);
+    }
+  }
+  const crossed = [...(tilesOf.get(saved[1]?.id) ?? [])].filter((k) => tilesOf.get(saved[0]?.id)?.has(k));
+  ok(crossed.length >= 1, 'the Northern does not cross the Central');
+  console.log(`  routes derived from the layer: ${dtos.map((d) => `${d.name} ${d.route ? routeTiles(d.route).length : 0} tiles`).join(', ')}; the Northern crosses the Central at ${crossed.join(' ')}`);
+
+  // the client's copy, as the wire delivers the chunks
+  const cw = new ClientWorld();
+  for (const c of sw.chunks.values()) cw.putChunk({ cx: c.cx, cy: c.cy, tiles: u16ToB64(c.tiles), parcels: i32ToB64(c.parcel), aux: c.aux.some((v) => v) ? u8ToB64(c.aux) : undefined, sub: c.sub.some((v) => v) ? u8ToB64(c.sub) : undefined, under: c.under.some((v) => v) ? u8ToB64(c.under) : undefined });
+  const cenv: MetroEnv = { tile: (x, y) => cw.getTile(x, y), aux: (x, y) => cw.auxAt(x, y), sub: (x, y) => cw.subAt(x, y), under: (x, y) => cw.underAt(x, y) };
+  let probes = 0;
+  for (const [name, st] of Object.entries(S2)) {
+    const want = metroStationAt(st.x, st.y, env);
+    ok(!!want, `${name}: the server finds no station`);
+    const tiles: [number, number][] = [[st.x, st.y]];
+    if (want) for (let a = want.a0; a <= want.a1; a++) tiles.push(stopTile2(want, a));
+    if (st.kind === METRO_STATION) eachTile(placedFromDoor(st.kind, st.x, st.y, st.r ?? 0), (x, y) => tiles.push([x, y]));
+    for (const [x, y] of tiles) { probes++; ok(JSON.stringify(metroStationAt(x, y, env)) === JSON.stringify(want) && JSON.stringify(metroStationAt(x, y, cenv)) === JSON.stringify(want), `${name}: (${x}, ${y}) finds another station on the server or the client`); }
+  }
+  console.log(`  the client's copy: ${probes} probes (doors, footprints, platform tiles) find the same station as the server`);
+
+  // the server lines' timetables
+  trainChecks(dtos, routes2, env);
+
+  console.log('  refusals:');
+  {
+    build(METRO_ENTRANCE, -30, -40, true); build(METRO_ENTRANCE, -10, -40, true);
+    build(METRO_ENTRANCE, 118, -45, true); build(METRO_ENTRANCE, 128, -45, true); // the poor player's
+    const cases: { what: string; owner: string; stops: StopRef[]; want: RegExp }[] = [
+      { what: 'one station', owner: 'p1', stops: [at('k1')], want: /at least two/ },
+      { what: 'a platform another line calls at', owner: 'p1', stops: [{ x: -30, y: -40 }, at('k1')], want: /already calls/ },
+      { what: 'another owner\'s stations', owner: 'poor', stops: [{ x: -30, y: -40 }, { x: -10, y: -40 }], want: /not on your land/ },
+      { what: 'short of money', owner: 'poor', stops: [{ x: 118, y: -45 }, { x: 128, y: -45 }], want: /costs \$[\d,]+; the treasury has \$50/ },
+    ];
+    for (const c of cases) {
+      const r = sim.transit.saveLine(c.owner, { number: 9, colour: 0, loop: false, vehicles: 2, stops: c.stops });
+      ok(typeof r === 'string' && c.want.test(r), `${c.what}: expected a refusal matching ${c.want}, got ${typeof r === 'string' ? r : 'a saved line'}`);
+      console.log(`    ${c.what}: ${typeof r === 'string' ? r : 'SAVED'}`);
+    }
+    ok(poor.money === 50, `the poor player was charged: $${poor.money}`);
+    // a line over the Central's stations under another id would run in its tunnel
+    const twin = metro.route({ ...saved[0], id: 999, number: 9, name: 'Twin' });
+    ok(typeof twin === 'string' && /run in the Central line's tunnel/.test(twin), `routing in another line's tunnel: ${typeof twin === 'string' ? twin : 'ROUTED'}`);
+    console.log(`    another line's tunnel: ${typeof twin === 'string' ? twin : 'ROUTED'}`);
+  }
+
+  // the snapshot: v8 round-trips the under bytes and the names; a v7 world loads with none
+  {
+    const snap = JSON.parse(JSON.stringify(snapshotOf(sw))) as Snapshot;
+    const back = worldFromSnapshot(snap)!;
+    let same = 0, diff = 0, bored = 0;
+    for (const c of sw.chunks.values()) {
+      if (!c.modified) continue;
+      const b = back.getChunk(c.cx, c.cy, false);
+      if (c.under.some((v) => v)) bored++;
+      if (b && b.under.every((v, i) => v === c.under[i])) same++; else diff++;
+    }
+    ok(diff === 0 && bored > 0, `v8 snapshot: ${diff} chunks' under bytes differ`);
+    ok(back.stopLabel(ST.k1.x, ST.k1.y) === 'Bank' && [...back.transitLines.values()].map((l) => l.name).join() === 'Central,Northern,Circle', 'v8 snapshot: names lost');
+    const v7 = { ...snap, version: 7, stopNames: undefined, chunks: snap.chunks.map((c) => ({ ...c, under: undefined })) } as Snapshot;
+    const old = worldFromSnapshot(v7)!;
+    ok(!!old && [...old.chunks.values()].every((c) => c.under.every((v) => v === 0)) && old.stopNames.size === 0, 'a v7 world loads with under bytes or names');
+    console.log(`  snapshot: v8 round-trips ${same} chunks (${bored} with tunnel) byte-identical, with names; v7 loads with an empty under layer`);
+  }
+
+  // the underground bulldozer, and a station bulldozed on the surface
+  {
+    const cen = routeTiles(routes2.get(saved[0].id)!).find((t) => !isPlatform(sw.underAt(t.x, t.y)))!;
+    const used = metro.fill(p1, cen.x, cen.y), plat = metro.fill(p1, ST.k1.x, ST.k1.y);
+    sw.setUnder(-40, 50, tunnelByte(2)); sw.setUnder(-39, 50, tunnelByte(10)); sw.setUnder(-38, 50, tunnelByte(8));
+    const free = metro.fill(p1, -39, 50);
+    ok(/runs through/.test(used ?? '') && /platform/.test(plat ?? '') && free === null && sw.underAt(-39, 50) === 0 && underMask(sw.underAt(-40, 50)) === 0 && underMask(sw.underAt(-38, 50)) === 0,
+      `bulldozing tunnel: used "${used}", platform "${plat}", unused ${free ?? 'filled'} (neighbours ${sw.underAt(-40, 50)}, ${sw.underAt(-38, 50)})`);
+    console.log(`  bulldozer: "${used}"; "${plat}"; an unused tunnel fills and its neighbours' joints go`);
+    const k9 = stops.get('k9')!;
+    sw.setTile(ST.k9.x, ST.k9.y, packTile(Terrain.Grass, false, 0, 0), 0);
+    for (let i = 0; i < 12; i++) sim.tick();
+    const reverted = Array.from({ length: k9.len }, (_, a) => stopTile2(k9, k9.a0 + a)).every(([x, y]) => isTunnel(sw.underAt(x, y)) && !isPlatform(sw.underAt(x, y)));
+    const circle = metro.dtos().find((d) => d.id === saved[2]?.id);
+    ok(reverted && !!circle && circle.status !== 'running', `the orphaned platform: reverted ${reverted}, the Circle ${circle?.status}`);
+    console.log(`  the loop's kiosk bulldozed: its platform is tunnel again, the Circle "${circle?.status}"`);
+  }
+}
+const stopTile2 = (s: StationStop, a: number): [number, number] => (s.alongX ? [a, s.row] : [s.row, a]);
+
+partTwo();
 console.log(failures ? `\n${failures} FAILURES (${checks} checks)` : `\nALL CHECKS PASSED (${checks} checks)`);
 process.exit(failures ? 1 : 0);

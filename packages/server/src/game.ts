@@ -3,9 +3,11 @@ import type { World } from './world';
 import { Simulation } from './sim/simulation';
 import { Airports } from './sim/airports';
 import { Rail } from './sim/rail';
+import { Metro } from './sim/metro';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
 import { TickWindow } from './tickstats';
+import { historyOf } from './history';
 
 export type { GameConfig };
 
@@ -21,6 +23,8 @@ export interface Game {
   airports: Airports;
   /** railways (sim/rail.ts): trains are the 'rail' mode of the transit registry, which plans riders and collects fares */
   rail: Rail;
+  /** underground railways (sim/metro.ts): the 'metro' mode of the transit registry, its tunnels and platforms */
+  metro: Metro;
   net: Net;
   /** tick time over the last minute (300 loops), for the stats message, /healthz and the client's perf readout */
   tickWin: TickWindow;
@@ -37,7 +41,7 @@ export function tuneEconomy(spec: string) {
   for (const kv of spec.split(',').filter(Boolean)) { const [k, v] = kv.split('='); if (k in ECONOMY_TUNING) (ECONOMY_TUNING as Record<string, number>)[k] = Number(v); }
 }
 
-/** Wire a loaded or freshly seeded World into a running game: the simulation, airports, rail and the protocol over `source`. */
+/** Wire a loaded or freshly seeded World into a running game: the simulation, airports, rail, the metro and the protocol over `source`. */
 export function createGame(world: World, source: ConnSource, cfg: GameConfig, steps = 1): Game {
   for (const id of world.parcels.keys()) world.recountRoads(id);
   // the Commons has every technology (seed.ts, loadtest/cities.ts); top it up when the tree has grown since the world was saved
@@ -49,7 +53,9 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   airports.onArrival = (a) => sim.gateways.planeLanded(a.terminal.doorX, a.terminal.doorY, a.passengers);
   const rail = new Rail(world, sim.transit);
   sim.transit.register(rail);
-  sim.transit.sandbox = sim.buses.sandbox = rail.sandbox = cfg.sandbox; // lines are anyone's to edit in a sandbox
+  const metro = new Metro(world, sim.transit);
+  sim.transit.register(metro);
+  sim.transit.sandbox = sim.buses.sandbox = rail.sandbox = metro.sandbox = cfg.sandbox; // lines are anyone's to edit in a sandbox
   // rail freight: deliveries from industry near a freight yard go by train when a freight line reaches a yard near the shop
   sim.freight = rail;
   rail.trucks = { spawn: (from, to, owner) => sim.spawnFreightTruck(from, to, owner) };
@@ -57,15 +63,20 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const net = new Net(world, sim, source, cfg);
   net.airports = airports;
   net.rail = rail;
+  net.metro = metro;
   const tickWin = new TickWindow(300);
   let slow = 0, loops = 0;
+  // city history for the charts (history.ts): one sample per game hour, pushed to the clients that have the panel open
+  const hist = historyOf(world);
+  const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const game: Game = {
-    world, sim, airports, rail, net, tickWin, steps,
-    step() { sim.tick(); airports.tick(); net.flush(); },
+    world, sim, airports, rail, metro, net, tickWin, steps,
+    step() { sim.tick(); airports.tick(); net.flush(); sampleHistory(); },
     loop() {
       const t0 = performance.now();
       for (let i = 0; i < game.steps; i++) { sim.tick(); airports.tick(); }
       net.flush();
+      sampleHistory();
       const dt = performance.now() - t0;
       tickWin.push(dt);
       if (++loops % 5 === 0) net.tickStats = tickWin.summary(); // once a second; sent with the next stats message

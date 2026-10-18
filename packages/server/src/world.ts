@@ -4,7 +4,7 @@ import {
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
-  type LedgerCat, type LedgerDTO, ECONOMY_TUNING,
+  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName,
 } from '@msimcity/shared';
 import { LIFE, stageFor } from './sim/life';
 import type { GoalState } from './goals';
@@ -17,6 +17,8 @@ export interface Chunk {
   aux: Uint8Array;
   /** sub layer, one byte per tile (docs/sub-kinds.md): the kind id of a sub-kind; 0 = the family's base kind */
   sub: Uint8Array;
+  /** under layer, one byte per tile (docs/underground.md, shared/src/metro.ts): tunnels and platforms; nothing on the surface reads it */
+  under: Uint8Array;
   /** true once a player has changed anything; only modified chunks are persisted */
   modified: boolean;
 }
@@ -96,6 +98,8 @@ export interface Leg {
   lift?: { driver: number; dest: [number, number] };
   /** a ride on a transit line (sim/transit.ts): calls `from` to `to`, boarding at stop tile `board`, getting off at `off`; `path` is the stops and the road between, for the route ribbon */
   ride?: { line: number; from: number; to: number; board: [number, number]; off: [number, number] };
+  /** a taxi or private-hire booking (sim/taxis.ts): wait at the kerb, ride, get out at `dest`; `path` is from and to, for the route ribbon */
+  hail?: { booking: number; dest: [number, number] };
 }
 /** A road user that is not a citizen: freight, visitors from outside, patrols and call-outs. */
 export interface Vehicle extends Mover {
@@ -218,6 +222,12 @@ export class World {
   dirtyAux = new Map<string, [number, number]>();
   /** tiles whose sub byte changed, sent as their own delta stream */
   dirtySub = new Map<string, [number, number]>();
+  /** tiles whose under byte changed, sent as their own delta stream */
+  dirtyUnder = new Map<string, [number, number]>();
+  /** bumped on every under-layer change, so the metro can re-derive its lines after any edit */
+  underVersion = 0;
+  /** station names by tileKey of the entrance (docs/underground.md); persisted (snapshot v8) */
+  stopNames = new Map<string, string>();
   dirtyParcels = new Set<number>();
   removedParcels = new Set<number>();
   playersDirty = false;
@@ -257,7 +267,7 @@ export class World {
     for (let ly = 0; ly < CHUNK_SIZE; ly++)
       for (let lx = 0; lx < CHUNK_SIZE; lx++)
         tiles[ly * CHUNK_SIZE + lx] = packTile(this.sampler(x0 + lx, y0 + ly), false, 0, 0);
-    return { cx, cy, tiles, parcel: new Int32Array(CHUNK_SIZE * CHUNK_SIZE), aux: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE), sub: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE), modified: false };
+    return { cx, cy, tiles, parcel: new Int32Array(CHUNK_SIZE * CHUNK_SIZE), aux: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE), sub: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE), under: new Uint8Array(CHUNK_SIZE * CHUNK_SIZE), modified: false };
   }
 
   /** Tile value, generating the chunk if needed. */
@@ -318,6 +328,27 @@ export class World {
     c.sub[i] = v;
     c.modified = true;
     this.dirtySub.set(tileKey(x, y), [x, y]);
+  }
+  /** Under byte at a tile (tunnel or platform, shared/src/metro.ts); 0 (solid ground) where the chunk does not exist yet. */
+  underAt(x: number, y: number): number {
+    const c = this.getChunk(chunkOf(x), chunkOf(y), false);
+    return c ? c.under[localIndex(x, y)] : 0;
+  }
+  /** Set an under byte. The surface never reads the layer, so no road search or building is touched. */
+  setUnder(x: number, y: number, v: number) {
+    const c = this.getChunk(chunkOf(x), chunkOf(y))!;
+    const i = localIndex(x, y);
+    if (c.under[i] === v) return;
+    c.under[i] = v;
+    c.modified = true;
+    this.underVersion++;
+    this.dirtyUnder.set(tileKey(x, y), [x, y]);
+  }
+  /** A stop's name: the one given to the station at (x, y) (stopNames), else the generated stopName. */
+  stopLabel(x: number, y: number): string { return this.stopNames.get(tileKey(x, y)) ?? stopName(x, y); }
+  /** Name the stop at (x, y); null or an empty name goes back to the generated one. */
+  setStopName(x: number, y: number, name: string | null) {
+    if (name) this.stopNames.set(tileKey(x, y), name); else this.stopNames.delete(tileKey(x, y));
   }
   /** The catalogue kind id standing on a tile (0 for nothing), from its family code and sub byte. */
   kindIdAt(x: number, y: number): number {

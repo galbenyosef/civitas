@@ -8,13 +8,16 @@ import {
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
   isBridgeAux, planBridge, joinsBridgeSide, BRIDGE_STYLE_NAMES, type BridgePlan,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
+  isMetroStationKind, CITIZEN_UNDER,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
 import { interiorLots } from './sim/blocks';
 import type { Airports } from './sim/airports';
 import type { Rail } from './sim/rail';
+import type { Metro } from './sim/metro';
 import { Onboarding } from './goals';
+import { historyOf, type History } from './history';
 
 interface Client {
   conn: Conn; player: Player | null; subs: Set<string>; lastHint: number;
@@ -22,6 +25,8 @@ interface Client {
   builderHint: number; builtSeen: number; builtMoved: number;
   /** the last goals message sent (goals.ts), so only changes go out */
   goalsSig?: string;
+  /** the charts panel is open (history.ts): it gets each hourly sample */
+  hist?: boolean;
 }
 
 /** tool id -> kind id, from the building catalogue: zoning tools for growable kinds, placement tools for civic ones.
@@ -44,6 +49,8 @@ export interface GameConfig {
 const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) => k.tool!.id));
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
 
+const r2 = (v: number) => Math.round(v * 100) / 100;
+
 /** shortest gap between two line previews for one client (editLine) */
 const PREVIEW_MS = 100;
 
@@ -61,6 +68,8 @@ export class Net {
   airports: Airports | null = null;
   /** railways (sim/rail.ts): the track tool, station tooltips and the 'railLines' message; set by index.ts */
   rail: Rail | null = null;
+  /** underground railways (sim/metro.ts): platforms under new stations, the underground bulldozer, station tooltips and the 'metroLines' and 'metroLoads' messages; set by game.ts */
+  metro: Metro | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
   tickStats: { avg: number; p95: number; max: number } | null = null;
   /** game ticks per TICK_MS of wall time, sent with the stats message when it is not 1 so the client's clock follows a paused or
@@ -115,7 +124,7 @@ export class Net {
       case 'sub': return this.subscribe(c, m.chunks);
       case 'unsub': for (const [cx, cy] of m.chunks) c.subs.delete(chunkKey(cx, cy)); return;
       case 'buy': return this.buy(c, m.x, m.y, m.w, m.h);
-      case 'build': return this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
+      case 'build': return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
       case 'parcel': return this.editParcel(c, m.id, m.taxRate, m.name);
       case 'inspect': return this.inspect(c, m.x, m.y, m.full === true);
       case 'inspectCitizen': return this.send(c, { t: 'citizen', id: Number(m.id), info: this.sim.describeCitizen(Number(m.id), m.route === true) });
@@ -123,10 +132,26 @@ export class Net {
       case 'dev': return this.dev(c, m.action, m.on);
       case 'sites': return this.siteList(c, m.id);
       case 'priority': return this.setPriority(c, m.x, m.y, m.priority);
-      case 'inspectTrain': return this.send(c, { t: 'train', line: Number(m.line), train: Number(m.train), info: this.rail?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? null });
+      case 'inspectTrain': return this.send(c, { t: 'train', line: Number(m.line), train: Number(m.train), info: this.rail?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.metro?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? null });
       case 'lines': return this.send(c, this.linesMsg());
       case 'line': return this.editLine(c, m);
+      case 'hist': return this.histOpen(c, m.open === true);
       case 'goals': case 'hint': this.onboarding?.command(c.player, m); return this.goals(c);
+    }
+  }
+
+  /** The charts panel opened or closed: on opening, the whole history (docs/charts.md); then each hour's sample until it closes. */
+  private histOpen(c: Client, open: boolean) {
+    c.hist = open;
+    if (!open || !c.player) return;
+    const h = historyOf(this.w);
+    this.send(c, { t: 'history', hour: h.hour, world: h.world.toDTO(), mine: h.playerDTO(c.player.id) });
+  }
+  /** A new hourly sample (game.ts): to every client with the charts panel open. */
+  historySample(h: History) {
+    for (const c of this.clients) {
+      if (!c.hist || !c.player || !c.conn.open) continue;
+      this.send(c, { t: 'histSample', hour: h.hour, w: Array.from(h.lastWorld, r2), p: Array.from(h.playerSample(c.player.id), r2) });
     }
   }
 
@@ -169,6 +194,7 @@ export class Net {
     });
     this.send(c, this.linesMsg());
     if (this.rail) this.send(c, { t: 'railLines', lines: this.rail.dtos() });
+    if (this.metro) { this.send(c, { t: 'metroLines', lines: this.metro.dtos() }); if (this.metro.loads.length) this.send(c, { t: 'metroLoads', l: this.metro.loads }); }
     c.goalsSig = undefined; this.goals(c);
   }
 
@@ -209,7 +235,9 @@ export class Net {
     } else if (m.op === 'save') {
       const r = this.sim.transit.saveLine(p.id, m.line ?? {});
       if (typeof r === 'string') return this.toast(c, r);
-      this.toast(c, r.mode === 'rail' ? `Line ${r.number} saved: ${r.stops.length} stations, ${r.vehicles} train${r.vehicles === 1 ? '' : 's'} asked for` : `Line ${r.number} saved: ${r.stops.length} stops, ${r.vehicles} bus${r.vehicles === 1 ? '' : 'es'}`, 'info');
+      const bored = r.mode === 'metro' ? this.metro?.lastBore : null;
+      if (r.mode === 'metro') this.toast(c, `${r.name ? `The ${r.name} line` : `Line ${r.number}`} saved: ${r.stops.length} stations, ${r.vehicles} train${r.vehicles === 1 ? '' : 's'} asked for${bored?.tiles ? `; ${bored.tiles} tiles of tunnel bored${bored.crossovers ? ` with ${bored.crossovers} crossover${bored.crossovers === 1 ? '' : 's'}` : ''} for $${bored.cost.toLocaleString('en-GB')}` : ''}`, 'info');
+      else this.toast(c, r.mode === 'rail' ? `Line ${r.number} saved: ${r.stops.length} stations, ${r.vehicles} train${r.vehicles === 1 ? '' : 's'} asked for` : `Line ${r.number} saved: ${r.stops.length} stops, ${r.vehicles} bus${r.vehicles === 1 ? '' : 'es'}`, 'info');
       this.send(c, this.linesMsg(r.id));
     } else return;
     this.lastLines = '';
@@ -249,6 +277,7 @@ export class Net {
       this.send(c, { t: 'chunk', chunk: {
         cx, cy, tiles: u16ToB64(ch.tiles), parcels: i32ToB64(ch.parcel),
         aux: ch.aux.some((v) => v !== 0) ? u8ToB64(ch.aux) : undefined, sub: ch.sub.some((v) => v !== 0) ? u8ToB64(ch.sub) : undefined,
+        under: ch.under.some((v) => v !== 0) ? u8ToB64(ch.under) : undefined,
       } });
       const traffic = this.trafficBytes(cx, cy);
       const kerb = this.kerbBytes(cx, cy);
@@ -257,7 +286,7 @@ export class Net {
       const out: number[] = [];
       for (const a of this.sim.agents()) {
         if (Math.floor(a.x / CHUNK_SIZE) !== cx || Math.floor(a.y / CHUNK_SIZE) !== cy) continue;
-        out.push(a.id, Math.round(a.x * 100) / 100, Math.round(a.y * 100) / 100, packCitizenFlags(a.state, a.mode, a.kind, a.cls, a.queued, a.emergency, a.stage, a.bag, a.rev));
+        out.push(a.id, Math.round(a.x * 100) / 100, Math.round(a.y * 100) / 100, packCitizenFlags(a.state, a.mode, a.kind, a.cls, a.queued, a.emergency, a.stage, a.bag, a.rev, a.ind) | (a.under ? CITIZEN_UNDER : 0) | (a.extra ?? 0));
       }
       if (out.length) this.send(c, { t: 'citizens', c: out });
     }
@@ -402,6 +431,9 @@ export class Net {
         if (this.w.kindIdAt(x, y) === k) continue;
         if (this.occupied(t)) { this.toast(c, 'Something is built there already; bulldoze it first'); return; }
         if (!this.w.hasRoadAccess(x, y)) { this.toast(c, `A ${KIND_NAMES[k]} needs a road next to it`); return; }
+        // a metro entrance lays its platform under the door (sim/metro.ts), along the street it faces
+        const platform = isMetroStationKind(k) ? this.metro?.platformFor(k, x, y, rot) ?? 'No underground railways on this server' : null;
+        if (typeof platform === 'string') { this.toast(c, platform); return; }
         cost = CIVIC_COST[k]; zoned = true;
         // a player's first builders' yard opens at once: without one their lots wait behind the Commons' own streets
         const starter = familyOf(k) === Zone.Yard && !this.hasYard(p.id);
@@ -409,6 +441,7 @@ export class Net {
           this.w.setTile(x, y, packTile(terrainOf(t), false, 0, 0));
           const site = this.w.createSite(x, y, k, 1, workOf(k, 1), familyOf(k) === Zone.Yard ? 2 : 1); // a yard is urgent: it brings its own builders; work per kind (size tiers: a police box is quicker than a station)
           if (site && starter) { this.w.completeSite(site); this.toast(c, 'Your first builders\' yard opens at once; its builders start on your nearest lots with their next shift', 'info'); }
+          if (platform) this.metro!.lay(platform);
         };
       } else if (tool === 'busstop') {
         // a shelter beside a plain stretch of road, put up at once like a parking lot (sim/transit.ts)
@@ -538,7 +571,11 @@ export class Net {
     }, rot);
     if (!verdict.ok) { this.toast(c, verdict.reason); return false; }
     if (budget < CIVIC_COST[kind]) { this.toast(c, 'Not enough money'); return false; }
+    // a metro hall lays its platform under the door (sim/metro.ts), along the street its front faces
+    const platform = isMetroStationKind(kind) ? this.metro?.platformFor(kind, verdict.placed.doorX, verdict.placed.doorY, verdict.placed.r) ?? 'No underground railways on this server' : null;
+    if (typeof platform === 'string') { this.toast(c, platform); return false; }
     this.w.placeStructure(verdict.placed, { work: workOf(kind, 1), priority: 1 }); // build work scales with the tier (CIVIC_WORK for the original kinds)
+    if (platform) this.metro!.lay(platform);
     return true;
   }
 
@@ -597,6 +634,23 @@ export class Net {
     for (const q of touched) this.w.recountRoads(q);
     if (plan.cost) this.w.credit(p.id, -plan.cost);
     this.toast(c, swap ? 'The other road is on the deck now' : tool === 'roundabout' ? `Roundabout built for $${plan.cost}: traffic goes round anticlockwise and gives way to the ring` : `Flyover built for $${plan.cost}: nobody turns here now`, 'info');
+  }
+
+  /**
+   * The bulldozer in the underground view (docs/underground.md): fill each dragged tunnel tile that no line runs
+   * through and that is not under someone else's land (sim/metro.ts fill). Free, and nothing is refunded.
+   */
+  private fillTunnels(c: Client, tiles: [number, number][]) {
+    if (!this.metro || !Array.isArray(tiles)) return;
+    let filled = 0, why: string | null = null;
+    for (const pair of tiles.slice(0, 256)) {
+      const x = Math.floor(Number(pair?.[0])), y = Math.floor(Number(pair?.[1]));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const r = this.metro.fill(c.player!, x, y, this.cfg.sandbox);
+      if (r) why ??= r; else filled++;
+    }
+    if (filled) this.toast(c, `Filled ${filled} tile${filled === 1 ? '' : 's'} of tunnel${why ? ` (not all: ${why.charAt(0).toLowerCase()}${why.slice(1)})` : ''}`, 'info');
+    else if (why) this.toast(c, why);
   }
 
   /** Lay railway track along a dragged path (shared/src/rail.ts planTrack, sim/rail.ts). */
@@ -686,6 +740,7 @@ export class Net {
     const info = b ? this.sim.describe(b, full) : null;
     if (info && b!.id === Zone.Airport && this.airports) info.airport = this.airports.describe(dx, dy); // the airport kind, not every transport hub
     if (info && isRailStationKind(b!.id) && this.rail) info.rail = this.rail.describeStation(dx, dy);
+    if (info && isMetroStationKind(b!.id) && this.metro) info.metro = this.metro.describeStation(dx, dy);
     this.send(c, { t: 'building', x, y, info });
   }
 
@@ -770,6 +825,23 @@ export class Net {
 
   flush() {
     const w = this.w;
+    // under bytes (tunnels and platforms, docs/underground.md): nothing on the surface reads them, so they only need to beat the tile words
+    if (w.dirtyUnder.size) {
+      const byChunk = new Map<string, number[]>();
+      for (const [x, y] of w.dirtyUnder.values()) {
+        const key = chunkKey(chunkOf(x), chunkOf(y));
+        let arr = byChunk.get(key);
+        if (!arr) { arr = []; byChunk.set(key, arr); }
+        arr.push(x, y, w.underAt(x, y));
+      }
+      w.dirtyUnder.clear();
+      for (const c of this.clients) {
+        if (!c.player) continue;
+        const u: number[] = [];
+        for (const [key, arr] of byChunk) if (c.subs.has(key)) for (const v of arr) u.push(v);
+        if (u.length) this.send(c, { t: 'under', u });
+      }
+    }
     // aux bytes first, so a client applying the tile words that follow already knows which tiles are structure parts
     if (w.dirtyAux.size) {
       const byChunk = new Map<string, number[]>();
@@ -834,6 +906,9 @@ export class Net {
     }
     // rail lines with their routes (sim/rail.ts), whenever any line's status or route changed
     if (this.rail?.changed) { this.rail.changed = false; this.broadcast({ t: 'railLines', lines: this.rail.dtos() }); }
+    // metro lines likewise (sim/metro.ts), and riders per train for the carriage crowds when they change (every 25 ticks at most)
+    if (this.metro?.changed) { this.metro.changed = false; this.broadcast({ t: 'metroLines', lines: this.metro.dtos() }); }
+    if (this.metro?.loadsChanged) { this.metro.loadsChanged = false; this.broadcast({ t: 'metroLoads', l: this.metro.loads }); }
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed
     if (w.tick % 10 === 0) {
@@ -885,7 +960,7 @@ export class Net {
     for (const a of this.sim.agents()) {
       seen.add(a.id);
       const x = Math.round(a.x * 100) / 100, y = Math.round(a.y * 100) / 100;
-      const flags = packCitizenFlags(a.state, a.mode, a.kind, a.cls, a.queued, a.emergency, a.stage, a.bag, a.rev);
+      const flags = packCitizenFlags(a.state, a.mode, a.kind, a.cls, a.queued, a.emergency, a.stage, a.bag, a.rev, a.ind) | (a.under ? CITIZEN_UNDER : 0) | (a.extra ?? 0);
       const prev = this.lastSent.get(a.id);
       if (prev && prev[0] === x && prev[1] === y && prev[2] === flags && a.id % 10 !== keep) continue;
       if (prev) { prev[0] = x; prev[1] = y; prev[2] = flags; } else this.lastSent.set(a.id, [x, y, flags]);

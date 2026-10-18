@@ -2,7 +2,7 @@ import {
   DEFAULT_TAX, Terrain, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, KIND_ID, KIND_NAMES, chunkKey, isBuildable, isRoad, packTile, terrainOf,
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
-  isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux,
+  isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux, isMetroStationKind,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS } from '../world';
 import { seedCity } from '../loadtest/cities';
@@ -11,12 +11,14 @@ import { seedLondon } from './london';
 import { fillCity, yieldNow } from '../fill';
 import type { Simulation } from '../sim/simulation';
 import type { Rail } from '../sim/rail';
+import { Metro } from '../sim/metro';
 
 /**
  * The demo seeder (docs/demo.md): builds a demo scenario (shared/src/demo/showcase.ts) into a fresh World through the
  * planners players go through: `planStructure` with the scenario's rotation for every multi-tile kind, the 1×1 rules
  * of the build tool (own land, a road beside it), `planRunway`, `Rail.paint` (planTrack) for every track drag,
- * `BusService.stopProblem` for bus stops and `Transit.saveLine` (the registry's validation and routing) for every line.
+ * `BusService.stopProblem` for bus stops, `Metro.platformFor` for the platform under a metro station and
+ * `Transit.saveLine` (the registry's validation and routing, and the metro's boring) for every line.
  * Anything a planner refuses is a problem; the caller fails loudly on any, so a broken scenario never seeds quietly.
  * Everything is pre-built complete (no waiting for builders).
  *
@@ -168,7 +170,12 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
   return problems;
 }
 
-/** Phase 2: bus stops (BusService.stopProblem), track (Rail.paint), then every line through the transit registry. */
+/**
+ * Phase 2: bus stops (BusService.stopProblem), track (Rail.paint), the platforms under the metro stations
+ * (Metro.platformFor, as the station tools lay them) and their names, then every line through the transit registry.
+ * The metro service is the one registered with the registry (game.ts); a caller that registers none (a check that
+ * builds its own Rail) gets one registered here when the scenario has metro stations.
+ */
 export function seedDemoNetwork(w: World, sim: Simulation, rail: Rail, id: DemoId): string[] {
   const problems: string[] = [];
   const owner = w.players.get(DEMO_OWNER);
@@ -194,8 +201,22 @@ export function seedDemoNetwork(w: World, sim: Simulation, rail: Rail, id: DemoI
     const r = rail.paint(owner, trackDragPath([a[0], a[1]], [b[0], b[1]]), true);
     if (!r.ok) problems.push(`${s.id}: ${tr.id} drag ${at(a)} to ${at(b)}: ${r.msg}`);
   }
+  const stations = sections.flatMap((s) => (s.placements ?? []).filter((p) => isMetroStationKind(kindId(p.kind))).map((p) => ({ s, p })));
+  if (stations.length) {
+    let metro = sim.transit.services.get('metro') as Metro | undefined;
+    if (!metro) sim.transit.register(metro = new Metro(w, sim.transit));
+    metro.sandbox = true;
+    for (const { s, p } of stations) { // the platform a station tool lays with the entrance (net.ts), on the scenario's turn
+      const k = kindId(p.kind), [x, y] = p.door;
+      if (w.kindIdAt(x, y) !== k) continue; // phase 1 has said why it is not there
+      const writes = metro.platformFor(k, x, y, p.rot);
+      if (typeof writes === 'string') problems.push(`${s.id}: ${p.id ?? p.kind} at ${at(p.door)}: ${writes}`);
+      else metro.lay(writes);
+      if (p.name) w.setStopName(x, y, p.name);
+    }
+  }
   for (const s of sections) for (const l of s.lines ?? []) {
-    const r = sim.transit.saveLine(DEMO_OWNER, { number: l.number, colour: l.colour, loop: l.loop, vehicles: l.vehicles, stops: l.stops.map(([x, y]) => ({ x, y })) });
+    const r = sim.transit.saveLine(DEMO_OWNER, { number: l.number, colour: l.colour, loop: l.loop, vehicles: l.vehicles, stops: l.stops.map(([x, y]) => ({ x, y })), ...(l.name ? { name: l.name } : {}) });
     if (typeof r === 'string') problems.push(`${s.id}: ${l.id}: ${r}`);
     else if (r.mode !== l.mode) problems.push(`${s.id}: ${l.id} came out as a ${r.mode} line, not ${l.mode}`);
   }
@@ -233,7 +254,7 @@ export function seededRandom(seed: number): () => number {
   };
 }
 
-/** FNV-1a over every modified chunk's tile words, aux and sub bytes (sorted by chunk) and the transit lines. */
+/** FNV-1a over every modified chunk's tile words, aux, sub and under bytes (sorted by chunk), the station names and the transit lines. */
 export function worldHash(w: World): string {
   let h = 0x811c9dc5;
   const byte = (b: number) => { h ^= b & 0xff; h = Math.imul(h, 0x01000193) >>> 0; };
@@ -241,9 +262,10 @@ export function worldHash(w: World): string {
   for (const [cx, cy] of keys) {
     const c = w.getChunk(cx, cy, false)!;
     for (const v of [cx, cy]) for (let s = 0; s < 32; s += 8) byte(v >> s);
-    for (let i = 0; i < c.tiles.length; i++) { byte(c.tiles[i]); byte(c.tiles[i] >> 8); byte(c.aux[i]); byte(c.sub[i]); }
+    for (let i = 0; i < c.tiles.length; i++) { byte(c.tiles[i]); byte(c.tiles[i] >> 8); byte(c.aux[i]); byte(c.sub[i]); byte(c.under[i]); }
   }
-  const lines = [...w.transitLines.values()].sort((a, b) => a.id - b.id).map((l) => [l.id, l.owner, l.mode, l.number, l.colour, l.loop, l.vehicles, l.stops.map((s) => [s.x, s.y])]);
+  for (const ch of JSON.stringify([...w.stopNames].sort((a, b) => (a[0] < b[0] ? -1 : 1)))) byte(ch.charCodeAt(0));
+  const lines = [...w.transitLines.values()].sort((a, b) => a.id - b.id).map((l) => [l.id, l.owner, l.mode, l.number, l.colour, l.loop, l.vehicles, l.stops.map((s) => [s.x, s.y]), l.name ?? '']);
   for (const ch of JSON.stringify(lines)) byte(ch.charCodeAt(0));
   return h.toString(16).padStart(8, '0');
 }

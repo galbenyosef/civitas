@@ -45,8 +45,8 @@ export const MIN_GAP = 0.12;
 /** Lane centre and sidewalk line, as offsets from a road tile's centreline (right-hand traffic). The road texture's sidewalk strip is 0.125 wide. */
 export const LANE_OFFSET = 0.19;
 export const SIDEWALK_OFFSET = 0.42;
-/** Vehicle length in tiles by VehicleClass (sedan, truck, van, bus) and the common width. */
-export const VEHICLE_LEN = [0.34, 0.46, 0.4, 0.6];
+/** Vehicle length in tiles by VehicleClass (sedan, truck, van, bus, and the server-only two-wheeler BIKE_CLASS 4 of fleet.ts) and the common width. */
+export const VEHICLE_LEN = [0.34, 0.46, 0.4, 0.6, 0.16];
 export const VEHICLE_WIDTH = 0.18;
 /** How far (in tiles) a driver will go to find a lot when the destination is full. */
 export const PARK_RADIUS = 10;

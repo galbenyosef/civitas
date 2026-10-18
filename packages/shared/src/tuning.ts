@@ -48,6 +48,14 @@ export const TRAFFIC_TUNING = {
   /** Most re-routes for lateness per leg. */
   delayMax: 3,
 
+  // ---- two-wheelers (delivery bikes and mopeds, docs/mobile-jobs.md) -------------------------------------------------
+  /**
+   * A bike and a car filtering past each other in a lane while either is turning: 1 the body guard holds them as any two
+   * vehicles; 2 only the bike gives way (a car is never held by a bike, so the two never wait for each other); 0 they
+   * filter through turns too.
+   */
+  bikeTurnGuard: 1,
+
   // ---- signals (signalT, signalPeriod and signalAmber are shared with the client, which draws the same phase) -------
   /** Lights at T-junctions as well as crossroads (1) or only at four-arm junctions (0). */
   signalT: 1,

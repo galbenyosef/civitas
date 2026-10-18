@@ -49,7 +49,7 @@ const railing = (x: number, z0: number, z1: number): Op[] => {
 
 export const metroEntrance: KindDef = {
   id: 'metro-entrance', name: 'metro entrance', code: Zone.Hub, kindId: 22, family: 'transport',
-  flags: { civic: true, workplace: true }, draft: true, // undrafted by U8, which places both in the Showcase and London
+  flags: { civic: true, workplace: true },
   windows: 'civic',
   tool: { id: 'metroentrance', key: '', label: 'Metro entrance (1×1)', color: '#dc241f' },
   group: 'metro', tier: 1,
@@ -94,7 +94,7 @@ export const metroEntrance: KindDef = {
 
 export const metroStation: KindDef = {
   id: 'metro-station', name: 'metro station', code: Zone.Hub, kindId: 23, family: 'transport',
-  flags: { civic: true, workplace: true }, draft: true, // undrafted by U8, which places both in the Showcase and London
+  flags: { civic: true, workplace: true },
   windows: 'civic',
   footprint: { w: 2, h: 1, door: [0, 0] },
   tool: { id: 'metrostation', key: '', label: 'Metro station (2×1)', color: '#a3141a' },

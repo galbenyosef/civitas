@@ -1,6 +1,9 @@
 import type { DemoRect, DemoXY, DemoSection, DemoPlacement, DemoBlock, TourStop } from './showcase';
 import { KIND_ID } from '../buildings/compiled';
 import { FRONT, placedFromAnchor, placedFromDoor, type Placed } from '../structures';
+import { TRANSIT } from '../transit';
+import { platformSpan } from '../metro';
+import { stopTile } from '../rail';
 import { LONDON_MAP, LT, arterialPaths, geoF, inLondon, lidx, londonBase, londonBridges, londonPlan, type LondonPlan } from './londonMap';
 
 /**
@@ -108,6 +111,39 @@ const ROUTE_D3: Spot[] = [
   ['stop-d3-poplar', 'bus-stop', 51.5110, -0.0170, 'N'], ['stop-d3-canary-wharf', 'bus-stop', 51.4980, -0.0198, 'E'],
   ['stop-d3-millwall', 'bus-stop', 51.4894, -0.0293, 'E'], ['stop-d3-island-gardens', 'bus-stop', 51.4830, -0.0149, 'N'],
 ];
+
+/**
+ * The Underground (docs/underground.md section 7): a station's name, where the real one is (latitude, longitude) or the
+ * rail terminus it changes with (its entrance then lands within the change walk of that station's door), and 'hall'
+ * for a station hall (a 6-car platform) in place of a kiosk. Stations fewer than 6 tiles apart along a line are left out.
+ */
+type TubeStop = readonly [name: string, at: readonly [lat: number, lon: number] | keyof typeof STATIONS, hall?: 'hall'];
+interface TubeLine { id: string; name: string; number: number; colour: number; trains: number; stops: TubeStop[] }
+const TUBE: TubeLine[] = [
+  { id: 'central', name: 'Central', number: 1, colour: 0xdc241f, trains: 8, stops: [
+    ["Shepherd's Bush", [51.5046, -0.2187], 'hall'], ['Notting Hill Gate', [51.5094, -0.1967]], ['Marble Arch', [51.5136, -0.1586]],
+    ['Tottenham Court Road', [51.5165, -0.1310]], ["St Paul's", [51.5146, -0.0973]], ['Liverpool Street', 'liverpoolStreet', 'hall'],
+    ['Bethnal Green', [51.5270, -0.0549]], ['Mile End', [51.5249, -0.0332]], ['Stratford', 'stratford', 'hall'],
+  ] },
+  // drawn dark grey: the real line's black would not show underground
+  { id: 'northern', name: 'Northern', number: 2, colour: 0x3a3a3a, trains: 8, stops: [
+    ['Camden Town', [51.5392, -0.1426], 'hall'], ['Euston', [51.5282, -0.1337]], ['Tottenham Court Road', [51.5165, -0.1310]],
+    ['Charing Cross', [51.5080, -0.1247]], ['Waterloo', 'waterloo'], ['Kennington', [51.4884, -0.1053]],
+    ['Stockwell', [51.4723, -0.1229]], ['Clapham Common', [51.4618, -0.1384]], ['Balham', [51.4431, -0.1525], 'hall'],
+  ] },
+  { id: 'jubilee', name: 'Jubilee', number: 3, colour: 0xa0a5a9, trains: 8, stops: [
+    ['Baker Street', [51.5226, -0.1571], 'hall'], ['Green Park', [51.5067, -0.1428]], ['Westminster', [51.5010, -0.1254]],
+    ['Waterloo', 'waterloo'], ['London Bridge', [51.5052, -0.0864], 'hall'], ['Canada Water', [51.4982, -0.0502]],
+    ['Canary Wharf', [51.5036, -0.0187], 'hall'], ['North Greenwich', [51.5005, 0.0039]], ['West Ham', [51.5285, 0.0056]],
+    ['Stratford', 'stratford', 'hall'],
+  ] },
+];
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
+/** The rectangle round some tiles, `pad` tiles bigger each way. */
+const bboxOf = (pts: readonly DemoXY[], pad: number): DemoRect => {
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]), x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad;
+  return [x0, y0, Math.max(...xs) + pad - x0 + 1, Math.max(...ys) + pad - y0 + 1];
+};
 
 type AreaSpec = readonly [id: string, name: string, lat: number, lon: number, kind: string, blurb: string];
 const AREAS: AreaSpec[] = [
@@ -269,6 +305,70 @@ export function londonScenario(): LondonScenario {
     return { id, kind: 'bus-stop', door: door ?? [0, 0] };
   };
   const [route25, route159, routeD3] = [ROUTE_25, ROUTE_159, ROUTE_D3].map((r) => { route = []; return r.map(stopAt); });
+
+  // ---- the Underground: each entrance on a frontage lot as near its real place as fits (fitEntrance), the platform
+  // along the line there (the way to its neighbours), clear of every other platform underneath
+  /** platform tiles claimed, and the tiles just past each platform's ends (planPlatform: platforms never touch end to end) */
+  const platformTiles = new Set<number>(), platformEnds = new Set<number>();
+  /** entrances by station name: an interchange's second entrance stays within the change walk of the first */
+  const entrances = new Map<string, DemoXY[]>();
+  const walk = (a: DemoXY, b: DemoXY) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) <= TRANSIT.transferWalk;
+  const lot = (x: number, y: number) => inLondon(x, y) && plan.t[lidx(x, y)] === LT.Land && !used.has(lidx(x, y));
+  /**
+   * The nearest door (spiralling out from `target`) for a kiosk or hall whose platform runs along x (`alongX`): on the
+   * town's dry land beside a road (a frontage lot, off the railways and the landmarks; a hall's two lots with its door
+   * facing the road), within the change walk of every tile in `near`, with room for the platform underneath.
+   */
+  const fitEntrance = (kind: 'metro-entrance' | 'metro-station', target: readonly [number, number], alongX: boolean, near: DemoXY[]): DemoPlacement | null => {
+    const tx = Math.floor(target[0]), ty = Math.floor(target[1]);
+    for (const [dx, dy] of NEAR) {
+      const x = tx + dx, y = ty + dy;
+      if (!near.every((p) => walk(p, [x, y])) || !lot(x, y) || plan.reach[lidx(x, y)] !== 1) continue;
+      const span = platformSpan(K[kind], x, y, alongX);
+      const under: number[] = [];
+      for (let a = span.a0; a <= span.a1; a++) { const [px, py] = stopTile(span, a); if (!inLondon(px, py)) break; under.push(lidx(px, py)); }
+      const ends = [span.a0 - 1, span.a1 + 1].map((a) => stopTile(span, a)).filter(([px, py]) => inLondon(px, py)).map(([px, py]) => lidx(px, py));
+      if (under.length !== span.len || under.some((i) => platformTiles.has(i) || platformEnds.has(i)) || ends.some((i) => platformTiles.has(i))) continue;
+      let rot: 0 | 1 | 2 | 3 = alongX ? 0 : 1;
+      if (kind === 'metro-station') {
+        const r = ([alongX ? 0 : 1, alongX ? 2 : 3] as const).find((q) => {
+          const p = placedFromDoor(K[kind], x, y, q), [fx, fy] = FRONT[q];
+          for (let py = p.ay; py < p.ay + p.h; py++) for (let px = p.ax; px < p.ax + p.w; px++) if (!lot(px, py)) return false;
+          return inLondon(x + fx, y + fy) && plan.t[lidx(x + fx, y + fy)] === LT.Road;
+        });
+        if (r === undefined) continue;
+        rot = r;
+        const p = placedFromDoor(K[kind], x, y, rot);
+        for (let py = p.ay; py < p.ay + p.h; py++) for (let px = p.ax; px < p.ax + p.w; px++) used.add(lidx(px, py));
+      }
+      used.add(lidx(x, y));
+      for (const i of under) platformTiles.add(i);
+      for (const i of ends) platformEnds.add(i);
+      return { kind, door: [x, y], rot };
+    }
+    return null;
+  };
+  const tubeStations: DemoPlacement[] = [];
+  const tubeLines = TUBE.map((line) => {
+    const targets = line.stops.map(([, where]): [number, number] => (typeof where === 'string' ? [STATIONS[where].door[0], STATIONS[where].door[1]] : geoF(where[0], where[1])));
+    const doors = line.stops.map(([name, where, hall], i): DemoXY => {
+      // the platform runs the way the line goes here: from the station before to the one after
+      const [ax, ay] = targets[Math.max(0, i - 1)], [bx, by] = targets[Math.min(targets.length - 1, i + 1)];
+      const alongX = Math.abs(bx - ax) >= Math.abs(by - ay);
+      const near = [...(entrances.get(name) ?? []), ...(typeof where === 'string' ? [STATIONS[where].door] : [])];
+      const id = `tube-${line.id}-${slug(name)}`;
+      // a hall where one fits, else a kiosk; the platform across the line only where neither fits along it (a cramped interchange)
+      const p = [alongX, !alongX].reduce<DemoPlacement | null>((got, ax) => got ?? ((hall && fitEntrance('metro-station', targets[i], ax, near)) || fitEntrance('metro-entrance', targets[i], ax, near)), null);
+      if (!p) { problems.push(`${id}: no frontage lot near (${Math.round(targets[i][0])}, ${Math.round(targets[i][1])}) with room for the platform`); return [0, 0]; }
+      tubeStations.push({ ...p, id, name });
+      entrances.set(name, [...(entrances.get(name) ?? []), p.door]);
+      return p.door;
+    });
+    return { id: `line-tube-${line.id}`, mode: 'metro' as const, number: line.number, name: line.name, colour: line.colour, loop: false, vehicles: line.trains, stops: doors };
+  });
+  // where the Northern and the Jubilee lines meet at Waterloo, under the underground view
+  const waterlooTube = [STATIONS.waterloo.door, ...(entrances.get('Waterloo') ?? [])];
+  const tubeSpot = bboxOf(waterlooTube, 3);
   /** a named area on the tour: the 15×15 tiles round a real place, inspected at the frontage lot nearest it */
   const areas: DemoBlock[] = AREAS.map(([id, name, lat, lon, kind, blurb]) => {
     const [px, py] = geoF(lat, lon);
@@ -344,6 +444,13 @@ export function londonScenario(): LondonScenario {
         { id: 'line-bus-d3', mode: 'bus', number: 3, colour: 0xb71c1c, loop: true, vehicles: 2, stops: routeD3.map((p) => p.door) },
       ],
     },
+    {
+      id: 'london-tube', name: 'The Underground',
+      blurb: 'The Central line from Shepherd\'s Bush under Oxford Street and the City to Stratford, the Northern from Camden Town under the river to Balham, and the Jubilee from Baker Street by Westminster, Waterloo and Canary Wharf to Stratford: their tunnels cross at right angles, under the Thames and every street, and they change with each other, the rail termini and the buses.',
+      placements: tubeStations,
+      lines: tubeLines,
+      spots: [{ id: 'tube-crossover', spot: 'tube-crossover', name: 'Under Waterloo', rect: tubeSpot, view: 'under', inspect: entrances.get('Waterloo')?.[0] }],
+    },
   ];
   return (BUILT = { sections, plan, problems });
 }
@@ -353,9 +460,10 @@ export const LONDON_TOUR: string[] = [
   'welcome',
   'area-westminster', 'parliament', 'london-eye', 'buckingham-palace', 'new-scotland-yard', 'st-thomas', 'lambeth-fire',
   'area-west-end', 'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'leicester-square', 'line-bus-25', 'line-bus-159',
+  'tube-central-tottenham-court-road', 'line-tube-central', 'line-tube-northern',
   'area-city', 'gherkin', 'walkie-talkie', 'tower-of-london', 'tower-bridge', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
-  'area-south-bank', 'shard', 'waterloo', 'line-south-western', 'clapham-junction', 'area-clapham', 'victoria-garage', 'stockwell-garage', 'area-brixton',
-  'area-canary-wharf', 'one-canada-square', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'maritime-museum', 'o2-arena',
+  'area-south-bank', 'shard', 'waterloo', 'tube-crossover', 'line-tube-jubilee', 'line-south-western', 'clapham-junction', 'area-clapham', 'victoria-garage', 'stockwell-garage', 'area-brixton',
+  'area-canary-wharf', 'one-canada-square', 'tube-jubilee-canary-wharf', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'maritime-museum', 'o2-arena',
   'area-royal-docks', 'area-thames-gateway', 'dagenham-yard', 'track-freight', 'barking-yard', 'line-freight',
   'royal-london', 'area-hackney', 'area-islington', 'kings-cross', 'british-library', 'line-east-coast', 'finsbury-park', 'british-museum',
   'area-camden', 'regents-park-lake', 'lords', 'serpentine', 'area-kensington', 'natural-history-museum',

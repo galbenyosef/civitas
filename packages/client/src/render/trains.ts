@@ -1,12 +1,14 @@
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BoxGeometry, CylinderGeometry, Color, Group, IcosahedronGeometry, InstancedMesh, Matrix4, MeshBasicMaterial, Quaternion, Vector3, AdditiveBlending, type BufferGeometry, type Camera } from 'three';
 import {
-  CHUNK_SIZE, CAR_LEN, hash2, isRailAux, railMask, isRoad, railService, trainsAt, trainPoses, railPoint, TICKS_PER_DAY,
+  CHUNK_SIZE, CAR_LEN, hash2, isRailAux, railMask, isRoad, railService, trainsAt, trainPoses, railPoint, metroBore, TICKS_PER_DAY,
   type RailLineDTO, type RailService, type TrainState, type VehiclePose,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Kit } from './kit';
 import { vehicleMaterial, sceneUniforms } from './materials';
 import { CrossingsView } from './crossings';
+import { METRO_Y } from './underground';
 
 /**
  * Trains and the overhead line (shared/src/rail.ts, docs/rail.md). Where every train is comes from the shared pure
@@ -24,6 +26,11 @@ import { CrossingsView } from './crossings';
 const MAX_VEHICLES = 600;
 const MAX_LIGHTS = 400;
 const RAIL_TOP = 0.014;
+/** tube stock (docs/underground.md section 5): the rail head of the bores (render/underground.ts: the floor is METRO_Y - 0.17, the rail 0.025 tall) and how far each bore lies from the tunnel's middle */
+const TUBE_TOP = METRO_Y - 0.17 + 0.025, BORE_OFF = 0.2;
+const MAX_TUBE = 1500, MAX_TUBE_LIGHTS = 1200, MAX_FIGURES = 6000;
+/** how far up the underground view must be for its trains to be picked, and for the carriages' riders to show */
+const SHOW_LEVEL = 0.04, USE_LEVEL = 0.5;
 const W = 0.21;
 const WHITE = new Color(0xffffff), PALE = new Color(0xe9edf0), HEAD = new Color(0xfff3d0), TAIL = new Color(0xff2a1c);
 const ROOF = 0x8f949c, UNDER = 0x2a2c30, BOGIE = 0x1d1e21, GREY = 0x6b6f76, YELLOW = 0xe8c53a;
@@ -54,6 +61,56 @@ function carriage(cabAtBack: boolean): Parts {
   }
   return { shell: shell.build(), trim: trim.build(), fixed: fixed.build(), glass: glass.build() };
 }
+/**
+ * Tube stock for the bores (RailVehicle 7 and 8): a squat barrel-roofed car that fits the 0.16 bore, sliding doors and a
+ * stripe in the line's colour (the trim), a lit window band (the glass, bright whatever the hour) and silver sides (the shell).
+ * The cab car has its driver's end at +x; the rear one is flipped by trainPoses.
+ */
+const TUBE_W = 0.19;
+function tubeChassis(k: Kit) {
+  k.box(0.8, 0.025, 0.15, 0, 0.025, 0, UNDER);
+  for (const x of [-0.3, 0.3]) {
+    k.box(0.15, 0.03, 0.16, x, 0.0, 0, BOGIE);
+    for (const dx of [-0.045, 0.045]) for (const z of [-0.07, 0.07]) k.wheel(0.022, 0.018, x + dx, 0.022, z, BOGIE);
+  }
+  k.box(0.6, 0.01, 0.07, 0, 0.238, 0, GREY); // roof vents
+}
+function tubeBody(doors: number[], windows: [number, number][]): Parts {
+  const shell = new Kit(), trim = new Kit(), fixed = new Kit(), glass = new Kit();
+  tubeChassis(fixed);
+  shell.box(0.84, 0.15, TUBE_W, 0, 0.04, 0, 0xffffff);
+  shell.taper(0.84, TUBE_W, 0.84, 0.12, 0.05, 0, 0.19, 0, 0xffffff);                 // the barrel roof
+  trim.box(0.845, 0.016, TUBE_W + 0.004, 0, 0.085, 0, 0xffffff);                     // the stripe
+  for (const x of doors) {
+    trim.box(0.09, 0.15, TUBE_W + 0.006, x, 0.04, 0, 0xffffff);                      // sliding doors
+    glass.box(0.05, 0.07, TUBE_W + 0.01, x, 0.115, 0, 0xffffff);
+  }
+  for (const [x, l] of windows) glass.box(l, 0.06, TUBE_W + 0.008, x, 0.12, 0, 0xffffff);
+  return { shell: shell.build(), trim: trim.build(), fixed: fixed.build(), glass: glass.build() };
+}
+function tubeCar(): Parts {
+  const p = tubeBody([-0.29, 0, 0.29], [[-0.145, 0.18], [0.145, 0.18], [-0.38, 0.07], [0.38, 0.07]]);
+  const g = new Kit();
+  for (const x of [-0.425, 0.425]) g.box(0.02, 0.15, 0.14, x, 0.045, 0, GREY); // gangways
+  return { ...p, fixed: mergeParts(p.fixed, g.build()) };
+}
+function tubeCab(): Parts {
+  const p = tubeBody([-0.29, 0], [[-0.145, 0.18], [0.145, 0.18], [-0.38, 0.07], [0.31, 0.12]]);
+  const g = new Kit(), w = new Kit();
+  g.box(0.02, 0.15, 0.14, -0.425, 0.045, 0, GREY);                                  // gangway at the back
+  g.box(0.016, 0.17, 0.17, 0.427, 0.04, 0, 0x2b2d33);                                // the nose
+  g.box(0.014, 0.022, 0.12, 0.433, 0.05, 0, YELLOW);                                 // warning panel
+  w.box(0.014, 0.065, 0.14, 0.434, 0.115, 0, 0xffffff);                              // windscreen
+  return { ...p, fixed: mergeParts(p.fixed, g.build()), glass: mergeParts(p.glass!, w.build()) };
+}
+function mergeParts(a: BufferGeometry, b: BufferGeometry): BufferGeometry { return mergeGeometries([a, b], false)!; }
+/** a rider seen through a carriage window: head and shoulders, a thin plate standing against the glass (base at the sill) */
+function figure(): BufferGeometry {
+  return mergeGeometries([new BoxGeometry(0.022, 0.032, 0.004).translate(0, 0.016, 0), new BoxGeometry(0.013, 0.014, 0.004).translate(0, 0.039, 0)], false)!;
+}
+const CLOTHES = [0x2a2d35, 0x3b2f2a, 0x1f3a52, 0x4a2a2f, 0x2c4a3a, 0x55504a, 0x6a3b2a, 0x1a1c22, 0x5a6270].map((c) => new Color(c));
+const SILVER = new Color(0xc9ced6);
+
 /** a short wagon's frame and two bogies (wagons are RAIL_VEHICLE_LEN 0.58 long) */
 function wagonChassis(k: Kit) {
   k.box(0.56, 0.03, 0.17, 0, 0.025, 0, UNDER);

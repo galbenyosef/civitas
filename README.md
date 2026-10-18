@@ -296,6 +296,16 @@ changing behaviour in game time.
   people stop for a coffee before work, many go out after an evening shift, and
   people on their day off go out in the afternoon and evening. Visitors spend
   money and the venue's parcel collects sales tax.
+- *Mobile jobs* (`server/src/sim/mobile.ts`, `shared/src/fleet.ts`, `docs/mobile-jobs.md`). Some workers work on the
+  road: a hashed share of shops are cab offices whose staff drive cabs (roof sign lit for hire, waiting at a station or
+  airport rank) or private hire from home in their own car; a quarter of café and restaurant staff deliver meals on
+  bicycles and mopeds that filter past queues at the kerb edge; waste and recycling depots (a share of industry) send
+  bin lorries round each district on its weekday, stopping at every home's kerb while a bin is tipped, and street
+  sweepers two days later; warehouses and distribution centres send courier vans in a morning and an afternoon wave.
+  A citizen without a car (or out for the night) weighs a taxi against walking, the bus and driving; homes order food
+  at lunch and dinner and get parcels. The workers keep their ordinary jobs, so jobs and housing stay balanced; fares,
+  meals, collection fees and parcel fees go to the owners. Tooltips show cab offices, takeaways and depots at work and
+  a home's bin day; a worker's panel links to the vehicle they are out in. `loadtest/mobile.ts` probes it.
 - *Parks and leisure venues* (`shared/src/buildings/leisure.ts`, `shared/src/leisure.ts`). Parks (no
   staff; a pocket park grows into a park and a large park with use), libraries and community halls, cinemas,
   sports halls and theatres (Culture tech track) are placed like civic buildings. Every citizen has a leisure

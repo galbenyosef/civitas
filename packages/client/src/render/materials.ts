@@ -12,6 +12,8 @@ export const sceneUniforms = {
   uTime: { value: 0 },
   /** 1 while the congestion overlay is showing */
   uHeat: { value: 0 },
+  /** 0 normal view, 1 underground view: the ground and buildings fade and cool in their own shaders (render/underground.ts) */
+  uUnder: { value: 0 },
   /** 1: windows below a pixel draw their class's average (WINDOWS, far windows); 0 always draws every pane (for comparing) */
   uFarWin: { value: 1 },
 };
@@ -504,12 +506,29 @@ export function buildingMaterial() {
   vOrigin = (modelMatrix * o).xz;
 }`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>' + FRAG_PARS)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + WINDOWS);
+      .replace('#include <common>', '#include <common>' + FRAG_PARS + 'uniform float uUnder;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + WINDOWS)
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + GHOST);
   };
   m.customProgramCacheKey = () => 'msc-windows';
   return m;
 }
+
+/** The underground view: buildings go cool, grey and nearly clear so the layer below reads. */
+const GHOST = /* glsl */ `
+if (uUnder > 0.001) {
+  float l = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(l) * vec3(0.72, 0.86, 1.1) + vec3(0.02, 0.04, 0.07), uUnder * 0.6);
+  gl_FragColor.a *= 1.0 - 0.93 * uUnder;
+}`;
+
+/** The same for the ground: dark and half clear, roads a little less so (their outline stays). */
+const GROUND_UNDER = /* glsl */ `
+if (uUnder > 0.001) {
+  float l = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(l) * vec3(0.7, 0.86, 1.1), uUnder * 0.45) * (1.0 - 0.62 * uUnder);
+  gl_FragColor.a *= 1.0 - (vRoad >= 16.0 ? 0.6 : 0.76) * uUnder;
+}`;
 
 const GROUND_VERT_PARS = /* glsl */ `
 attribute float aRoad;
@@ -522,6 +541,7 @@ const GROUND_FRAG_PARS = /* glsl */ `
 uniform float uNight;
 uniform float uTime;
 uniform float uHeat;
+uniform float uUnder;
 varying float vRoad;
 varying float vHeat;
 varying vec3 vWorldP;
@@ -578,7 +598,7 @@ export function groundMaterial(atlas: Texture) {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>' + GROUND_FRAG_PARS)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + LAMPS)
-      .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + HEAT);
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + HEAT + GROUND_UNDER);
   };
   m.customProgramCacheKey = () => 'msc-ground';
   return m;

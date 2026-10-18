@@ -1,6 +1,6 @@
 import { CHUNK_SIZE, b64ToU16, b64ToI32, b64ToU8, chunkKey, chunkOf, localIndex, structureAt, kindIdOf, zoneOf, isRoad, type Placed, type ChunkDTO, type ParcelDTO, type PlayerDTO } from '@msimcity/shared';
 
-export interface ClientChunk { cx: number; cy: number; tiles: Uint16Array; parcel: Int32Array; aux: Uint8Array; /** kind ids of sub-kinds (docs/sub-kinds.md) */ sub: Uint8Array; dirty: boolean }
+export interface ClientChunk { cx: number; cy: number; tiles: Uint16Array; parcel: Int32Array; aux: Uint8Array; /** kind ids of sub-kinds (docs/sub-kinds.md) */ sub: Uint8Array; /** tunnels and platforms (docs/underground.md) */ under: Uint8Array; dirty: boolean }
 
 /** Client-side mirror of the part of the world we are subscribed to. */
 export class ClientWorld {
@@ -22,10 +22,11 @@ export class ClientWorld {
 
   putChunk(dto: ChunkDTO) {
     const N = CHUNK_SIZE * CHUNK_SIZE;
-    const aux = dto.aux ? b64ToU8(dto.aux) : null, sub = dto.sub ? b64ToU8(dto.sub) : null;
+    const aux = dto.aux ? b64ToU8(dto.aux) : null, sub = dto.sub ? b64ToU8(dto.sub) : null, under = dto.under ? b64ToU8(dto.under) : null;
     const c: ClientChunk = {
       cx: dto.cx, cy: dto.cy, tiles: b64ToU16(dto.tiles), parcel: b64ToI32(dto.parcels),
-      aux: aux && aux.length === N ? aux : new Uint8Array(N), sub: sub && sub.length === N ? sub : new Uint8Array(N), dirty: true,
+      aux: aux && aux.length === N ? aux : new Uint8Array(N), sub: sub && sub.length === N ? sub : new Uint8Array(N),
+      under: under && under.length === N ? under : new Uint8Array(N), dirty: true,
     };
     this.chunks.set(chunkKey(dto.cx, dto.cy), c);
     // road tiling along our edges depends on neighbours, and theirs on us
@@ -65,6 +66,11 @@ export class ClientWorld {
     const c = this.chunks.get(chunkKey(chunkOf(x), chunkOf(y)));
     return c ? c.sub[localIndex(x, y)] : 0;
   }
+  /** Under byte at a tile (tunnel or platform, shared/src/metro.ts; 0 = solid ground or not loaded). */
+  underAt(x: number, y: number): number {
+    const c = this.chunks.get(chunkKey(chunkOf(x), chunkOf(y)));
+    return c ? c.under[localIndex(x, y)] : 0;
+  }
   /** The catalogue kind id standing on a tile (0 for nothing or not loaded). */
   kindIdAt(x: number, y: number): number {
     const t = this.getTile(x, y);
@@ -101,6 +107,16 @@ export class ClientWorld {
       const c = this.chunks.get(chunkKey(chunkOf(u[i]), chunkOf(u[i + 1])));
       if (!c) continue;
       c.sub[localIndex(u[i], u[i + 1])] = u[i + 2];
+      c.dirty = true;
+    }
+  }
+
+  /** flat triples x, y, under byte (sent before 'aux' and the tile words) */
+  applyUnder(u: number[]) {
+    for (let i = 0; i < u.length; i += 3) {
+      const c = this.chunks.get(chunkKey(chunkOf(u[i]), chunkOf(u[i + 1])));
+      if (!c) continue;
+      c.under[localIndex(u[i], u[i + 1])] = u[i + 2];
       c.dirty = true;
     }
   }

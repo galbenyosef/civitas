@@ -1,11 +1,12 @@
 import { InstancedMesh, RingGeometry, Mesh, MeshBasicMaterial, MeshLambertMaterial, Matrix4, Color, Vector3, Quaternion, Group, BufferGeometry, InstancedBufferAttribute, Frustum, Sphere, type Camera } from 'three';
-import { CitizenState, TICK_MS, Zone, VehicleClass, VehicleKind, citizenState, citizenMode, citizenKind, citizenClass, citizenQueued, citizenEmergency, citizenStage, citizenBag, citizenReversing, LifeStage, hash2 } from '@msimcity/shared';
+import { CitizenState, TICK_MS, Zone, VehicleClass, VehicleKind, citizenState, citizenMode, citizenKind, citizenClass, citizenQueued, citizenEmergency, citizenStage, citizenBag, citizenReversing, citizenIndicator, Indicator, LifeStage, hash2, citizenFleet, fleetLoaded, fleetWorking } from '@msimcity/shared';
 import { Luggage } from './luggage';
 import { Kit } from './kit';
 import { P } from './models';
 import { vehicleMaterial, sceneUniforms } from './materials';
-import { HeadlightPools, LAMP, lampSeed, lampShader, lampAttribute } from './headlights';
+import { HeadlightPools, IndicatorFlares, LAMP, lampSeed, lampShader, lampAttribute, lampLenses, blinkLit } from './headlights';
 import { Crowd, lookOf, dressFor, EYE, type Look } from './people';
+import { FleetMeshes } from './fleet';
 
 interface Agent {
   x: number; y: number; px: number; py: number; tx: number; ty: number; t: number;
@@ -25,6 +26,10 @@ interface Agent {
   dressed?: number;
   /** moving in or leaving town: a suitcase on foot, a roof box on the car (render/luggage.ts) */
   bag?: boolean;
+  /** vehicles: the indicators the server says are on (shared Indicator), backing up, and until when (ms) the brake lights stay on after slowing */
+  ind: number; rev: boolean; brake: number;
+  /** a mobile worker's vehicle (shared FleetKind, render/fleet.ts), with a fare or delivery aboard, at a stop doing the job */
+  fleet: number; loaded: boolean; working: boolean;
 }
 
 /** Where a first-person camera sits for an agent, in world units (a tile is 1). */
@@ -38,6 +43,8 @@ export interface Eye {
   speed: number;
   /** body bob phase advance per millisecond (walkers) */
   pace: number;
+  /** a car's body colour, 0xrrggbb (the dashboard's bonnet) */
+  color?: number;
 }
 
 const MAX = 8000;
@@ -54,8 +61,14 @@ const TYPES = ['sedan', 'truck', 'van'] as const;
 const BUS_CLASS = VehicleClass.Bus;
 const BUS_DEFAULT = new Color(0xe6b734), WHITE = new Color(0xffffff);
 type VType = typeof TYPES[number];
-/** bumper distance ahead of the centre and headlight beam length and width, by model */
-const BEAM: Record<VType | 'bus', [number, number, number]> = { sedan: [0.17, 0.85, 0.42], van: [0.21, 0.9, 0.45], truck: [0.23, 0.95, 0.48], bus: [0.3, 1.0, 0.5] };
+/** how far either side of the middle each model's headlamps sit (the models below and the beams on the road) */
+const LAMP_Z: Record<VType | 'bus', number> = { sedan: 0.06, van: 0.065, truck: 0.07, bus: 0.075 };
+/** bumper distance ahead of the centre and headlight beam length and spread, by model */
+const BEAM: Record<VType | 'bus', [number, number, number]> = { sedan: [0.17, 0.85, 0.3], van: [0.21, 0.9, 0.32], truck: [0.23, 0.95, 0.34], bus: [0.3, 1.0, 0.36] };
+/** where the indicator flares sit on each model: front and rear lamp faces (x), out to the side (z) and height */
+const BLINKER: Record<VType | 'bus', [number, number, number, number]> = {
+  sedan: [0.184, -0.179, 0.072, 0.085], van: [0.214, -0.219, 0.077, 0.1], truck: [0.231, -0.231, 0.082, 0.082], bus: [0.311, -0.309, 0.088, 0.08],
+};
 const UP = new Vector3(0, 1, 0);
 const LERP_SECONDS = TICK_MS / 1000;
 const tmpC = new Color();
@@ -65,20 +78,20 @@ function sedan(): BufferGeometry {
   const k = new Kit();
   k.box(0.34, 0.09, 0.18, 0, 0.045, 0, 0xffffff)
     .box(0.17, 0.075, 0.15, -0.02, 0.135, 0, 0x3d4f68)
-    .box(0.025, 0.02, 0.035, 0.17, 0.075, 0.06, 0xfff2b0, LAMP.head).box(0.025, 0.02, 0.035, 0.17, 0.075, -0.06, 0xfff2b0, LAMP.head)
+    .box(0.025, 0.02, 0.035, 0.17, 0.075, LAMP_Z.sedan, 0xfff2b0, LAMP.head).box(0.025, 0.02, 0.035, 0.17, 0.075, -LAMP_Z.sedan, 0xfff2b0, LAMP.head)
     .box(0.015, 0.02, 0.035, -0.17, 0.075, 0.06, 0xd62020, LAMP.tail).box(0.015, 0.02, 0.035, -0.17, 0.075, -0.06, 0xd62020, LAMP.tail);
   for (const [x, z] of [[0.11, 0.095], [-0.11, 0.095], [0.11, -0.095], [-0.11, -0.095]]) k.wheel(0.04, 0.035, x, 0.04, z, 0x151515);
-  return k.build();
+  return lampLenses(k.build());
 }
 function van(): BufferGeometry {
   const k = new Kit();
   k.box(0.4, 0.18, 0.2, -0.01, 0.045, 0, 0xffffff)
     .box(0.07, 0.085, 0.18, 0.155, 0.14, 0, 0x3d4f68)
     .box(0.11, 0.03, 0.14, -0.03, 0.225, 0, 0xdde7ff)
-    .box(0.025, 0.02, 0.035, 0.2, 0.075, 0.065, 0xfff2b0, LAMP.head).box(0.025, 0.02, 0.035, 0.2, 0.075, -0.065, 0xfff2b0, LAMP.head)
+    .box(0.025, 0.02, 0.035, 0.2, 0.075, LAMP_Z.van, 0xfff2b0, LAMP.head).box(0.025, 0.02, 0.035, 0.2, 0.075, -LAMP_Z.van, 0xfff2b0, LAMP.head)
     .box(0.015, 0.03, 0.03, -0.21, 0.09, 0.07, 0xd62020, LAMP.tail).box(0.015, 0.03, 0.03, -0.21, 0.09, -0.07, 0xd62020, LAMP.tail);
   for (const [x, z] of [[0.12, 0.105], [-0.13, 0.105], [0.12, -0.105], [-0.13, -0.105]]) k.wheel(0.042, 0.035, x, 0.042, z, 0x151515);
-  return k.build();
+  return lampLenses(k.build());
 }
 function truck(): BufferGeometry {
   const k = new Kit();
@@ -86,10 +99,10 @@ function truck(): BufferGeometry {
     .box(0.02, 0.07, 0.17, 0.225, 0.115, 0, 0x3d4f68)
     .box(0.3, 0.035, 0.2, -0.07, 0.045, 0, 0x5c5f66)
     .box(0.09, 0.09, 0.09, -0.12, 0.08, 0.045, P.brick).box(0.075, 0.075, 0.075, -0.02, 0.08, -0.05, P.sand)
-    .box(0.012, 0.025, 0.035, 0.224, 0.07, 0.065, 0xfff2b0, LAMP.head).box(0.012, 0.025, 0.035, 0.224, 0.07, -0.065, 0xfff2b0, LAMP.head)
+    .box(0.012, 0.025, 0.035, 0.224, 0.07, LAMP_Z.truck, 0xfff2b0, LAMP.head).box(0.012, 0.025, 0.035, 0.224, 0.07, -LAMP_Z.truck, 0xfff2b0, LAMP.head)
     .box(0.012, 0.02, 0.03, -0.224, 0.05, 0.08, 0xd62020, LAMP.tail).box(0.012, 0.02, 0.03, -0.224, 0.05, -0.08, 0xd62020, LAMP.tail);
   for (const [x, z] of [[0.15, 0.105], [-0.1, 0.105], [-0.17, 0.105], [0.15, -0.105], [-0.1, -0.105], [-0.17, -0.105]]) k.wheel(0.042, 0.035, x, 0.042, z, 0x151515);
-  return k.build();
+  return lampLenses(k.build());
 }
 
 // a 0.6-tile single-decker (VEHICLE_LEN[3]): the body takes the line colour, the trim mesh a pale version of it
@@ -98,10 +111,10 @@ function busBody(): BufferGeometry {
   k.box(0.6, 0.17, 0.19, 0, 0.05, 0, 0xffffff)                                   // body
     .box(0.5, 0.075, 0.195, -0.02, 0.135, 0, 0x2a3546)                           // window band
     .box(0.02, 0.09, 0.17, 0.295, 0.12, 0, 0x2a3546)                             // windscreen
-    .box(0.02, 0.02, 0.04, 0.3, 0.07, 0.065, 0xfff2b0, LAMP.head).box(0.02, 0.02, 0.04, 0.3, 0.07, -0.065, 0xfff2b0, LAMP.head) // headlights
-    .box(0.015, 0.02, 0.04, -0.3, 0.07, 0.065, 0xd62020, LAMP.tail).box(0.015, 0.02, 0.04, -0.3, 0.07, -0.065, 0xd62020, LAMP.tail);
+    .box(0.02, 0.02, 0.04, 0.3, 0.07, LAMP_Z.bus, 0xfff2b0, LAMP.head).box(0.02, 0.02, 0.04, 0.3, 0.07, -LAMP_Z.bus, 0xfff2b0, LAMP.head) // headlights
+    .box(0.015, 0.02, 0.04, -0.3, 0.07, LAMP_Z.bus, 0xd62020, LAMP.tail).box(0.015, 0.02, 0.04, -0.3, 0.07, -LAMP_Z.bus, 0xd62020, LAMP.tail);
   for (const [x, z] of [[0.19, 0.1], [-0.17, 0.1], [0.19, -0.1], [-0.17, -0.1]]) k.wheel(0.045, 0.035, x, 0.045, z, 0x151515);
-  return k.build();
+  return lampLenses(k.build());
 }
 function busTrim(): BufferGeometry {
   const k = new Kit();
@@ -144,6 +157,10 @@ export class CitizensView {
   private lamp = new Map<InstancedMesh, InstancedBufferAttribute>();
   /** headlight beams on the road ahead of moving vehicles after dark */
   pools = new HeadlightPools(MAX);
+  /** taxis, delivery bikes, courier vans, bin lorries and sweepers (render/fleet.ts) */
+  private fleet: FleetMeshes;
+  /** lit indicator glows near the camera; the selected vehicle's on layer 1 like its model */
+  private flares = new IndicatorFlares(2000); private selFlares = new IndicatorFlares(4);
   agents = new Map<number, Agent>();
   private m = new Matrix4();
   private p = new Vector3();
@@ -183,7 +200,9 @@ export class CitizensView {
       this.group.add(mesh);
     }
     for (const mesh of [this.bus, this.busTrim, ...Object.values(this.vehicles)]) this.lampOf(mesh);
-    this.group.add(this.pools.mesh);
+    this.fleet = new FleetMeshes(this.group, vm, (mesh) => this.lampOf(mesh));
+    this.group.add(this.pools.mesh, this.flares.mesh, this.selFlares.mesh);
+    this.selFlares.mesh.layers.set(1);
     const own = (geo: BufferGeometry, mat: MeshLambertMaterial) => {
       // the selected agent's own copy: vehicles get their own geometry so its lamp attribute is its own
       const mesh = new InstancedMesh(mat === vm ? geo.clone() : geo, mat, 1);
@@ -210,10 +229,10 @@ export class CitizensView {
     mesh.geometry.setAttribute('aLampI', a);
     this.lamp.set(mesh, a);
   }
-  /** lamp habits and brake lights for instance `at` of a vehicle mesh; queued or standing still shows the brake lights */
-  private setLamp(mesh: InstancedMesh, at: number, id: number, a: Agent) {
-    const brake = a.queued || (a.tx - a.px) ** 2 + (a.ty - a.py) ** 2 < 1e-4 ? 1 : 0;
-    this.lamp.get(mesh)!.setXY(at, lampSeed(id), brake);
+  /** lamp habits, brake lights, indicators and reversing lamps for instance `at` of a vehicle mesh; queued, standing still or slowing shows the brake lights */
+  private setLamp(mesh: InstancedMesh, at: number, id: number, a: Agent, now: number) {
+    const brake = a.queued || now < a.brake || (a.tx - a.px) ** 2 + (a.ty - a.py) ** 2 < 1e-4 ? 1 : 0;
+    this.lamp.get(mesh)!.setXYZW(at, lampSeed(id), brake, a.ind, a.rev ? 1 : 0);
   }
 
   update(c: number[], now: number) {
@@ -223,11 +242,16 @@ export class CitizensView {
       if (state === CitizenState.Home) { this.agents.delete(id); continue; }
       const drives = citizenMode(f) === 1, kind = citizenKind(f), cls = citizenClass(f), queued = citizenQueued(f), emergency = citizenEmergency(f), stage = citizenStage(f);
       const a = this.agents.get(id);
-      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f) }); continue; }
+      const ind = drives ? citizenIndicator(f) : Indicator.None, rev = citizenReversing(f);
+      const fleet = citizenFleet(f), loaded = fleetLoaded(f), working = fleetWorking(f);
+      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f), ind, rev, brake: 0, fleet, loaded, working }); continue; }
       const dx = x - a.tx, dy = y - a.ty;
+      // slowing hard since the last tick: the brake lights come on for a moment
+      if (drives && (dx * dx + dy * dy) < 0.5 * ((a.tx - a.px) ** 2 + (a.ty - a.py) ** 2) && (a.tx - a.px) ** 2 + (a.ty - a.py) ** 2 > 1e-4) a.brake = now + 700;
       // facing the way it moves, except a bus backing up in a three-point turn (server sim/traffic.ts)
-      if (dx * dx + dy * dy > 1e-4) { const d = Math.hypot(dx, dy) * (citizenReversing(f) ? -1 : 1); a.hx = dx / d; a.hy = dy / d; }
-      a.px = a.x; a.py = a.y; a.tx = x; a.ty = y; a.t = 0; a.state = state; a.drives = drives; a.kind = kind; a.cls = cls; a.queued = queued; a.emergency = emergency; a.last = now; a.stage = stage; a.bag = citizenBag(f);
+      if (dx * dx + dy * dy > 1e-4) { const d = Math.hypot(dx, dy) * (rev ? -1 : 1); a.hx = dx / d; a.hy = dy / d; }
+      a.px = a.x; a.py = a.y; a.tx = x; a.ty = y; a.t = 0; a.state = state; a.drives = drives; a.kind = kind; a.cls = cls; a.queued = queued; a.emergency = emergency; a.last = now; a.stage = stage; a.bag = citizenBag(f); a.ind = ind; a.rev = rev;
+      a.fleet = fleet; a.loaded = loaded; a.working = working;
     }
   }
 
@@ -240,7 +264,7 @@ export class CitizensView {
     const sel = { sedan: 0, van: 0, truck: 0, bus: 0 };
     let nb = 0;
     const beams = this.pools.active;
-    this.pools.begin();
+    this.pools.begin(); this.flares.begin(); this.selFlares.begin(); this.fleet.begin();
     for (const [id, a] of this.agents) {
       if (now - a.last > 6000) { this.agents.delete(id); continue; }
       a.t = Math.min(1, a.t + dt / LERP_SECONDS);
@@ -272,9 +296,18 @@ export class CitizensView {
         tmpC.copy(lc === undefined ? BUS_DEFAULT : tmpC.setHex(lc));
         body.setColorAt(at, tmpC);
         trim.setColorAt(at, tmpC.lerp(WHITE, 0.72));
-        this.setLamp(body, at, id, a); this.setLamp(trim, at, id, a);
+        this.setLamp(body, at, id, a, now); this.setLamp(trim, at, id, a, now);
         if (beams) this.beam(x, z, a.ang, 'bus', id);
+        if (a.ind) this.blinkers(x, this.p.y, z, a.ang, 'bus', a.ind, id, mine);
         if (mine) sel.bus = 1; else nb++;
+      } else if (car && a.fleet) {
+        // a mobile worker's vehicle: taxi, bike, van, bin lorry (render/fleet.ts); beams and blinkers as the body it is closest to
+        const y = this.roadY(x, z, a.hx, a.hy);
+        this.q.setFromAxisAngle(UP, a.ang);
+        this.fleet.put(id, a.fleet, x, y, z, a.ang, a.loaded, a.working, now, mine, (mesh, at) => this.setLamp(mesh, at, id, a, now));
+        const fb = FleetMeshes.body(a.fleet);
+        if (fb && beams) this.beam(x, z, a.ang, fb, id);
+        if (fb && a.ind) this.blinkers(x, y, z, a.ang, fb, a.ind, id, mine);
       } else if (car) {
         const type: VType = TYPES[a.cls] ?? 'sedan';
         const mesh = mine ? this.selVeh[type] : this.vehicles[type];
@@ -284,8 +317,9 @@ export class CitizensView {
         this.m.compose(this.p, this.q, this.s);
         mesh.setMatrixAt(mine ? 0 : nv[type], this.m);
         mesh.setColorAt(mine ? 0 : nv[type], this.carColor(id, a, now));
-        this.setLamp(mesh, mine ? 0 : nv[type], id, a);
+        this.setLamp(mesh, mine ? 0 : nv[type], id, a, now);
         if (beams) this.beam(x, z, a.ang, type, id);
+        if (a.ind) this.blinkers(x, this.p.y, z, a.ang, type, a.ind, id, mine);
         if (a.bag && type === 'sedan') this.luggage.car(x, z, a.ang, id);
         if (mine) sel[type] = 1; else nv[type]++;
       } else {
@@ -313,7 +347,7 @@ export class CitizensView {
       }
     }
     this.count = this.agents.size;
-    this.pools.end();
+    this.pools.end(); this.flares.end(); this.selFlares.end(); this.fleet.end();
     for (const attr of this.lamp.values()) attr.needsUpdate = true;
     this.people.end(); this.crowd.end(); this.selPerson.end(); this.luggage.end();
     for (const type of TYPES) {
@@ -341,7 +375,35 @@ export class CitizensView {
 
   private beam(x: number, z: number, ang: number, type: VType | 'bus', id: number) {
     const [front, len, width] = BEAM[type];
-    this.pools.add(x, z, this.q, Math.cos(ang), -Math.sin(ang), front, len, width, lampSeed(id));
+    this.pools.add(x, z, this.q, Math.cos(ang), -Math.sin(ang), front, len, width, LAMP_Z[type], lampSeed(id));
+  }
+
+  /** Indicator flares at the corners of a vehicle near the camera: one side's front and rear, or all four for hazards. */
+  private blinkers(x: number, y: number, z: number, ang: number, type: VType | 'bus', ind: number, id: number, mine: boolean) {
+    const fl = mine ? this.selFlares : this.flares;
+    if (!fl.near(x, y, z)) return;
+    const [fx, rx, w, h] = BLINKER[type], c = Math.cos(ang), s = Math.sin(ang), seed = lampSeed(id);
+    // the car's left is -z in the model; (lx, lz) in the model is (lx c + lz s, -lx s + lz c) in the world
+    for (let side = -1; side <= 1; side += 2) {
+      if (ind !== Indicator.Hazard && (side < 0) !== (ind === Indicator.Left)) continue;
+      const lz = side * w;
+      fl.add(x + fx * c + lz * s, y + h, z - fx * s + lz * c, seed);
+      fl.add(x + rx * c + lz * s, y + h, z - rx * s + lz * c, seed);
+    }
+  }
+
+  /**
+   * The indicators on a vehicle (for the cockpit dashboard): -1 turning left, 1 turning right, 'hazard' for both,
+   * 0 for none or when it is not a vehicle on the road. indicatorLit says whether the lamps are lit at that moment.
+   */
+  indicatorOf(id: number): -1 | 0 | 1 | 'hazard' {
+    const a = this.agents.get(id);
+    if (!a?.car) return 0;
+    return a.ind === Indicator.Left ? -1 : a.ind === Indicator.Right ? 1 : a.ind === Indicator.Hazard ? 'hazard' : 0;
+  }
+  /** Is this vehicle's indicator lamp lit at wall-clock `t` seconds (sceneUniforms.uTime), in step with the lamps outside. */
+  indicatorLit(id: number, t = sceneUniforms.uTime.value): boolean {
+    return this.indicatorOf(id) !== 0 && blinkLit(lampSeed(id), t);
   }
 
   /** Buses on the road and their line colours: flat [busId, lineId, …] and line id -> colour (the 'lines' message). */
@@ -376,14 +438,15 @@ export class CitizensView {
     const a = this.agents.get(id);
     if (!a) return null;
     let height: number, pace: number;
-    if (a.car) { height = a.cls === BUS_CLASS ? 0.27 : (TYPES[a.cls] ?? 'sedan') === 'sedan' ? 0.16 : 0.22; pace = 0.014; }
+    if (a.car && a.fleet) { height = FleetMeshes.eye(a.fleet); pace = 0.014; }
+    else if (a.car) { height = a.cls === BUS_CLASS ? 0.27 : (TYPES[a.cls] ?? 'sedan') === 'sedan' ? 0.16 : 0.22; pace = 0.014; }
     else {
       // the walker's own eyes: their figure's height, a little lower for a stoop
       const look = this.dress(id, a, sceneUniforms.uNight.value > 0.5);
       height = EYE * look.height * Math.cos(look.stoop) - (a.stage === LifeStage.Child ? 0 : 0.004); pace = look.pace;
     }
     const speed = a.t < 1 ? Math.hypot(a.tx - a.px, a.ty - a.py) / LERP_SECONDS : 0;
-    return { x: a.rx, z: a.rz, ang: a.ang, height, car: a.car, travelling: a.trav, speed, pace };
+    return { x: a.rx, z: a.rz, ang: a.ang, height, car: a.car, travelling: a.trav, speed, pace, color: a.car ? (a.fleet ? FleetMeshes.color(a.fleet, id) : this.carColor(id, a, 0).getHex()) : undefined };
   }
 
   private carColor(id: number, a: Agent, now: number): Color {

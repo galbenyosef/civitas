@@ -4,7 +4,10 @@ import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, T
 import { railStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, LEDGER_LABELS, type KindToolId, type LedgerDTO, type LedgerCat } from '@msimcity/shared';
+import { FLEET_LABEL } from '@msimcity/shared';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
+/** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
+const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐' };
 
 /** Tool bar groups: land and roads first, then the catalogue kinds by what they are, bulldoze last. */
 const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
@@ -246,7 +249,7 @@ export class UI {
     el.title = L ? `${this.ledgerText(L)}\n(click for the ledger)` : 'Your treasury (the ledger arrives on the next game hour)';
     let box = document.getElementById('ledgerBox');
     if (!this.ledgerOpen || !L) { box?.remove(); return; }
-    if (!box) { box = document.createElement('div'); box.id = 'ledgerBox'; $('ui').appendChild(box); box.addEventListener('click', () => { this.ledgerOpen = false; this.setMoney(this.money); }); }
+    if (!box) { box = document.createElement('div'); box.id = 'ledgerBox'; $('ui').appendChild(box); box.addEventListener('click', (e) => { this.ledgerOpen = false; this.setMoney(this.money); if ((e.target as HTMLElement).closest('[data-chart]')) this.onOpenChart?.('money'); }); }
     const r = el.getBoundingClientRect();
     box.style.left = `${Math.round(r.left)}px`;
     box.innerHTML = this.ledgerHtml(L, n);
@@ -270,11 +273,14 @@ export class UI {
     return `<table><tr><th></th><th>yesterday</th><th>today</th></tr>${cats.map((k) => `<tr><th>${LEDGER_LABELS[k]}</th>${cell(L.yesterday[k])}${cell(L.today[k])}</tr>`).join('')}
       <tr class="sum"><th>Income</th>${cell(inY)}${cell(inT)}</tr><tr class="sum"><th>Spending</th>${cell(outY)}${cell(outT)}</tr>
       <tr class="sum"><th>Net</th>${cell(netY || undefined)}${cell(inT + outT || undefined)}</tr></table>
+      <div class="note"><span class="chartlink" data-chart="money">Treasury and income charts ›</span></div>
       <div class="note">${left < 0 ? 'Taxes and fees cover the running costs (wages, upkeep).'
         : `<span class="${left < 30 ? 'bad' : ''}">Running costs exceed taxes and fees${left < 30 ? `: about ${left} day${left === 1 ? '' : 's'} of cash left at this rate` : ''}.</span> Raise the tax rate in a parcel, add homes, or hold off on services.`}</div>`;
   }
   /** onboarding.ts takes advisor hints (shared/src/goals.ts HINTS) and returns true; false: toast them as before */
   onHint: ((id: 'night') => boolean) | null = null;
+  /** charts.ts: open the charts panel on a chart (population and treasury figures link to theirs) */
+  onOpenChart: ((id: string) => void) | null = null;
   /** the light chip's mode, and whether the clock has been shown yet (the first one may say it is night) */
   private lightMode: 'live' | 'fixed' = 'live';
   private clockSeen = false;
@@ -289,7 +295,9 @@ export class UI {
   setWorldStats(s: { population: number; jobs: number; employed: number; moving: number; driving: number; outAndAbout: number; sites: number; chunks: number; vehicles: number; queued: number; speedPct: number; parked: number; migIn?: number; migOut?: number; migWaiting?: number }, players: number) {
     // players < 0: a local game, nobody else online
     const jam = s.vehicles ? Math.round((100 * s.queued) / s.vehicles) : 0;
-    $('worldstats').innerHTML = `pop <b>${s.population}</b> · jobs <b>${s.employed}/${s.jobs}</b> · on the move <b>${s.moving}</b> · <span title="vehicles on the road · share held up · average speed">traffic <b>${s.vehicles}</b> cars, <b class="${jam > 30 ? 'bad' : ''}">${jam}%</b> queued, speed <b>${s.speedPct}%</b></span> · parked <b>${s.parked}</b> · out <b>${s.outAndAbout}</b> · building <b>${s.sites}</b>${s.migIn !== undefined ? ` · <span title="newcomers in · leavers out through the gateways today · waiting at the gates">migration <b class="${s.migIn - (s.migOut ?? 0) < 0 ? 'bad' : ''}">${s.migIn - (s.migOut ?? 0) >= 0 ? '+' : ''}${s.migIn - (s.migOut ?? 0)}</b> (${s.migIn} in, ${s.migOut ?? 0} out${s.migWaiting ? `, ${s.migWaiting} at the gate` : ''})</span>` : ''}${players >= 0 ? ` · online <b>${players}</b>` : ''}`;
+    const ws = $('worldstats');
+    if (!ws.dataset.wired) { ws.dataset.wired = '1'; ws.addEventListener('click', (e) => { const id = (e.target as HTMLElement).closest<HTMLElement>('[data-chart]')?.dataset.chart; if (id) this.onOpenChart?.(id); }); }
+    ws.innerHTML = `<span class="chartlink" data-chart="pop" title="Population chart">pop <b>${s.population}</b></span> · jobs <b>${s.employed}/${s.jobs}</b> · on the move <b>${s.moving}</b> · <span title="vehicles on the road · share held up · average speed">traffic <b>${s.vehicles}</b> cars, <b class="${jam > 30 ? 'bad' : ''}">${jam}%</b> queued, speed <b>${s.speedPct}%</b></span> · parked <b>${s.parked}</b> · out <b>${s.outAndAbout}</b> · building <b>${s.sites}</b>${s.migIn !== undefined ? ` · <span title="newcomers in · leavers out through the gateways today · waiting at the gates">migration <b class="${s.migIn - (s.migOut ?? 0) < 0 ? 'bad' : ''}">${s.migIn - (s.migOut ?? 0) >= 0 ? '+' : ''}${s.migIn - (s.migOut ?? 0)}</b> (${s.migIn} in, ${s.migOut ?? 0} out${s.migWaiting ? `, ${s.migWaiting} at the gate` : ''})</span>` : ''}${players >= 0 ? ` · online <b>${players}</b>` : ''}`;
   }
   setHeat(on: boolean) {
     const b = $('heat');
@@ -482,6 +490,11 @@ export class UI {
       if (info.capacity === 0 && info.upkeep) html += row('Daily upkeep', `$${info.upkeep}`);
     }
     if (info.venue?.block) html += row('Leisure value', `${info.venue.leisureValue}, for the homes round it only`);
+    // road work based here or serving here: a cab office, a takeaway's riders, a depot's rounds (docs/mobile-jobs.md)
+    for (const m of info.mobile ?? []) {
+      html += `<div class="sect">${esc(m.role.charAt(0).toUpperCase() + m.role.slice(1))}</div>`;
+      for (const [k, v] of m.rows) html += row(esc(k), esc(v));
+    }
     if (info.parking) {
       const p = info.parking;
       html += `<div class="sect">Parking</div>`;
@@ -597,15 +610,20 @@ export class UI {
   private citizenHtml(info: CitizenInfo, full: boolean): string {
     const row = (k: string, v: string | number) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
     const where = (d: { x: number; y: number; label: string }) => `${esc(d.label)} <span style="color:var(--muted)">(${d.x}, ${d.y})</span>`;
-    const icon = info.role === 'citizen' ? (info.mode === 'drive' ? '🚗' : info.mode === 'ride' ? '🚌' : '🚶') : info.role === 'delivery truck' ? '🚚' : info.role === 'visitor' ? '🚘' : info.role === 'police patrol' ? '🚓' : info.role === 'fire engine' ? '🚒' : info.role === 'bus' ? '🚌' : '🚑';
+    const icon = info.role === 'citizen' ? (info.taxi ? '🚕' : info.mode === 'drive' ? '🚗' : info.mode === 'ride' ? '🚌' : '🚶') : FLEET_ICON[info.role] ?? (info.role === 'delivery truck' ? '🚚' : info.role === 'visitor' ? '🚘' : info.role === 'police patrol' ? '🚓' : info.role === 'fire engine' ? '🚒' : info.role === 'bus' ? '🚌' : '🚑');
     let html = `<h3>${icon} ${esc(info.name)}${info.role !== 'citizen' ? ` <span style="color:var(--muted);font-weight:400">${esc(info.role)}</span>` : ''}</h3>`;
     html += `<div class="sub">${esc(info.activity)}${info.status === 'queued' ? ` · <span class="bad">held up ${Math.round(info.waitTicks * 0.6)} min</span>` : ''}</div>`;
     if (info.bus) html += busHtml(info.bus, row);
-    if (info.occupation) html += row('Works as', `${esc(info.occupation)}${info.employer ? ` at the ${esc(KIND_NAMES[info.employer.kind])}` : ''}`);
+    if (info.occupation) html += row('Works as', `${esc(info.occupation)}${info.fleet?.base ? `, ${esc(info.fleet.base)}` : info.employer ? ` at the ${esc(KIND_NAMES[info.employer.kind])}` : ''}`);
     if (info.employer?.parcel) html += row('Employer', esc(info.employer.parcel));
     if (info.shift) html += row('Shift', `${info.shift.label}${info.shift.workingToday ? '' : ' (day off)'}`);
     if (info.home) html += row('Lives', `${info.home.parcel ? esc(info.home.parcel) : 'unclaimed land'} <span style="color:var(--muted)">(${info.home.x}, ${info.home.y})</span>`);
     if (info.destination) html += row('Heading to', where(info.destination));
+    // a mobile worker (docs/mobile-jobs.md): what the job is doing and the vehicle they are out in (select it to follow)
+    if (info.fleet && info.role === 'citizen') html += row('On the road', `${esc(info.fleet.task)}${info.fleet.vehicle ? ` · <span class="plink" data-cid="${info.fleet.vehicle}" title="select the vehicle (follow it from its panel)">${esc(FLEET_LABEL[info.fleet.kind] ?? 'vehicle')}</span>` : ''}`);
+    if (info.fleet?.today && (info.fleet.today.jobs || info.role !== 'citizen')) html += row('Today', `${info.fleet.today.jobs} job${info.fleet.today.jobs === 1 ? '' : 's'} · ${fmt(info.fleet.today.money)}`);
+    if (info.fleet?.stops && info.role !== 'citizen') html += row('Stops to make', info.fleet.stops);
+    if (info.taxi) html += row('Taxi', `<span class="plink" data-cid="${info.taxi.vehicle}" title="select the taxi">${esc(info.taxi.label)}</span>`);
     if (info.liftWith) html += row('Lift with', `<span class="plink" data-cid="${info.liftWith.id}" title="click to select ${esc(info.liftWith.name)}">${esc(info.liftWith.name)}</span> <span style="color:var(--muted)">${esc(info.liftWith.relation)}</span>`);
     if (info.occupants && !full) html += row('In the car', esc(info.occupants.map((o) => o.name.split(' ')[0]).join(', ')));
     if (info.reroutes) html += row('Re-routed', `${info.reroutes} time${info.reroutes === 1 ? '' : 's'} this trip`);

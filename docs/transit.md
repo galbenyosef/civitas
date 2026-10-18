@@ -158,9 +158,27 @@ shows the ride legs as drive-width strips along the bus's road.
 ## Other modes
 
 `Transit` is mode-agnostic. A mode registers a `ModeService` (`stopProblem`, `route`, `waitAt`, `rideTicks`, `headway`,
-`inService`, `problem`, `tick`, `lineChanged`, `positionOf`, and optionally `lines()` when it keeps its own line store,
-as rail does) and its stop kinds in `STOP_KINDS`; the planner then offers its lines alongside the buses, and its vehicles
-hand riders over with `Transit.serveCall(vehicleId, lineId, call, room)`.
+`inService`, `problem`, `tick`, `lineChanged`, `positionOf`, and optionally `lines()` when it keeps its own line store)
+and its stop kinds in `STOP_KINDS`; the planner then offers its lines alongside the buses, and its vehicles hand riders
+over with `Transit.serveCall(vehicleId, lineId, call, room)`. The optional hooks:
+
+- `plan(line)`: the editor's preview, when the mode routes drafts itself (buses, the metro). Its stops' own problems
+  are then left to the plan, which says how to fix them.
+- `commit(line)`: make and pay for what the line needs before `route()` runs on save. The metro bores its tunnel here
+  and refuses the save, with the amount, when the owner is short.
+- `waitSpot(stop, citizenId)`: where a rider stands while waiting, seeded per rider (the metro: along the platform),
+  in place of the kerb crowd.
+- `under`: the mode's riders wait and ride below ground. `Transit.isUnder(c)` is true for them; the agent stream ORs
+  `CITIZEN_UNDER` (flag bit 18) into their flags and the surface does not draw them.
+
+Rail and the metro both run rail's pure timetable through one base class, `sim/timetabled.ts` (`Timetabled`): routes
+re-derived every 10 ticks and after a network edit, the timing answers, and every call at a station handed to
+`serveCall`. Rail is docs/rail.md; the metro is docs/underground.md.
+
+A line may have a `name` (`TransitLine.name`, up to 24 characters, kept when a save leaves it out): metro lines use
+it ("the Central line") in the citizen panel and tooltips. Stops are named by `World.stopLabel`: a name given to the
+station (`World.stopNames`), else the generated `stopName`. `Transit.stopsAround(x, y, r)` lists the routed stops near a
+tile with their lines, for a station's "change here for".
 
 ## Measurements
 

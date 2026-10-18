@@ -1,6 +1,6 @@
 # Underground railways (design)
 
-UTD card 94a665f8. Rich: "we need stations and lines similar to buses but working underground". This started as a design. Built so far: subtask 1, the under layer, its persistence and wire; subtask 2, the shared metro logic (section 9 marks each subtask as it lands). Section 9 splits it into subtasks for one work window, and section 10 lists the open questions, each with a default so work need not wait.
+UTD card 94a665f8. Rich: "we need stations and lines similar to buses but working underground". This started as a design. Built so far: subtask 1, the under layer, its persistence and wire; subtask 2, the shared metro logic; subtask 3, the kinds and tech; subtask 4, the `Metro` service on the server; subtask 5, the underground view; subtask 8, the Showcase line, the London Tube and the checks (section 9 marks each subtask as it lands). Section 9 splits it into subtasks for one work window, and section 10 lists the open questions, each with a default so work need not wait.
 
 In one paragraph: a fifth per-chunk byte layer, the **under layer**, holds tunnels and platforms. Nothing on the surface reads it. A **metro station** is a small surface entrance on the player's land with a 1×N platform straight underneath it. A **metro line** is made in the Lines panel like a bus line, by clicking entrances in order. On save the server bores whatever tunnel is missing, then routes the line through the layer with surface rail's own route search. Trains run surface rail's pure timetable, so they are drawn without a message per train, extended for twin bores. Citizens use the line through the existing transit registry. An underground view (key N) fades the surface and shows the network Tube-map style.
 
@@ -47,7 +47,7 @@ Code: the encoding and the rest of the pure metro logic go in a new `shared/src/
 - v7 and older worlds upgrade in place, with zero under bytes and no names. `UPGRADES_FROM` gains 7.
 - `World.setUnder(x, y, v)` marks the chunk modified, so it is saved, and records the tile in `World.dirtyUnder`.
 
-**Built (subtask 1).** `World.underAt(x, y)` reads 0 where no chunk exists and never generates one. `setUnder` also bumps `World.underVersion` on every real change, so the metro service can re-derive its lines after an edit from any source (a bore, the bulldozer, the seeder) without a hook. The snapshot writes `stopNames` always (an empty array when there are none). The client mirror is `ClientChunk.under`, `ClientWorld.underAt` and `ClientWorld.applyUnder`; an under change marks its chunk dirty. `worldHash` (`server/src/demo/seed.ts`) does not hash the under layer; the metro subtask may add it once seeded lines bore tunnels.
+**Built (subtask 1).** `World.underAt(x, y)` reads 0 where no chunk exists and never generates one. `setUnder` also bumps `World.underVersion` on every real change, so the metro service can re-derive its lines after an edit from any source (a bore, the bulldozer, the seeder) without a hook. The snapshot writes `stopNames` always (an empty array when there are none). The client mirror is `ClientChunk.under`, `ClientWorld.underAt` and `ClientWorld.applyUnder`; an under change marks its chunk dirty. `worldHash` (`server/src/demo/seed.ts`) hashes the under bytes, the station names and the lines' names too (U8), so a demo's reset and its determinism check cover the tunnels.
 
 Local mode stores the same snapshot in IndexedDB (`client/src/local/host.ts`), so it needs no change. `npm run local:check` already exercises the readers. Deploy note: a v7 server moves a v8 `world.json` aside, so never roll back across this.
 
@@ -80,7 +80,7 @@ Boring is paid when the line is saved. Save is refused, with the amount, when th
 
 ## 2. Stations
 
-**Built (U3):** the two kinds, their four designs, the cost, upkeep and staffing below, and `tr9` are in `shared/src/buildings/metro.ts` and `shared/src/tech.ts`, both kinds drafts. The platform logic below is U2 and U4.
+**Built (U3):** the two kinds, their four designs, the cost, upkeep and staffing below, and `tr9` are in `shared/src/buildings/metro.ts` and `shared/src/tech.ts`. U8 undrafted both kinds once the Showcase placed them. The platform logic below is U2 and U4.
 
 The stations are two Hub-family sub-kinds (docs/sub-kinds.md) from the 21-39 transport range (21 is the motorway connection, so 22 and 23), in a new `shared/src/buildings/metro.ts`:
 
@@ -197,16 +197,32 @@ The entrance tooltip lists "change here for" every routed stop within that walk,
 
   The cockpit agent's train cab overlay (`render/instruments.ts`) is used unchanged, through `InstrumentFeed`.
 
+**Built (U5), in `client/src/render/underground.ts` (`UndergroundView`), with small hooks in `main.ts`, `render/materials.ts` and `index.html`.** What differs from the sketch above:
+
+- **No `ChunkView.setUnder` and no `ui.ts` edit.** The ground and buildings fade in their own shaders: `sceneUniforms.uUnder` (`materials.ts`) drives a cool desaturate and an alpha drop, ground to about 0.24 (roads 0.4) and buildings to 0.07, both with `depthWrite` off while the view is up. Everything else opaque and Lambert or Basic (cars, people, trees, bridges, signs, helicopters ...) is ghosted to 0.2 by material opacity: `UndergroundView.surface` lists the groups, collected once when a fade starts and restored when it ends, so the view costs nothing while off. Flipping `transparent` recompiles the affected programs once, on the first fade of a session. The building mesh stops casting shadows while the view is up. Sky, sun, hemisphere light and exposure ease toward a dark slate (`look`, called after `Lighting.update`). The fade takes 0.3 s.
+- **The chip and key.** `#under` in `index.html` sits beside heat; N and the chip call `setUnder` in `main.ts`. The view comes on by itself while a metro station tool is picked and goes back when the tool is dropped, unless the player pressed N meanwhile. (Editing a line should do the same: U6 calls `setUnder(true, true)`.)
+- **Tunnels** are, per chunk, a merged vertex-coloured `MeshBasicMaterial` mesh for the platforms and shafts (opaque), one for the bore tubes (50% see-through, `depthWrite` off, so trains running inside show from above) and one for the platform vaults, built lazily, two chunks a frame, only while the view is on, and again after any under change or `setLines`. A tile is twin bores (radius 0.16, 0.2 either side) with a collar every tile; curves are two concentric arcs, a junction is the through pair plus an arm, a stub has capped ends, and at a crossover the north-south pair dips 0.4 by `sin²`. A platform tile is an island platform between the two tracks with lit edges in the line colour, low cavity walls, a lamp panel per tile (its own brightness), a translucent vault, and, at the middle tile under the door, a shaft up to the street, a roundel on the platform and a beacon post with a roundel above the street so the entrance reads through the ghosted buildings.
+- **The normal view** keeps only the grates: a dark frame with four slats on a road tile above a tunnel, about one in five by hash, each with its own size, off-grid turn, rust tone, jitter inside the tile, glow phase and rate (slats flicker warm or cool after dark) and, for about half, two steam puffs on `uNight` (a `Points` shader, rising and drifting at their own pace). The plates dim with the street at night. The entrances are the ordinary catalogue buildings. Station names and sprites are not drawn yet (names reach the client with U6's `metroLines`).
+- **The placement preview** is `setPreview(stop, ok)`: the platform under the door ghosted green or red, drawn with the same piece code. `main.ts` computes it with `planPlatform` from the hovered door and the Z/C turn (`(r & 1) === 0` runs along x). The reason also joins the status line and turns the footprint red, because `hoverArea` downgrades the surface verdict when the platform is refused (the server's own verdict is U4's).
+
+**Hooks for U6.**
+
+- `underground.setLines([{ colour, sides }])`, with `sides = lineSides(route, env)` from shared/src/metro.ts for each metro line (call it from the `metroLines` handler; `[]` goes back to neutral). Used tiles take the colour of the line whose sides meet the bore's, so a crossover shows two colours. Tiles no line runs on go grey. Every chunk rebuilds on the next frame the view is up.
+- `METRO_Y` is exported for the trains, and `underground.level` (0 to 1, eased) tells other render code how far the view is up (show waiting riders and carriages when it is above 0.5).
+- Testing without U4: `msc.world.applyUnder([x, y, byte, ...])` writes under bytes into the client mirror (`0x1a` is an east-west tunnel, `0x3a` an east-west platform tile, `0x1f` a crossover), then `msc.setUnder(true)`. `msc.underground` is the view.
+
 ## 6. Tools and tech
 
 - **Tech `tr9`, "Underground railway"** (built, `shared/src/tech.ts`): transport tier 7, requires `tr6` Rail and `con3` Deep foundations, condition 600 jobs, $8,000. It unlocks `['metro', 'metroentrance', 'metrostation']`. The feature id is `metro` because `underground` is already taken by Deep foundations, for underground parking.
 - **Tools.** A size ladder, "Underground station", in the Transport group: the kiosk and the hall, chosen in the picker. It has no key, since every letter is taken. Z and C turn the platform.
-  - **Built (U3).** The ladder is group `metro`, labelled "Underground", in `shared/src/buildings/groups.ts`, with tools `metroentrance` and `metrostation`. Both kinds are `draft`, so the tool shows only with `?dev`. The group sets `draft: true` so validation allows a ladder with no live rung. `structureTool` in `client/src/input.ts` admits both kinds (`PLATFORM_KINDS`), so Z and C turn the 1×1 kiosk as well as the hall. The kiosk's server side still goes through the plain civic branch and ignores `rot`; U4 reads it for the platform axis.
+  - **Built (U3).** The ladder is group `metro`, labelled "Underground", in `shared/src/buildings/groups.ts`, with tools `metroentrance` and `metrostation`. Both kinds were `draft` (the tool showed only with `?dev`) and the group set `draft: true`, until U8 placed them in the Showcase and dropped all three flags. `structureTool` in `client/src/input.ts` admits both kinds (`PLATFORM_KINDS`), so Z and C turn the 1×1 kiosk as well as the hall. The kiosk's server side still goes through the plain civic branch and ignores `rot`; U4 reads it for the platform axis.
 - **Lines** use the existing **lines** chip.
 - **Bulldozing** in the underground view works on tunnels.
 - **The view** is always available, on N.
 
 ## 7. London and the Showcase
+
+**Built (U8)**, as below, with these changes: Tottenham Court Road and Northern's Waterloo are kiosks (a hall's long platform left no room for the other line's entrance within the walk), and where neither a hall nor a kiosk fits with its platform along the line, the platform turns across it (Charing Cross; Waterloo's two kiosks stand side by side, both platforms north-south). docs/demo.md "London" has what was built: about 290 tunnel tiles, 128 platform tiles and three crossovers.
 
 **London: a new section, `london-tube` ("The Underground"),** after Rail and Heathrow. Every station targets its real place with `geo()` (`shared/src/demo/londonMap.ts`). `fitEntrance(target, axis)` in `shared/src/demo/london.ts` then takes the nearest tile, spiralling out, that meets all of these:
 
@@ -248,7 +264,8 @@ What `demo:check` enforces:
 - It also gains `metro-crossover`, with `demo: 'london'` and the rule "the showcase runs one underground line; lines cross in London". Its test is a mask-15 under byte in London.
 - `DemoSpot` gains `view?: 'under'`, so `client/src/tour.ts` turns the underground view on for that stop.
 - `DemoSection` gains nothing: metro lines are `lines` entries with `mode: 'metro'`. The seeder places entrances through the planner and saves lines through `Transit.saveLine` with `commit`, as a player does.
-- **Staging:** the two kinds stay `draft: true` until the showcase subtask lands, and `showcaseProblems` skips a line mode whose stop kinds are all drafts. That is a two-line change, landed with the metro service, and it keeps `demo:check` green in between.
+- **Built (U8).** The Showcase's line is the Crosstown, metro line 1 (docs/demo.md "The scenario"): kiosks at (17, -36), 3 tiles from the rail station's door, and (27, -19) by the arena, and a hall at (27, -2), 2 tiles from bus line 1's stop at (25, -2); 39 tiles bored under roads and blocks, 2 trains of 4 cars. The tour stops at the kiosk, the line and the hall. `DemoPlacement.name` names a station (`setStopName`) and titles its tour stop ("Metro entrance: Station Road"); `DemoLine.name` names the line. `metro-interchange`'s test is a metro line calling within the change walk of a bus or rail line's stop, over the scenario and over the saved lines (`SeededDemo.lines`); `metro-crossover`'s is an under byte with mask 15 in London (`SeededDemo.scan` passes the under byte), with the tour stop `tube-crossover`. `DemoSpot.view` and `TourStop.view` are `'under'`, set on every metro line's stop and the crossover spot, and `client/src/tour.ts` turns the underground view on there (through `setUnder`, passed in by `main.ts`) and off at the next stop. The seeder (`seedDemoNetwork`) lays each station's platform with `Metro.platformFor` on the placement's turn and `Metro.lay`, names it, then saves the lines with their names; it registers a `Metro` itself when the caller has none (demo:check and the load tests build their own `Rail`).
+- **Staging (done):** the two kinds stayed `draft: true` until the showcase subtask landed, and `showcaseProblems` skips a line mode whose stop kinds are all drafts. That is a two-line change, landed with the metro service, and it keeps `demo:check` green in between.
 
 ## 8. Checks
 
@@ -260,7 +277,7 @@ What `demo:check` enforces:
   - over whole days at every half tick: unfolded spacing, with terminus dwells in both bores; no tile shared by two trains of a bore; bogies on the line's tiles (overruns included); service hours, dwells, calls and `nextRide`.
 
   It passes about 519k checks in about 12 s.
-- **Part two**, below, is still U8's.
+- **Part two, built (U8)**, below, in the same script after part one.
 - **`npx tsx packages/shared/scripts/metro-check.ts [days]`**, like rail-check. It builds a server World with entrances, bores three lines through `Metro.commit` (one crossing another, one under water), mirrors the chunks into a ClientWorld and checks:
   - `planBore` is deterministic, and preview equals save;
   - the route derived from the layer is the bored path or shorter, and uses no other line's tile except at crossovers;
@@ -269,14 +286,33 @@ What `demo:check` enforces:
   - the refusals hold: platforms that overlap or touch end to end, a crossing at a junction or a platform, shared tunnel, short of money, a single station;
   - the snapshot round-trips: v7 loads with zero under bytes, and v8 saves and loads them byte-identical;
   - the bulldoze rules hold: a used tunnel cannot be filled, and an orphan platform reverts to tunnel.
-- **`rail-check.ts`** stays green and byte-identical after the `TrackNet` refactor.
-- **`npx tsx packages/server/src/loadtest/metro.ts [--hours 24] [--off]`**, on the harness (`loadtest/harness.ts`). It takes a test city (`loadtest/cities.ts`, about 10k citizens), adds two crossing metro lines and a bus feeder, and reports:
-  - riders a day per line, and the share of trips by metro, bus, car and foot;
-  - median wait, peak platform crowd, peak train load and give-ups;
-  - the tick cost of `Metro.tick` and of `bestTransit` with metro against `--off`.
 
-  It passes with riders on every line, no rider left waiting past `waitMax`, and at most +0.3 ms a tick.
-- **`npm run demo:check`**, then `npx tsx packages/server/src/demo/check.ts --fill --run 1`. The run report gains riders per metro line and peak train load. The London run must show every Tube line running.
+  As built, it runs on a server World with a `Simulation` and the `Metro` service registered with its transit registry, the same stations as part one (the Central under a 4-tile river, the Northern crossing it, a 4-station loop): platforms laid by `platformFor` (and refused across and end to end with another), the lines saved through `Transit.saveLine` with the preview (`Metro.plan`, run twice) equal to what the save bored, charged and left in `lastBore`, a second save costing $0, and the cost checked tile by tile. The routes the service derives are checked against the layer and each other, `metroStationAt` against a ClientWorld fed the chunk DTOs (57 probes), and the server lines' timetables go through part one's whole-day checks (`trainChecks`). The refusals are one station, a platform another line calls at, another owner's stations, short of money and another line's tunnel; crossing at a junction or a platform is part one's. The snapshot round-trips byte-identical with the names, a v7 snapshot loads with an empty layer, the bulldozer refuses a used tunnel and a platform and fills an unused one, cutting its neighbours' joints, and a bulldozed kiosk's platform reverts and grounds its loop. Both parts pass 1,037,654 checks in about 8 s.
+- **`rail-check.ts`** stays green and byte-identical after the `TrackNet` refactor.
+- **`npx tsx packages/server/src/loadtest/metro.ts [--districts 3] [--hours 24] [--from 0] [--off] [--no-fill]`** (built, U4). It works on a `seedCity` test city (3×3 districts, about 10,500 citizens) with the bus network of `loadtest/ab.ts` in the middle district. Everything goes through `Net.handle` with a fake client:
+  - the stations are placed with the metro tools: a hall at each end of line A, kiosks elsewhere;
+  - the lines are previewed and saved with the Lines panel's messages;
+  - an entrance and tunnels are bulldozed at the end.
+
+  Line A, "Central", runs east-west: 6 stations, 40 tiles bored, $2,400. Line B, "Northern", runs north-south: 6 stations, 44 tiles with one crossover under A, $2,950. seedCity's commutes are a few tiles, and no train wins those. So after the fill, half the workers living in the district at one end of each line swap workplaces with workers of the same kind at the other end.
+
+  It asserts:
+  - the preview is what the save bores, routes and charges, and a second save costs $0;
+  - B crosses A at exactly one crossover;
+  - a station another line calls at is refused with a suggested tile, and a single station is refused;
+  - every station gets exactly the timetable's calls in the window;
+  - riders board and alight on both lines, trips go by metro, and some change between the metro and a bus;
+  - only riders on a platform carry `CITIZEN_UNDER` on the wire;
+  - nobody waits past their give-up time, and nobody is on board a vehicle that is not running;
+  - a bulldozed entrance's platform turns back into tunnel and grounds its line;
+  - a used tunnel cannot be filled, and an unused one can.
+
+  On 2026-10-18 the 24 hours from 00:00 passed all 46 checks:
+  - 158 metro rides (Central 57, Northern 101) and 1 metro-bus change. The bus depot had no drivers on shift that day, so the buses barely ran.
+  - Peak platform crowd 8, peak train load 7, 1 give-up.
+  - `Metro.tick` 0.12 ms a tick against 0.018 with `--off` (no lines). `bestTransit` 0.107 ms a tick against 0.022: with two more lines its 5,363 calls took 48 µs each against 10.
+  - So the metro adds about 0.19 ms a tick, within the +0.3 ms budget. Whole-tick averages (58 against 34 ms) were taken while other agents' jobs shared the machine and are noise.
+- **`npm run demo:check`**, then `npx tsx packages/server/src/demo/check.ts --fill --run 1`. The run report gains riders per metro line and peak train load. The London run must show every Tube line running. Built (U8): the seeding prints each metro line's status and the tunnel, platform and crossover tiles bored; the run prints each line's trains and headway, trips planned by metro, changes by mode pair, the peak train load and `Metro.tick`'s cost, and `--no-tube` runs London without the Underground for the tick cost. Numbers below, under U8 in section 9.
 - **`npm run typecheck`**, which ends with `local:check`. The metro code is pure, so the worker bundle check covers it. Then `npm run buildings:check`.
 
 ## 9. Phased plan
@@ -322,7 +358,38 @@ Order of play, about 4.5 hours: **1 ∥ 2 ∥ 3** → **4 ∥ 5** → **6 ∥ 8*
    - `Transit`: the `commit` and `waitSpot` hooks, an underground test for the flag, and `name` on lines.
    - Wiring in `server/src/game.ts`, which local mode gets for free.
    - `net.ts`: platform placement after the kiosk or hall, the `under` bulldoze, `metroLines`, `metroLoads`, routing `inspectTrain` by mode, and flag bit 18.
-5. **The underground view.**
+
+   **Built (U4).**
+   - **`server/src/sim/timetabled.ts`, `Timetabled`**, is the line-running half of rail, which `Rail` and `Metro` both extend. It keeps each line's route, service and status, re-derives them (every 10 ticks, and at the next tick after `pending`), answers the timing questions, and serves calls, day ends and withdrawals. A mode supplies `def`, `network` (its route now, or why not), `unbuilt` and `capacity`. `trainVehicleId` lives there; `Rail` keeps the track, crossings, freight and its tooltips. Rail is unchanged: rail-check's output is the same, and so are the demo hashes. A seeded fill and day of the transport demo printed byte-identical transit and freight counters, line wire forms and station tooltips with this `Rail` and with HEAD's. A second run of HEAD's own `Rail` differed slightly, since a run is not exactly repeatable.
+   - **`server/src/sim/metro.ts`, `Metro`** (mode `'metro'`, `under: true`):
+     - **Routes.** `route` and `network` are `routeNet` over `underNet`, with every other routed line's sides taken (`lineSides`, overruns included). While re-deriving, earlier lines count as just derived and later ones as they were, so a line keeps its tunnel. When a line cannot be routed but could be with the other tunnels open, its status names the line whose tunnel it would run in. `rebuild` is skipped when nothing it reads has changed: `World.underVersion`, the metro lines and their stops, the station doors' tile words and the registry's verdicts.
+     - **The editor.** `plan` is `planBore` as a `LinePreview`, with `bore`, `crossovers`, `cost` and `lapTicks` (the timetable's cycle). It is refused, with the amount, when the owner is short of money, and at `METRO.linesPerOwner` lines. `commit` plans again, writes the bytes, charges the owner (ledger `build`), sets `pending` and leaves `lastBore` for the save toast. A second save of a bored line costs $0.
+     - **Problems.** Messages name stations by `World.stopLabel` and their number on the line. For a leg that cannot be bored, `suggest` is a tile within the change walk of either station where a kiosk's platform would let the leg through. Each candidate is tested with `planBore` on an overlay of the layer, with the old platform as plain tunnel; at most 4 are tried. "Another line already calls at" suggests a free tile within the walk for a second entrance. A broken platform's fix is to rebuild the entrance.
+     - **Riders.** A train carries cars × `METRO.carRiders`, and `rideTicks` adds `METRO.access`. `waitSpot` puts a rider at a hash-seeded spot along the platform, 0.30 to 0.42 tiles to either side of the track.
+     - **Platforms.** `platformFor(kind, doorX, doorY, rot?)` gives the writes or the reason, and `lay(writes)` applies them. With no turn a kiosk faces its road (`kioskTurn`, below). Every 10 ticks a platform whose entrance has gone is turned back into tunnel (`orphanPlatform`). The platform runs come from a full scan of the layer, made again after any under edit.
+     - **Tunnels.** `fill(player, x, y, anyLand)` is the underground bulldozer. It refuses a platform, a tile any routed line runs on (overruns included) and, outside a sandbox, a tile under someone else's parcel. The neighbours' joints to the filled tile are cut, as `Rail.removeTrack` does.
+     - **Wire.** `loads` is refreshed every 25 ticks, with `loadsChanged` set when it moved. `dtos()` is `MetroLineDTO[]`, rail's form with `names` from `stopLabel`; `def.name` is the line's name, or "Line N". `describeStation` and `describeTrain` answer the tooltips.
+   - **`shared/src/metro.ts`** gained `kioskTurn(x, y, tile)` and `platformAlongX(rot)`, so the client's ghost platform matches the server. A kiosk with no turn faces the first road beside it: south, east, west, then north (FRONT 0, 1, 3, 2), as a 1×1 building is drawn. A hall takes the turn `planStructure` gives it. The platform runs along x when `(rot & 1) === 0`.
+   - **`Transit`** (`sim/transit.ts`):
+     - optional `ModeService.commit`, `waitSpot` and `under`;
+     - `isUnder(c)`, and `stopsAround(x, y, r)` for "change here for";
+     - `TransitLine.name`, set on save (trimmed to 24 characters) and kept when a re-save leaves it out;
+     - stop names through `World.stopLabel` in `describeStop`, the citizen panel ("waiting for the Central line at …") and the draft errors.
+   - **`Simulation.agents`** yields `under` for a rider standing on a platform: waiting, or still stepping aboard. Riders on board are not drawn, as on a bus. `Net` ORs `CITIZEN_UNDER` into the packed flags, in the chunk snapshot and in the stream.
+   - **`net.ts`**:
+     - The 1×1 civic branch (kiosk) and `placeStructure` (hall) refuse with `platformFor`'s reason, and lay the platform with the site.
+     - `{ t: 'build', tool: 'bulldoze', under: true }` goes to `fillTunnels`.
+     - `inspectTrain` falls through to `Metro.describeTrain`, and `BuildingInfo.metro` is filled for kinds 22 and 23.
+     - `metroLines` is sent on hello and when `changed`; `metroLoads` on hello and when `loadsChanged`.
+     - A metro save toasts the tunnel bored and its cost.
+   - **The wire, as built:**
+     - `MetroLineDTO extends RailLineDTO { names }`.
+     - `MetroStationInfo extends RailStationInfo` adds `name`, `platform?: [x0, y0, x1, y1]` and `changes: { name, x, y, mode, lines: { id, number, name?, colour }[] }[]`. Its `track` reads "open", "opens when the entrance is built", or what is wrong with the platform.
+     - `{ t: 'metroLoads', l: [lineId, trains, load0, …] }`, by train index.
+     - `LinePreview.bore`, `crossovers` and `cost`, and `build.under`.
+   - **Wiring.** `game.ts` registers `Metro` after `Rail` and sets its sandbox, so local mode has it. `demo/check.ts` and the demo seeder build their own `Rail`; since U8 the seeder registers a `Metro` beside it when the scenario has stations.
+   - **Checks.** `npx tsx packages/server/src/loadtest/metro.ts [--districts 3] [--hours 24] [--from 0] [--off]`, below in section 8, as built.
+5. **The underground view.** Built, see section 5. Files: `client/src/render/underground.ts` (new), `render/materials.ts` (`uUnder` and two shader snippets), `main.ts` (the view, N, the chip, the preview, the verdict) and `index.html` (the chip). `render/chunkView.ts` and `ui.ts` needed no change.
    - New `client/src/render/underground.ts`.
    - Edits to `render/materials.ts` (`uUnder`), `render/chunkView.ts` (`setUnder`, the ground fade), `client/src/ui.ts` (the chip) and `main.ts` (N, `setUnder`).
    - The placement preview: a ghost platform and the reason from `planPlatform` in the status line (`render/footprint.ts`).
@@ -337,7 +404,7 @@ Order of play, about 4.5 hours: **1 ∥ 2 ∥ 3** → **4 ∥ 5** → **6 ∥ 8*
    - Tunnel mode in `render/fpv.ts`.
    - The tunnel interior pool in `render/underground.ts`.
    - The feed into the existing instruments. Do not edit `instruments.ts`.
-8. **Showcase and London.**
+8. **Showcase and London.** Built; see section 7 and the U8 notes below.
    - `shared/src/demo/showcase.ts` (line, features, captions, tour, `DemoSpot.view`), after the showcase agent has landed.
    - `shared/src/demo/london.ts` (`london-tube`, `fitEntrance`), `server/src/demo/seed.ts` (placement, then `saveLine` with commit, then `stopNames`) and `server/src/demo/check.ts` (the report).
    - The `view` in `client/src/tour.ts`.

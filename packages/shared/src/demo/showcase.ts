@@ -3,7 +3,8 @@ import { MOTORWAY_KIND } from '../gateways';
 import { ZONE_COST } from '../constants';
 import type { KindManifest } from '../buildings/schema';
 import type { Tool } from '../protocol';
-import { STOP_KINDS, type TransitMode } from '../transit';
+import { STOP_KINDS, TRANSIT, type TransitMode } from '../transit';
+import { METRO, isTunnel, isPlatform, underMask } from '../metro';
 import { placedFromDoor, footprintOf, FRONT, FRONT_NAMES, type Placed } from '../structures';
 import { kindManifest, CIVIC_COST } from '../tile';
 import { techFor, TRACK_NAMES } from '../tech';
@@ -37,7 +38,7 @@ import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
  */
 
 export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside'
-  | 'london-areas' | 'london-landmarks' | 'london-rail' | 'london-buses';
+  | 'london-areas' | 'london-landmarks' | 'london-rail' | 'london-buses' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
 /** x, y, width, height in tiles */
@@ -57,6 +58,8 @@ export interface DemoPlacement {
    * never placed by a player): the seeder builds it on lots of its zone as growth would. Default its first level.
    */
   level?: number;
+  /** a metro station's name (World.setStopName), shown on the platform, the Tube map and the tooltips */
+  name?: string;
 }
 export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 'office'; rect: DemoRect }
 /** a runway dragged from `from` to `to` (shared/src/airport.ts planRunway) */
@@ -72,7 +75,7 @@ export interface DemoBridge { id: string; name: string; from: DemoXY; to: DemoXY
 /** a roundabout or flyover clicked on the junction `at` (junctions.ts); a flyover's deck carries the `deck` road */
 export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: DemoXY; deck?: 'ew' | 'ns' }
 /** A tour stop on something that is neither a kind nor a drag (a level crossing, the river): its caption is SPOT_CAPTIONS[spot]. */
-export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY }
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' }
 export interface DemoLine {
   id: string; mode: TransitMode; number: number; colour: number;
   /** stops in calling order: bus stop tiles or station doors */
@@ -80,6 +83,8 @@ export interface DemoLine {
   loop: boolean; vehicles: number;
   /** a rail line calling only at freight yards */
   freight?: boolean;
+  /** the line's name ("Central"), shown in place of its number (metro lines) */
+  name?: string;
 }
 /**
  * grown land the tour stops at: a block of a zone, not placed (zones grow by themselves). `inspect` is a lot on the
@@ -249,8 +254,10 @@ export const SECTIONS: DemoSection[] = [
   },
   {
     id: 'rail', name: 'Rail and freight',
-    blurb: 'A halt among the homes of district A2 and a station beside the stadium, on a passenger line along the north edge, and two freight yards on a freight line along the south edge: one beside the industrial estate, one beside the shops it delivers to.',
+    blurb: 'A halt among the homes of district A2 and a station beside the stadium, on a passenger line along the north edge, two freight yards on a freight line along the south edge (one beside the industrial estate, one beside the shops it delivers to), and an underground line from the rail station past the arena to a bus stop on line 1.',
     land: [{ name: 'North railway', rect: [-35, -41, 70, 6] }, { name: 'South railway', rect: [-35, 35, 70, 6] }],
+    // the metro line's middle kiosk and its hall (beside the east road, x = 28) take a lot or two of the districts
+    clear: [[27, -19, 1, 1], [27, -3, 1, 2]],
     // shops beside the east yard (the estate's nearest), homes in place of every shop nearer the estate than that
     zones: [
       { zone: 'commercial', rect: block(1, 2, 2, 3) },
@@ -261,6 +268,12 @@ export const SECTIONS: DemoSection[] = [
       { kind: 'rail-station', door: [20, -36], rot: 0 },
       { id: 'freight-yard-west', kind: 'freight-yard', door: [-30, 35], rot: 2 },
       { id: 'freight-yard-east', kind: 'freight-yard', door: [-2, 35], rot: 2 },
+      // the underground line (docs/underground.md): a kiosk 3 tiles from the rail station's door, one by the arena, and a
+      // hall 2 tiles from bus line 1's stop at (25, -2). Every platform runs north-south (rot 1: along y), so the tunnel
+      // turns once under the stadium's district and runs straight down x = 27 under the roads and blocks between
+      { kind: 'metro-entrance', door: [17, -36], rot: 1, name: 'Station Road' },
+      { id: 'metro-entrance-2', kind: 'metro-entrance', door: [27, -19], rot: 1, name: 'Arena' },
+      { kind: 'metro-station', door: [27, -2], rot: 1, name: 'Eastgate' },
     ],
     tracks: [
       // the halt's platform track runs on y = -38, the station's on y = -39: one drag with a corner, then along the station.
@@ -271,6 +284,7 @@ export const SECTIONS: DemoSection[] = [
     lines: [
       { id: 'line-rail-1', mode: 'rail', number: 1, colour: 0xb0563d, loop: false, vehicles: 1, stops: [[-7, -36], [20, -36]] },
       { id: 'line-freight-1', mode: 'rail', number: 9, colour: 0x6d6f73, loop: false, vehicles: 1, freight: true, stops: [[-30, 35], [-2, 35]] },
+      { id: 'line-metro-1', mode: 'metro', number: 1, name: 'Crosstown', colour: 0x0098d4, loop: false, vehicles: 2, stops: [[17, -36], [27, -19], [27, -2]] },
     ],
   },
   {
@@ -371,7 +385,7 @@ export const TOUR: string[] = [
   'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
   'fire-post', 'fire', 'large-fire-station', 'fire-hq',
   'handyman', 'yard', 'builders-depot', 'construction-company',
-  'rail-halt', 'track-passenger', 'rail-station', 'line-rail-1',
+  'rail-halt', 'track-passenger', 'rail-station', 'line-rail-1', 'metro-entrance', 'line-metro-1', 'metro-station',
   'park', 'lakeside-park', 'botanical-garden',
   'cafe-cinema', 'cinema', 'multiplex',
   'studio-theatre', 'theatre', 'opera-house',
@@ -393,8 +407,8 @@ export const DEMOS: DemoDef[] = [
     blurb: 'Parks, cinemas, theatres, sport and libraries, every size.' },
   { id: 'civic', name: 'Civic demo', slot: 93, sections: ['downtown', 'civic'],
     blurb: 'Health, police, fire and builders, every size.' },
-  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-rail', 'london-buses'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
-    blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow.' },
+  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-rail', 'london-buses', 'london-tube'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
+    blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, and the Central, Northern and Jubilee lines underneath.' },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
 export const isDemoId = (s: unknown): s is DemoId => typeof s === 'string' && DEMO_BY_ID.has(s as DemoId);
@@ -464,7 +478,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads';
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover';
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'level-crossing': {
     title: 'Level crossing',
@@ -484,6 +498,12 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     how: 'Nothing to build: a hospital, police headquarters or tall office whose design has a pad brings its service. Hover a helicopter for its callsign and errand, click it for its crew, and press I or O to ride in the cockpit.',
     facts: [['Air ambulance', '2-5 flights a pad a day, some go on to a second hospital'], ['Police', '2-3 a day, an hour or more on the pad'], ['Executive', '1-3 a day, some hop between towers'], ['Royal', 'Buckingham Palace (London demo)']],
   },
+  'tube-crossover': {
+    title: 'Under Waterloo',
+    what: 'The Northern and Jubilee lines meet under Waterloo: two entrances a short walk apart and from the rail station\'s door, so riders change between the two lines and the trains to Clapham Junction. Underground, lines never share a tunnel; where one must cross another it bores straight across it at a crossover, the north-south bore dipping under the east-west one. In the underground view (N) each line glows in its colour, platforms are lit, and the trains run in twin bores, out in one and back in the other.',
+    how: `Nothing extra to build: save a line whose tunnel has to cross another's and the boring picks a crossover, straight across at right angles (${money(METRO.crossoverCost)} on top of the tunnel). Lines may not cross on a curve, a junction or a platform. A change between lines is a walk of up to ${TRANSIT.transferWalk} tiles between their stops.`,
+    facts: [['Tool', 'lines panel (top bar); N for the view'], ['Crossover', `${money(METRO.crossoverCost)} on top of the tunnel`], ['Change walk', `${TRANSIT.transferWalk} tiles`], ['Technology', techLine('metrostation')]],
+  },
 };
 const LINE_CAPTIONS: Record<TransitMode | 'freight', Omit<Caption, 'title'>> = {
   bus: {
@@ -497,9 +517,9 @@ const LINE_CAPTIONS: Record<TransitMode | 'freight', Omit<Caption, 'title'>> = {
     facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('railstation')], ['Fare', '$2 a ride']],
   },
   metro: {
-    what: 'An underground line between metro stations. The tunnel is bored for you when the line is saved; trains run the same timetable as rail, 05:00 to 01:00, in twin bores and never in traffic.',
-    how: 'Put metro entrances and station halls on your land, then open the lines panel and pick them in calling order.',
-    facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('metrostation')], ['Fare', '$2 a ride']],
+    what: `An underground line. Each station is a kiosk or a hall on the surface with a platform straight below it; the tunnel between them is bored when the line is saved, under roads, blocks and rivers alike. Trains of tube cars (${METRO.carRiders} riders a car, as many cars as the shortest platform has tiles) run rail's timetable, 05:00 to 01:00, out in one bore and back in the other, so a there-and-back line runs many trains, and they are never in traffic. Riders change to a bus or a train at any stop within a ${TRANSIT.transferWalk}-tile walk of the entrance. Press N for the underground view.`,
+    how: `Pick Underground station in the Transport group (Z and C turn the platform), put the entrances on your land beside a road, then open the lines panel and click them in calling order. The preview shows the new tunnel and its cost (${money(METRO.tunnelCost)} a tile, ${money(METRO.wetTunnelCost)} under water, ${money(METRO.crossoverCost)} more to cross another line); tunnel that already exists is free. Lines never share tunnel or a platform: they cross at right angles.`,
+    facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('metrostation')], ['Fare', '$2 a ride, children free, retirees half']],
   },
   freight: {
     what: 'A freight line between two yards. Deliveries from factories within 12 tiles of one yard to shops within 12 tiles of the other go by train when that is shorter: a truck to the yard, containers on the train, a truck for the last mile. The shipper pays the line owner $4 a container.',
@@ -528,6 +548,8 @@ export interface TourStop {
   /** the tile to ask the server about for live stats */
   inspect?: DemoXY;
   line?: { mode: TransitMode; number: number; colour: number };
+  /** 'under': the tour turns the underground view on at this stop (a metro line, a spot under ground) */
+  view?: 'under';
 }
 
 const kindIdOf = (s: string): number => (KIND_ID as Record<string, number>)[s] ?? 0;
@@ -601,7 +623,8 @@ export function demoTour(id: DemoId): TourStop[] {
         const area = placed ? [placed.ax, placed.ay, placed.w, placed.h] as const : [p.door[0], p.door[1], 1, 1] as const;
         // a tall landmark (the Shard is 9.6 tiles) is framed from further out so its top stays in view
         const tall = Math.max(...k.levels.flatMap((l) => l.designs.map((dz) => dz.height)));
-        out.push({ id: sid, ...base, ...kindCaption(k, p.door, rot, p.level), ...framing(area[0], area[1], area[2], area[3], rot, tall > 3 ? tall / 3 : 1), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door });
+        const c = kindCaption(k, p.door, rot, p.level);
+        out.push({ id: sid, ...base, ...c, title: p.name ? `${c.title}: ${p.name}` : c.title, ...framing(area[0], area[1], area[2], area[3], rot, tall > 3 ? tall / 3 : 1), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door });
         continue;
       }
       const b = s.blocks?.find((q) => q.id === sid);
@@ -651,16 +674,17 @@ export function demoTour(id: DemoId): TourStop[] {
       const sp = s.spots?.find((q) => q.id === sid);
       if (sp) {
         const [x, y, w, h] = sp.rect;
-        out.push({ id: sid, ...base, ...SPOT_CAPTIONS[sp.spot], title: sp.name, ...framing(x, y, w, h, 0, w * h === 1 ? 0.8 : 0.5), rect: sp.rect, inspect: sp.inspect });
+        out.push({ id: sid, ...base, ...SPOT_CAPTIONS[sp.spot], title: sp.name, ...framing(x, y, w, h, 0, w * h === 1 ? 0.8 : 0.5), rect: sp.rect, inspect: sp.inspect, view: sp.view });
         continue;
       }
       const l = s.lines?.find((q) => q.id === sid);
       if (l) {
         const mode = l.freight ? 'freight' : l.mode;
         const box = bbox(l.stops);
-        const title = l.freight ? `Freight line ${l.number}` : l.mode === 'bus' ? `Bus line ${l.number}` : `Rail line ${l.number}`;
+        const title = l.freight ? `Freight line ${l.number}` : l.mode === 'bus' ? `Bus line ${l.number}` : l.mode === 'metro' ? `${l.name ?? `Line ${l.number}`} (underground)` : `Rail line ${l.number}`;
         const facts: [string, string][] = [['Stops', `${l.stops.length}, ${l.loop ? 'a loop' : 'there and back'}`], [l.mode === 'bus' ? 'Buses' : 'Trains', `${l.vehicles}`], ...LINE_CAPTIONS[mode].facts];
-        out.push({ id: sid, ...base, title, what: LINE_CAPTIONS[mode].what, how: LINE_CAPTIONS[mode].how, facts, ...framing(box[0], box[1], box[2], box[3], 0, 0.8), rect: box, path: [...l.stops], inspect: l.stops[0], line: { mode: l.mode, number: l.number, colour: l.colour } });
+        // a metro line's stop turns the underground view on (client/src/tour.ts)
+        out.push({ id: sid, ...base, title, what: LINE_CAPTIONS[mode].what, how: LINE_CAPTIONS[mode].how, facts, ...framing(box[0], box[1], box[2], box[3], 0, 0.8), rect: box, path: [...l.stops], inspect: l.stops[0], line: { mode: l.mode, number: l.number, colour: l.colour }, ...(l.mode === 'metro' ? { view: 'under' as const } : {}) });
       }
     }
   }
@@ -676,8 +700,8 @@ export function demoTour(id: DemoId): TourStop[] {
 export interface SeededDemo {
   /** buildings and structures by kind id, with how many of each (a structure counts once, at its door) */
   kinds: ReadonlyMap<number, number>;
-  /** visit every tile the seeding wrote: x, y, tile word, aux byte */
-  scan(f: (x: number, y: number, tile: number, aux: number) => void): void;
+  /** visit every tile the seeding wrote: x, y, tile word, aux byte, under byte (tunnels and platforms) */
+  scan(f: (x: number, y: number, tile: number, aux: number, under: number) => void): void;
   aux(x: number, y: number): number;
   /** the helipads on its buildings (shared/src/helipads.ts chunkPads) */
   pads: readonly Pad[];
@@ -685,6 +709,8 @@ export interface SeededDemo {
   airports: readonly Airport[];
   /** each saved bus line's turns as its buses plan them (BusService.plan): flat [x, y, kind, ...], kind 0 a dead end, 1 a junction mouth, 2 via the depot */
   busTurns: readonly { number: number; turns: readonly number[] }[];
+  /** every saved line: its mode (freight lines are 'rail') and its stops (bus stop tiles, station doors) */
+  lines: readonly { mode: TransitMode; number: number; stops: readonly DemoXY[] }[];
 }
 
 /**
@@ -712,7 +738,10 @@ export interface ShowcaseFeature {
 export const FEATURE_DAYS = 7;
 const days = () => Array.from({ length: FEATURE_DAYS }, (_, d) => d);
 const placedKind = (kind: string) => (ss: readonly DemoSection[]) => ss.some((s) => s.placements?.some((p) => p.kind === kind));
-const anyTile = (d: SeededDemo, f: (x: number, y: number, t: number, a: number) => boolean) => { let hit = false; d.scan((x, y, t, a) => { if (!hit && f(x, y, t, a)) hit = true; }); return hit; };
+const anyTile = (d: SeededDemo, f: (x: number, y: number, t: number, a: number, u: number) => boolean) => { let hit = false; d.scan((x, y, t, a, u) => { if (!hit && f(x, y, t, a, u)) hit = true; }); return hit; };
+/** A metro line calls within the change walk (TRANSIT.transferWalk, Manhattan) of a stop of another mode's line. */
+const metroInterchange = (lines: readonly { mode: TransitMode; stops: readonly DemoXY[] }[]) => lines.some((m) => m.mode === 'metro' && m.stops.some(([x, y]) =>
+  lines.some((o) => o.mode !== 'metro' && o.stops.some(([ox, oy]) => Math.abs(ox - x) + Math.abs(oy - y) <= TRANSIT.transferWalk))));
 
 // Typed against the source unions, so a new bridge style, junction tool, plane type or helicopter service fails the
 // typecheck here until it has an entry, and demo:check then fails until the showcase shows it.
@@ -787,9 +816,12 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   // ---- buses
   { id: 'bus-turnaround', caption: 'a bus line that turns round at a dead end', tour: 'line-bus-3',
     seeded: (d) => d.busTurns.some((l) => l.turns.some((_v, i) => i % 3 === 2 && l.turns[i] === 0)) },
-  // ---- metro (docs/underground.md)
-  { id: 'metro-interchange', caption: 'a metro line with an interchange',
-    todo: 'TODO(U8): the metro station kinds are drafts. When U8 places a real metro line in the showcase (and London) and undrafts them, give this entry a test that a metro line calls at a station shared with another line (an interchange), a `tour` stop, and drop this `todo`.' },
+  // ---- metro (docs/underground.md): the showcase runs one underground line, which changes to rail and a bus
+  { id: 'metro-interchange', caption: 'a metro line with an interchange (an entrance within the change walk of a rail or bus stop)', tour: 'line-metro-1',
+    scenario: (ss) => metroInterchange(ss.flatMap((s) => s.lines ?? [])), seeded: (d) => metroInterchange(d.lines) },
+  { id: 'metro-crossover', caption: 'a metro crossover (one line\'s tunnel straight across another\'s)', tour: 'tube-crossover', demo: 'london',
+    rule: 'the showcase runs one underground line; lines cross in London, where the Tube\'s Central, Northern and Jubilee lines meet',
+    seeded: (d) => anyTile(d, (_x, _y, _t, _a, u) => isTunnel(u) && !isPlatform(u) && underMask(u) === 15) },
 ];
 
 /** Problems with the feature registry that the scenario alone shows: a feature or its tour stop missing from its demo. */
@@ -879,7 +911,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   for (const kind of placed) if (!toured.has(kindIdOf(kind))) out.push(`${kind} is placed but no tour stop shows it`);
   out.push(...featureProblems());
   for (const s of sections) for (const l of s.lines ?? []) {
-    const want = l.mode === 'bus' ? ['bus-stop'] : l.freight ? ['freight-yard'] : ['rail-halt', 'rail-station'];
+    const want = l.mode === 'bus' ? ['bus-stop'] : l.freight ? ['freight-yard'] : l.mode === 'metro' ? ['metro-entrance', 'metro-station'] : ['rail-halt', 'rail-station'];
     for (const st of l.stops) {
       const p = sections.flatMap((q) => q.placements ?? []).find((q) => q.door[0] === st[0] && q.door[1] === st[1]);
       if (!p || !want.includes(p.kind)) out.push(`${l.id} stops at (${st[0]}, ${st[1]}), which is not a ${want.join(' or ')} placement`);

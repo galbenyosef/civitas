@@ -1,6 +1,6 @@
 # The aux layer and multi-tile structures
 
-Every chunk carries a third per-tile array next to the tile words (`Uint16Array`) and the parcel ids (`Int32Array`): one byte per tile, the **aux layer**. It costs 1 KB per chunk. Its uses are multi-tile structures, airfield strips (runways, docs/airport.md), railway track (docs/rail.md), junction types on road tiles (roundabouts and flyovers, docs/structures.md section 4) and bridge decks over water (docs/structures.md section 3); the remaining free range is kept for road classes and graded height (docs/structures.md, E3 and E7). A fourth byte per tile, the **sub layer**, holds kind ids past the tile's 16 codes; it is stored and streamed the same way and is described in docs/sub-kinds.md.
+Every chunk carries a third per-tile array next to the tile words (`Uint16Array`) and the parcel ids (`Int32Array`): one byte per tile, the **aux layer**. It costs 1 KB per chunk. Its uses are multi-tile structures, airfield strips (runways, docs/airport.md), railway track (docs/rail.md), junction types on road tiles (roundabouts and flyovers, docs/structures.md section 4) and bridge decks over water (docs/structures.md section 3); the remaining free range is kept for road classes and graded height (docs/structures.md, E3 and E7). A fourth byte per tile, the **sub layer**, holds kind ids past the tile's 16 codes; it is stored and streamed the same way and is described in docs/sub-kinds.md. A fifth, the **under layer** (`Chunk.under`), holds metro tunnels and platforms below ground; nothing on the surface reads it, and it too is stored and streamed the same way (docs/underground.md).
 
 Code: `packages/shared/src/structures.ts` (encoding, footprint geometry, placement rules), `packages/server/src/world.ts` (storage, mirroring, place and remove), `packages/server/src/store.ts` (snapshot), `packages/server/src/net.ts` (wire and the build tool), `packages/client/src/world.ts` and `render/chunkView.ts` (mirror and drawing).
 
@@ -52,9 +52,9 @@ The client shows the planned footprint under the cursor, green when the server w
 
 ## Storage and wire
 
-- **Snapshot.** Format v5 added each modified chunk's aux as base64, only when it is not all zero; v6 adds the sub layer the same way. v5, v4 and v3 worlds upgrade in place with zero aux and sub.
-- **Chunk message.** `ChunkDTO.aux` is base64 of the 1024 bytes, omitted when all zero.
-- **Deltas.** Aux changes go out as their own flat stream, `{ t: 'aux', u: [x, y, aux, ...] }`, only for tiles whose aux byte changed, and always before the `tiles` quads of the same tick (sub bytes follow in `{ t: 'sub' }`, between the two). Tile quads are unchanged (`x, y, packed, parcelId`), so existing traffic costs nothing extra. Placing or removing a 2×2 sends one 12-number aux message once; construction progress sends tile quads only.
+- **Snapshot.** Format v5 added each modified chunk's aux as base64, only when it is not all zero; v6 adds the sub layer the same way, and v8 the under layer. Older worlds upgrade in place with zero aux, sub and under bytes.
+- **Chunk message.** `ChunkDTO.aux` is base64 of the 1024 bytes, omitted when all zero; `sub` and `under` likewise.
+- **Deltas.** Aux changes go out as their own flat stream, `{ t: 'aux', u: [x, y, aux, ...] }`, only for tiles whose aux byte changed, and always before the `tiles` quads of the same tick (sub bytes follow in `{ t: 'sub' }`, between the two; under bytes go in `{ t: 'under' }` ahead of all three). Tile quads are unchanged (`x, y, packed, parcelId`), so existing traffic costs nothing extra. Placing or removing a 2×2 sends one 12-number aux message once; construction progress sends tile quads only.
 
 ## Drawing
 

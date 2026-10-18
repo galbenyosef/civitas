@@ -33,3 +33,5 @@ export * from './demo/london';
 export * from './demo/londonMap';
 export * from './helicopters';
 export * from './metro';
+export * from './fleet';
+export * from './history';

@@ -19,13 +19,13 @@
  * Options: --hour H (default 8), --ticks N (1500), --seed S (1), --set k=v,..., --label L, --json FILE, --quiet.
  */
 import { writeFileSync } from 'node:fs';
-import { TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, type TrafficTuning, type StopRef } from '@msimcity/shared';
+import { TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, type TrafficTuning, type StopRef } from '@msimcity/shared';
 import { World, tkey, type Citizen, type Mover } from '../world';
 import { Simulation } from '../sim/simulation';
 import { seedCity } from './cities';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
-const PED_R = 0.07, W = VEHICLE_WIDTH;
+const PED_R = 0.07, W = VEHICLE_WIDTH, BIKE_W = 0.05;
 
 function mulberry32(a: number) {
   return () => {
@@ -37,12 +37,12 @@ function mulberry32(a: number) {
 }
 
 const desc = (m: Mover) => `#${m.id} (${m.x.toFixed(2)},${m.y.toFixed(2)}) lane ${Math.floor(m.lane / 4) >= 0 ? `${Math.floor(m.lane / 4 / 65536) - 0x8000},${(Math.floor(m.lane / 4) % 65536) - 0x8000}` : '-'} d${m.lane % 4} path ${m.path.slice(Math.max(0, (m.pi - 1) * 2), m.pi * 2 + 4).join(',')} pi ${m.pi} prog ${m.prog.toFixed(2)} c${+m.committed} w${m.wait} s${m.stuck}`;
-interface Body { m: Mover; x: number; y: number; hx: number; hy: number; len: number }
+interface Body { m: Mover; x: number; y: number; hx: number; hy: number; len: number; wid: number }
 /** Separating-axis test for two oriented rectangles. */
 function obbOverlap(a: Body, b: Body): boolean {
   const axes = [[a.hx, a.hy], [-a.hy, a.hx], [b.hx, b.hy], [-b.hy, b.hx]];
   const corners = (o: Body) => {
-    const ux = o.hx * o.len / 2, uy = o.hy * o.len / 2, vx = -o.hy * W / 2, vy = o.hx * W / 2;
+    const ux = o.hx * o.len / 2, uy = o.hy * o.len / 2, vx = -o.hy * o.wid / 2, vy = o.hx * o.wid / 2;
     return [[o.x + ux + vx, o.y + uy + vy], [o.x + ux - vx, o.y + uy - vy], [o.x - ux + vx, o.y - uy + vy], [o.x - ux - vx, o.y - uy - vy]];
   };
   const ca = corners(a), cb = corners(b);
@@ -57,7 +57,7 @@ function obbOverlap(a: Body, b: Body): boolean {
 function pointInObb(px: number, py: number, o: Body): boolean {
   const dx = px - o.x, dy = py - o.y;
   const along = dx * o.hx + dy * o.hy, across = -dx * o.hy + dy * o.hx;
-  return Math.abs(along) < o.len / 2 + PED_R && Math.abs(across) < W / 2 + PED_R;
+  return Math.abs(along) < o.len / 2 + PED_R && Math.abs(across) < o.wid / 2 + PED_R;
 }
 
 export interface AbResult {
@@ -85,6 +85,8 @@ export interface AbResult {
   reroute: { slow: number; late: number; forced: number; lateTried: number; cars: number; perCar: number; maxPerCitizenDay: number };
   /** driven legs that ended in the window: count, mean elapsed / expected ratio, 50th and 90th percentile of it, share running late by the delayFrac / delayMinTicks test */
   legs: { n: number; ratioMean: number; ratioP50: number; ratioP90: number; lateShare: number; ticksMean: number };
+  /** mobile jobs over the window (docs/mobile-jobs.md): fleet vehicles on the road per tick, and each service's counters */
+  mobile: { onRoadMean: number; bikesCarOverlaps: number; bikePedContacts: number; fleetPedContacts: number; fleetPedWhere: Record<string, number>; taxi: Record<string, number>; food: Record<string, number>; bins: Record<string, number>; parcels: Record<string, number>; foodMinutes: number[] };
 }
 
 /**
@@ -102,7 +104,7 @@ export const OLD_RULES: Partial<TrafficTuning> = {
 };
 
 /** Keys that change the test city rather than TRAFFIC_TUNING: car ownership, no parking lots, no signals technology. */
-const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles'];
+const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile'];
 
 /**
  * A bus network on the Commons (local coordinates of the 22×22 district): a depot whose door faces the y=5 street;
@@ -149,6 +151,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
   const log = opts.log ?? (() => {});
   Math.random = mulberry32(opts.seed * 2654435761);
   for (const [k, v] of Object.entries(opts.set)) if (k in TRAFFIC_TUNING) (TRAFFIC_TUNING as Record<string, number>)[k] = v;
+  MOBILE.on = opts.set.mobile !== 0; // mobile=0: no taxis, riders, bin lorries or couriers (docs/mobile-jobs.md), the control
   if (opts.set.carOwnership !== undefined) {
     const own = opts.set.carOwnership, office = Math.min(1, own + 0.15);
     World.prototype.ownsCar = (id: number, kind: number) => hash2(id, 41) < (kind === Zone.Office ? office : own);
@@ -198,7 +201,9 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
   const m0 = { ...sim.modeLog }, t0s = { ...sim.transit.stats, ...prefix(sim.buses.stats, 'bus.') };
   const travel = (st: number) => st === S.ToWork || st === S.ToHome || st === S.ToSite || st === S.ToVenue;
   const allTrips: number[] = [], rideTrips: number[] = [], rode = new Set<number>();
-  let carsSum = 0, carsPeak = 0, busesSum = 0, busCar = 0;
+  let carsSum = 0, carsPeak = 0, busesSum = 0, busCar = 0, fleetSum = 0, bikeCar = 0, bikePed = 0, fleetPed = 0;
+  const fleetPedWhere: Record<string, number> = {};
+  const mob0 = { taxi: { ...sim.taxis.stats }, food: { ...sim.delivery.stats }, bins: { ...sim.refuse.stats }, parcels: { ...sim.couriers.stats }, minutes: sim.delivery.minutes.length };
   sim.legSamples = [];
 
   let simMs = 0;
@@ -238,18 +243,19 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     const drawn: Body[] = [];
     const addCar = (m: Mover) => {
       if (!tr.headingOf(m, hd)) return;
-      const len = VEHICLE_LEN[m.cls] ?? VEHICLE_LEN[0];
-      cars.push({ m, x: m.x, y: m.y, hx: hd[0], hy: hd[1], len });
+      const len = VEHICLE_LEN[m.cls] ?? VEHICLE_LEN[0], wid = m.cls === BIKE_CLASS ? BIKE_W : W; // a delivery bike and rider are narrow
+      cars.push({ m, x: m.x, y: m.y, hx: hd[0], hy: hd[1], len, wid });
       // as the client draws it: facing the direction it last moved in (east until it first moves, as the probe assumes)
       if (!tr.motionOf(m, hd)) { hd[0] = 1; hd[1] = 0; }
-      drawn.push({ m, x: m.x, y: m.y, hx: hd[0], hy: hd[1], len });
+      drawn.push({ m, x: m.x, y: m.y, hx: hd[0], hy: hd[1], len, wid });
     };
     for (const c of w.citizens.values()) {
       if (c.state === S.Home || c.state === S.Work || c.state === S.AtSite || c.state === S.AtVenue) continue;
-      if (c.leg?.drive) { if (c.lane >= 0) addCar(c); } else if (c.leg && !sim.transit.isRiding(c)) peds.push(c); // riders on board are inside the bus
+      if (c.leg?.drive) { if (c.lane >= 0) addCar(c); } else if (c.leg && !sim.transit.isRiding(c) && !sim.taxis.isAboard(c)) peds.push(c); // riders on board are inside the bus or the taxi
     }
     for (const veh of w.vehicles.values()) if (veh.phase !== 'dwell' && veh.lane >= 0) { addCar(veh); drove.add(veh.id); }
     { let n = 0, nb = 0; for (const b of cars) { if (b.m.cls === VehicleClass.Bus) nb++; else n++; } carsSum += n; busesSum += nb; if (n > carsPeak) carsPeak = n; }
+    for (const u of sim.mobile.units.values()) if (u.v.lane >= 0) fleetSum++;
     const grid = new Map<number, Body[]>();
     for (const b of cars) { const k = tkey(Math.floor(b.x), Math.floor(b.y)); let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(b); }
     let tcc = 0, tcp = 0;
@@ -264,6 +270,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
           if (!obbOverlap(a, b)) continue;
           tcc++;
           if (a.m.cls === VehicleClass.Bus || b.m.cls === VehicleClass.Bus) busCar++;
+          if ((a.m.cls === BIKE_CLASS) !== (b.m.cls === BIKE_CLASS)) bikeCar++;
           const mx = Math.floor((a.x + b.x) / 2), my = Math.floor((a.y + b.y) / 2), mt = w.peekTile(mx, my);
           const deg = tr.degreeOf(mx, my);
           const sameLane = a.m.lane === b.m.lane;
@@ -281,12 +288,14 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
         for (const a of l) {
           if (Math.hypot(a.x - p.x, a.y - p.y) > a.len / 2 + 0.2 || !pointInObb(p.x, p.y, a)) continue;
           tcp++;
+          if (a.m.cls === BIKE_CLASS) bikePed++;
           const t = w.peekTile(px, py);
           const onRoad = t !== undefined && isRoad(t);
           const crossing = !!(p.cross && p.pp < p.cross.length && p.cross[p.pp]);
           const deg = onRoad ? tr.degreeOf(px, py) : 0;
           const key = !onRoad ? 'off-road (building tile)' : crossing ? `crossing ${deg >= 3 ? 'junction' : 'mid-block'}${a.m.wait >= TRAFFIC_TUNING.carYieldMax && TRAFFIC_TUNING.carYieldMax > 0 ? ' car nosed' : ''}${p.wait > 0 ? ' ped forced' : ''}` : `sidewalk ${deg >= 3 ? 'junction' : 'road'}`;
           bump(cpWhere, key);
+          if (sim.mobile.units.has(a.m.id)) { fleetPed++; bump(fleetPedWhere, `${key} ${(a.m as { vkind?: number }).vkind}${(a.m as { dwell?: boolean }).dwell ? ' dwelling' : ''}`); }
           if (examples.filter((e) => e.startsWith('cp')).length < 30) examples.push(`cp t${w.tick} ${key} ped #${p.id}(${p.x.toFixed(2)},${p.y.toFixed(2)} pp ${p.pp} wait ${p.wait} seg ${p.pts ? [p.pts[(p.pp - 1) * 2], p.pts[(p.pp - 1) * 2 + 1], p.pts[p.pp * 2], p.pts[p.pp * 2 + 1]].map((v) => v?.toFixed(2)).join(',') : '-'} path ${p.path.slice(0, 8).join(',')} st ${p.state} leg ${p.leg?.arrive}) car #${a.m.id}(${a.x.toFixed(2)},${a.y.toFixed(2)} lane ${a.m.lane} prog ${a.m.prog.toFixed(2)} wait ${a.m.wait} c${+a.m.committed})`);
         }
       }
@@ -342,8 +351,15 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     trips: allTrips.length, tripMean: avg(allTrips), transitTrips: rideTrips.length, transitTripMean: avg(rideTrips),
     carsMean: carsSum / opts.ticks, carsPeak, busesMean: busesSum / opts.ticks, busCarPerTick: busCar / opts.ticks, transit: transitDelta,
     legs: { n: samples.length, ratioMean: avg(ratios), ratioP50: ratios[Math.floor(ratios.length * 0.5)] ?? 0, ratioP90: ratios[Math.floor(ratios.length * 0.9)] ?? 0, lateShare: samples.length ? late / samples.length : 0, ticksMean: avg(samples.map(([e]) => e)) },
+    mobile: {
+      onRoadMean: fleetSum / opts.ticks, bikesCarOverlaps: bikeCar, bikePedContacts: bikePed, fleetPedContacts: fleetPed, fleetPedWhere,
+      taxi: delta(sim.taxis.stats, mob0.taxi), food: delta(sim.delivery.stats, mob0.food), bins: delta(sim.refuse.stats, mob0.bins), parcels: delta(sim.couriers.stats, mob0.parcels),
+      foodMinutes: sim.delivery.minutes.slice(mob0.minutes),
+    },
   };
 }
+
+const delta = (a: Record<string, number>, b: Record<string, number>) => Object.fromEntries(Object.keys(a).map((k) => [k, Math.round((a[k] - (b[k] ?? 0)) * 100) / 100]));
 
 export function summary(r: AbResult): string {
   const f1 = (v: number) => v.toFixed(1), f3 = (v: number) => v.toFixed(3);
@@ -359,6 +375,7 @@ export function summary(r: AbResult): string {
     `  car-ped where: ${JSON.stringify(r.cpWhere)}  car-car where: ${JSON.stringify(r.ccWhere)}`,
     `  trips ${r.trips}, mean ${f1(r.tripMean)} ticks; planned walk ${r.modes.walk} drive ${r.modes.drive} transit ${r.modes.transit} (${f1(100 * r.modes.transitShare)}% transit); by transit ${r.transitTrips}, mean ${f1(r.transitTripMean)} ticks`,
     `  cars on the road ${f1(r.carsMean)} mean, ${r.carsPeak} peak; buses ${f1(r.busesMean)}; bus-car overlaps ${f3(r.busCarPerTick)}/tick; transit ${JSON.stringify(r.transit)}`,
+    `  mobile jobs: ${f1(r.mobile.onRoadMean)} fleet vehicles on the road; taxi ${JSON.stringify(r.mobile.taxi)}; food ${JSON.stringify(r.mobile.food)}; bins ${JSON.stringify(r.mobile.bins)}; parcels ${JSON.stringify(r.mobile.parcels)}; bike-car overlaps ${r.mobile.bikesCarOverlaps}, bike-ped contacts ${r.mobile.bikePedContacts}, fleet-ped contacts ${r.mobile.fleetPedContacts} ${JSON.stringify(r.mobile.fleetPedWhere)}`,
     `  sim ${r.simMsPerTick.toFixed(3)} ms/tick over the window; wall ${f1(r.wallSec)} s`,
   ].join('\n');
 }

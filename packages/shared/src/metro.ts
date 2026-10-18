@@ -1,6 +1,6 @@
 import { KIND_ID } from './buildings/compiled';
-import { isBuildable, kindIdOf, levelOf, underConstruction, zoneOf } from './tile';
-import { structureAt } from './structures';
+import { isBuildable, isRoad, kindIdOf, levelOf, underConstruction, zoneOf } from './tile';
+import { structureAt, FRONT } from './structures';
 import {
   RAIL_SIDES, METRO_TIMING, oppSide, stopTile, alongSide, trackKey, routeTiles,
   type RailEnv, type RailLineDef, type RailRoute, type RailService, type StationStop, type TrackNet, type TrainState,
@@ -62,6 +62,21 @@ export const METRO_STATION: number = (KIND_ID as Record<string, number>)['metro-
 export const isMetroStationKind = (id: number) => id === METRO_ENTRANCE || id === METRO_STATION;
 /** platform tiles under a metro kind (0 for any other kind) */
 export const metroPlatformLen = (kind: number) => (kind === METRO_ENTRANCE ? METRO.platform.kiosk : kind === METRO_STATION ? METRO.platform.hall : 0);
+
+/**
+ * The turn (FRONT index: 0 faces +y, 1 +x, 2 -y, 3 -x) a station is given when the player gave none: a kiosk faces the
+ * first road beside it, south, east, west, north, as a 1×1 building is drawn; -1 with no road beside it. A hall takes
+ * the turn planStructure gives its footprint.
+ */
+export function kioskTurn(x: number, y: number, tile: (x: number, y: number) => number | undefined): number {
+  for (const r of [0, 1, 3, 2]) {
+    const t = tile(x + FRONT[r][0], y + FRONT[r][1]);
+    if (t !== undefined && isRoad(t)) return r;
+  }
+  return -1;
+}
+/** The platform runs along the street its entrance faces: along x for a turn facing south or north (`rot & 1` 0). */
+export const platformAlongX = (rot: number) => (rot & 1) === 0;
 
 /** What metro code reads: rail's tiles, aux and sub bytes, and the under layer (0 where solid or not loaded). */
 export interface MetroEnv extends RailEnv {

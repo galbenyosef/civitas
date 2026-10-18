@@ -1,8 +1,10 @@
 import type { KindToolId } from './buildings/compiled';
-import type { StopInfo, BusInfo, LineInfo, LineStats, LinePreview, TransitLine } from './transit';
+import type { StopInfo, BusInfo, LineInfo, LineStats, LinePreview, TransitLine, TransitMode } from './transit';
 import type { RailLineDef, RailRoute } from './rail';
 import type { GatewayInfo } from './gateways';
 import type { GoalsDTO } from './goals';
+import type { RingsDTO } from './history';
+import type { FleetInfo, MobileRows } from './fleet';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
 export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | KindToolId;
 
@@ -59,6 +61,8 @@ export interface ChunkDTO {
   aux?: string;
   /** base64 of Uint8Array(CHUNK_SIZE^2) sub bytes (kind ids of sub-kinds, docs/sub-kinds.md); omitted when all zero */
   sub?: string;
+  /** base64 of Uint8Array(CHUNK_SIZE^2) under bytes (tunnels and platforms, docs/underground.md); omitted when all zero */
+  under?: string;
 }
 
 export const CitizenState = { Home: 0, ToWork: 1, Work: 2, ToHome: 3, ToSite: 4, AtSite: 5, ToVenue: 6, AtVenue: 7 } as const;
@@ -74,11 +78,16 @@ export const LIFE_STAGE_NAMES = ['adult', 'child', 'retired'] as const;
  * citizens wire flags: bits 0-2 state, bit 3 mode (1 = in a vehicle), bits 4-7
  * occupation (the workplace's family code, so 4 bits stay enough past 16 kinds) / vehicle kind, bits 8-9 vehicle class, bit 10 queued, bit 11 emergency,
  * bits 12-13 life stage (LifeStage; vehicles 0), bit 14 moving in or leaving town (a suitcase on foot, a packed car; server sim/gateways.ts),
- * bit 15 backing up (a bus in the reverse of a three-point turn, server sim/traffic.ts: drawn facing against its motion).
+ * bit 15 backing up (a bus in the reverse of a three-point turn, server sim/traffic.ts: drawn facing against its motion),
+ * bits 16-17 the driver's indicators (Indicator; server sim/indicators.ts). Bit 18 underground (CITIZEN_UNDER: waiting on a metro
+ * platform or riding a metro train; OR it into packCitizenFlags). Bits 19-22 the fleet kind of a mobile worker's vehicle (FleetKind: taxi,
+ * private hire, bicycle, moped, courier van, bin lorry, sweeper, trades van; 0 for anything else), bit 23 loaded (a taxi with a fare, a
+ * rider or van with something to deliver), bit 24 working at a stop (bins on the lift, a rider at the door): shared/src/fleet.ts
+ * packFleet, docs/mobile-jobs.md; a fleet vehicle sends kind 0 and the nearest body class. Bits 25-30 are free.
  * A quad with state Home tells the client to drop that agent.
  */
-export const packCitizenFlags = (state: number, mode: number, kind: number, cls = 0, queued = false, emergency = false, stage = 0, bag = false, rev = false) =>
-  (state & 7) | ((mode & 1) << 3) | ((kind & 15) << 4) | ((cls & 3) << 8) | (queued ? 1 << 10 : 0) | (emergency ? 1 << 11 : 0) | ((stage & 3) << 12) | (bag ? 1 << 14 : 0) | (rev ? 1 << 15 : 0);
+export const packCitizenFlags = (state: number, mode: number, kind: number, cls = 0, queued = false, emergency = false, stage = 0, bag = false, rev = false, ind = 0) =>
+  (state & 7) | ((mode & 1) << 3) | ((kind & 15) << 4) | ((cls & 3) << 8) | (queued ? 1 << 10 : 0) | (emergency ? 1 << 11 : 0) | ((stage & 3) << 12) | (bag ? 1 << 14 : 0) | (rev ? 1 << 15 : 0) | ((ind & 3) << 16);
 export const citizenState = (f: number) => f & 7;
 export const citizenMode = (f: number) => (f >> 3) & 1;
 export const citizenKind = (f: number) => (f >> 4) & 15;
@@ -90,6 +99,12 @@ export const citizenStage = (f: number) => (f >> 12) & 3;
 export const citizenBag = (f: number) => ((f >> 14) & 1) === 1;
 /** backing up: draw it facing against its motion (bit 15) */
 export const citizenReversing = (f: number) => ((f >> 15) & 1) === 1;
+/** What a vehicle's indicators show (bits 16-17): the turn coming up, or hazards when it is stuck or backing up. */
+export const Indicator = { None: 0, Left: 1, Right: 2, Hazard: 3 } as const;
+export const citizenIndicator = (f: number) => (f >> 16) & 3;
+/** bit 18: below ground, on a metro platform or train (docs/underground.md); the surface does not draw them */
+export const CITIZEN_UNDER = 1 << 18;
+export const citizenUnder = (f: number) => (f & CITIZEN_UNDER) !== 0;
 
 /** One person (or dwelling vehicle) listed in a building's people panel. */
 export interface PersonRow {
@@ -156,10 +171,14 @@ export interface BuildingInfo {
   transit?: StopInfo;
   /** rail halts and stations: the track behind the platform, the lines calling here and today's riders (shared/src/rail.ts) */
   rail?: RailStationInfo;
+  /** metro entrances and halls: the platform under the door, the lines calling, today's riders and where to change (sim/metro.ts) */
+  metro?: MetroStationInfo;
   /** gateways (motorway connection, stations, coach depot, airport): arrivals and departures through it (shared/src/gateways.ts) */
   gateway?: GatewayInfo;
   /** named lists of everyone tied to this building; present only for a `full` inspect */
   people?: BuildingPeople;
+  /** road work based here or serving here (docs/mobile-jobs.md): a cab office's taxis, a restaurant's orders and riders, a depot's rounds, a home's bins */
+  mobile?: MobileRows[];
 }
 
 /** An airport terminal's runway and timetable, for its tooltip. Ticks are absolute game ticks. */
@@ -203,6 +222,21 @@ export interface RailStationInfo {
   faresToday: number;
   /** freight yards: containers brought in by truck and sent out on trucks today, and those waiting for a train now */
   freight?: { inToday: number; outToday: number; waiting: number; inYesterday: number; outYesterday: number };
+}
+/**
+ * A metro line on the wire ('metroLines', docs/underground.md): a rail line with `metro` set, whose route runs through
+ * the under layer, plus its stations' names in calling order. Clients run its trains with railService, as on the surface.
+ */
+export interface MetroLineDTO extends RailLineDTO {
+  names: string[];
+}
+/** A metro station's tooltip section: the rail section's fields (`track` says how the platform is), plus its name and the changes. */
+export interface MetroStationInfo extends RailStationInfo {
+  name: string;
+  /** the platform's end tiles, [x0, y0, x1, y1], when there is one */
+  platform?: [number, number, number, number];
+  /** "change here for": routed stops of other lines within the change walk (TRANSIT.transferWalk), nearest first */
+  changes: { name: string; x: number; y: number; mode: TransitMode; lines: { id: number; number: number; name?: string; colour: number }[] }[];
 }
 /** A train's tooltip (sim/rail.ts), answered to an inspectTrain. The consist the client works out itself. */
 export interface TrainInfo {
@@ -282,6 +316,10 @@ export interface CitizenInfo {
   occupants?: PersonRef[];
   /** a citizen riding in (or about to get into) someone else's car: the driver, relation as seen by the passenger */
   liftWith?: PersonRef;
+  /** a mobile worker's road job, or a fleet vehicle's (docs/mobile-jobs.md) */
+  fleet?: FleetInfo;
+  /** a passenger in a taxi or waiting for one (sim/taxis.ts): the vehicle, so the panel can select it */
+  taxi?: { vehicle: number; label: string };
 }
 
 /** Someone a citizen is connected to, for the panel (clickable). */
@@ -341,7 +379,9 @@ export type ClientMsg =
   /** `dev` (sent with ?dev) skips technology locks, honoured only by a server not running in production */
   | { t: 'build'; tool: Tool; tiles: [number, number][]; dev?: boolean;
       /** multi-tile kinds: the orientation the player chose (0-3, the direction the front faces: 0 = +y, 1 = +x, 2 = -y, 3 = -x); left out = the server picks the road side */
-      rot?: number }
+      rot?: number;
+      /** bulldoze in the underground view: fill unused tunnel instead of clearing the surface (docs/underground.md) */
+      under?: true }
   | { t: 'parcel'; id: number; taxRate?: number; name?: string }
   /** `route` asks for the trail taken and the route ahead (the selected agent; hovers leave it off) */
   | { t: 'inspectCitizen'; id: number; route?: boolean }
@@ -359,7 +399,9 @@ export type ClientMsg =
   | { t: 'line'; op: 'preview'; line: Partial<TransitLine>; seq: number }
   /** onboarding (shared/src/goals.ts): skip or resume the goal chain; dismiss a hint for good */
   | { t: 'goals'; op: 'skip' | 'resume' }
-  | { t: 'hint'; id: string };
+  | { t: 'hint'; id: string }
+  /** the charts panel (docs/charts.md): open (answered with 'history', then an hourly 'histSample' follows) or closed */
+  | { t: 'hist'; open: boolean };
 
 export type ServerMsg =
   | { t: 'welcome'; you: string; seed: number; day: number; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
@@ -370,6 +412,8 @@ export type ServerMsg =
   | { t: 'aux'; u: number[] }
   /** flat triples: x, y, sub byte (kind id of a sub-kind, 0 = base kind); only for tiles whose sub changed, sent after 'aux' and before 'tiles' */
   | { t: 'sub'; u: number[] }
+  /** flat triples: x, y, under byte (docs/underground.md); only for tiles whose under byte changed, sent before 'aux' and 'tiles' */
+  | { t: 'under'; u: number[] }
   | { t: 'parcels'; parcels: ParcelDTO[]; removed?: number[] }
   | { t: 'players'; players: PlayerDTO[] }
   /** flat quads: id, x, y, flags (see packCitizenFlags) */
@@ -384,6 +428,10 @@ export type ServerMsg =
   | { t: 'toast'; kind: 'info' | 'error'; msg: string }
   /** every rail line in the world, sent with the welcome and whenever any line's definition, status or route changes */
   | { t: 'railLines'; lines: RailLineDTO[] }
+  /** every metro line (sim/metro.ts), sent with the welcome and whenever any line's definition, status or route changes */
+  | { t: 'metroLines'; lines: MetroLineDTO[] }
+  /** riders on board each running metro train, every 25 ticks while it changes: flat [lineId, trains, load0, load1, …, lineId, …] */
+  | { t: 'metroLoads'; l: number[] }
   | { t: 'train'; line: number; train: number; info: TrainInfo | null }
   | { t: 'pong'; n: number }
   /** every transit line, and which line each bus on the road runs (flat [busId, lineId, …], for the livery) */
@@ -394,4 +442,8 @@ export type ServerMsg =
   /** your onboarding goals (shared/src/goals.ts), to you only, whenever they change; `completed` names a goal just finished and its reward */
   | { t: 'goals'; goals: GoalsDTO; completed?: { id: string; reward: string } }
   /** an advisor hint (shared/src/goals.ts HINTS); `msg` replaces the stock wording when the server has numbers to put in it */
-  | { t: 'hint'; id: string; msg?: string };
+  | { t: 'hint'; id: string; msg?: string }
+  /** the city's history for the charts panel, to you only, when you open it: the world's series and yours (shared/src/history.ts) */
+  | { t: 'history'; hour: number; world: RingsDTO; mine: RingsDTO }
+  /** the newest hourly sample, to clients with the charts panel open: WORLD_SERIES values `w` and your PLAYER_SERIES values `p` */
+  | { t: 'histSample'; hour: number; w: number[]; p: number[] };

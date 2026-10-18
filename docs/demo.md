@@ -6,11 +6,11 @@ teaching it.
 
 | Demo | Port | Sections | Tour stops |
 | --- | --- | --- | --- |
-| **Showcase** | 8190 | all eight | 89 |
-| Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 29 |
+| **Showcase** | 8190 | all eight | 92 |
+| Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 32 |
 | Leisure demo | 8192 | Downtown, Leisure | 23 |
 | Civic demo | 8193 | Downtown, Civic services | 28 |
-| **London** | 8194 | Areas, Landmarks, Rail and Heathrow, Buses (its own map, below) | 66 |
+| **London** | 8194 | Areas, Landmarks, Rail and Heathrow, Buses, The Underground (its own map, below) | 81 |
 
 Code:
 
@@ -53,7 +53,7 @@ After its first fill, a demo child saves its world and copies it to `data/demos/
 
 The town comes back exactly as first built, citizens included. The world save does not keep per-day counters, so after a reset, or any restart from a saved world, the tooltips' today and yesterday counts (visits, riders, flights, containers) start from zero and fill as the day runs. The people, vehicles, trains and planes are moving from the first tick. Only a first fill arrives with a whole day counted. Without a snapshot, for example after an interrupted first fill, reset removes the world so the demo seeds again.
 
-The town is deterministic as well. The seeder uses fixed coordinates and a fixed terrain seed. While a demo is seeded and filled, `Math.random` is a seeded generator (`seededRandom`), so a fresh seeding gives the same town. The child reports a hash of every modified chunk's tile words, aux and sub bytes and the transit lines as `startHash` on `/healthz` and `/api/demos`.
+The town is deterministic as well. The seeder uses fixed coordinates and a fixed terrain seed. While a demo is seeded and filled, `Math.random` is a seeded generator (`seededRandom`), so a fresh seeding gives the same town. The child reports a hash of every modified chunk's tile words, aux, sub and under bytes (tunnels and platforms), the station names and the transit lines (with their names) as `startHash` on `/healthz` and `/api/demos`.
 
 ## London
 
@@ -160,6 +160,27 @@ How the map is made:
   on a loop of the network, preferably a main road, on the side the server boards it from (`boardDir`: south, east,
   west, north), three tiles or more from the route's other stops. The 25 and the 159 run out and back; the D3 runs one
   way round the Isle of Dogs loop.
+- **The Underground** (section `london-tube`, docs/underground.md section 7). Three Tube lines run there and back with 8
+  trains each: the **Central** (red, `0xdc241f`) from Shepherd's Bush under Notting Hill Gate, Marble Arch, Tottenham
+  Court Road, St Paul's, Liverpool Street, Bethnal Green and Mile End to Stratford; the **Northern** (drawn dark grey,
+  `0x3a3a3a`, as the real black would not show underground) from Camden Town by Euston, Tottenham Court Road, Charing
+  Cross, Waterloo, Kennington, Stockwell and Clapham Common to Balham; the **Jubilee** (`0xa0a5a9`) from Baker Street by
+  Green Park, Westminster, Waterloo, London Bridge, Canada Water, Canary Wharf, North Greenwich and West Ham to
+  Stratford. Stations closer than 6 tiles along a line are left out (Oxford Circus, Bond Street, Bank). Each station
+  is fitted where the real one is (`TUBE` in london.ts, latitude and longitude through `geoF`) by `fitEntrance`: the
+  nearest frontage lot, spiralling out, on dry land beside a road, off the railways and the landmarks, with room
+  underneath for its platform, which runs the way the line goes there (towards its neighbours) and may neither overlap
+  nor touch another end to end. A station that changes with a rail terminus (Liverpool Street, Stratford, Waterloo)
+  lands within the 4-tile change walk of that station's door, and a second line's entrance of the same name within
+  the walk of the first (Tottenham Court Road, Waterloo, Stratford), so riders change on foot. The termini, Liverpool
+  Street, London Bridge and Canary Wharf are halls (6-car platforms) where a two-lot frontage fits; the rest are kiosks,
+  and where neither fits along the line (a cramped interchange) the platform turns across it. The stations go through
+  the real planners on the boroughs' land (a sandbox, so the town's lines call there), are named with
+  `World.setStopName`, and the lines are saved through `Transit.saveLine`, which bores them in order: about 290 tunnel
+  tiles under the streets and the Thames, with three crossovers where the lines cross (the Central and the Northern
+  by Tottenham Court Road, the Central and the Jubilee by Marble Arch, the Jubilee and the Northern by Waterloo). The
+  tour stops at Tottenham Court Road, each line, under Waterloo (`tube-crossover`, with the underground view on) and
+  Canary Wharf.
 - **Margin.** A 24-tile ring of plain grass round the map, with the river running on out of it, so the noise terrain's
   lakes do not read as more river from above. It has no parcels; players can buy it.
 
@@ -205,9 +226,9 @@ A section (`DemoSection`) lists:
 | `tracks` | drags as a player makes them; each runs along its longer axis first and turns once |
 | `junctions` | a roundabout or flyover clicked on a junction (`deck` picks the road on top) |
 | `bridges` | a road bridge over water from `from` to `to`, laid through `planBridge`, with a forced `style` (the road tool's choice otherwise); `landmark` draws a bascule span as that landmark |
-| `lines` | bus or rail lines: stops in calling order (bus stop tiles or station doors), loop or there and back, vehicles. `freight: true` for a line between yards |
+| `lines` | bus, rail or metro lines: stops in calling order (bus stop tiles or station doors), loop or there and back, vehicles. `freight: true` for a line between yards; `name` for a line known by name (the Central) |
 | `blocks` | grown land the tour stops at: zones nobody places, and block middles (deep plots, a communal garden) |
-| `spots` | a tour stop on something that is neither a kind nor a drag, such as a level crossing, the river or the helipads. The caption is `SPOT_CAPTIONS[spot]` |
+| `spots` | a tour stop on something that is neither a kind nor a drag, such as a level crossing, the river, the helipads or a Tube crossover. The caption is `SPOT_CAPTIONS[spot]`; `view: 'under'` turns the underground view on there |
 
 A placement of a merged lot (a zone kind bigger than 1×1 that growth assembles, `GROW_FORMS` in shared/src/zones.ts) takes a `level`. Nobody places these. The seeder builds each on lots of its zone, as growth would: through `planStructure` with those lots seen as empty, before the block middles round it are settled.
 
@@ -221,6 +242,7 @@ Some choices make every system busy:
 - **The stadium faces the north road next to the rail station.** The halt sits among the homes of A2, 30 tiles away, inside the 40-tile limit on a night out.
 - **The riverside quarter is reached only over its bridges.** A river four tiles wide runs east-west south of the freight line, on rows 44 to 47. The bascule's model, Tower Bridge, is drawn for a 4-tile span. Four streets run down from the south perimeter road over the railway land and cross the river: a steel girder bridge at x = -20, a stone arch at 5, a bascule at 15 and a suspension bridge at 25. The freight line's track crosses the first street on a level crossing. Beyond the river, ten 4×4 blocks lie between the river road (y = 49) and y = 54. Together they hold one of every merged lot: works to the west, then shops, offices and homes. The last block is a ring of homes round a communal garden. Bus line 3 runs there and back from the street down to the stone bridge, over it and along the river road. The road runs on past the quarter to a dead end at x = 33, where the buses turn round by themselves. Everyone who lives or works there crosses a bridge, so all four carry traffic. The traffic waits at the bascule's barriers while it lifts for a barge, and at the level crossing while a freight train passes.
 - **The runway is 20 tiles,** long enough for the jumbo (`PLANE_TYPES.jumbo.minRunway`). Every plane type therefore lands at the showcase airport.
+- **One underground line, the Crosstown** (metro line 1, in the rail section, so the transport demo has it too): a kiosk, Station Road, 3 tiles from the rail station's door on the railway land at (17, -36); a kiosk by the arena, Arena, at (27, -19); a hall, Eastgate, at (27, -2), 2 tiles from bus line 1's stop at (25, -2). Every platform runs north-south (`rot: 1`), so the tunnel leaves Station Road southwards, turns once under the stadium's district and runs straight down x = 27 under the roads and blocks between: 39 tiles bored, 2 trains of 4 cars, there and back. Riders change to the passenger line or bus line 1 on foot. The tour stops at the kiosk, the line (with the underground view on) and the hall.
 
 ## How seeding uses the players' planners
 
@@ -238,9 +260,10 @@ Seeding has two phases, because stops, track and lines need the simulation's ser
 | bridges | `planBridge` with the scenario's style, then `World.placeBridge` | `Net.road` over water |
 | bus stops | bulldoze the lot, then `BusService.stopProblem` (no junction) | `Net.build`, `busstop` |
 | track | `Rail.paint(owner, trackDragPath(a, b))` (planTrack) | `Net.track` |
-| lines | `Transit.saveLine` | the lines panel |
+| metro stations | the 1×1 or `planStructure` rules above, then `Metro.platformFor` with the placement's `rot` (the platform along x for an even turn) and `Metro.lay`; a placement's `name` goes to `World.setStopName` | `Net.build` and `Net.placeStructure`, which lay the platform with the site |
+| lines | `Transit.saveLine` (a metro line bores its tunnel and is charged in `Metro.commit`) | the lines panel |
 
-`saveLine` validates the stops, routes bus lines on the roads and rail lines through the track (`Rail.route`), and refuses shared track. Every refusal is collected. The child exits with the list if there is any, so a broken scenario never seeds quietly. Everything is pre-built complete.
+`saveLine` validates the stops, routes bus lines on the roads, rail lines through the track (`Rail.route`) and metro lines through the tunnels it has just bored, and refuses shared track or tunnel. Every refusal is collected. The child exits with the list if there is any, so a broken scenario never seeds quietly. Everything is pre-built complete.
 
 `fillDemo` then has two stages:
 
@@ -267,6 +290,7 @@ The check then seeds every demo through the real planners. It fails on any refus
 - the planes scheduled by type and the helicopter flights by service
 - the bascule's lifts for a barge and how long the level crossing's barriers were down
 - gateway arrivals and freight containers
+- for the underground: each metro line's trains and headway, the trips planned by metro, the changes between the metro and the other modes (`bus-metro`, `metro-rail`, `metro-metro`), the peak train load and what `Metro.tick` costs a tick. `--no-tube` runs London without its Underground, for the tick cost without the metro.
 
 ```sh
 npm run demo:check
@@ -283,7 +307,7 @@ Catalogue kinds, surface tools and line modes are checked by kind. Everything el
 | `demo`, `rule` | the demo that must show it, the showcase unless `rule` says why it lives elsewhere |
 | `tour` | the stop that shows it, which must be on that demo's tour |
 | `scenario` | a test over the demo's sections, run by `showcaseProblems` (pure) |
-| `seeded` | a test over the seeded demo (`SeededDemo`: kinds built, every tile and aux byte written, the helipads, the operational airports), run by demo:check |
+| `seeded` | a test over the seeded demo (`SeededDemo`: kinds built, every tile, aux and under byte written, the helipads, the operational airports, the bus lines' turns, the saved lines' stops), run by demo:check |
 | `todo` | not enforced yet: why, and what turns it on |
 
 Some entries are typed against the union they come from, the way `SURFACE_TOOLS` and `LINE_MODES` are. A new bridge style, junction tool, plane type (`PlaneType`) or helicopter service (`PadKind`) therefore fails the typecheck until it has an entry. Merged lots are read from the catalogue (`GROW_FORMS`), so a new form is enforced as soon as it compiles.
@@ -301,7 +325,8 @@ Some entries are typed against the union they come from, the way `SURFACE_TOOLS`
 | every merged lot | the non-deep ones placed and built; the deep plots built (they settle into block middles by themselves) | the kind's own stop, `block-deep` |
 | communal garden | built | `block-garden` |
 | bus turnaround | a saved bus line whose buses turn round at a dead end (`BusService.plan(line).turns` has a kind 0) | `line-bus-3` |
-| metro line with an interchange | **todo**: turned on when U8 places a real metro line and undrafts the station kinds (docs/underground.md) | none yet |
+| metro line with an interchange | a metro line calls within the change walk (`TRANSIT.transferWalk`, 4 tiles) of a stop of a bus or rail line, in the scenario and among the saved lines | `line-metro-1` |
+| metro crossover | in **London**: an under byte with all four sides (one line's tunnel straight across another's). Rule: the showcase runs one underground line; lines cross in London | London's `tube-crossover` |
 
 ### Adding a feature to the showcase
 

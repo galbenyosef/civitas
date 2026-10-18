@@ -1,10 +1,32 @@
 import {
   DRIVE_SPEED, MIN_GAP, LANE_OFFSET, SIDEWALK_OFFSET, VEHICLE_LEN, VEHICLE_WIDTH, TRAFFIC_TUNING as TT,
-  VehicleClass, isRoad, hasFeature, signalTiming, signalPhaseOf, signalArms, signalledArms, type SignalPhase,
+  VehicleClass, BIKE_CLASS, isRoad, hasFeature, signalTiming, signalPhaseOf, signalArms, signalledArms, type SignalPhase,
   isJunctionAux, isRingAux, isFlyoverAux, islandOf, ringPos, isArmPos, RING_POS, isCrossing, isBridgeAux, isDeck, bridgeStyle, BridgeStyle, basculeBarrierAt,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
+
+/**
+ * Two-wheelers (fleet.ts BIKE_CLASS: delivery bicycles and mopeds, docs/mobile-jobs.md) ride at the kerb edge of the
+ * lane, BIKE_SIDE further out than a car, and filter: in a lane, cars follow cars and bikes follow bikes, and the body
+ * guard does not hold a bike and a car in the same lane against each other. Everything else (stop lines, signals, the
+ * junction box, crossings, pedestrians) applies to them as to cars.
+ */
+const isBike = (m: Mover) => m.cls === BIKE_CLASS;
+/**
+ * A two-wheeler's offset towards the kerb from a car's line, and the width of a bike and its rider: it rides in the
+ * strip between a car's side (LANE_OFFSET + half a car, 0.28 from the centre line) and people on the pavement
+ * (SIDEWALK_OFFSET less a walker's radius, 0.35), touching neither.
+ */
+const BIKE_SIDE = 0.125, BIKE_WIDTH = 0.05;
+/** body width of a mover, and the guard's margin round a pedestrian (none for a bike, which passes in its own strip) */
+const widthOf = (m: Mover) => (isBike(m) ? BIKE_WIDTH : VEHICLE_WIDTH);
+const marginOf = (m: Mover) => (isBike(m) ? 0 : GUARD_MARGIN);
+/** The nearest mover of the given kind (bike or not) before index i of a lane queue: the one m follows. */
+function leaderIn(q: Mover[], i: number, bike: boolean): Mover | null {
+  for (let j = i - 1; j >= 0; j--) if (isBike(q[j]) === bike) return q[j];
+  return null;
+}
 
 /** Index into DIRS for the step from a to b (adjacent tiles). */
 export function dirBetween(ax: number, ay: number, bx: number, by: number): number {
@@ -516,7 +538,14 @@ export class Traffic {
    */
   private laneRoom(x: number, y: number, key: number, m: Mover, extra: Mover[] | null = null): boolean {
     const q = this.cells.get(key);
-    if (!TT.laneByLength) return (q?.length ?? 0) + (extra?.length ?? 0) < this.capacityInto(x, y);
+    if (!TT.laneByLength) {
+      // two-wheelers (fleet.ts BIKE_CLASS) slip into the space a car leaves and take none of a car's: they do not count,
+      // and the following gap alone keeps them clear of whatever is ahead (docs/mobile-jobs.md)
+      if (m.cls === BIKE_CLASS) return true;
+      let n = extra?.length ?? 0;
+      if (q) for (const o of q) if (o.cls !== BIKE_CLASS) n++;
+      return n < this.capacityInto(x, y);
+    }
     const kerb = (this.w.kerb.get(tkey(x, y)) ?? 0) > 0;
     let used = m.len + MIN_GAP;
     if (q) for (const o of q) used += o.len + MIN_GAP;
@@ -604,10 +633,8 @@ export class Traffic {
     const d = dirBetween(m.path[0], m.path[1], m.path[2], m.path[3]);
     const key = Traffic.laneKey(m.path[0], m.path[1], d);
     const q = this.cells.get(key);
-    if (q && q.length) {
-      const tail = q[q.length - 1];
-      if (tail.prog < (tail.len + m.len) / 2 + MIN_GAP * m.gapMul) return 'blocked';
-    }
+    const tail = q && q.length ? leaderIn(q, q.length, isBike(m)) : null;
+    if (tail && tail.prog < (tail.len + m.len) / 2 + MIN_GAP * m.gapMul) return 'blocked';
     if (TT.spawnClear && this.boxBusyExcept(m.path[0], m.path[1], m)) return 'blocked';
     m.pi = 1; m.prog = 0; m.wait = 0; m.stuck = 0; m.committed = false;
     m.inDir = d;
@@ -649,8 +676,9 @@ export class Traffic {
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1];
     const bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
     const d = dirBetween(ax, ay, bx, by);
-    if (prog < 0.5) pathPoint(ax, ay, m.inDir, d, 0.5 + prog, LANE_OFFSET, p);
-    else pathPoint(bx, by, d, this.nextDirOf(m), prog - 0.5, LANE_OFFSET, p);
+    const off = isBike(m) ? LANE_OFFSET + BIKE_SIDE : LANE_OFFSET;
+    if (prog < 0.5) pathPoint(ax, ay, m.inDir, d, 0.5 + prog, off, p);
+    else pathPoint(bx, by, d, this.nextDirOf(m), prog - 0.5, off, p);
     return p;
   }
   /** A progress the body guard can test: on into the next lane (as step() would put it there), or short of the destination. */
@@ -664,7 +692,7 @@ export class Traffic {
     if (p < 1 || m.pi + 1 >= m.path.length / 2) return this.posAt(m, Math.min(p, 0.999), out);
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1];
     const bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
-    return pathPoint(bx, by, dirBetween(ax, ay, bx, by), this.nextDirOf(m), 0.5 + (p - 1), LANE_OFFSET, out);
+    return pathPoint(bx, by, dirBetween(ax, ay, bx, by), this.nextDirOf(m), 0.5 + (p - 1), isBike(m) ? LANE_OFFSET + BIKE_SIDE : LANE_OFFSET, out);
   }
   /**
    * The body guard, last resort behind the entry rules: how far m may move this tick (at most `allowed`) without its
@@ -690,7 +718,7 @@ export class Traffic {
           if (ex * ex + ey * ey > reach * reach) continue;
           if (this.flyAt(p.x, p.y) || this.flyAt(m.x, m.y)) continue; // walkers on a flyover are on the deck or under it, beside the carriageways
           // already touching (walking out of a car is always allowed): driving on is how that ends
-          if (Math.abs(ex * nhx + ey * nhy) < m.len / 2 + PED_R && Math.abs(-ex * nhy + ey * nhx) < VEHICLE_WIDTH / 2 + PED_R) continue;
+          if (Math.abs(ex * nhx + ey * nhy) < m.len / 2 + PED_R && Math.abs(-ex * nhy + ey * nhx) < widthOf(m) / 2 + PED_R) continue;
           // behind the car's centre: ignored (pedBehind 0), or only a real touch counts (1: no margin, or a turning car's rear would freeze it next to people on the kerb)
           const ahead = ex * nhx + ey * nhy > 0;
           if (!ahead && !TT.pedBehind) continue;
@@ -704,7 +732,7 @@ export class Traffic {
         const q = this.carGrid.get(tkey(tx + dx, ty + dy));
         if (!q) continue;
         for (const o of q) {
-          if (o === m || o.lane < 0 || this.apart(m, o)) continue;
+          if (o === m || o.lane < 0 || this.apart(m, o) || this.filtering(m, o)) continue;
           const ex = o.x - m.x, ey = o.y - m.y, rr = reach + o.len / 2 + VEHICLE_WIDTH;
           if (ex * nhx + ey * nhy <= 0 || ex * ex + ey * ey > rr * rr) continue;
           const oh: [number, number] = [0, 0];
@@ -717,7 +745,7 @@ export class Traffic {
     }
     if (!peds.length && !cars.length) return allowed;
     const a: [number, number] = [0, 0], b: [number, number] = [0, 0], c: [number, number] = [0, 0];
-    const halfL = m.len / 2 + PED_R + GUARD_MARGIN, halfW = VEHICLE_WIDTH / 2 + PED_R + GUARD_MARGIN;
+    const halfL = m.len / 2 + PED_R + GUARD_MARGIN, halfW = widthOf(m) / 2 + PED_R + marginOf(m);
     for (let k = 1; k <= 3; k++) {
       const p = this.sweepProg(m, m.prog + (allowed * k) / 3);
       this.posAlong(m, Math.max(0, p - 0.01), a); this.posAlong(m, p + 0.01, b); this.posAlong(m, p, c);
@@ -754,6 +782,24 @@ export class Traffic {
     return false;
   }
   private gCars: Obb[] = [];
+  /**
+   * A two-wheeler and a car in the same lane, or one in the lane the other drives into next, both going straight: the
+   * bike rides past at the kerb edge. While either is turning, their paths cross and the body guard holds them as any two.
+   */
+  private filtering(m: Mover, o: Mover): boolean {
+    if (isBike(m) === isBike(o)) return false;
+    // through a turn: with bikeTurnGuard 1 both are held as any two vehicles; with 2 only the bike gives way (a car is never held by a bike)
+    if (TT.bikeTurnGuard && (TT.bikeTurnGuard === 1 || isBike(m)) && (this.turning(m) || this.turning(o))) return false;
+    if (o.lane === m.lane) return true;
+    const n = m.path.length / 2;
+    return m.pi + 1 < n && o.lane === Traffic.laneKey(m.path[m.pi * 2], m.path[m.pi * 2 + 1], this.nextDirOf(m));
+  }
+  /** Is m on the turning part of its lane: still coming round from the way it entered, or already into the turn ahead? */
+  private turning(m: Mover): boolean {
+    if (m.lane < 0 || m.pi < 1 || m.pi * 2 + 1 >= m.path.length) return false;
+    const d = m.lane % 4;
+    return (m.prog < 0.5 && m.inDir !== d) || (m.prog > 0.3 && this.nextDirOf(m) !== d);
+  }
   /** Would mover m's body at `prog` (posAlong) touch a pedestrian (body guard)? */
   private pedInBody(m: Mover, prog: number): boolean {
     const a = this.posAlong(m, Math.max(0, prog - 0.01), [0, 0]), b = this.posAlong(m, prog + 0.01, [0, 0]);
@@ -761,7 +807,7 @@ export class Traffic {
     let hx = b[0] - a[0], hy = b[1] - a[1];
     const d = Math.hypot(hx, hy); if (d < 1e-6) return false;
     hx /= d; hy /= d;
-    const halfL = m.len / 2 + PED_R + GUARD_MARGIN, halfW = VEHICLE_WIDTH / 2 + PED_R + GUARD_MARGIN;
+    const halfL = m.len / 2 + PED_R + GUARD_MARGIN, halfW = widthOf(m) / 2 + PED_R + marginOf(m);
     const tx = Math.floor(c[0]), ty = Math.floor(c[1]);
     const now = this.headingOf(m, this.tmp2) ? [this.tmp2[0], this.tmp2[1]] : null;
     for (const grid of [this.walkCur, this.walkPrev]) {
@@ -793,7 +839,7 @@ export class Traffic {
       const q = this.cells.get(Traffic.laneKey(tx + dx, ty + dy, dd));
       if (!q) continue;
       for (const o of q) {
-        if (o === m || this.apart(m, o)) continue;
+        if (o === m || this.apart(m, o) || this.filtering(m, o)) continue;
         const ex = o.x - c[0], ey = o.y - c[1];
         if (ex * ex + ey * ey > ((m.len + o.len) / 2 + VEHICLE_WIDTH) ** 2 || !this.headingOf(o, h)) continue;
         // only what is ahead: a car behind me keeps its own distance (and a turning car's rear swings toward it)
@@ -816,9 +862,9 @@ export class Traffic {
         if (m.lane < 0 || this.flyAt(m.x, m.y) || this.flyAt(x, y)) continue;
         const ex = x - m.x, ey = y - m.y;
         if (ex * ex + ey * ey > 0.36 || !this.headingOf(m, h)) continue;
-        if (Math.abs(ex * h[0] + ey * h[1]) < m.len / 2 + PED_R && Math.abs(-ex * h[1] + ey * h[0]) < VEHICLE_WIDTH / 2 + PED_R) return true;
+        if (Math.abs(ex * h[0] + ey * h[1]) < m.len / 2 + PED_R && Math.abs(-ex * h[1] + ey * h[0]) < widthOf(m) / 2 + PED_R) return true;
         const mh = TT.guardDrawn & 2 ? this.motion.get(m) : undefined; // and as drawn, facing its last move
-        if (mh && Math.abs(ex * mh[0] + ey * mh[1]) < m.len / 2 + PED_R && Math.abs(-ex * mh[1] + ey * mh[0]) < VEHICLE_WIDTH / 2 + PED_R) return true;
+        if (mh && Math.abs(ex * mh[0] + ey * mh[1]) < m.len / 2 + PED_R && Math.abs(-ex * mh[1] + ey * mh[0]) < widthOf(m) / 2 + PED_R) return true;
       }
     }
     return false;
@@ -946,8 +992,8 @@ export class Traffic {
     if (nq && nq.length && deg >= 3 && !ring) {
       // at a junction the car ahead in the exit lane must be out of the box before we go in behind it;
       // on plain road the following gap in step() is all that is needed, so cars can close up inside a tile
-      const tail = nq[nq.length - 1];
-      if (tail.prog < this.clearAt(tail) + MIN_GAP) return false;
+      const tail = leaderIn(nq, nq.length, isBike(m));
+      if (tail && tail.prog < this.clearAt(tail) + MIN_GAP) return false;
     }
     if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
     const signal = deg >= 3 && this.junction(bx, by).signal && !trapped;
@@ -1009,7 +1055,7 @@ export class Traffic {
    * nothing in its way in the box, the light green and not amber).
    */
   private offCrossing(m: Mover, bx: number, by: number, outD: number, nq: Mover[] | null): boolean {
-    if (nq && nq.length) { const tail = nq[nq.length - 1]; if (tail.prog < this.clearAt(tail) + MIN_GAP) return false; }
+    if (nq && nq.length) { const tail = leaderIn(nq, nq.length, isBike(m)); if (tail && tail.prog < this.clearAt(tail) + MIN_GAP) return false; }
     const i = m.pi + 1, n = m.path.length / 2;
     if (i + 1 >= n) return true; // C is where it is going: the forecourt rule decides
     const cx = m.path[i * 2], cy = m.path[i * 2 + 1];
@@ -1106,16 +1152,21 @@ export class Traffic {
     // follow the car ahead: in this lane, or the tail of the next lane on my route
     const q = this.cells.get(m.lane)!;
     const idx = q.indexOf(m);
+    const bike = isBike(m);
     let gap = Infinity;
-    if (idx > 0) { const l = q[idx - 1]; gap = l.prog - m.prog - (l.len + m.len) / 2; }
+    // cars follow cars and two-wheelers follow two-wheelers (they filter past each other at the kerb edge)
+    const lead = idx > 0 ? leaderIn(q, idx, bike) : null;
+    let tailNext: Mover | null = null;
+    if (lead) gap = lead.prog - m.prog - (lead.len + m.len) / 2;
     else if (!last) {
       const nq = this.cells.get(Traffic.laneKey(bx, by, nextDir));
-      if (nq && nq.length) { const l = nq[nq.length - 1]; gap = 1 - m.prog + l.prog - (l.len + m.len) / 2; }
+      tailNext = nq && nq.length ? leaderIn(nq, nq.length, bike) : null;
+      if (tailNext) gap = 1 - m.prog + tailNext.prog - (tailNext.len + m.len) / 2;
     }
     let allowed = Math.min(base, gap - MIN_GAP * m.gapMul);
     // progress is a fraction of the lane, and a right-turn arc is shorter than a straight, so also
     // hold the real distance to the car ahead (the chord never overstates the arc, so this is safe)
-    const ahead = idx > 0 ? q[idx - 1] : (!last ? (() => { const nq = this.cells.get(Traffic.laneKey(bx, by, nextDir)); return nq && nq.length ? nq[nq.length - 1] : null; })() : null);
+    const ahead = lead ?? tailNext;
     if (ahead) {
       const dist = Math.hypot(ahead.x - m.x, ahead.y - m.y) - (ahead.len + m.len) / 2 - MIN_GAP * m.gapMul * 0.5;
       if (dist < allowed) allowed = dist;

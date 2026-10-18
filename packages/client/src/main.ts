@@ -1,7 +1,7 @@
-import { WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
+import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   CHUNK_SIZE, LAND_PRICE_PER_TILE, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo,
+  terrainOf, isRoad, zoneOf, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
@@ -23,6 +23,7 @@ import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
 import { BridgeView } from './render/bridges';
 import { LandmarkMotion } from './render/landmarks';
+import { UndergroundView } from './render/underground';
 import { FootprintOverlay } from './render/footprint';
 import { Fpv, type CabEye } from './render/fpv';
 import { vehicleKey, trainPanelHtml, trainKmh, planePanelHtml, planeTipHtml, planeDoing, planeKnots, planeFeet, heliTipHtml, heliPanelHtml, heliDoing, heliTitle, heliKnots, type VehicleSel } from './vehicles';
@@ -35,6 +36,7 @@ import { UI } from './ui';
 import { ContextMenu } from './contextmenu';
 import { Onboarding } from './onboarding';
 import { LinesPanel } from './lines';
+import { ChartsPanel } from './charts';
 import { PerfHud } from './render/perfhud';
 import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered } from './worlds';
 import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel } from './tour';
@@ -145,6 +147,12 @@ const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz); // cars and walkers on a flyover deck or a bridge and their ramps
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
 landmarks.auxAt = (x, y) => world.auxAt(x, y); // a Tower Bridge span running on into the next chunk
+// the underground view (N, the "underground" chip): tunnels and platforms from the under layer, street grates, the platform preview (render/underground.ts)
+const underground = new UndergroundView(world);
+scene.add(underground.group);
+underground.surface = [citizens.group, parked.group, parks.group, junctions.group, bridges.group, lights.group, landmarks.group, trains.group, airfield.group, helis.group, buildings.mesh];
+underground.buildings = buildings.mesh;
+underground.shaderMaterials = [groundMaterial, buildings.mesh.material as Material];
 const airportParam = params.get('airport')?.split(',').map(Number);
 if (airportParam && airportParam.length >= 3 && airportParam.every((n) => Number.isFinite(n))) {
   planes.setPreviews([{ id: 1, x: airportParam[0], y: airportParam[1], dir: (airportParam[2] & 3) as 0 | 1 | 2 | 3, gates: airportParam[3] || 3, runwayLen: 12, flightsPerHour: airportParam[4] || 2 }]);
@@ -203,6 +211,7 @@ net.on('chunk', (m) => {
 });
 net.on('aux', (m) => world.applyAux(m.u));
 net.on('sub', (m) => world.applySub(m.u));
+net.on('under', (m) => world.applyUnder(m.u));
 net.on('tiles', (m) => world.applyTiles(m.u));
 net.on('parcels', (m) => { world.applyParcels(m.parcels, m.removed); lights.invalidate(); refreshPanel(); });
 net.on('players', (m) => {
@@ -215,6 +224,9 @@ net.on('players', (m) => {
 net.on('citizens', (m) => citizens.update(m.c, performance.now()));
 // bus lines (client/src/lines.ts): the lines chip and panel, ribbons while it is open, and each bus's livery
 const lines = new LinesPanel(net, world, (kind, msg) => ui.toast(kind, msg), liveTick);
+// city history charts (charts.ts, docs/charts.md): the charts chip, the ` key, and a click on the population or treasury figure
+const charts = new ChartsPanel(net);
+ui.onOpenChart = (id) => charts.show(id);
 lines.onLivery = (pairs, colours) => citizens.setLivery(pairs, colours);
 lines.onEdit = () => input.setTool('select');
 scene.add(lines.group);
@@ -304,6 +316,7 @@ function dropView(key: string) {
   lights.dropChunk(key);
   parks.dropChunk(key);
   airfield.dropChunk(key);
+  underground.dropChunk(key);
   helis.dropChunk(key);
   trains.dropChunk(key);
   junctions.dropChunk(key);
@@ -315,7 +328,7 @@ setInterval(streamChunks, 300);
 
 // ---- input ------------------------------------------------------------------------------------
 const input = new Input(canvas, rig, {
-  onToolChange: (t) => { ui.setTool(t); rectMesh.visible = false; updateStatus(); },
+  onToolChange: (t) => { ui.setTool(t); rectMesh.visible = false; updateStatus(); toolUnder(t); },
   ladderKey: (t) => ui.ladderKey(t), // 0, 8, 9, Y, P, G, V, B, L open their size picker on the size last used
   isWater: (x, y) => { const t = world.getTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water; }, // the road tool bridges water (render/bridges.ts)
   onBuild: (tool, tiles) => {
@@ -362,6 +375,7 @@ const input = new Input(canvas, rig, {
   onKey: (code) => {
     if (code === 'Escape' && selectedBuilding) closeBuilding();
     else if (code === 'KeyH') setHeat(!ChunkView.heatOn);
+    else if (code === 'KeyN') setUnder(!underground.on);
     else if (code === 'KeyT') { ui.toggleTech(); ui.showTech(world.myPlayer); }
   },
 });
@@ -391,6 +405,26 @@ function setHeat(on: boolean) {
   ui.setHeat(on);
 }
 document.getElementById('heat')!.onclick = () => setHeat(!ChunkView.heatOn);
+// ---- the underground view ------------------------------------------------------------------------
+/** the view came on by itself because a metro tool was picked, and goes back off when the tool does */
+let underAuto = false;
+function setUnder(on: boolean, auto = false) {
+  underground.set(on);
+  underAuto = on && auto;
+  document.getElementById('under')?.classList.toggle('on', on);
+}
+document.getElementById('under')?.addEventListener('click', () => setUnder(!underground.on));
+/** a metro station tool shows the underground while it is picked (docs/underground.md section 5) */
+function toolUnder(tool: string) {
+  const metro = isMetroStationKind(structureTool(tool));
+  if (metro && !underground.on) setUnder(true, true);
+  else if (!metro && underAuto) setUnder(false);
+}
+/** the platform a metro station tool would build under the hovered door, for the ghost and the verdict */
+function platformAt(kind: number, h: [number, number], p: Placed | undefined, rot: number | undefined) {
+  const r = p?.r ?? rot ?? 0;
+  return planPlatform(kind, p ? p.doorX : h[0], p ? p.doorY : h[1], (r & 1) === 0, { tile: (x, y) => world.getTile(x, y), under: (x, y) => world.underAt(x, y) });
+}
 document.getElementById('techBtn')!.onclick = () => { ui.toggleTech(); ui.showTech(world.myPlayer); };
 ui.setHeat(false);
 /** Fold fresh traffic bytes into the chunk views and the parked-car instances. */
@@ -412,6 +446,7 @@ const fpv = new Fpv({
   citizens,
   selected: () => selectedCitizen,
   cab: () => cabEye(),
+  indicator: (id) => { const s = citizens.indicatorOf(id); return s && citizens.indicatorLit(id) ? (s === 'hazard' ? 2 : s) : 0; },
   notify: (msg) => ui.toast('info', msg),
   onChange: (mode) => {
     ui.markFpv(mode);
@@ -542,6 +577,7 @@ function cabEye(): CabEye | null {
     return {
       key: vehicleKey(v), x: c.x, y: c.y, z: c.z, q: new Quaternion().setFromAxisAngle(UP, -c.h),
       label: `Line ${dto.number} · driver's cab`, lines: [doing, `${trainKmh(c.st.v)} km/h`], dip: 0.035, sway: c.st.v / TRAIN_VMAX, seed: hash2(v.line, v.train),
+      interior: { kind: 'train', kmh: trainKmh(c.st.v), vmax: trainKmh(TRAIN_VMAX), next: trainInfo?.next, doors: !!c.st.doors, seed: hash2(v.line, v.train) },
     };
   }
   if (v.kind === 'heli') {
@@ -659,7 +695,12 @@ function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: n
         land: (x, y) => { const p = world.parcelAt(x, y); if (p ? world.mayEdit(p.owner) : draft && DEV_TOOLS) return null; return p ? 'Not your land' : 'Buy this land first'; },
       }, rot) };
     }
-    const v = placeMemo.v, p = v.placed;
+    let v = placeMemo.v;
+    const p = v.placed;
+    if (v.ok && isMetroStationKind(kind)) { // the surface allows it; the platform under it must too
+      const pp = platformAt(kind, h, p, rot);
+      if (!pp.ok) v = { ok: false, reason: pp.reason ?? 'No room for a platform', placed: p };
+    }
     return p ? { x: p.ax, y: p.ay, w: p.w, h: p.h, verdict: v, placed: p } : { x: h[0], y: h[1], w: 1, h: 1, verdict: v };
   }
   if (input.tool === 'roundabout' || input.tool === 'flyover') return junctions.hoverArea(input.tool, h);
@@ -870,7 +911,9 @@ function frame(now: number) {
   rig.update();
   adaptQuality(dt);
 
+  underground.frame(dt, renderer);
   lighting.update(liveHour(), rig.target, rig.dist);
+  underground.look(lighting, renderer);
   scene.background = lighting.sky;
   const fog = scene.fog as Fog;
   fog.color.copy(lighting.sky);
@@ -881,7 +924,7 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (world.parcelsDirty) { parcelsView.rebuild(world.parcels.values(), world.players, world.me, selectedParcel); world.parcelsDirty = false; }
@@ -929,6 +972,11 @@ function frame(now: number) {
     } else footprint.hide();
   } else footprint.hide();
   footprint.frame(rig.camera, canvas.clientWidth, canvas.clientHeight);
+  { // a metro station tool: the planned platform under the door, green when it fits
+    const mk = structureTool(input.tool);
+    if (h && isMetroStationKind(mk)) { const area = hoverArea(h), pp = platformAt(mk, h, area.placed, input.rotationOf(input.tool)); underground.setPreview(pp.stop as StationStop, pp.ok && area.verdict?.ok !== false); }
+    else underground.setPreview(null);
+  }
   const r = input.buyRect;
   rectMesh.visible = !!r;
   if (r) {
@@ -947,7 +995,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { underground, setUnder, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------
@@ -974,7 +1022,7 @@ if (demoParam) {
   reviveDemo(demoParam, net);
   tour = new TourPanel({
     demo: demoParam, net, rig, scene, buildingHtml: (info) => ui.buildingHtml(info, 'h3'),
-    chipMount: document.getElementById('techBtn')!, onFly: () => { following = false; },
+    chipMount: document.getElementById('techBtn')!, onFly: () => { following = false; }, setUnder: (on) => setUnder(on),
   });
   (window as any).msc.tour = tour;
 }

@@ -16,7 +16,8 @@
     "buildings:compile": "tsx packages/shared/scripts/compile-buildings.ts",
     "buildings:check": "tsx packages/shared/scripts/check-buildings.ts",
     "demo:check": "tsx packages/server/src/demo/check.ts",
-    "local:check": "tsx packages/server/src/local/check.ts"
+    "local:check": "tsx packages/server/src/local/check.ts",
+    "history:check": "tsx packages/server/src/history-check.ts"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

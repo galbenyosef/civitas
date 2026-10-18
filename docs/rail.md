@@ -6,7 +6,7 @@ Code:
 
 - `shared/src/rail.ts` holds the aux encoding, the track planner, station geometry, the route search, track geometry, the timetable, train poses, calls and rides.
 - `shared/src/buildings/rail.ts` holds the two station kinds and their designs.
-- `server/src/sim/rail.ts` is `Rail`, the 'rail' mode of the transit registry. It handles routes, timing, calls, the track tool and station tooltips.
+- `server/src/sim/rail.ts` is `Rail`, the 'rail' mode of the transit registry. It handles routes, the track tool, freight and station tooltips. Timing and calls are its base class, `server/src/sim/timetabled.ts` (`Timetabled`), which the metro shares.
 - `server/src/net.ts` hosts the track tool, bulldozing and the 'railLines' message.
 - `client/src/render/trains.ts` draws trains and the overhead line.
 - `client/src/rail.ts` handles the track preview and the track and station tooltips.

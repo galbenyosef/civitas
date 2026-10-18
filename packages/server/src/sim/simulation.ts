@@ -6,7 +6,7 @@ import {
   withLevel, withProgress, progressOf, isRoad, tileKey, parseKey, mod,
   OCCUPATIONS, pickShift, hoursToTicks, hasFeature, levelFeature, nameFor, surnameFor, hash2, LifeStage, LIFE_STAGE_NAMES,
   LEISURE_CODES, LEISURE_MAX_RADIUS, VENUE_TYPE_INDEX, VENUE_WORDS, EVENT_NAMES, WEEKDAY_NAMES, leisureAt, isLeisure, isOpenAt, eventOn, eventStartAt, nextEvent,
-  type LeisureSpec, TRANSIT, stopModeOf, stopName, walkCost, BUS_DEPOT_KIND,
+  type LeisureSpec, TRANSIT, stopModeOf, stopName, walkCost, BUS_DEPOT_KIND, TAXI, FLEET_JOB,
   SERVICE_RADIUS_OF, SERVICE_STRENGTH_OF, WORK_RATE_OF, PATROL_RATE_OF,
   GROW_FORMS, topLevelOf, firstLevelOf, isMergedKind, venueCapacityOf, isMultiTile, placedFromAnchor, planStructure, packTile, terrainOf,
   zoneOf, isBuildable, underConstruction, isGatewayId, GATEWAY_OF, GATEWAY_WORDS, bridgeSpanAt, BRIDGE_STYLE_NAMES,
@@ -21,9 +21,15 @@ import {
 } from './life';
 import { findPath, findBest, findRoute, pathBetween, pathStillValid } from '../pathfinding';
 import { Traffic, crossMask, dirBetween } from './traffic';
+import { indicatorOf } from './indicators';
 import { Transit, BusService, isMechanic } from './transit';
 import { Carpool, CARPOOL, householdShare, coworkerShare, friendShare, type Candidate } from './carpool';
 import { Gateways, MIG, type Gate } from './gateways';
+import { Mobile, FLEET_VKIND } from './mobile';
+import { Taxis } from './taxis';
+import { Delivery } from './delivery';
+import { Refuse } from './refuse';
+import { Couriers } from './couriers';
 import { plantGardens, deepBackOk, GARDEN_KIND } from './blocks';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
@@ -143,12 +149,18 @@ export class Simulation {
   pool: Carpool;
   /** gateways (sim/gateways.ts): where newcomers arrive and leavers go out */
   gateways: Gateways;
+  /** mobile jobs (sim/mobile.ts, docs/mobile-jobs.md): workers on the road, and the taxi service */
+  mobile: Mobile;
+  taxis: Taxis;
+  delivery: Delivery;
+  refuse: Refuse;
+  couriers: Couriers;
   /** messages for a parcel owner's screen (net.ts sends them as toasts and clears the list) */
   notices: { owner: string; msg: string }[] = [];
   /** owners already told that newcomers spawn in place; cleared once a gateway brings someone in, so a town that loses its last gateway hears again */
   private noticed = new Set<string>();
   /** trips planned by mode since start (the A/B harness reads these): walked, driven, by transit */
-  modeLog = { walk: 0, drive: 0, transit: 0 };
+  modeLog = { walk: 0, drive: 0, transit: 0, taxi: 0 };
 
   constructor(private w: World) {
     this.traffic = new Traffic(w);
@@ -157,7 +169,17 @@ export class Simulation {
     this.transit.register(this.buses);
     this.pool = new Carpool(w);
     this.gateways = new Gateways(w);
-    w.onCitizenRemoved = (c) => { this.traffic.leave(c); this.transit.drop(c); this.pool.forget(c); this.releaseParking(c); this.dropVenue(c); };
+    this.mobile = new Mobile(w, this.traffic);
+    this.taxis = new Taxis(w, this.mobile);
+    this.mobile.register(this.taxis);
+    this.taxis.ranks = () => this.taxiRanks();
+    this.delivery = new Delivery(w, this.mobile);
+    this.mobile.register(this.delivery);
+    this.refuse = new Refuse(w, this.mobile);
+    this.mobile.register(this.refuse);
+    this.couriers = new Couriers(w, this.mobile);
+    this.mobile.register(this.couriers);
+    w.onCitizenRemoved = (c) => { this.traffic.leave(c); this.transit.drop(c); this.taxis.drop(c); this.mobile.forget(c); this.pool.forget(c); this.releaseParking(c); this.dropVenue(c); };
   }
 
   tick() {
@@ -177,6 +199,7 @@ export class Simulation {
     this.moveCitizens();
     this.moveVehicles();
     this.transit.tick();
+    this.mobile.tick();
     this.dispatch();
     this.traffic.endTick();
   }
@@ -202,6 +225,8 @@ export class Simulation {
       if (b.zone === Zone.Parking) { info.parking.fee = PARKING_FEE; info.parking.incomeToday = w.lotIncome.get(key) ?? 0; info.upkeep = CIVIC_UPKEEP[b.id]; }
     }
     if (full) info.people = this.peopleAt(b);
+    const mob = this.mobile.describeBuilding(b.x, b.y, b.id);
+    if (mob.length) info.mobile = mob;
     if (b.zone === Zone.Parking) return info;
     if (isGatewayId(b.id)) {
       let enRoute = 0;
@@ -354,6 +379,9 @@ export class Simulation {
     }
     if (c.leg) { info.tripDone = Math.max(0, c.leg.drive ? c.pi - 1 : c.pi); info.tripTotal = c.path.length / 2 - 1; }
     if (c.leg && this.legTrack.get(c)?.tripAt === c.tripStart) { const rr = this.reroutesOf(c).trip; if (rr > 0) info.reroutes = rr; }
+    const role = this.mobile.roleOf(c);
+    if (role) { info.occupation = FLEET_JOB[role.kind]; info.fleet = this.mobile.workerInfo(c); }
+    if (c.leg?.hail) { info.taxi = this.taxis.taxiOf(c); info.mode = this.taxis.isAboard(c) ? 'drive' : 'none'; info.status = this.taxis.isAboard(c) ? 'moving' : 'idle'; }
     this.describeShare(c, info);
     if (withRoute) this.addRoute(info, c);
     info.life = this.describeLife(c);
@@ -452,6 +480,7 @@ export class Simulation {
   private describeVehicle(v: Vehicle): CitizenInfo {
     const w = this.w;
     if (v.vkind === VehicleKind.Bus) { const bi = this.buses.describe(v); if (bi) return bi; }
+    if (v.vkind > FLEET_VKIND) { const fi = this.mobile.describe(v); if (fi) return fi; }
     const label = VEHICLE_LABEL[v.vkind] ?? 'vehicle';
     const fromB = w.buildings.get(tileKey(v.from[0], v.from[1])), toB = w.buildings.get(tileKey(v.to[0], v.to[1]));
     const named = (b: Building | undefined, p: [number, number]) => b ? `${KIND_NAMES[b.id]} at (${p[0]}, ${p[1]})` : `(${p[0]}, ${p[1]})`;
@@ -492,6 +521,10 @@ export class Simulation {
       const d = this.w.citizens.get(c.legs[0].lift.driver);
       return `walking to ${d ? `${nameFor(d.id, d.sn)}'s` : 'the'} car for a lift${going}`;
     }
+    if (c.leg?.hail) {
+      const tx = this.taxis.activity(c);
+      if (tx) return `${tx}${going}`;
+    }
     if (c.leg?.ride) {
       const ta = this.transit.activity(c);
       if (ta) return `${ta}${c.state === S.ToWork ? ', going to work' : c.state === S.ToHome ? ', going home' : c.state === S.ToVenue ? ', going out' : ''}`;
@@ -512,7 +545,7 @@ export class Simulation {
         if (c.stage === LifeStage.Retired) return 'at home, retired';
         return c.job ? 'at home' : 'at home, between jobs';
       case S.ToWork: return `${legWord()} to work`;
-      case S.Work: return familyOf(c.kind) === Zone.Yard ? 'at the yard' : 'on shift';
+      case S.Work: return this.mobile.activity(c) ?? (familyOf(c.kind) === Zone.Yard ? 'at the yard' : 'on shift');
       case S.ToHome: return `${legWord()} home`;
       case S.ToSite: return `${legWord()} to a building site`;
       case S.AtSite: return 'working on a building site';
@@ -914,6 +947,10 @@ export class Simulation {
     const owner = this.w.parcelAt(home.x, home.y)?.owner;
     if (owner) this.notice(owner, 'Newcomers are moving straight into your homes: place a motorway connection (Transport, at a road end on the edge of town) or a station so they arrive and leave through it');
   }
+  /** Taxi ranks: the doors of the gateways people may leave by taxi (stations, the airport, coach depots). */
+  private *taxiRanks(): Iterable<[number, number]> {
+    for (const g of this.gateways.list) if (g.spec.modes.includes('taxi')) yield [g.x, g.y];
+  }
   /** Tell an owner once, until the situation changes (see `noticed`). */
   private notice(owner: string, msg: string) {
     if (this.noticed.has(owner)) return;
@@ -945,12 +982,18 @@ export class Simulation {
   private migrate(c: Citizen, g: Gate, dx: number, dy: number, inbound: boolean): boolean {
     const w = this.w;
     const fx = Math.floor(c.x), fy = Math.floor(c.y);
-    this.traffic.leave(c); this.transit.drop(c); this.pool.forget(c);
+    this.traffic.leave(c); this.transit.drop(c); this.taxis.drop(c); this.pool.forget(c);
     c.legs = []; c.leg = null; c.pts = null;
     resetTrail(c, fx, fy);
     today(c, Math.floor(w.tick / DAY)); c.tripsToday++; c.tripStart = w.tick;
     if (fx === dx && fy === dy) { c.path = [dx, dy]; c.pi = 1; return true; }
     const mode = this.gateways.modeFor(g, c, Math.abs(dx - fx) + Math.abs(dy - fy));
+    if (mode === 'taxi') {
+      // a real taxi from the rank when one is free nearby (sim/taxis.ts); else the ride as before
+      const q = this.taxis.quote(fx, fy, dx, dy);
+      const leg = q && c.money >= q.fare ? this.taxis.book(c, q, fx, fy, dx, dy) : null;
+      if (leg) { c.legs = [leg]; this.modeLog.taxi++; this.startLeg(c); return true; }
+    }
     if (mode !== 'foot') {
       // a car comes off (or goes onto) the road in front of the gate, not out of the building
       const [sx, sy] = inbound ? [g.fx, g.fy] : [fx, fy], [ex, ey] = inbound ? [dx, dy] : [g.fx, g.fy];
@@ -1047,7 +1090,7 @@ export class Simulation {
   private hire(c: Citizen, b: Building, commute: number[]) {
     b.occupants++;
     c.job = true; c.wx = b.x; c.wy = b.y; c.kind = b.id; c.commute = commute; c.idleDays = 0;
-    const occ = OCCUPATIONS[b.id];
+    const occ = this.mobile.rotaFor(c) ?? OCCUPATIONS[b.id]; // a road job keeps its own hours (docs/mobile-jobs.md)
     const shift = pickShift(occ);
     const jitter = (Math.random() + Math.random() - 1) * TPH * 0.5; // mostly small, up to ±30 min
     c.shiftStart = mod(Math.round(hoursToTicks(shift.start) + jitter), DAY);
@@ -1141,6 +1184,7 @@ export class Simulation {
     if (!this.commutePath(c)) { this.w.quitJob(c); return; }
     const startAbs = c.nextAt + this.lead(c);
     c.nextAt = startAbs + c.shiftLen; // shift ends on schedule however long the trip takes
+    if (this.mobile.worksFromHome(c)) { c.state = S.Work; return; } // private hire: logs on at home (sim/mobile.ts)
     if (c.preStop && c.money >= MIN_SPENDING_MONEY && this.goToVenue(c, S.ToWork)) return;
     if (!this.plan(c, c.wx, c.wy)) { this.w.quitJob(c); return; }
     c.state = S.ToWork;
@@ -1155,6 +1199,7 @@ export class Simulation {
   }
 
   private endShift(c: Citizen) {
+    if (c.state === S.Work && this.mobile.holdShift(c)) return; // out on the road: finish the job and come back first (sim/mobile.ts)
     if (c.state === S.Work && this.waitForLift(c)) return; // a lift home with someone finishing a little later
     this.payWage(c);
     this.w.leaveSite(c);
@@ -1810,7 +1855,7 @@ export class Simulation {
     const px = Math.floor(p.x), py = Math.floor(p.y);
     let walk: number[] | null = null;
     if (px !== on[0] || py !== on[1]) { walk = pathBetween(w, px, py, on[0], on[1]); if (!walk) return false; }
-    this.traffic.leave(p); this.transit.drop(p); this.pool.forget(p);
+    this.traffic.leave(p); this.transit.drop(p); this.taxis.drop(p); this.pool.forget(p);
     p.legs = []; p.leg = null; p.pts = null;
     resetTrail(p, px, py);
     today(p, Math.floor(w.tick / DAY)); p.tripsToday++; p.tripStart = w.tick;
@@ -1905,7 +1950,7 @@ export class Simulation {
     const w = this.w;
     const hx = Math.floor(c.x), hy = Math.floor(c.y);
     this.traffic.leave(c);
-    this.transit.drop(c);
+    this.transit.drop(c); this.taxis.drop(c);
     this.pool.forget(c);
     c.legs = []; c.leg = null; c.pts = null;
     resetTrail(c, hx, hy);
@@ -1941,6 +1986,14 @@ export class Simulation {
     if (this.transit.any && c.parkedAt === null && Math.abs(dx - hx) + Math.abs(dy - hy) >= TRANSIT.minTrip) {
       const tl = this.transitChoice(c, hx, hy, dx, dy, useCar ? carTicks : Infinity);
       if (tl) { c.legs = tl; this.modeLog.transit++; this.startLeg(c); return true; }
+    }
+    // a taxi or private hire (sim/taxis.ts) when the car is at home or there is none: booked now if it beats walking and driving
+    if (c.parkedAt === null && Math.abs(dx - hx) + Math.abs(dy - hy) >= TAXI.minTrip) {
+      const h = this.hour, evening = h >= 19 || h < 4;
+      const db = goingHome ? undefined : this.w.buildings.get(tileKey(dx, dy));
+      const nightOut = evening && (goingHome ? c.state === S.AtVenue : !!db && (db.zone === Zone.Commercial || isLeisure(db.id)));
+      const tl = this.taxis.choose(c, hx, hy, dx, dy, useCar ? carTicks : Infinity, nightOut);
+      if (tl) { c.legs = tl; this.modeLog.taxi++; this.startLeg(c); return true; }
     }
     if (useCar) this.modeLog.drive++; else this.modeLog.walk++;
     if (!useCar) {
@@ -1981,6 +2034,7 @@ export class Simulation {
     m.path = leg.path; m.pi = 0; m.wait = 0; m.stuck = 0; m.pts = null;
     if (leg.ride && 'hx' in m) { this.traffic.leave(m); this.transit.startRide(m, leg); return true; } // to the stop's crowd
     if (leg.lift) { this.traffic.leave(m); return true; } // waiting for the car, or in it (sim/carpool.ts)
+    if (leg.hail && 'hx' in m) { this.traffic.leave(m); this.taxis.startWait(m); return true; } // waiting for a taxi, or in it (sim/taxis.ts)
     if (leg.drive) {
       m.cls = this.classOf(m);
       this.startTrack(m, leg);
@@ -2017,6 +2071,8 @@ export class Simulation {
       // 'off': out of the car, the walk from here (if any) is queued
     } else if (leg.ride) {
       if (!this.transit.rideDone(c)) return false; // waiting at the stop or on board
+    } else if (leg.hail) {
+      if (!this.taxis.hailDone(c)) return false; // waiting at the kerb or in the taxi (sim/taxis.ts)
     } else if (leg.drive) {
       if (c.lane < 0) { // still in the garage: pull out as soon as the lane start is clear (and everyone is in)
         if (leg.pool && this.pool.hold(c)) return false;
@@ -2405,7 +2461,7 @@ export class Simulation {
   }
 
   private teleportHome(c: Citizen) {
-    this.transit.drop(c);
+    this.transit.drop(c); this.taxis.drop(c);
     this.pool.forget(c);
     this.w.leaveSite(c);
     this.dropVenue(c);
@@ -2515,7 +2571,7 @@ export class Simulation {
   private moveVehicles() {
     const w = this.w;
     for (const v of w.vehicles.values()) {
-      if (v.vkind === VehicleKind.Bus) continue; // driven by the bus service (sim/transit.ts)
+      if (v.vkind === VehicleKind.Bus || v.vkind > FLEET_VKIND) continue; // driven by the bus service (sim/transit.ts) or as mobile jobs (sim/mobile.ts)
       if (v.phase === 'dwell') {
         if (w.tick >= v.until) this.headBack(v);
         continue;
@@ -2708,23 +2764,31 @@ export class Simulation {
   }
 
   /** Everyone who should be drawn: travelling citizens and vehicles on the road. */
-  *agents(): Iterable<{ id: number; x: number; y: number; state: number; mode: number; kind: number; cls: number; queued: boolean; emergency: boolean; stage: number; bag?: boolean; rev?: boolean }> {
+  *agents(): Iterable<{ id: number; x: number; y: number; state: number; mode: number; kind: number; cls: number; queued: boolean; emergency: boolean; stage: number; bag?: boolean; rev?: boolean; ind?: number; under?: boolean; extra?: number }> {
     for (const c of this.w.citizens.values()) {
       if (c.state === S.Home || c.state === S.Work) continue;
       if (c.leg?.lift) continue; // in someone's car, or waiting for it to set off (sim/carpool.ts): not drawn
+      if (c.leg?.hail) {
+        // waiting at the kerb for a taxi: standing there; in it, or waiting indoors for one that comes in at the door: not drawn
+        if (this.taxis.waiting(c) === 'kerb') yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: 0, kind: familyOf(c.kind), cls: 0, queued: true, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out };
+        continue;
+      }
       if (c.leg?.ride) {
         // on board: inside the bus, not drawn; at the stop: standing in the crowd (queued marks a walker standing still)
         if (this.transit.isRiding(c)) continue;
-        yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: 0, kind: familyOf(c.kind), cls: 0, queued: true, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out };
+        // on a metro platform: below ground (CITIZEN_UNDER), drawn only by the underground view
+        yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: 0, kind: familyOf(c.kind), cls: 0, queued: true, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out, under: this.transit.isUnder(c) };
         continue;
       }
       const drive = !!c.leg?.drive;
       if (drive && c.lane < 0) continue; // waiting in the garage for a gap
-      yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: drive ? 1 : 0, kind: familyOf(c.kind), cls: drive ? c.cls : 0, queued: drive && c.wait > 1, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out };
+      yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: drive ? 1 : 0, kind: familyOf(c.kind), cls: drive ? c.cls : 0, queued: drive && c.wait > 1, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out, ind: drive ? indicatorOf(c, false) : 0 };
     }
     for (const v of this.w.vehicles.values()) {
       if (v.phase === 'dwell' || v.lane < 0) continue;
-      yield { id: v.id, x: v.x, y: v.y, state: v.phase === 'back' ? S.ToHome : S.ToWork, mode: 1, kind: v.vkind, cls: v.cls, queued: v.wait > 1, emergency: v.priority, stage: 0, rev: v.cls === VehicleClass.Bus && this.traffic.reversing(v) };
+      if (v.vkind > FLEET_VKIND) { const a = this.mobile.agentOf(v); if (a) yield a; continue; } // taxis, riders, bin lorries (sim/mobile.ts)
+      const rev = v.cls === VehicleClass.Bus && this.traffic.reversing(v);
+      yield { id: v.id, x: v.x, y: v.y, state: v.phase === 'back' ? S.ToHome : S.ToWork, mode: 1, kind: v.vkind, cls: v.cls, queued: v.wait > 1, emergency: v.priority, stage: 0, rev, ind: indicatorOf(v, rev) };
     }
   }
 

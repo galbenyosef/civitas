@@ -66,6 +66,15 @@ export interface ModeService {
   lineChanged(id: number, line: TransitLine | null): void;
   /** Where a vehicle is now, so riders on board move with it; null when it is gone. */
   positionOf(vehicleId: number): [number, number] | null;
+  /**
+   * Make what a line needs before it is routed, and pay for it (the metro bores its tunnels: sim/metro.ts); called by
+   * saveLine after the stops are checked and before route(). An error refuses the save. Optional.
+   */
+  commit?(line: TransitLine): string | null;
+  /** Where a rider stands waiting at a stop, seeded per rider (the metro: along the platform); optional, else the kerb crowd (standAt). */
+  waitSpot?(stop: StopRef, citizenId: number): [number, number] | null;
+  /** Riders of this mode wait and ride below ground: their agents carry CITIZEN_UNDER and the surface does not draw them. */
+  readonly under?: boolean;
 }
 
 /** One ride of a planned trip. */
@@ -149,8 +158,8 @@ export class Transit {
     if (svc.lines) return bad(`${mode} lines are set up in their own panel`);
     for (let i = 0; i < stops.length; i++) {
       const s = stops[i];
-      if (stopModeOf(this.w.kindIdAt(s.x, s.y)) !== mode) return bad(`${stopName(s.x, s.y)} (stop ${i + 1}) is not a ${mode} stop`, i, s);
-      if (!this.sandbox && this.w.parcelAt(s.x, s.y)?.owner !== owner) return bad(`${stopName(s.x, s.y)} (stop ${i + 1}) is not on your land`, i, s);
+      if (stopModeOf(this.w.kindIdAt(s.x, s.y)) !== mode) return bad(`${this.w.stopLabel(s.x, s.y)} (stop ${i + 1}) is not a ${mode} stop`, i, s);
+      if (!this.sandbox && this.w.parcelAt(s.x, s.y)?.owner !== owner) return bad(`${this.w.stopLabel(s.x, s.y)} (stop ${i + 1}) is not on your land`, i, s);
       if (svc.plan) continue;
       const p = svc.stopProblem(s.x, s.y);
       if (p) return bad(p, i, s);
@@ -185,6 +194,9 @@ export class Transit {
       colour: (Number(spec.colour) >>> 0) & 0xffffff, stops, loop: spec.loop !== false,
       vehicles: Math.max(0, Math.min(TRANSIT.maxVehicles, Math.floor(Number(spec.vehicles) || 0))),
     };
+    const name = typeof spec.name === 'string' ? spec.name.trim().slice(0, 24) : prev?.name;
+    if (name) line.name = name;
+    if (svc.commit) { const err = svc.commit(line); if (err) return err; }
     const r = svc.route(line);
     if (typeof r === 'string') return r;
     this.w.transitLines.set(line.id, line);
@@ -335,7 +347,8 @@ export class Transit {
     let l = this.waiting.get(k);
     if (!l) this.waiting.set(k, l = []);
     l.push(r);
-    this.standAt(c, r.stop.x, r.stop.y);
+    const spot = svc?.waitSpot?.(r.stop, c.id);
+    if (spot) { c.x = spot[0]; c.y = spot[1]; } else this.standAt(c, r.stop.x, r.stop.y);
     c.pts = null; c.wait = 0;
     noteTrail(c, r.stop.x, r.stop.y);
   }
@@ -541,6 +554,11 @@ export class Transit {
     }
     return best;
   }
+  /** Routed stops within Manhattan distance r of (x, y), nearest first, with the lines calling there (a station's "change here for"). */
+  stopsAround(x: number, y: number, r: number): { s: StopRef; d: number; lines: TransitLine[] }[] {
+    return this.stopsNear(x, y, r).sort((a, b) => a.d - b.d || a.s.x - b.s.x || a.s.y - b.s.y)
+      .map(({ s, d }) => ({ s, d, lines: (this.linesAt.get(tkey(s.x, s.y)) ?? []).map((e) => e.line) }));
+  }
   /** Routed stops within Manhattan distance r of (x, y), with their distance. */
   private stopsNear(x: number, y: number, r: number): { s: StopRef; d: number }[] {
     const out: { s: StopRef; d: number }[] = [];
@@ -622,7 +640,7 @@ export class Transit {
     const day = Math.floor(this.w.tick / DAY), k = tkey(x, y);
     const waitList = this.waiting.get(k) ?? [];
     const c = readCount(this.stopCount.get(k), day);
-    const info: StopInfo = { name: stopName(x, y), waiting: waitList.length, lines: [], boardingsToday: c.today, boardingsYesterday: c.yesterday };
+    const info: StopInfo = { name: this.w.stopLabel(x, y), waiting: waitList.length, lines: [], boardingsToday: c.today, boardingsYesterday: c.yesterday };
     const d = boardDir(this.w, x, y);
     if (d >= 0) info.board = [x + DIRS[d][0], y + DIRS[d][1]];
     const mode = stopModeOf(this.w.kindIdAt(x, y));
@@ -651,13 +669,16 @@ export class Transit {
     const r = this.riders.get(c.id);
     if (!r) return null;
     const l = this.lines.get(r.line);
-    const name = l ? `the ${l.number}` : 'a bus';
-    if (r.phase === 'wait') return `waiting for ${name} at ${stopName(r.stop.x, r.stop.y)}`;
-    return this.w.tick < r.boardAt ? `boarding ${name} for ${stopName(r.off.x, r.off.y)}` : `riding ${name} to ${stopName(r.off.x, r.off.y)}`;
+    const name = l ? (l.name ? `the ${l.name} line` : `the ${l.number}`) : 'a bus';
+    const at = (s: StopRef) => this.w.stopLabel(s.x, s.y);
+    if (r.phase === 'wait') return `waiting for ${name} at ${at(r.stop)}`;
+    return this.w.tick < r.boardAt ? `boarding ${name} for ${at(r.off)}` : `riding ${name} to ${at(r.off)}`;
   }
   /** On board (and not still stepping aboard at the stop). */
   isRiding(c: Citizen) { const r = this.riders.get(c.id); return !!r && r.phase === 'ride' && this.w.tick >= r.boardAt; }
   isWaiting(c: Citizen) { return this.riders.get(c.id)?.phase === 'wait'; }
+  /** Waiting or riding below ground (a mode with `under`: the metro), so the surface does not draw them (CITIZEN_UNDER). */
+  isUnder(c: Citizen) { const r = this.riders.get(c.id), l = r && this.lines.get(r.line); return !!l && !!this.services.get(l.mode)?.under; }
   waitingCount() { let n = 0; for (const l of this.waiting.values()) n += l.length; return n; }
   ridingCount() { let n = 0; for (const l of this.onboard.values()) n += l.length; return n; }
 }

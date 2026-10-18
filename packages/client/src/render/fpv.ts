@@ -7,6 +7,7 @@ import type { CitizensView } from './citizens';
 import { Interior, placeOf } from './interiors';
 import { sceneUniforms } from './materials';
 import { Instruments, type AircraftCal } from './instruments';
+import { CarInterior, TrainCab, type CarFeed, type TrainCabFeed } from './vehicleInterior';
 
 export type FpvMode = 'off' | 'inset' | 'full';
 
@@ -44,6 +45,8 @@ export interface CabEye {
   sway?: number; seed?: number;
   /** an aircraft: show the flight instruments (render/instruments.ts), calibrated to the game's speed and altitude scales */
   instruments?: AircraftCal;
+  /** a train cab: draw the driver's cab around the view (render/vehicleInterior.ts) */
+  interior?: TrainCabFeed;
 }
 
 export interface FpvHooks {
@@ -52,6 +55,8 @@ export interface FpvHooks {
   selected(): number;
   /** the selected train's cab or plane's cockpit, when one is selected */
   cab(): CabEye | null;
+  /** the indicator lamps of a road vehicle that are lit right now: -1 left, 1 right, 2 both, 0 none (the dashboard arrows; the caller does the blinking) */
+  indicator?(id: number): number;
   /** the mode changed (including to 'off' once a fade-out has finished) */
   onChange(mode: FpvMode): void;
   /** a short message for the player ("they are indoors") */
@@ -90,6 +95,12 @@ export class Fpv {
   private body: HTMLElement;
   private fade: HTMLElement;
   private inst: Instruments;
+  private car: CarInterior;
+  private train: TrainCab;
+  /** the car interior was drawn this frame (otherwise it is hidden) */
+  private carOn = false;
+  private lastHeading = 0;
+  private carFeed: CarFeed = { id: 0, height: 0.16, speedTps: 0, yawRate: 0, indicator: 0 };
   private hudKey = '';
   private hudAt = 0;
   // smoothed pose
@@ -131,6 +142,9 @@ export class Fpv {
     this.body = this.hud.querySelector('.fbody')!;
     this.fade = this.hud.querySelector('.ffade')!;
     this.inst = new Instruments(this.hud, this.fade);
+    // behind the title and the text block, so those stay readable over the dash
+    this.car = new CarInterior(this.hud, this.hud.firstElementChild);
+    this.train = new TrainCab(this.hud, this.hud.firstElementChild);
     // between the canvas and the rest of the UI, so in full-window mode the panels stay clickable but the world does not
     document.body.insertBefore(this.hud, document.getElementById('ui'));
     this.hud.querySelector<HTMLElement>('#fpvClose')!.onclick = () => this.end();
@@ -228,7 +242,7 @@ export class Fpv {
     document.body.classList.toggle('fpv-full', mode === 'full');
     document.body.classList.toggle('fpv-on', mode !== 'off');
     this.hud.className = mode === 'off' ? 'hidden' : mode;
-    if (mode === 'off') this.inst.hide();
+    if (mode === 'off') { this.inst.hide(); this.car.hide(); this.train.hide(); }
     const swap = this.hud.querySelector<HTMLElement>('#fpvSwap')!;
     swap.textContent = mode === 'full' ? '▣ inset' : '⤢ full';
     this.layout(true);
@@ -268,12 +282,15 @@ export class Fpv {
         this.ride(cab, now, dt);
         this.cabHud(now, cab);
         this.instruments(cab, now, dt);
+        this.car.hide();
+        if (cab.interior) this.train.update(cab.interior, now, dt, this.viewW(), this.viewH(), this.level); else this.train.hide();
       }
       return;
     }
     this.fogFar = FOG_FAR;
-    this.inst.hide();
+    this.inst.hide(); this.train.hide();
     this.hud.classList.remove('inst');
+    this.carOn = false;
     const eye = this.hooks.citizens.eyeOf(this.id);
     const hour = sceneUniforms.uHour.value;
     if (eye && !eye.travelling) this.idleSince += dt; else this.idleSince = 0;
@@ -309,6 +326,7 @@ export class Fpv {
       else this.hold = this.lost > 0.35;
       if (this.lost > (this.room ? 8 : 3)) this.end();
     }
+    if (!this.carOn) this.car.hide();
     this.updateHud(now, eye?.speed ?? 0);
   }
 
@@ -335,7 +353,7 @@ export class Fpv {
     const k = 1 - Math.exp(-dt * POS_RATE); // position: filtered, so late or bunched tick updates never jerk the view
     const kh = 1 - Math.exp(-dt * 5.5); // heading: slower, so corners swing rather than snap
     if (!this.ready) {
-      this.px = tx; this.pz = tz; this.heading = want; this.speed = this.lead = eye.speed; this.bobAmt = 0; this.ready = true;
+      this.px = tx; this.pz = tz; this.heading = this.lastHeading = want; this.speed = this.lead = eye.speed; this.bobAmt = 0; this.ready = true;
     } else {
       // a low-pass filter trails a moving body by speed / rate; lead by that much (from the smoothed speed) to cancel it
       const lag = this.lead / POS_RATE;
@@ -369,7 +387,20 @@ export class Fpv {
     c.lookAt(this.px + Math.cos(h) * 10, y + Math.tan(pitch) * 10, this.pz - Math.sin(h) * 10);
     c.rotateZ(roll);
     this.py = y;
+    // the inside of a car, van, truck or bus; walkers have none
+    if (eye.car) {
+      const yawRate = dt > 0 ? angDiff(this.heading, this.lastHeading) / dt : 0;
+      const f = this.carFeed;
+      f.id = id; f.height = eye.height; f.speedTps = this.speed; f.yawRate = clamp(yawRate, -4, 4); f.color = eye.color; f.indicator = this.hooks.indicator?.(id) ?? 0;
+      this.car.update(f, now, dt, this.viewW(), this.viewH(), this.level);
+      this.carOn = true;
+    }
+    this.lastHeading = this.heading;
   }
+
+  /** the size of the first-person viewport in CSS pixels: the inset or the whole window */
+  private viewW() { return this.mode === 'full' ? this.winW : this.rect.w; }
+  private viewH() { return this.mode === 'full' ? this.winH : this.rect.h; }
 
   /**
    * In a cab: the eye is where the renderer put the cab this frame (a pure function of the smoothed tick, so it is

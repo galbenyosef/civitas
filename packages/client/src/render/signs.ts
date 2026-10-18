@@ -43,6 +43,13 @@ const STYLES: Record<string, Style[]> = {
   store: [{ board: '#1b2440', ink: '#e6c873', edge: '#e6c873', font: `bold ${SERIF}`, upper: true, glow: 1 }],
   mall: [{ board: '#f4f4f0', ink: '#11706b', edge: '#11706b', font: `bold ${SANS}`, glow: 1 }],
   hotel: [{ board: '#121212', ink: '#e9c66d', edge: '#e9c66d', font: `bold ${SERIF}`, upper: true, glow: 1 }],
+  // waste and recycling depots (shared/src/fleet.ts): council green
+  waste: [{ board: '#1f5e34', ink: '#ffffff', edge: '#b8e0c2', font: `bold ${SANS}`, glow: 0.6 }],
+  // cab offices (shared/src/fleet.ts): a lit minicab sign, black and taxi yellow or white on blue
+  cabs: [
+    { board: '#17171b', ink: '#ffcf33', edge: '#ffcf33', font: `bold ${SANS}`, upper: true, glow: 1 },
+    { board: '#1d3f8f', ink: '#ffffff', edge: '#ffcf33', font: `bold ${SANS}`, upper: true, glow: 1 },
+  ],
   office: [
     { board: '#c9cdd2', ink: '#23272e', edge: '#8e949c', font: `bold ${SANS}`, glow: 0.4 },
     { board: '#2a2f36', ink: '#f2f4f7', edge: '#59616b', font: `bold ${SANS}`, glow: 0.6 },

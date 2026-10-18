@@ -1,4 +1,5 @@
 import { hash2 } from './noise';
+import { isCabOffice, isWasteDepot } from './fleet';
 
 const FIRST = ['Ada', 'Amir', 'Anya', 'Arjun', 'Bea', 'Ben', 'Carla', 'Chen', 'Dara', 'Dev', 'Ellie', 'Emeka', 'Esme', 'Felix', 'Freya', 'Gus',
   'Hana', 'Hugo', 'Ines', 'Ivan', 'Jade', 'Jonah', 'Kai', 'Kira', 'Leo', 'Lina', 'Luca', 'Mae', 'Malik', 'Mira', 'Nadia', 'Noah',
@@ -54,6 +55,10 @@ export const SIGN_POOLS: Record<string, string[]> = (() => {
       return r < 0.45 ? `${surnameAt(i, 227)}'s ${t}` : r < 0.75 ? `The ${pickFrom(SHOP_ADJ, i, 229)} ${t}` : `${FIRST[Math.floor(hash2(i, 233) * FIRST.length)]}'s ${t}`;
     }),
     store: gen(12, (i) => `${surnameAt(i, 241)} & ${surnameAt(i, 251)}`),
+    // cab offices (shared/src/fleet.ts isCabOffice): minicab firms on the high street
+    // waste and recycling depots (shared/src/fleet.ts isWasteDepot)
+    waste: gen(8, (i) => (hash2(i, 265) < 0.5 ? `${surnameAt(i, 267)} ${pickFrom(['Waste & Recycling', 'Recycling', 'Environmental Services'], i, 269)}` : `${pickFrom(['Council', 'Borough', 'City', 'Greenway', 'Clearwater'], i, 271)} ${pickFrom(['Recycling Depot', 'Waste Depot', 'Cleansing Depot'], i, 273)}`)),
+    cabs: gen(12, (i) => (hash2(i, 255) < 0.5 ? `${surnameAt(i, 257)} ${pickFrom(['Cars', 'Taxis', 'Cabs', 'Minicabs'], i, 259)}` : `${pickFrom(['Ace', 'Star', 'Eagle', 'Metro', 'City', 'Swift', 'Express', 'Delta', 'Arrow', 'Crown'], i, 261)} ${pickFrom(['Cars', 'Taxis', 'Cabs'], i, 263)}`)),
     mall: gen(12, (i) => `${surnameAt(i, 257)} ${pickFrom(['Arcade', 'Centre', 'Galleria', 'Shopping Centre'], i, 263)}`),
     hotel: gen(12, (i) => (hash2(i, 269) < 0.5 ? `Hotel ${surnameAt(i, 271)}` : `The ${surnameAt(i, 277)} Hotel`)),
     office: gen(48, (i) => (hash2(i, 281) < 0.5 ? `${pickFrom(COMPANY_PRE, i, 283)} ${pickFrom(COMPANY, i, 293)}` : `${surnameAt(i, 307)} ${pickFrom(COMPANY, i, 311)}`)),
@@ -70,15 +75,16 @@ export type SignSource = { pool: string; index: number } | { text: string };
  * pools, venues a house name, civic buildings and transport hubs their kind's name. `kind` is the manifest entry
  * (shared/src/buildings: family, commerceType, venueType, name). Homes have numbers instead (houseNumber).
  */
-export function signSource(kind: { family: string; name: string; attrs: { commerceType?: string; venueType?: string; title?: string } }, x: number, y: number): SignSource {
+export function signSource(kind: { family: string; name: string; kindId?: number; attrs: { commerceType?: string; venueType?: string; title?: string } }, x: number, y: number): SignSource {
   const pool = (p: string): SignSource => ({ pool: p, index: Math.floor(hash2(x * 31 + 7, y * 17 + 3) * SIGN_POOLS[p].length) });
   switch (kind.family) {
     case 'commercial': {
+      if (kind.kindId !== undefined && isCabOffice(kind.kindId, x, y)) return pool('cabs'); // a minicab office (docs/mobile-jobs.md)
       const c = kind.attrs.commerceType;
       return pool(c === 'department store' ? 'store' : c === 'mall' ? 'mall' : c === 'hotel' ? 'hotel' : 'shop');
     }
     case 'office': return pool('office');
-    case 'industrial': return pool('industry');
+    case 'industrial': return kind.kindId !== undefined && isWasteDepot(kind.kindId, x, y) ? pool('waste') : pool('industry');
     case 'leisure': {
       const v = kind.attrs.venueType;
       if (kind.attrs.title) return { text: cap(kind.attrs.title) };
