@@ -4,7 +4,7 @@ import {
   BULLDOZE_COST, MAX_SUBS, MAX_TAX, DEFAULT_TAX, Zone, CitizenState, CIVIC_COST, workOf, KIND_NAMES, TRAFFIC_EVERY,
   isRoad, isBuildable, isGrowable, zoneOf, levelOf, terrainOf, packTile, chunkKey, chunkOf, parseKey, packCitizenFlags, localIndex, isStructureAux,
   u16ToB64, i32ToB64, u8ToB64, hasFeature, techFor, TECH_BY_ID, ALL_TECH_IDS, checkPurchase, ZONE_TOOLS, CIVIC_TOOLS, MANIFEST,
-  isMultiTile, planStructure, planRunway, isAirfieldAux, RUNWAY_MAX, isRailAux, isRailStationKind, RAIL_DRAG_MAX, roadOverTrackProblem, CROSSING_COST, familyOf, subFor, kindManifest,
+  isMultiTile, planStructure, planRunway, isAirfieldAux, RUNWAY_MAX, isRailAux, isRailStationKind, RAIL_DRAG_MAX, roadOverTrackProblem, CROSSING_COST, familyOf, subFor, kindManifest, isHarbourId,
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
   isBridgeAux, planBridge, joinsBridgeSide, BRIDGE_STYLE_NAMES, type BridgePlan,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
@@ -14,6 +14,7 @@ import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world
 import type { Simulation } from './sim/simulation';
 import { interiorLots } from './sim/blocks';
 import type { Airports } from './sim/airports';
+import type { Harbours } from './sim/harbours';
 import type { Rail } from './sim/rail';
 import type { Metro } from './sim/metro';
 import type { Ferry } from './sim/ferry';
@@ -55,7 +56,7 @@ export interface GameConfig {
  * What a spectator may still ask: looking, never changing. A whitelist, so an intent added to ClientMsg later is refused in
  * spectate mode until it is listed here. (hello and ping are answered before this, as for everyone.)
  */
-const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map']);
+const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map', 'inspectBoat']);
 const SPECTATE_REFUSAL = 'Read-only showcase: you can look around, but nothing can be changed here';
 const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) => k.tool!.id));
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
@@ -83,6 +84,8 @@ export class Net {
   metro: Metro | null = null;
   /** river buses (sim/ferry.ts): pier tooltips, boat tooltips and the 'ferryLines' message; set by game.ts */
   ferry: Ferry | null = null;
+  /** harbours (sim/harbours.ts): the 'harbours' message, harbour tooltips, boat panels, a cargo port's sea check; set by game.ts */
+  harbours: Harbours | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
   tickStats: { avg: number; p95: number; max: number } | null = null;
   /** game ticks per TICK_MS of wall time, sent with the stats message when it is not 1 so the client's clock follows a paused or
@@ -148,7 +151,11 @@ export class Net {
       case 'parcelOp': return this.parcelOp(c, m);
       case 'map': for (const json of this.map.answer(m.s, m.l)) if (c.conn.open) c.conn.send(json); return;
       case 'inspect': return this.inspect(c, m.x, m.y, m.full === true);
-      case 'inspectCitizen': return this.send(c, { t: 'citizen', id: Number(m.id), info: this.sim.describeCitizen(Number(m.id), m.route === true) });
+      case 'inspectCitizen': {
+        const info = this.sim.describeCitizen(Number(m.id), m.route === true), atSea = info && this.harbours?.atSea(Number(m.id));
+        if (info && atSea) info.atSea = atSea; // a fishing crew member out on their trawler (sim/harbours.ts)
+        return this.send(c, { t: 'citizen', id: Number(m.id), info });
+      }
       case 'unlock': return this.unlock(c, String(m.id));
       case 'dev': return this.dev(c, m.action, m.on);
       case 'sites': return this.siteList(c, m.id);
@@ -158,6 +165,7 @@ export class Net {
       case 'line': return this.editLine(c, m);
       case 'hist': return this.histOpen(c, m.open === true);
       case 'goals': case 'hint': this.onboarding?.command(c.player, m); return this.goals(c);
+      case 'inspectBoat': return this.send(c, { t: 'boat', id: Number(m.id), info: this.harbours?.inspectBoat(Number(m.id)) ?? null });
     }
   }
 
@@ -218,6 +226,7 @@ export class Net {
     if (this.rail) this.send(c, { t: 'railLines', lines: this.rail.dtos() });
     if (this.metro) { this.send(c, { t: 'metroLines', lines: this.metro.dtos() }); if (this.metro.loads.length) this.send(c, { t: 'metroLoads', l: this.metro.loads }); }
     if (this.ferry) this.send(c, { t: 'ferryLines', lines: this.ferry.dtos() });
+    if (this.harbours) this.send(c, this.harbours.msg());
     c.goalsSig = undefined; this.goals(c);
   }
 
@@ -606,6 +615,8 @@ export class Net {
     }, rot);
     if (!verdict.ok) { this.toast(c, verdict.reason); return false; }
     if (budget < CIVIC_COST[kind]) { this.toast(c, 'Not enough money'); return false; }
+    const sea = this.harbours?.placeProblem(verdict.placed); // a cargo port on a lake that never reaches the sea
+    if (sea) { this.toast(c, sea); return false; }
     // a metro hall lays its platform under the door (sim/metro.ts), along the street its front faces
     const platform = isMetroStationKind(kind) ? this.metro?.platformFor(kind, verdict.placed.doorX, verdict.placed.doorY, verdict.placed.r) ?? 'No underground railways on this server' : null;
     if (typeof platform === 'string') { this.toast(c, platform); return false; }
@@ -777,6 +788,7 @@ export class Net {
     if (info && isRailStationKind(b!.id) && this.rail) info.rail = this.rail.describeStation(dx, dy);
     if (info && isMetroStationKind(b!.id) && this.metro) info.metro = this.metro.describeStation(dx, dy);
     if (info && isFerryPierKind(b!.id) && this.ferry) info.ferry = this.ferry.describeStation(dx, dy);
+    if (info && isHarbourId(b!.id) && this.harbours) info.harbour = this.harbours.describe(b!);
     this.send(c, { t: 'building', x, y, info });
   }
 
@@ -976,6 +988,8 @@ export class Net {
     if (this.metro?.loadsChanged) { this.metro.loadsChanged = false; this.broadcast({ t: 'metroLoads', l: this.metro.loads }); }
     // ferry lines likewise (sim/ferry.ts)
     if (this.ferry?.changed) { this.ferry.changed = false; this.broadcast({ t: 'ferryLines', lines: this.ferry.dtos() }); }
+    // harbours and their lanes (sim/harbours.ts): a new list whenever any harbour, its staffing or the water changed
+    if (this.harbours?.changed) { this.harbours.changed = false; this.broadcast(this.harbours.msg()); }
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed
     if (w.tick % 10 === 0) {

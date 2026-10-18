@@ -5,6 +5,8 @@ import type { GatewayInfo } from './gateways';
 import type { GoalsDTO } from './goals';
 import type { RingsDTO } from './history';
 import type { FleetInfo, MobileRows } from './fleet';
+import type { BoatHarbour } from './boats';
+import type { SeaGate } from './waterways';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
 export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | KindToolId;
 
@@ -189,6 +191,8 @@ export interface BuildingInfo {
   people?: BuildingPeople;
   /** road work based here or serving here (docs/mobile-jobs.md): a cab office's taxis, a restaurant's orders and riders, a depot's rounds, a home's bins */
   mobile?: MobileRows[];
+  /** harbours (docs/boats.md, server sim/harbours.ts): lanes, sea route, the catch, cargo and berth fees */
+  harbour?: HarbourInfo;
 }
 
 /** An airport terminal's runway and timetable, for its tooltip. Ticks are absolute game ticks. */
@@ -337,6 +341,8 @@ export interface CitizenInfo {
   fleet?: FleetInfo;
   /** a passenger in a taxi or waiting for one (sim/taxis.ts): the vehicle, so the panel can select it */
   taxi?: { vehicle: number; label: string };
+  /** a fishing harbour's crew member whose trawler is out (server sim/harbours.ts): "at sea on the Kittiwake" */
+  atSea?: { boat: number; name: string };
 }
 
 /** Someone a citizen is connected to, for the panel (clickable). */
@@ -433,7 +439,9 @@ export type ClientMsg =
   | { t: 'goals'; op: 'skip' | 'resume' }
   | { t: 'hint'; id: string }
   /** the charts panel (docs/charts.md): open (answered with 'history', then an hourly 'histSample' follows) or closed */
-  | { t: 'hist'; open: boolean };
+  | { t: 'hist'; open: boolean }
+  /** a boat's panel (docs/boats.md section 7): what the server knows beyond the schedule; answered with 'boat' */
+  | { t: 'inspectBoat'; id: number };
 
 export type ServerMsg =
   | { t: 'welcome'; you: string; seed: number; day: number; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
@@ -482,4 +490,55 @@ export type ServerMsg =
   /** the city's history for the charts panel, to you only, when you open it: the world's series and yours (shared/src/history.ts) */
   | { t: 'history'; hour: number; world: RingsDTO; mine: RingsDTO }
   /** the newest hourly sample, to clients with the charts panel open: WORLD_SERIES values `w` and your PLAYER_SERIES values `p` */
-  | { t: 'histSample'; hour: number; w: number[]; p: number[] };
+  | { t: 'histSample'; hour: number; w: number[]; p: number[] }
+  /** every harbour with its lanes, and the sea gates (docs/boats.md 6.5): on hello and whenever anything changes, always a new list */
+  | { t: 'harbours'; list: HarbourDTO[]; gates: SeaGate[] }
+  | { t: 'boat'; id: number; info: BoatInfo | null };
+
+/**
+ * A harbour on the wire (server sim/harbours.ts): what the boat schedule reads (boats.ts BoatHarbour: id, kind, the
+ * anchor as x and y, name, active, berths, lanes) and where it stands. Clients run boatsAt on the list as it comes.
+ */
+export interface HarbourDTO extends BoatHarbour {
+  /** rotation: the FRONT index the door faces */
+  r: number;
+  door: [number, number];
+  owner: string | null;
+  /** the fairway tile every lane starts at */
+  fairway: [number, number];
+  /** the lanes its kind wants that could not be derived, and why ("no sea route for container ships: ...") */
+  refused?: string[];
+}
+/** A harbour's tooltip (server sim/harbours.ts). Money is dollars today; counts are today's unless named otherwise. */
+export interface HarbourInfo {
+  role: string;
+  /** staffed: its boats sail */
+  active: boolean;
+  lanes: { purpose: string; cls: string; tiles: number; gate?: string }[];
+  refused: string[];
+  /** the sea gate (or open water's offing) its sea lanes leave by; a cargo port is a gateway only with one */
+  sea?: string;
+  /** without a sea gate in the world: how many tiles of water it stands on (counted up to the open-sea size) */
+  waterTiles?: number;
+  boats: number;
+  /** its boats away now */
+  away: number;
+  /** fishing: boxes landed today, sent to market today, waiting on the quay */
+  landed?: number; sold?: number; stock?: number;
+  /** cargo port: ship calls today, containers landed and taken on, waiting to go by lorry, in the export stack, passengers off */
+  calls?: number; imports?: number; exports?: number; importQueue?: number; exportStack?: number; passengers?: number;
+  /** port dues (port) or berth fees (marina) earned today */
+  fees?: number;
+}
+/** A boat's panel: what the server knows beyond the schedule (the client has the type, name, crew roles and route). */
+export interface BoatInfo {
+  id: number;
+  harbour: number;
+  harbourName?: string;
+  /** a trawler's crew: real citizens on the harbour's payroll */
+  crew?: { id: number; name: string }[];
+  /** boxes of fish this trawler landed today */
+  landedToday?: number;
+  /** a ship's call: containers landed and taken on, passengers off */
+  cargo?: { imports: number; exports: number; passengers: number };
+}

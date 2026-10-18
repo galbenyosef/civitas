@@ -12,7 +12,11 @@
  * B3 appends the schedule: harbours (berths and derived lanes), fleets, a week of timetables (the same from the
  * client's tiles and the wire's copy, cold or cached), and every half tick no berth shared, no tall boat under a closed
  * or low deck, no jumps; bascule passages only inside lifts, one boat at a time.
- * Later subtasks append their sections (harbours, ferries).
+ * B4 appends the server's harbours: real harbours placed on the basin and the lake, their lanes derived by
+ * sim/harbours.ts (from the fairway, to open water's offing or the declared gates), a new list only on change, lanes
+ * re-derived after a water edit equal to a fresh derivation, a port refused on a small lake, two days of events
+ * (catch, calls, exports, dues, berth fees) against the schedule, and sea gates through a save.
+ * Later subtasks append their sections (ferries).
  *   npx tsx packages/shared/scripts/boats-check.ts [days]
  */
 import {
@@ -26,10 +30,14 @@ import {
   BOAT_TYPES, boatTimetable, boatsAt, harbourFleet, deriveHarbourLanes, harbourLaneSpecs, boatLane, clearBoatTimetables, voyageEvents, boatEvents,
   boatLifts, catchOf, callCargo, boatName, boatOwner, boatCrew, fishingReg, starboardOffset, HARBOUR_KIND, harbourBerths, placedBerths, placedFromDoor, BOAT_DAY_FROM, BOAT_DAY_TO,
   basculeOpen, basculeLifts, bridgeClearance, TICKS_PER_DAY, TICKS_PER_HOUR, BASCULE_RAISE, BASCULE_HOLD,
-  hash2, type BoatHarbour, type Berth, type BoatState, type BoatType, type Voyage,
+  hash2, HARBOUR_OF, type BoatHarbour, type Berth, type BoatState, type BoatType, type Voyage,
 } from '../src';
 import { World } from '../../server/src/world';
 import { ClientWorld } from '../../client/src/world';
+import { planStructure, fairwayTiles, footprintTile, withLevel, capacityOf, DEFAULT_TAX, type Placed } from '../src';
+import { emptyStats } from '../../server/src/world';
+import { Harbours, OFFING_NAME, harbourId } from '../../server/src/sim/harbours';
+import { snapshotOf, worldFromSnapshot } from '../../server/src/snapshot';
 
 let failures = 0, checks = 0;
 const fail = (msg: string) => { if (failures++ < 30) console.log('FAIL ' + msg); };
@@ -505,6 +513,152 @@ console.log('=== B3: names, owners, crews');
     seen.add(b.type);
     console.log(`  ${BOAT_TYPES[b.type].name} "${boatName(b.type, b.seed)}", ${boatOwner(b.type, b.seed, 'Fishbourne')}: ${boatCrew(b.type, b.seed).map((c) => `${c.name} (${c.role})`).join(', ')}`);
   }
+}
+
+// ==== B4: the server's harbours ====================================================================================
+// Real harbours on the basin's south shore (open water: the basin and the river are one body of over OPEN_SEA_TILES)
+// and on the small lake, their lanes derived by server sim/harbours.ts as the game does.
+console.log('=== B4: harbours on the server');
+{
+  const owner = w.getOrCreatePlayer('harb', 'Harbour Co', 0);
+  const parcel = { id: w.nextId++, owner: owner.id, name: 'The Quays', x: 100, y: 45, w: 32, h: 12, taxRate: DEFAULT_TAX, stats: emptyStats() };
+  w.parcels.set(parcel.id, parcel);
+  for (let y = parcel.y; y < parcel.y + parcel.h; y++) for (let x = parcel.x; x < parcel.x + parcel.w; x++) w.setParcelId(x, y, parcel.id);
+  const penv = { tile: (x: number, y: number) => w.getTile(x, y), aux: (x: number, y: number) => w.auxAt(x, y), sub: (x: number, y: number) => w.subAt(x, y), land: () => null };
+  /** a harbour of `role` with its back row(s) on the water at y 49 (r 0: the door faces south) or on the lake at y 60 (r 2) */
+  const doorFor = (kind: number, x: number, r: 0 | 2) => {
+    const p0 = placedFromDoor(kind, x, 0, r), wet = HARBOUR_OF[kind]!.wet;
+    return (r === 0 ? 50 - wet : 60 + wet - p0.h) - p0.ay; // the wet rows end at y 49, or start at y 60
+  };
+  const place = (role: 'jetty' | 'marina' | 'fishing' | 'port', x: number, r: 0 | 2): Placed | string => {
+    const kind = HARBOUR_KIND[role], doorY = doorFor(kind, x, r);
+    const p = placedFromDoor(kind, x, doorY, r);
+    w.setTile(p.frontX, p.frontY, packTile(Terrain.Grass, true, 0, 0));
+    const v = planStructure(kind, x, doorY, penv, r);
+    if (!v.ok) return v.reason;
+    w.placeStructure(v.placed, { work: 1, priority: 1, built: true });
+    const b = w.buildings.get(`${v.placed.doorX},${v.placed.doorY}`)!;
+    b.occupants = capacityOf(b.id, b.level);
+    return v.placed;
+  };
+  const PL: [string, 'jetty' | 'marina' | 'fishing' | 'port', number][] = [['jetty', 'jetty', 102], ['marina', 'marina', 105], ['fishing', 'fishing', 112], ['port', 'port', 120]];
+  const placedH = new Map<string, Placed>();
+  for (const [name, role, x] of PL) {
+    const p = place(role, x, 0);
+    ok(typeof p !== 'string', `placing the ${name}: ${p}`);
+    if (typeof p !== 'string') { placedH.set(name, p); ok(p.ay + p.h - 1 >= 50 && w.peekTile(p.doorX, p.doorY) !== undefined, `${name} straddles the shore`); }
+  }
+  const h4 = new Harbours(w);
+  h4.scan();
+  const list0 = h4.list;
+  ok(list0.length === 4 && h4.changed, `four harbours listed: ${list0.length}`);
+  for (const h of list0) {
+    const p = [...placedH.values()].find((q) => q.ax === h.x && q.ay === h.y)!;
+    const role = HARBOUR_OF[h.kind]!.role;
+    ok(!!p && h.id === harbourId(p.ax, p.ay) && h.door[0] === p.doorX && h.r === p.r && h.owner === 'harb' && h.active, `${role}: id, door, owner, active`);
+    // no low gate in a procedural world: no river lane (the barges come in from the sea)
+    const want = harbourLaneSpecs(h.kind).filter((q) => q.purpose !== 'river').length;
+    ok(h.lanes.length === want && !h.refused, `${role}: ${h.lanes.length}/${want} lanes; refused ${h.refused?.join('; ')}`);
+    const rowIdx = fairwayTiles(p, 0).length >> 1;
+    ok([0, 1, 2].some((row) => fairwayTiles(p, row)[rowIdx].join() === h.fairway.join()), `${role}: the fairway ${h.fairway} is behind its middle column`);
+    const [bx, by] = footprintTile(p, 0, 0), [fx, fy] = footprintTile(p, 0, -1);
+    for (const l of h.lanes) {
+      checkLane(`B4 ${role} ${l.purpose}/${l.cls}/${l.sig}`, l.route, l.cls, l.sig);
+      ok(l.route.x === h.fairway[0] && l.route.y === h.fairway[1] && (l.route.loop || (SIDES[l.route.entry][0] === bx - fx && SIDES[l.route.entry][1] === by - fy)), `${role} ${l.purpose}: starts at the fairway, entered from the harbour`);
+      if (l.purpose === 'sea' || l.purpose === 'grounds') ok(l.gate === OFFING_NAME, `${role} ${l.purpose}: leaves by the open sea (${l.gate})`);
+    }
+    ok(JSON.stringify(h.berths) === JSON.stringify(harbourBerths(p)), `${role}: berths are B3's harbourBerths`);
+    console.log(`  ${h.name} (${role}): fairway (${h.fairway}), ${h.lanes.map((l) => `${l.purpose}/${l.cls}/${l.sig}${l.gate ? ` to ${l.gate}` : ''} ${l.route.sides.length}`).join(', ')}`);
+  }
+  ok(h4.gates.length >= 1 && h4.gates.every((g) => g.name === OFFING_NAME), `gates: ${JSON.stringify(h4.gates)}`);
+  const port = list0.find((h) => HARBOUR_OF[h.kind]!.role === 'port')!;
+  ok(!!h4.describe(w.buildings.get(`${port.door[0]},${port.door[1]}`)!)?.sea, 'the port has a sea route (its gateway may open)');
+
+  // nothing changed: the same list object; a wet tile's word changing as it levels up is no water edit (the first
+  // change seen at a tile counts as one, since the harbours did not watch it being placed)
+  const fishing = list0.find((h) => HARBOUR_OF[h.kind]!.role === 'fishing')!;
+  const relevel = () => {
+    w.setTile(fishing.door[0], fishing.door[1], withLevel(w.getTile(fishing.door[0], fishing.door[1]), 2));
+    w.setTile(fishing.door[0], fishing.door[1], withLevel(w.getTile(fishing.door[0], fishing.door[1]), 1));
+    for (let i = 0; i < 6; i++) h4.scan();
+  };
+  relevel();
+  ok(h4.list === list0, 'derived again after a first sight: the same lanes keep the same list');
+  h4.changed = false;
+  const d0 = h4.totals.derivations;
+  relevel();
+  ok(h4.list === list0 && !h4.changed && h4.totals.derivations === d0, 'unchanged: the same list, no derivation');
+  // staffing: a new list of new objects, the harbour inactive, its boats stay home
+  const fb = w.buildings.get(`${fishing.door[0]},${fishing.door[1]}`)!;
+  fb.occupants = 0;
+  h4.scan();
+  const list1 = h4.list;
+  ok(list1 !== list0 && h4.changed && list1.every((h) => !list0.includes(h)) && !list1.find((h) => h.id === fishing.id)!.active && h4.totals.derivations === d0, 'staff gone: a new list, inactive, lanes kept');
+  ok(boatTimetable(list1, DAY0).voyages.every((v) => v.harbour !== fishing.id), 'an unstaffed harbour sails nothing');
+  fb.occupants = capacityOf(fb.id, fb.level);
+  h4.scan();
+
+  // the port on the small lake is refused at placement; its lanes, were it there, would say why
+  const lakeP = placedFromDoor(HARBOUR_KIND.port, 14, doorFor(HARBOUR_KIND.port, 14, 2), 2);
+  const why = h4.placeProblem(lakeP);
+  ok(!!why && /needs open water that reaches the sea: this lake is \d+ tiles/.test(why) && h4.placeProblem(placedH.get('port')!) === null, `a port on the small lake: ${why}`);
+  console.log(`  a port on the small lake: "${why}"`);
+
+  // wire: the schedule from the message's JSON copy is the same
+  const wire = JSON.parse(JSON.stringify(h4.msg())) as ReturnType<Harbours['msg']>;
+  const vd = (hs: readonly BoatHarbour[]) => boatTimetable(hs, DAY0).voyages.map((v) => `${v.id}:${v.boat}:${v.tStart.toFixed(2)}:${v.tEnd.toFixed(2)}`).join('|');
+  ok(vd(wire.list) === vd(h4.list) && vd(h4.list).length > 0, "the wire's copy gives the same timetable");
+
+  // two days of events, walked tick by tick, against the schedule's own events
+  const T0 = DAY0 * TICKS_PER_DAY + 1;
+  w.day = DAY0; w.tick = T0;
+  h4.tick();
+  const pt = placedH.get('port')!, stackFill = 400;
+  for (let i = 0; i < stackFill + 50; i++) (h4 as unknown as { exported(x: number, y: number): boolean }).exported(pt.frontX, pt.frontY);
+  const money0 = owner.money, tot0 = { ...h4.totals };
+  const T1 = T0 + 2 * TICKS_PER_DAY;
+  for (let t = T0 + 1; t <= T1; t++) { w.tick = t; w.day = Math.floor(t / TICKS_PER_DAY); h4.tick(); }
+  let landed = 0, calls = 0, imports = 0, exports = 0, left = stackFill;
+  const hs = h4.list;
+  const evs = [DAY0 - 1, DAY0, DAY0 + 1, DAY0 + 2].flatMap((d) => boatEvents(hs, d)).filter((e) => e.t > T0 && e.t <= T1).sort((a, b) => a.t - b.t);
+  for (const e of evs) {
+    if (e.what === 'berthed' && e.voyage.kind === 'fishing') landed += catchOf(e.voyage);
+    if (e.what === 'alongside' && e.voyage.kind === 'call') { calls++; imports += callCargo(e.voyage).imports; }
+    if (e.what === 'castOff' && e.voyage.kind === 'call') { if (e.t > T0 + Math.round(1.5 * TICKS_PER_DAY)) left = 0; const n = Math.min(left, callCargo(e.voyage).exportRoom); left -= n; exports += n; }
+  }
+  const D = (k: keyof typeof tot0) => h4.totals[k] - tot0[k];
+  const marina = hs.find((h) => HARBOUR_OF[h.kind]!.role === 'marina')!;
+  const fees = 2 * harbourFleet(marina).length * 4;
+  ok(D('landed') === landed && landed > 0, `catch landed ${D('landed')}, the schedule says ${landed}`);
+  ok(D('calls') === calls && D('imports') === imports && calls > 0, `calls ${D('calls')}/${calls}, containers landed ${D('imports')}/${imports}`);
+  ok(D('exports') === exports && exports > 0, `containers taken on ${D('exports')}, the schedule and the stack say ${exports}`);
+  ok(D('berthFees') === fees && D('dues') === 5 * (imports + exports) && Math.abs(owner.money - money0 - fees - D('dues')) < 1e-6, `berth fees $${D('berthFees')} (want ${fees}), dues $${D('dues')}, the owner +$${owner.money - money0}`);
+  const tb = harbourFleet(fishing).find((b) => b.type === 'trawler')!;
+  const bi = h4.inspectBoat(tb.id);
+  ok(!!bi && bi.harbour === fishing.id && bi.harbourName === fishing.name && Array.isArray(bi.crew) && bi.landedToday !== undefined, `inspectBoat: ${JSON.stringify(bi)}`);
+  console.log(`  2 days walked: ${landed} boxes landed, ${calls} calls landing ${imports} containers, ${exports} taken on from the stack, $${D('dues')} dues, $${fees} berth fees`);
+
+  // a water edit: a girder over the river and declared gates. The lanes are derived again (a little at a time), and
+  // equal what a fresh grid derives; the barges come down from the upper river under the new deck
+  w.seaGates = [gate, upriver];
+  bridge(85, 20, 4, BridgeStyle.Girder);
+  for (let i = 0; i < 20; i++) h4.scan();
+  const fresh = new Harbours(w);
+  fresh.scan();
+  ok(JSON.stringify(fresh.list) === JSON.stringify(h4.list), 'after the edit, the lanes equal a fresh derivation');
+  const portL = h4.list.find((h) => h.id === port.id)!;
+  ok(portL.lanes.some((l) => l.purpose === 'river' && l.gate === 'the upper river' && l.route.bridges.some((q) => q.x0 === 85 && q.style === BridgeStyle.Girder)), 'barges under the new girder from the upper river');
+  ok(portL.lanes.every((l) => l.purpose !== 'sea' || l.gate === 'the estuary') && h4.gates.some((g) => g.name === 'the estuary') && !h4.gates.some((g) => g.name === OFFING_NAME), 'declared gates replace the offing');
+  // taking a harbour away gives its water back to the others' lanes
+  w.removeStructure(placedH.get('jetty')!);
+  for (let i = 0; i < 20; i++) h4.scan();
+  const fresh2 = new Harbours(w);
+  fresh2.scan();
+  ok(h4.list.length === 3 && JSON.stringify(fresh2.list) === JSON.stringify(h4.list), 'the jetty bulldozed: three harbours, lanes as fresh');
+  // sea gates survive a save
+  const back = worldFromSnapshot(JSON.parse(JSON.stringify(snapshotOf(w))))!;
+  ok(JSON.stringify(back.seaGates) === JSON.stringify(w.seaGates), `sea gates through a save: ${JSON.stringify(back.seaGates)}`);
+  console.log(`  ${h4.totals.derivations} harbour derivations in ${h4.totals.deriveMs.toFixed(0)} ms (${(h4.totals.deriveMs / h4.totals.derivations).toFixed(1)} ms each); message ${(JSON.stringify(h4.msg()).length / 1024).toFixed(1)} KB`);
 }
 console.log(failures ? `\n${failures} FAILURES (${checks} checks)` : `\nALL CHECKS PASSED (${checks} checks)`);
 process.exit(failures ? 1 : 0);

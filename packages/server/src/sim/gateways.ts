@@ -26,7 +26,7 @@ export const MIG = {
 
 const REFRESH_EVERY = Math.max(1, Math.round(TICKS_PER_HOUR / 6)); // re-scan the built gateways every 10 game minutes
 const RELEASE_EVERY = 5;
-/** share of a plane's arriving passengers who are moving here (the rest are visitors and returning residents) */
+/** share of a plane's (or a ro-ro ferry's) arriving passengers who are moving here (the rest are visitors and returning residents) */
 const PLANE_NEWCOMER_SHARE = 0.08;
 
 interface QueuedArrival { hx: number; hy: number; due: number }
@@ -49,6 +49,8 @@ export class Gateways {
   totals = { in: 0, out: 0, fallbackIn: 0, fallbackOut: 0 };
 
   private scanned = false;
+  /** Has the cargo port whose door is (x, y) a sea route? (sim/harbours.ts, set by game.ts) A sea gate opens only with one. */
+  seaRoute: ((x: number, y: number) => boolean) | null = null;
 
   constructor(private w: World) {}
 
@@ -62,6 +64,7 @@ export class Gateways {
       const spec = GATEWAY_OF[b.id];
       if (!spec || b.level === 0) continue;
       if (spec.type !== 'motorway' && b.occupants === 0) continue;
+      if (spec.type === 'sea' && !this.seaRoute?.(b.x, b.y)) continue;
       const key = tkey(b.x, b.y);
       seen.add(key);
       if (this.gates.has(key)) continue;
@@ -142,6 +145,9 @@ export class Gateways {
     const add = passengers * PLANE_NEWCOMER_SHARE * (0.6 + 0.8 * Math.random());
     g.tokens = Math.min(this.burst(g.spec) + 40, g.tokens + add);
   }
+
+  /** A ro-ro ferry berthed at the cargo port whose door is (x, y) (sim/harbours.ts): planeLanded's twin. */
+  shipBerthed(x: number, y: number, passengers: number) { this.planeLanded(x, y, passengers); }
 
   /**
    * The gate a leaver heads for from (x, y): the nearest, with a car preferring the motorway and without one a

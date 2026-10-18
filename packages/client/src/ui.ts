@@ -1,6 +1,6 @@
 import { ROAD_COST, ZONE_COST, LAND_PRICE_PER_TILE, MAX_TAX, CIVIC_COST, Zone, KIND_NAMES, PRIORITY_NAMES, DAYS_PER_WEEK, isCivicId, familyOf, hasFeature, techFor, TECH, TECH_BY_ID, TRACK_NAMES, describeCondition, type ParcelDTO, type PlayerDTO, type BuildingInfo, type PersonRow, type PersonRef, type RoadInfo, type CitizenInfo, type SiteDTO } from '@msimcity/shared';
 import { TOOL_KINDS, DEV_TOOLS, type ToolId } from './input';
-import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo } from '@msimcity/shared';
+import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo, type HarbourInfo } from '@msimcity/shared';
 import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, LEDGER_LABELS, type KindToolId, type LedgerDTO, type LedgerCat } from '@msimcity/shared';
@@ -46,12 +46,32 @@ function gatewayHtml(g: GatewayInfo, row: (k: string, v: string | number) => str
   const net = (i: number, o: number) => { const n = i - o; return `<b class="${n < 0 ? 'bad' : ''}">${n > 0 ? '+' : ''}${n}</b>`; };
   const how: Record<string, string> = { car: 'by car', foot: 'on foot', taxi: 'by taxi' };
   let html = `<div class="sect">Gateway</div>`;
-  html += row('Status', g.open ? `taking arrivals · up to ${g.perHour} an hour${g.type === 'air' ? ' plus some of every plane' : ''}` : `<span class="bad">${g.type === 'motorway' ? 'not built yet' : 'closed: no staff yet'}</span>`);
+  html += row('Status', g.open ? `taking arrivals · up to ${g.perHour} an hour${g.type === 'air' ? ' plus some of every plane' : g.type === 'sea' ? ' plus some off every ferry' : ''}` : `<span class="bad">${g.type === 'motorway' ? 'not built yet' : g.type === 'sea' ? 'closed: no staff yet, or no sea route' : 'closed: no staff yet'}</span>`);
   html += row('Newcomers come in', g.modes.map((m) => how[m] ?? m).join(' or '));
   html += row('Today', `${g.arrivalsToday} in · ${g.departuresToday} out · net ${net(g.arrivalsToday, g.departuresToday)}`);
   html += row('Yesterday', `${g.arrivalsYesterday} in · ${g.departuresYesterday} out · net ${net(g.arrivalsYesterday, g.departuresYesterday)}`);
   html += row('Waiting at the gate', g.waiting ? `${g.waiting} newcomer${g.waiting === 1 ? '' : 's'}` : 'nobody');
   html += row('On their way', `${g.enRoute}`);
+  return html;
+}
+
+const LANE_WORDS: Record<string, string> = { sea: 'out to sea', cruise: 'a cruise', grounds: 'to the fishing grounds', river: 'up the river', through: 'through' };
+/** A harbour's tooltip (server sim/harbours.ts, docs/boats.md). */
+function harbourHtml(h: HarbourInfo, row: (k: string, v: string | number) => string): string {
+  let html = `<div class="sect">Harbour</div>`;
+  html += row('Status', h.active ? `in service · ${h.boats} boat${h.boats === 1 ? '' : 's'} based, ${h.away} out` : '<span class="bad">no staff: its boats stay moored</span>');
+  if (h.sea) html += row('Sea route', `out by ${esc(h.sea)}`);
+  else if (h.waterTiles !== undefined) html += row('Water', `a lake of ${h.waterTiles} tiles: local boats only`);
+  if (h.lanes.length) html += row('Lanes', h.lanes.map((l) => `${LANE_WORDS[l.purpose] ?? l.purpose} (${l.cls}, ${l.tiles} tiles${l.gate ? `, to ${esc(l.gate)}` : ''})`).join('<br>'));
+  for (const r of h.refused) html += row('No way', `<span class="bad">${esc(r)}</span>`);
+  if (h.landed !== undefined) html += row('Catch today', `${h.landed} boxes landed · ${h.sold} to market · ${h.stock} on the quay`);
+  if (h.calls !== undefined) {
+    html += row('Ships today', `${h.calls}`);
+    html += row('Containers today', `${h.imports} landed · ${h.exports} taken on`);
+    html += row('Waiting', `${h.importQueue} for lorries · ${h.exportStack} to ship`);
+    if (h.passengers) html += row('Ferry passengers today', `${h.passengers}`);
+  }
+  if (h.fees !== undefined) html += row(h.calls !== undefined ? 'Port dues today' : 'Berth fees today', fmt(h.fees));
   return html;
 }
 
@@ -473,6 +493,7 @@ export class UI {
     if (info.rail) html += railStationHtml(info.rail, row);
     if (info.metro) html += metroStationHtml(info.metro, row);
     if (info.ferry) html += metroStationHtml(info.ferry, row, true);
+    if (info.harbour) html += harbourHtml(info.harbour, row);
     if (info.gateway) html += gatewayHtml(info.gateway, row);
     if (info.transit) html += stopHtml(info.transit, row);
     if (info.venue) {
