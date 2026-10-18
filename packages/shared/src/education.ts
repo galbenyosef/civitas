@@ -1,6 +1,8 @@
 import { hash2 } from './noise';
 import { mod } from './coords';
 import { MANIFEST } from './buildings/compiled';
+import { LEVEL_SLOTS, Zone } from './buildings/codes';
+import { capacityOf } from './tile';
 
 /**
  * Education (docs/education.md): qualification levels, study stages, the tunables, and the pure helpers both sides use.
@@ -81,6 +83,10 @@ export const EDU = {
   match: 0.6,
   /** leaving chance multiplier for a graduate out of work or over-qualified for drainDays (E4) */
   drainMul: 3, drainDays: 2,
+  /** chance a new graduate with no matching job drainDays after graduating leaves town (E4) */
+  gradLeave: 0.5,
+  /** health target bonus for a degree or more (E4) */
+  healthBonus: 2,
   /** share of newcomers who arrive as a family with 1-3 children aged 0-15 (E5) */
   familyShare: 0.2,
   /** the education log keeps this many finished stages */
@@ -194,9 +200,7 @@ export function eduDefaults(id: number, age: number): EduFields {
   const base = pick(EDU.baseMix, hash2(id, 231));
   const cap = maxLevelAt(age);
   const edu = age < 18 ? (age < 11 ? EduLevel.None : Math.min(cap, Math.max(EduLevel.Primary, base))) : Math.min(cap, base);
-  const track = edu >= EduLevel.Degree ? pick(EDU.trackDegree, hash2(id, 233))
-    : edu === EduLevel.Further ? pick(EDU.trackFurther, hash2(id, 233)) : EduTrack.None;
-  return { edu, track, study: Study.None, sx: 0, sy: 0, att: 0, due: 0, eduBits: 0, eduLog: [] };
+  return { edu, track: trackFor(id, edu), study: Study.None, sx: 0, sy: 0, att: 0, due: 0, eduBits: 0, eduLog: [] };
 }
 
 /** Points 0-5 per level; the education index is 20 x the mean over residents aged 25-64 (0-100; baseMix gives about 62). */
@@ -227,3 +231,79 @@ export function logEdu(c: EduFields, entry: EduLogEntry) {
   c.eduLog.push(entry);
   if (c.eduLog.length > EDU.logMax) c.eduLog.splice(0, c.eduLog.length - EDU.logMax);
 }
+
+// ---- jobs: skilled places (E4, docs/education.md section 7) ------------------------------------------
+
+/**
+ * The switch for the education effects on jobs, wages and migration (the skill gate, wage multipliers, the newcomer
+ * tilt, brain drain and the happiness parts). Off, the simulation plays as before E4: the A/B control
+ * (`EDU=0` in the server's environment, or `ab.ts --set edu=0`).
+ */
+export const SKILLS = { on: true };
+
+/**
+ * A workplace's skilled places, by kind and level: `[level, share]`, that share of its places (rounded up) needs that
+ * level, and the rest are unskilled places anyone may take. A kind or level can set it with a `skill` attribute;
+ * the others read these defaults by family. Where section 7 names two tiers (a factory complex: further 50% + degree
+ * 10%), the places are one tier at the lower level with the shares added.
+ */
+export function skillDefault(kind: string, family: number, level: number, attrs: Record<string, unknown>): [number, number] {
+  const L = EduLevel;
+  const stage = typeof attrs.stage === 'number' ? attrs.stage : 0;
+  if (stage) return stage >= Study.Postgrad ? [L.Postgrad, 0.6] : stage === Study.Degree ? [L.Postgrad, 0.4] : [L.Degree, 0.6]; // schools, university, research (E2)
+  switch (family) {
+    case Zone.Commercial: return level <= 3 ? [L.Secondary, [0.2, 0.2, 0.3, 0.4][level]] : [L.Further, 0.3]; // shops; department store, shopping centre, hotel
+    case Zone.Industrial: return [L.Further, level <= 3 ? [0.3, 0.3, 0.4, 0.5][level] : level === 4 ? 0.5 : 0.6]; // trades; factory complex, heavy plant
+    case Zone.Office: return level <= 1 ? [L.Further, 0.4] : level === 2 ? [L.Degree, 0.4] : level === 3 ? [L.Degree, 0.6] : [L.Degree, 0.7];
+    case Zone.Hospital: return [L.Degree, HEALTH_SHARE[kind] ?? 0.5];
+    case Zone.Police: case Zone.Fire: case Zone.Yard: return [L.Further, 0.3];
+    case Zone.Airport: return kind === 'airport' ? [L.Further, 0.4] : [L.None, 0]; // pilots and crew; other hubs as before
+    default: return [L.None, 0];
+  }
+}
+const HEALTH_SHARE: Record<string, number> = {
+  'gp-surgery': 0.4, 'health-centre': 0.45, 'walk-in-centre': 0.45, 'community-hospital': 0.5, hospital: 0.55, 'general-hospital': 0.55,
+  'teaching-hospital': 0.8,
+};
+
+const SKILL_NEED = new Uint8Array(MANIFEST.reduce((n, k) => Math.max(n, k.kindId + 1), 0) * LEVEL_SLOTS);
+const SKILLED = new Int16Array(SKILL_NEED.length);
+const WORK_TRACK = new Uint8Array(SKILL_NEED.length / LEVEL_SLOTS);
+for (const k of MANIFEST) {
+  if (!k.flags.workplace) continue;
+  WORK_TRACK[k.kindId] = k.code === Zone.Industrial || k.code === Zone.Yard ? EduTrack.Trades
+    : k.code === Zone.Hospital || (typeof k.attrs.stage === 'number' && k.attrs.stage >= Study.Degree) ? EduTrack.Stem
+    : k.code === Zone.Office ? EduTrack.Arts : EduTrack.None;
+  for (const l of k.levels) {
+    const own = l.attrs.skill; // London's office towers are level-1 landmarks: they hire like the top office tier
+    const [need, share] = Array.isArray(own) && own.length === 2 ? own as [number, number]
+      : skillDefault(k.id, k.code, k.landmark && k.code === Zone.Office ? 7 : l.level, l.attrs);
+    const i = k.kindId * LEVEL_SLOTS + l.level;
+    SKILL_NEED[i] = need;
+    SKILLED[i] = share > 0 && need > 0 ? Math.min(capacityOf(k.kindId, l.level), Math.ceil(capacityOf(k.kindId, l.level) * share)) : 0;
+  }
+}
+const slotOf = (id: number, level: number) => id * LEVEL_SLOTS + (level > 7 ? 7 : level < 0 ? 0 : level);
+/** The level a workplace's skilled places need (0: it has none). */
+export const skillNeed = (id: number, level: number) => SKILL_NEED[slotOf(id, level)] ?? 0;
+/** How many of a workplace's places are skilled: ceil(capacity × share). */
+export const skilledPlaces = (id: number, level: number) => SKILLED[slotOf(id, level)] ?? 0;
+/** The track that fits a workplace: trades in industry and building, STEM in health and research, arts and business in offices. */
+export const workTrack = (id: number) => WORK_TRACK[id] ?? 0;
+
+/**
+ * Whether a worker is over-qualified for their place: a graduate (degree or more) in a place that needs two or more
+ * levels below theirs (an unskilled place counts as needing none). `skill` is the level their place needs.
+ */
+export const overQualified = (c: { job: boolean; edu: number; skill?: number }) =>
+  SKILLS.on && c.job && c.edu >= EduLevel.Degree && c.edu - (c.skill ?? 0) >= 2;
+
+/** Wage multiplier for a worker: by level in a skilled place, times EDU.trackMatch when the track fits the workplace. */
+export function wageMul(c: { edu: number; track: number; skill?: number }, kind: number): number {
+  if (!SKILLS.on || !c.skill) return 1;
+  return EDU.wage[c.edu] * (c.track && c.track === workTrack(kind) ? EDU.trackMatch : 1);
+}
+
+/** The track a citizen of this level takes, from the id (as eduDefaults gives it). */
+export const trackFor = (id: number, edu: number) => edu >= EduLevel.Degree ? pick(EDU.trackDegree, hash2(id, 233))
+  : edu === EduLevel.Further ? pick(EDU.trackFurther, hash2(id, 233)) : EduTrack.None;

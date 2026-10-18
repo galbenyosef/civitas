@@ -13,6 +13,7 @@ import {
   type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
   buildingValue, LAND_PRICE_PER_TILE, ROAD_COST,
   eduDefaults, birthdayOf, yearGroup, STAGES, Study, EduResult, EDU_NURSERY, EDU_DROPPED, EDU_HOMEWARD, CITIZEN_STUDY, type CitizenEducation,
+  SKILLS, wageMul, type EduFields,
 } from '@msimcity/shared';
 import type { Building, Citizen, Leg, Mover, Vehicle, World, MergePlan } from '../world';
 import { noteTrail, resetTrail, tkey, untkey, lifeDefaults, hasJobs } from '../world';
@@ -32,6 +33,7 @@ import { Taxis } from './taxis';
 import { Delivery } from './delivery';
 import { Refuse } from './refuse';
 import { Couriers } from './couriers';
+import { Skills, Place } from './skills';
 import { plantGardens, deepBackOk, GARDEN_KIND } from './blocks';
 import { Schools, ERRAND_SCHOOL } from './schools';
 
@@ -169,6 +171,8 @@ export class Simulation {
   couriers: Couriers;
   /** schools (sim/schools.ts, docs/education.md): admissions, the school day, results */
   schools: Schools;
+  /** jobs, wages and migration by education (sim/skills.ts, docs/education.md section 7) */
+  skills: Skills;
   /** messages for a parcel owner's screen (net.ts sends them as toasts and clears the list) */
   notices: { owner: string; msg: string }[] = [];
   /** owners already told that newcomers spawn in place; cleared once a gateway brings someone in, so a town that loses its last gateway hears again */
@@ -197,6 +201,8 @@ export class Simulation {
       scheduleNext: (c) => this.scheduleNext(c), depart: (c) => this.depart(c),
       escort: (a, c, then, onShift) => this.escortTrip(a, c, then, onShift), fetch: (a, c) => this.fetchTrip(a, c),
     }, this.lifeEvents);
+    this.skills = new Skills(w, (c) => this.leaveTown(c), (owner, msg) => this.notices.push({ owner, msg })); // it says it once a game day itself
+    this.schools.onGraduated = (c) => this.skills.graduated(c);
     w.onCitizenRemoved = (c) => { this.traffic.leave(c); this.transit.drop(c); this.taxis.drop(c); this.mobile.forget(c); this.pool.forget(c); this.releaseParking(c); this.dropVenue(c); };
   }
 
@@ -653,9 +659,10 @@ export class Simulation {
       if (parcel) w.credit(parcel.owner, -upkeepOf(b.id, b.level)); // per level (parks have three); one-level kinds as before
     }
     for (const c of w.citizens.values()) {
+      this.skills.day(c); // brain drain: graduates out of work or over-qualified
       if (c.job || c.study || c.stage !== LifeStage.Adult) { c.idleDays = 0; continue; } // children, retirees and students are not looking for work
       if (c.mig) continue; // moving in or out already
-      if (++c.idleDays > MAX_IDLE_DAYS) this.leaveTown(c);
+      if (++c.idleDays > MAX_IDLE_DAYS) { this.skills.count(c); this.leaveTown(c); }
     }
     w.parkFail.clear(); w.lotIncome.clear();
     this.leisureCache.clear(); // drops homes that are gone; the rest refill on first use
@@ -985,7 +992,8 @@ export class Simulation {
   private spawnCitizen(home: Building) {
     const w = this.w;
     const id = w.nextId++;
-    const c = this.makeCitizen(id, home, seededAge(id, LIFE.newcomerMin, LIFE.newcomerMax), 70 + 28 * hash2(id, 212));
+    const n = this.skills.newcomer(id, seededAge(id, LIFE.newcomerMin, LIFE.newcomerMax));
+    const c = this.makeCitizen(id, home, n.age, 70 + 28 * hash2(id, 212), n.edu);
     w.addCitizen(c);
     home.occupants++;
     if (this.vacantJobs > 0) this.findJob(c);
@@ -1017,7 +1025,8 @@ export class Simulation {
     const home = w.buildings.get(tileKey(hx, hy));
     if (!home || home.zone !== Zone.Residential || home.level === 0 || home.occupants >= capacityOf(home.id, home.level)) return; // gone or filled meanwhile
     const id = w.nextId++;
-    const c = this.makeCitizen(id, home, seededAge(id, LIFE.newcomerMin, LIFE.newcomerMax), 70 + 28 * hash2(id, 212));
+    const n = this.skills.newcomer(id, seededAge(id, LIFE.newcomerMin, LIFE.newcomerMax));
+    const c = this.makeCitizen(id, home, n.age, 70 + 28 * hash2(id, 212), n.edu);
     c.mig = MIG.In; c.gx = g.x; c.gy = g.y; c.x = g.x + 0.5; c.y = g.y + 0.5;
     w.addCitizen(c);
     home.occupants++;
@@ -1093,7 +1102,7 @@ export class Simulation {
   }
 
   /** A citizen at home in `home`, of the given age and health, in a household of their own. */
-  private makeCitizen(id: number, home: Building, age: number, health: number): Citizen {
+  private makeCitizen(id: number, home: Building, age: number, health: number, edu: EduFields = eduDefaults(id, age)): Citizen {
     const w = this.w;
     return {
       id, hx: home.x, hy: home.y, job: false, wx: 0, wy: 0, kind: 0,
@@ -1104,7 +1113,7 @@ export class Simulation {
       car: w.ownsCar(id, 0), legs: [], leg: null, parkedAt: null, parkKerb: false,
       ...w.moverDefaults(id),
       ...lifeDefaults(id, w.tick, age, health),
-      ...eduDefaults(id, age),
+      ...edu,
       leisure: LEISURE.start + LEISURE.startSpread * hash2(id, 219), // newcomers arrive neither bored nor fresh from a holiday
     };
   }
@@ -1115,13 +1124,16 @@ export class Simulation {
    * again: so a miss is remembered with the tiles it looked at and the full workplaces it passed, and stands, giving
    * the same answer without searching, until one of those workplaces has room again or World.jobEditedSince sees a
    * workplace or road edit over those tiles.
+   *
+   * Education (sim/skills.ts): a vacancy is a place this citizen's level may take, a skilled place they qualify for
+   * or an unskilled one, so a miss is remembered per home and level.
    */
   private findJob(c: Citizen): boolean {
-    const w = this.w;
-    const home = tkey(c.hx, c.hy);
+    const w = this.w, sk = this.skills, edu = c.edu;
+    const home = tkey(c.hx, c.hy) * 8 + (SKILLS.on ? edu : 0);
     const miss = this.jobMisses.get(home);
     if (miss) {
-      if (!w.jobEditedSince(miss.x0, miss.y0, miss.x1, miss.y1, miss.edits) && miss.full.every((b) => b.occupants >= capacityOf(b.id, b.level))) return false;
+      if (!w.jobEditedSince(miss.x0, miss.y0, miss.x1, miss.y1, miss.edits) && miss.full.every((b) => sk.placeFor(b, edu) === Place.None)) return false;
       this.jobMisses.delete(home);
     }
     let x0 = c.hx, y0 = c.hy, x1 = c.hx, y1 = c.hy;
@@ -1133,7 +1145,7 @@ export class Simulation {
       if (t === undefined || isRoad(t) || !hasJobs(zoneOf(t))) return false; // most tiles looked at: no map lookup
       const b = w.buildings.get(tileKey(x, y));
       if (!b || !hasJobs(b.zone)) return false;
-      if (b.occupants < capacityOf(b.id, b.level)) return true;
+      if (sk.placeFor(b, edu) !== Place.None) return true;
       full.add(b);
       return false;
     });
@@ -1143,6 +1155,7 @@ export class Simulation {
   }
 
   private hire(c: Citizen, b: Building, commute: number[]) {
+    this.skills.hired(c, b); // before the count: it reads which places are free
     b.occupants++;
     c.job = true; c.wx = b.x; c.wy = b.y; c.kind = b.id; c.commute = commute; c.idleDays = 0;
     const occ = this.mobile.rotaFor(c) ?? OCCUPATIONS[b.id]; // a road job keeps its own hours (docs/mobile-jobs.md)
@@ -1536,7 +1549,7 @@ export class Simulation {
   /** Daily health: drift toward what is normal for the age, wear from work and traffic, illness coming and going. */
   private lifeHealth(c: Citizen, age: number, covered: boolean, hh: { ids: number[] } | undefined) {
     const w = this.w;
-    let h = c.health + (healthTarget(age, c.cond) - c.health) * HEALTH.pull;
+    let h = c.health + (healthTarget(age, c.cond) + this.skills.healthBonus(c) - c.health) * HEALTH.pull;
     const fam = familyOf(c.kind); // wear and injuries follow the workplace family (c.kind is a kind id)
     if (c.job) h -= fam === Zone.Industrial ? HEALTH.wearIndustrial : fam === Zone.Yard ? HEALTH.wearYard : fam === Zone.Fire ? HEALTH.wearFire : 0;
     h -= Math.min(HEALTH.trafficCap, (c.trafficTicksLife / TPH) * HEALTH.trafficPerHour);
@@ -1645,9 +1658,11 @@ export class Simulation {
     }
     if ((hh?.ids.length ?? 1) === 1 && c.stage !== LifeStage.Child) {
       // living alone: now and then people leave town, more often when life here is not good
+      // a graduate with no work to match their degree for a while is likelier to go (brain drain, sim/skills.ts)
+      const drain = this.skills.drainMul(c);
       const p = (LIFE.leaveBasePerDay + LIFE.leaveUnhappyPerDay * Math.max(0, (LIFE.leaveUnhappyBelow - c.happy) / LIFE.leaveUnhappyBelow))
-        * ((home.holdUntil ?? 0) > w.tick ? LIFE.leaveCrowdedMul : 1);
-      if (Math.random() < p) { this.lifeEvents.leftTown++; this.leaveTown(c); return; }
+        * ((home.holdUntil ?? 0) > w.tick ? LIFE.leaveCrowdedMul : 1) * drain;
+      if (Math.random() < p) { this.lifeEvents.leftTown++; if (drain > 1) this.skills.drained(c); else this.leaveTown(c); return; }
     }
     if (c.stage === LifeStage.Adult && Math.random() < LIFE.partnerPerDay) {
       const idx = this.socialIndex();
@@ -2917,7 +2932,7 @@ export class Simulation {
     const w = this.w;
     const wb = w.buildings.get(tileKey(c.wx, c.wy));
     if (!wb) return;
-    const wage = wageOf(c.kind, wb.level) * (c.shiftLen / (8 * TPH));
+    const wage = wageOf(c.kind, wb.level) * wageMul(c, c.kind) * (c.shiftLen / (8 * TPH)); // by education in a skilled place (sim/skills.ts)
     const parcel = w.parcelAt(c.wx, c.wy);
     const rate = parcel ? parcel.taxRate : 0;
     const tax = wage * rate;

@@ -23,7 +23,7 @@
 import {
   KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, DEMOS, demoSections, showcaseProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
   isBridgeAux, bridgeStyle, BridgeStyle, basculeSeed, basculeLiftAt, isCrossing, isTunnel, isPlatform, underMask, boatTimetable, boatLifts, HARBOUR_OF,
-  SCHOOL_SPECS, Study, STUDY_NAMES, EduLevel, type DemoId, type SeededDemo,
+  SCHOOL_SPECS, Study, LifeStage, STUDY_NAMES, EduLevel, type DemoId, type SeededDemo,
 } from '@msimcity/shared';
 import { chunkPads } from '@msimcity/shared/src/helipads';
 import { World } from '../world';
@@ -197,6 +197,14 @@ if (days > 0) {
   const avg = last.reduce((a, b) => a + b, 0) / (last.length || 1);
   console.log(`  tick over the last game day: avg ${avg.toFixed(1)} ms, p95 ${(last[Math.floor(last.length * 0.95)] ?? 0).toFixed(1)} ms, max ${(last[last.length - 1] ?? 0).toFixed(1)} ms`);
   console.log(`  population ${sim.population}, jobs ${sim.jobs}, employed ${sim.employed}`);
+  // jobs by education (sim/skills.ts, docs/education.md section 7): places filled, skilled places filled, brain drain
+  {
+    const pc = (a: number, b: number) => `${b ? Math.round((100 * a) / b) : 0}%`;
+    const f = sim.skills.fill(), st = sim.skills.stats;
+    const adults = [...w.citizens.values()].filter((c) => c.stage === LifeStage.Adult), idle = adults.filter((c) => !c.job).length;
+    console.log(`  jobs by education: ${Object.entries(f).map(([g, v]) => `${g} ${v.filled}/${v.places} ${pc(v.filled, v.places)} (skilled ${pc(v.skilledFilled, v.skilled)})`).join(', ')}`);
+    console.log(`  unemployed adults ${idle}/${adults.length} ${pc(idle, adults.length)}, newcomers drawn for open skilled places ${st.matched}/${st.newcomers}, brain drain ${st.brainDrain}`);
+  }
   const kid = (s: string) => (KIND_ID as Record<string, number>)[s];
   for (const s of demoSections(id)) for (const p of s.placements ?? []) {
     const [x, y] = p.door;

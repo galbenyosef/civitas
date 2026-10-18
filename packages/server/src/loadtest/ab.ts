@@ -12,14 +12,14 @@
  * away (every junction is give-way); `ring=1` adds a public ring road two tiles outside the district, joined to the end
  * of every street; `bus=N` lays a bus network on the Commons (a depot and twelve stops on two lines, docs/transit.md) with
  * N buses per line (`busFare=…` changes the fare; `busTiles=1` lays the depot and stops but runs no lines, the control
- * for the homes and jobs they take). Reports: vehicle-weighted mean speed, queued share,
+ * for the homes and jobs they take); `edu=0` turns off education's effects on jobs (sim/skills.ts, the E4 control). Reports: vehicle-weighted mean speed, queued share,
  * give-ups by kind (Traffic.counters), junction entries per tick, mean commute time, and true body overlaps
  * every tick (oriented rectangles VEHICLE_LEN × VEHICLE_WIDTH with the heading from the lane geometry, and
  * pedestrians as 0.07-radius discs; the same test as the live probe-obb.mjs).
  * Options: --hour H (default 8), --ticks N (1500), --seed S (1), --set k=v,..., --label L, --json FILE, --quiet.
  */
 import { writeFileSync } from 'node:fs';
-import { TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, type TrafficTuning, type StopRef } from '@msimcity/shared';
+import { TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, SKILLS, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, type TrafficTuning, type StopRef } from '@msimcity/shared';
 import { World, tkey, type Citizen, type Mover } from '../world';
 import { Simulation } from '../sim/simulation';
 import { seedCity } from './cities';
@@ -104,7 +104,7 @@ export const OLD_RULES: Partial<TrafficTuning> = {
 };
 
 /** Keys that change the test city rather than TRAFFIC_TUNING: car ownership, no parking lots, no signals technology. */
-const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile'];
+const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile', 'edu'];
 
 /**
  * A bus network on the Commons (local coordinates of the 22×22 district): a depot whose door faces the y=5 street;
@@ -152,6 +152,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
   Math.random = mulberry32(opts.seed * 2654435761);
   for (const [k, v] of Object.entries(opts.set)) if (k in TRAFFIC_TUNING) (TRAFFIC_TUNING as Record<string, number>)[k] = v;
   MOBILE.on = opts.set.mobile !== 0; // mobile=0: no taxis, riders, bin lorries or couriers (docs/mobile-jobs.md), the control
+  if (opts.set.edu === 0) SKILLS.on = false; // edu=0: no skill gate, wages, newcomer tilt or brain drain (docs/education.md), the control
   if (opts.set.carOwnership !== undefined) {
     const own = opts.set.carOwnership, office = Math.min(1, own + 0.15);
     World.prototype.ownsCar = (id: number, kind: number) => hash2(id, 41) < (kind === Zone.Office ? office : own);

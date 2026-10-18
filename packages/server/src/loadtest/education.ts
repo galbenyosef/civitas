@@ -8,12 +8,18 @@
  * sim ms per tick. Then checks: levels never exceed what the age allows, babies have none, nobody studies yet (E1),
  * a save round-trips the education fields, a world saved before education loads with levels seeded from the id
  * (no format bump), the citizen panel and building rows carry them, and CITIZEN_STUDY reaches the agent flags.
- * Later phases add enrolment by stage, attendance, graduations, brain drain and the job fill rate by skill.
+ * E4 adds jobs by education (sim/skills.ts): places filled by workplace family, skilled places filled, unemployment,
+ * newcomers drawn for open skilled places, over-qualified workers, brain drain and the commute, with checks on the
+ * skilled-place counters, wages and saves. `EDU=0` in the environment runs the control (education off for jobs);
+ * the last line, "E4 {...}", is the summary as JSON for runs over several seeds.
+ * Later phases add enrolment by stage, attendance and graduations.
  */
 import {
   TICKS_PER_DAY, CitizenState as S, LifeStage, CITIZEN_STUDY, EDU, EDU_LEVEL_SHORT, EDU_TRACK_NAMES, EduLevel, Study,
   eduDefaults, eduIndexOf, maxLevelAt, yearGroup, birthdayOf, logEdu, tileKey,
+  SKILLS, skillNeed, skilledPlaces, overQualified, wageMul, workTrack,
 } from '@msimcity/shared';
+import { hasJobs } from '../world';
 import { World } from '../world';
 import { Simulation } from '../sim/simulation';
 import { seedCity } from './cities';
@@ -110,7 +116,47 @@ ok(cs.every((c) => ageOf(c, w.tick) >= 11 || c.edu === EduLevel.None), 'children
 ok(cs.every((c) => c.study === Study.None && c.att === 0 && c.due === 0 && c.eduLog.length === 0), 'nobody studies yet (admissions are E3)');
 ok(cs.every((c) => (c.edu >= EduLevel.Further) === (c.track > 0) || ageOf(c, w.tick) < 18), 'adults hold a track exactly when they have further or more');
 const worstMix = Math.max(...mix.map((m, l) => Math.abs(m / adults.length - EDU.baseMix[l])));
-ok(worstMix < 0.05, `adult mix within 5 pts of baseMix (worst ${(100 * worstMix).toFixed(1)})`);
+if (!SKILLS.on) ok(worstMix < 0.05, `adult mix within 5 pts of baseMix (worst ${(100 * worstMix).toFixed(1)})`);
+else console.log(`  (the newcomer tilt moves the adult mix off baseMix: worst ${(100 * worstMix).toFixed(1)} pts)`);
+
+// ---- jobs by education (E4) ------------------------------------------------------------------------
+const fill = sim.skills.fill();
+let badCount = 0, overCap = 0;
+const holders = new Map<string, number>();
+for (const c of cs) if (c.job && c.skill) holders.set(tileKey(c.wx, c.wy), (holders.get(tileKey(c.wx, c.wy)) ?? 0) + 1);
+for (const b of w.buildings.values()) {
+  if (b.level === 0 || !hasJobs(b.zone)) continue;
+  const q = b.qualified ?? 0;
+  if (q !== (holders.get(tileKey(b.x, b.y)) ?? 0)) badCount++;
+  if (q > skilledPlaces(b.id, b.level)) overCap++;
+}
+const working = cs.filter((c) => c.stage === LifeStage.Adult);
+const employed = working.filter((c) => c.job), unemployed = working.length - employed.length;
+const over = employed.filter((c) => overQualified(c)).length;
+const dist = employed.reduce((a, c) => a + Math.abs(c.wx - c.hx) + Math.abs(c.wy - c.hy), 0) / Math.max(1, employed.length);
+const skilledWorkers = employed.filter((c) => c.skill);
+const mul = employed.reduce((a, c) => a + wageMul(c, c.kind), 0) / Math.max(1, employed.length);
+const st = sim.skills.stats;
+console.log(`\nJobs by education (${SKILLS.on ? 'on' : 'off: EDU=0, the control'}):`);
+for (const [label, f] of Object.entries(fill)) {
+  console.log(`  ${pad(label, 9)} ${pad(f.filled, 5)}/${pad(f.places, 5)} filled ${pad(pct(f.filled, f.places), 5)}%   skilled ${pad(f.skilledFilled, 4)}/${pad(f.skilled, 4)} ${pad(pct(f.skilledFilled, f.skilled), 5)}%`);
+}
+console.log(`  working-age adults ${working.length}: employed ${employed.length}, unemployed ${unemployed} (${pct(unemployed, working.length)}%); open jobs ${sim.vacantJobs}`);
+console.log(`  skilled places held ${skilledWorkers.length}, over-qualified workers ${over} (${pct(over, employed.length)}%), mean wage multiplier ${mul.toFixed(3)}`);
+console.log(`  newcomers ${st.newcomers}, drawn for open skilled places ${st.matched} (${pct(st.matched, st.newcomers)}%); hires skilled ${st.skilledHires}, unskilled ${st.unskilledHires} (over-qualified ${st.overQualifiedHires})`);
+console.log(`  brain drain ${st.brainDrain} graduates left; left town in all ${sim.lifeEvents.leftTown} (living alone)`);
+console.log(`  mean commute home to work ${dist.toFixed(2)} tiles (Manhattan)`);
+if (SKILLS.on) {
+  ok(badCount === 0, `Building.qualified matches the workers holding a skilled place there (${badCount} off)`);
+  ok(overCap === 0, `no workplace has more skilled holders than skilled places (${overCap} over)`);
+  ok(skilledWorkers.every((c) => c.edu >= (c.skill ?? 0)), 'every skilled place is held by someone qualified for it');
+  ok(employed.every((c) => wageMul(c, c.kind) === (c.skill ? EDU.wage[c.edu] * (c.track && c.track === workTrack(c.kind) ? EDU.trackMatch : 1) : 1)), 'wage multiplier: by level in a skilled place, 1 in an unskilled one');
+  ok(st.newcomers === 0 || (st.matched / st.newcomers > 0.3 && st.matched / st.newcomers <= EDU.match + 0.05), `about EDU.match of newcomers drawn for open skilled places while there are some (${pct(st.matched, st.newcomers)}%)`);
+} else ok(skilledWorkers.length === 0 && st.matched === 0 && st.brainDrain === 0, 'off: nobody holds a skilled place, no newcomer is drawn for one, no brain drain');
+const e4 = {
+  seed, days, districts, on: SKILLS.on, citizens: cs.length, simMs: simMs / (days * DAY), working: working.length, unemployed, open: sim.vacantJobs,
+  fill, over, dist, mul, ...st, leftTown: sim.lifeEvents.leftTown,
+};
 
 // the panels: citizen life and building rows
 const adult = adults.find((c) => c.edu >= EduLevel.Degree)!;
@@ -155,6 +201,17 @@ ok(rows.length > 0 && rows.every((r) => typeof r.edu === 'number' && r.edu === w
   const back = worldFromSnapshot(snap)!;
   const same = live.every((c) => { const o = back.citizens.get(c.id); return !!o && o.edu === c.edu && o.track === c.track && o.eduBits === c.eduBits && JSON.stringify(o.eduLog) === JSON.stringify(c.eduLog); });
   ok(same && back.citizens.size === live.length, `a save round-trips the education fields (${back.citizens.size} citizens, version ${snap.version})`);
+  const qOf = (x: World) => [...x.buildings.values()].map((b) => `${b.x},${b.y}:${b.qualified ?? 0}`).sort().join(' ');
+  ok(qOf(back) === qOf(w) && live.every((c) => (back.citizens.get(c.id)?.skill ?? 0) === (c.skill ?? 0)), 'a save round-trips the skilled places (Building.qualified rebuilt on load, Citizen.skill kept)');
+  if (SKILLS.on) {
+    const pre = JSON.parse(JSON.stringify(snap));
+    for (const c of pre.citizens) delete c.skill;
+    const pw = worldFromSnapshot(pre)!;
+    let bad = 0, held = 0;
+    for (const b of pw.buildings.values()) if ((b.qualified ?? 0) > skilledPlaces(b.id, b.level)) bad++;
+    for (const c of pw.citizens.values()) if (c.job && c.skill) { held++; if (c.edu < skillNeed(c.kind, pw.buildings.get(tileKey(c.wx, c.wy))!.level)) bad++; }
+    ok(bad === 0 && held > 0, `a save from before E4 gives its qualified workers skilled places on load (${held} placed, ${bad} wrong)`);
+  }
   const old = JSON.parse(JSON.stringify(snap));
   for (const c of old.citizens) for (const k of ['edu', 'track', 'study', 'sx', 'sy', 'att', 'due', 'eduBits', 'eduLog']) delete c[k];
   const legacy = worldFromSnapshot(old)!;
@@ -162,7 +219,7 @@ ok(rows.length > 0 && rows.every((r) => typeof r.edu === 'number' && r.edu === w
   ok(lc.length === live.length && lc.every((c) => { const d = eduDefaults(c.id, ageOf(c, legacy.tick)); return c.edu === d.edu && c.track === d.track && c.study === 0 && Array.isArray(c.eduLog); }),
     `a pre-education save loads with levels seeded from the id and age (${lc.length} citizens, version ${old.version} unchanged)`);
   const changed = lc.filter((c) => c.edu !== w.citizens.get(c.id)?.edu).length;
-  console.log(`  (${changed} of ${lc.length} reseeded levels differ from the live ones: newcomers who aged past a cap since arriving)`);
+  console.log(`  (${changed} of ${lc.length} reseeded levels differ from the live ones: newcomers drawn for open skilled places, or who aged past a cap since arriving)`);
   const lsim = new Simulation(legacy);
   let threw = '';
   try { for (let i = 0; i < 600; i++) lsim.tick(); } catch (e) { threw = String(e); }
@@ -183,4 +240,5 @@ ok(rows.length > 0 && rows.every((r) => typeof r.edu === 'number' && r.edu === w
 }
 
 console.log(`\n${checks - fails}/${checks} checks passed`);
+console.log(`E4 ${JSON.stringify(e4)}`);
 process.exit(fails ? 1 : 0);

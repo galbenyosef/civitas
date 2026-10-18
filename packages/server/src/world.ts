@@ -26,6 +26,8 @@ export interface Chunk {
 export interface Building {
   /** zone: the family code (tile kind bits; the building index is by family); id: the catalogue kind id (tables, names, behaviour) */
   x: number; y: number; zone: number; id: number; level: number; occupants: number;
+  /** workplaces: workers holding a skilled place (sim/skills.ts, docs/education.md section 7); rebuilt on load */
+  qualified?: number;
   /** homes: until this tick newcomers leave the last free bed to a family here (a couple moving in, a baby on the way) */
   holdUntil?: number;
 }
@@ -123,6 +125,9 @@ export interface Citizen extends Mover, EduFields {
   hx: number; hy: number;               // home tile
   job: boolean; wx: number; wy: number; // workplace tile
   kind: number;                         // workplace kind (occupation)
+  skill?: number;                       // the level the worker's place needs (sim/skills.ts): 0 an unskilled place
+  drain?: number;                       // days a graduate has been out of work or over-qualified (brain drain)
+  grad?: number;                        // game day of graduating (set by the schools, E3): "graduated", and the brain-drain check
   state: number;
   commute: number[] | null;             // cached home->work path (walkers)
   car: boolean;                         // owns a car
@@ -502,7 +507,7 @@ export class World {
         if (!b || to.has(tkey(dx, dy))) return;
         to.set(tkey(dx, dy), m);
         if (key !== doorKey) park.set(key, doorKey);
-        b.occupants = 0; // re-counted at the door below; dropping the building must not evict anyone
+        b.occupants = 0; b.qualified = 0; // re-counted at the door below; dropping the building must not evict anyone
         this.mergeStats.absorbed++;
       });
       this.mergeStats.opened++;
@@ -530,6 +535,7 @@ export class World {
           if (c.state === CitizenState.Work) { c.x = job.placed.doorX + 0.5; c.y = job.placed.doorY + 0.5; }
           c.wx = job.placed.doorX; c.wy = job.placed.doorY; c.kind = job.placed.kind; c.commute = null;
           b.occupants++; this.mergeStats.workers++;
+          if (c.skill) b.qualified = (b.qualified ?? 0) + 1;
         }
       }
       if (c.parkedAt && !c.parkKerb) { const d = park.get(c.parkedAt); if (d) c.parkedAt = d; }
@@ -777,7 +783,8 @@ export class World {
     this.leaveSite(c);
     if (!c.job) return;
     const wb = this.buildings.get(tileKey(c.wx, c.wy));
-    if (wb) wb.occupants--;
+    if (wb) { wb.occupants--; if (c.skill && wb.qualified) wb.qualified--; }
+    c.skill = 0;
     c.job = false;
     c.commute = null;
     c.kind = 0;

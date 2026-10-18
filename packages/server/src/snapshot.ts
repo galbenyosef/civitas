@@ -1,6 +1,7 @@
 import { CHUNK_SIZE, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, eduDefaults, isPolicyId, type TransitLine, type SeaGate } from '@msimcity/shared';
 import { World, emptyProgress, lifeDefaults, type Citizen, type Parcel, type Player, type Site } from './world';
 import { LIFE, seededAge, ageOf } from './sim/life';
+import { rehire } from './sim/skills';
 import { historyOf, type HistoryJSON } from './history';
 
 /**
@@ -112,7 +113,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
     home.occupants++;
     if (c.job) {
       const wb = w.buildings.get(tileKey(c.wx, c.wy));
-      if (wb) wb.occupants++; else { c.job = false; c.commute = null; }
+      if (wb) { wb.occupants++; rehire(c, wb); } else { c.job = false; c.commute = null; }
     }
     // resume everyone at home with their car; mid-trip positions are not worth restoring
     c.state = 0; c.path = []; c.pi = 0; c.x = c.hx + 0.5; c.y = c.hy + 0.5;

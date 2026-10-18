@@ -1,4 +1,4 @@
-import { TICKS_PER_DAY, TICKS_PER_HOUR, LifeStage, hash2, mod } from '@msimcity/shared';
+import { TICKS_PER_DAY, TICKS_PER_HOUR, LifeStage, hash2, mod, SKILLS, EDU, overQualified } from '@msimcity/shared';
 import type { Citizen } from '../world';
 
 /**
@@ -196,7 +196,12 @@ export function happinessParts(c: Citizen, h: HappyInputs): { label: string; del
   const fun = Math.max(0, Math.min(1, c.leisure));
   add(fun >= 0.65 ? 'good times out' : fun >= 0.35 ? 'the odd outing' : 'nothing to do', fun >= 0.65 ? Math.min(6, (fun - 0.5) * 16) : fun >= 0.35 ? 1 : -Math.min(6, (0.35 - fun) * 18 + 1));
   if (h.parks && h.parks > 0) add('park nearby', Math.min(5, 1 + h.parks * 0.6));
-  if (c.stage === LifeStage.Adult && !c.job) add('out of work', -8);
+  if (c.stage === LifeStage.Adult && !c.job) {
+    if (SKILLS.on && c.study) add('studying', 2); else add('out of work', -8);
+  }
+  // education (sim/skills.ts): a graduate in a place far below their level, and the first days after graduating
+  if (overQualified(c)) add('over-qualified', -2);
+  if (SKILLS.on && c.grad !== undefined && h.tick / DAY - c.grad < EDU.drainDays) add('graduated', 5);
   if (c.stage === LifeStage.Retired) add('retired', 3);
   const social = Math.min(6, c.friends.length * 2) + (c.partner ? 4 : 0);
   add(social > 0 ? (c.partner ? 'partner and friends' : 'friends') : 'lonely', social > 0 ? social : -3);

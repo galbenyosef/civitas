@@ -8,7 +8,9 @@ recommended answers (A to every question). **E2 (the institutions catalogue, sec
 and so is **E3 (the schools simulation, section 13)**: children are admitted, walk (or are taken) to school, attend, sit
 results and move up a stage. **E8 (the Showcase and London, section 14)** is built too: every kind stands in the Showcase
 and the four London universities are landmarks. **E7 (the city views, section 15)** is built: history series, the Charts panel's Education tab, parcel
-attainment, the education overlay, the citizen's timeline, the school tooltip and the student look. **E6 (policies, the Policies panel and school buses, section 16)** is built too.
+attainment, the education overlay, the citizen's timeline, the school tooltip and the student look. **E6 (policies, the Policies panel and school buses, section 16)** is built too. **E4 (jobs, wages and migration, section 17)** is built:
+workplaces have skilled places, wages follow education, newcomers come for open skilled jobs and graduates with no
+matching work leave.
 
 Code this touches: `shared/src/education.ts` (new: levels, stages, tables), `shared/src/buildings/education.ts` (new:
 the kinds), `server/src/sim/schools.ts` (new: admissions, attendance, graduation), hooks in
@@ -468,7 +470,7 @@ is no crime model (police coverage only), so there is no link until there is one
 | E1 | **Built.** **Citizen model and wire.** `shared/src/education.ts` (levels, tracks, stages, `EDU`, base mix, `eduDefaults`, year group, birthday); `Citizen` fields; snapshot defaults; `CitizenInfo.life.education`, `PersonRow.edu`, `CITIZEN_STUDY`; newcomer seeding (no tilt yet); `loadtest/education.ts` | opus | world.ts, snapshot.ts, protocol.ts, life.ts, simulation.ts (`makeCitizen`, `describeLife`) | none | M |
 | E2 | **Built.** **Institutions catalogue.** `buildings/education.ts` kinds 101-108 with two UK designs each; un-reserve the `education` group; the edu1-edu5 tech track and counters; `SHORT` label by kind; viewer | sonnet | buildings/*, groups.ts, tech.ts, compiled.ts (regenerate, never hand-merge), ui.ts | none (attribute names from this doc) | L |
 | E3 | **Built.** **Schools sim.** `sim/schools.ts`: admissions batches, the pupil timetable on the commute machinery, attendance, weekly rollover, graduation and drop-out, escorts via carpool, the `school` inspect block, `lifeEvents` | opus | sim/schools.ts, simulation.ts (Home branch, `endShift`, `newDay`, describe), carpool.ts | E1, E2 | L |
-| E4 | **Jobs, wages, migration.** Skill gate in `findJob`, `jobMisses` by level, `Building.qualified`, wage multipliers, `EDU.match` tilt, brain drain, happiness parts; tuning runs | opus | simulation.ts (`findJob`, `hire`, `payWage`, `lifeFamily`), life.ts, gateways.ts | E1 (runs beside E3) | M |
+| E4 | **Built.** **Jobs, wages, migration.** Skill gate in `findJob`, `jobMisses` by level, `Building.qualified`, wage multipliers, `EDU.match` tilt, brain drain, happiness parts; tuning runs | opus | simulation.ts (`findJob`, `hire`, `payWage`, `lifeFamily`), life.ts, gateways.ts | E1 (runs beside E3) | M |
 | E5 | **Higher and adult education.** University intake via gateways, halls of residence, families moving in, FE courses, evening classes (`errand` 2), apprenticeships, research ambition | opus | gateways.ts, simulation.ts (`spawn`, `arriveVia`, `ambition`), sim/schools.ts | E3, E4 | L |
 | E6 | **Built.** **Policies and the tree UI.** `policies.ts`, `Player.policies`, `setPolicy` intent, Policies panel, Education track in the tech panel; school buses as FleetKind 9 (the server part goes to opus) | sonnet (+ opus for `mobile.ts`) | policies.ts, net.ts, ui.ts, fleet.ts, sim/mobile.ts | E2; the effects need E3 | M |
 | E7 | **Built.** **City views.** History series and the Education tab funnel; `ParcelStats` fields; heat overlay; citizen timeline; school tooltip; student look in people.ts | sonnet | history.ts, charts.ts, main.ts, chunkView.ts, ui.ts, render/people.ts | E3 | M |
