@@ -1,5 +1,6 @@
 import { hash2 } from './noise';
 import { mod } from './coords';
+import { MANIFEST } from './buildings/compiled';
 
 /**
  * Education (docs/education.md): qualification levels, study stages, the tunables, and the pure helpers both sides use.
@@ -32,6 +33,8 @@ export const EDU_RESULT_NAMES = ['passed', 'failed', 'dropped out', 'left'] as c
 /** `Citizen.eduBits` */
 export const EDU_NURSERY = 1;
 export const EDU_DROPPED = 2;
+/** transient (server/src/sim/schools.ts): on the way home from school, so CITIZEN_STUDY marks only school trips */
+export const EDU_HOMEWARD = 4;
 
 export interface StageSpec {
   /** usual ages [from, to): the starting age and the leaving age; adult courses have no upper age (99) */
@@ -82,7 +85,70 @@ export const EDU = {
   familyShare: 0.2,
   /** the education log keeps this many finished stages */
   logMax: 6,
+  // ---- the schools simulation (E3, server/src/sim/schools.ts) ----
+  /** each school hashes its day: the bell between these hours (organic, so the school run is not one tick) */
+  startFrom: 8.5, startSpan: 0.5, endFrom: 15, endSpan: 0.5,
+  /** university lectures: a start between these hours, then lectureHours (each student hashes their own) */
+  lectureFrom: 9, lectureSpan: 2, lectureHours: 5,
+  /** a pupil's own bell jitter, ± hours, so a family's children do not all leave on one tick */
+  pupilJitter: 0.08,
+  /** under this age a pupil is taken to school and collected (CHILD_OUT_AGE in simulation.ts) */
+  escortAge: 8,
+  /** a household driver leaving for work this soon after the child is due takes them (carpool drop-off) */
+  liftWait: 0.75,
+  /** an older sibling at the same school due within this many hours walks them in */
+  siblingWindow: 0.5,
+  /** a working parent due out within this many hours does the drop-off on the way to work */
+  onTheWay: 1.5,
+  /** an under-8 may go in with a parent leaving for work up to this many hours before the child's own time (breakfast club) */
+  breakfastClub: 1.5,
+  /** a grown-up is free to walk a child in if their own shift is at least this many hours off */
+  freeFor: 3,
+  /** a school's quality is 1 - qualityDrop × the share of the teachers it is short of (pass chance multiplier, 0.5-1) */
+  qualityDrop: 0.5,
+  /** smoothing of a school's staffing over the year: each day moves this share toward today's */
+  qualityDays: 0.25,
+  /** school leavers with A-levels or Level 3 who go on to a university in town, and graduates who stay on for a master's */
+  uniShare: 0.45, postgradTake: 0.2,
+  /** sixth-formers and students below EDU.dropOutBelow drop out with this chance a day, once a few days have been held */
+  dropOutPerDay: 0.15, dropOutAfter: 3,
 } as const;
+
+/**
+ * An education kind's school as the simulation reads it (the `attrs` of shared/src/buildings/education.ts, docs/education.md
+ * "Built in E2"). `stage` is the Study a pupil there holds; the FE college (stage FeCourse) also takes 16-18s as SixthForm.
+ */
+export interface SchoolSpec {
+  kind: number; stage: number;
+  /** day places, and evening places (FE college) */
+  places: number; evening: number;
+  /** Manhattan tiles from home to the door within which children are admitted; 0 = the whole city */
+  catchment: number;
+  ages: [number, number];
+  /** share of the staff who must hold a degree, and of those a postgraduate degree (university, research institute) */
+  teachersShare: number; postgradShare: number;
+  beds: number;
+}
+const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+/** By kind id: every education kind (101-108 and any later rung), undefined for everything else. */
+export const SCHOOL_SPECS: (SchoolSpec | undefined)[] = [];
+for (const k of MANIFEST) {
+  if (k.group !== 'education') continue;
+  const a = k.levels[0]?.attrs ?? k.attrs;
+  const ages = Array.isArray(a.ages) && a.ages.length === 2 ? [num(a.ages[0], 0), num(a.ages[1], 99)] as [number, number] : [18, 99] as [number, number];
+  SCHOOL_SPECS[k.kindId] = {
+    kind: k.kindId, stage: num(a.stage, 0), places: num(a.pupilCapacity, 0), evening: num(a.eveningPlaces, 0), catchment: num(a.catchment, 0),
+    ages, teachersShare: num(a.teachersShare, 0), postgradShare: num(a.postgradShare, 0), beds: num(a.beds, 0),
+  };
+}
+export const schoolSpec = (kind: number): SchoolSpec | undefined => SCHOOL_SPECS[kind];
+/** The Study a school stage admits a child of this age to (by age at the start of the school year), or None. */
+export function studyForAge(age: number): number {
+  return age < 3 ? Study.None : age < 4 ? Study.Nursery : age < 11 ? Study.Primary : age < 16 ? Study.Secondary : age < 18 ? Study.SixthForm : Study.None;
+}
+/** Whether a school of this spec takes a pupil for this stage (the FE college runs sixth-form courses too). */
+export const schoolTakes = (s: SchoolSpec, study: number) => s.stage === study || (study === Study.SixthForm && s.stage === Study.FeCourse)
+  || (study === Study.Postgrad && s.stage === Study.Degree);
 
 /**
  * One finished stage in the education log (`Citizen.eduLog`), oldest first: [Study, door x, door y, kind id, the

@@ -199,6 +199,29 @@ export interface BuildingInfo {
   mobile?: MobileRows[];
   /** harbours (docs/boats.md, server sim/harbours.ts): lanes, sea route, the catch, cargo and berth fees */
   harbour?: HarbourInfo;
+  /** education kinds (docs/education.md, server sim/schools.ts): pupils, places, teachers and results */
+  school?: SchoolInfo;
+}
+
+/** A school, college or university for its tooltip (docs/education.md section 3). Stage is a Study value. */
+export interface SchoolInfo {
+  stage: number;
+  /** enrolled now, and in today right now (at their desks) */
+  pupils: number; present: number;
+  /** the places the building has, and the places its teachers let it fill (an understaffed school admits in proportion) */
+  places: number; admitting: number;
+  /** staff holding a degree (teachers), and how many the school needs; postgraduates where a share of them must be */
+  teachers: number; teachersNeeded: number; postgrads?: number; postgradsNeeded?: number;
+  /** Manhattan tiles from home within which children are admitted; 0 = the whole city */
+  catchment: number;
+  /** the school day, hours (the university's are each student's own) */
+  hours: [number, number];
+  /** pass chance multiplier from staffing over the year, 0.5-1 */
+  quality: number;
+  /** results this school year: passed, failed (attendance or the exam), dropped out */
+  passed: number; failed: number; droppedOut: number;
+  /** children of this stage nearest here with no place anywhere in reach, at the last admissions */
+  waiting: number;
 }
 
 /** An airport terminal's runway and timetable, for its tooltip. Ticks are absolute game ticks. */

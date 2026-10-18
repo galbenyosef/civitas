@@ -12,7 +12,7 @@ import {
   zoneOf, isBuildable, underConstruction, isGatewayId, GATEWAY_OF, GATEWAY_WORDS, bridgeSpanAt, BRIDGE_STYLE_NAMES,
   type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
   buildingValue, LAND_PRICE_PER_TILE, ROAD_COST,
-  eduDefaults, birthdayOf, yearGroup, STAGES, Study, EDU_NURSERY, EDU_DROPPED, CITIZEN_STUDY, type CitizenEducation,
+  eduDefaults, birthdayOf, yearGroup, STAGES, Study, EduResult, EDU_NURSERY, EDU_DROPPED, EDU_HOMEWARD, CITIZEN_STUDY, type CitizenEducation,
 } from '@msimcity/shared';
 import type { Building, Citizen, Leg, Mover, Vehicle, World, MergePlan } from '../world';
 import { noteTrail, resetTrail, tkey, untkey, lifeDefaults, hasJobs } from '../world';
@@ -33,6 +33,7 @@ import { Delivery } from './delivery';
 import { Refuse } from './refuse';
 import { Couriers } from './couriers';
 import { plantGardens, deepBackOk, GARDEN_KIND } from './blocks';
+import { Schools, ERRAND_SCHOOL } from './schools';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -83,10 +84,10 @@ const GARAGE_WAIT_MAX = 150;          // ticks a car will wait for a gap to pull
 
 const S = CitizenState;
 /**
- * CITIZEN_STUDY for a pupil or student out on the commute (pupils use ToWork and Work for school; docs/education.md).
- * Until sim/schools.ts (E3) marks the trip, a pupil's ToHome after an outing carries it too.
+ * CITIZEN_STUDY for a pupil or student on the way to or back from school (pupils use ToWork and Work for school;
+ * docs/education.md): sim/schools.ts marks the trip home from school (EDU_HOMEWARD), so the walk back from the park does not.
  */
-const studyFlag = (c: Citizen) => (c.study && (c.state === S.ToWork || c.state === S.ToHome) ? CITIZEN_STUDY : 0);
+const studyFlag = (c: Citizen) => (c.study && (c.state === S.ToWork || (c.state === S.ToHome && (c.eduBits & EDU_HOMEWARD))) ? CITIZEN_STUDY : 0);
 /** A trip dispatch decided on: from a building (freight, patrols, call-outs) or an entry tile (visitors). */
 /**
  * A job search from a home that found nothing (Simulation.findJob): the tiles it looked at, padded by two for the
@@ -140,7 +141,7 @@ export class Simulation {
   /** rebuilt once a game day on first use: who works where and who lives on which parcel, for partners and friends */
   private social = { day: -1, work: new Map<number, number[]>(), parcel: new Map<number, number[]>() };
   /** life events since the simulation started (probes and tests read these) */
-  lifeEvents = { births: 0, deaths: 0, deathsOldAge: 0, deathsIllness: 0, partners: 0, movedIn: 0, movedOut: 0, leftTown: 0, friendships: 0, doctorVisits: 0, sickDaysOff: 0, orphansLeft: 0 };
+  lifeEvents = { births: 0, deaths: 0, deathsOldAge: 0, deathsIllness: 0, partners: 0, movedIn: 0, movedOut: 0, leftTown: 0, friendships: 0, doctorVisits: 0, sickDaysOff: 0, orphansLeft: 0, graduations: 0, dropOuts: 0 };
   private today = 0;
   /** leisure visits per venue tile: today's and yesterday's count (parks grow with use; tooltips show them) */
   private venueVisits = new Map<string, { day: number; today: number; yesterday: number }>();
@@ -166,6 +167,8 @@ export class Simulation {
   delivery: Delivery;
   refuse: Refuse;
   couriers: Couriers;
+  /** schools (sim/schools.ts, docs/education.md): admissions, the school day, results */
+  schools: Schools;
   /** messages for a parcel owner's screen (net.ts sends them as toasts and clears the list) */
   notices: { owner: string; msg: string }[] = [];
   /** owners already told that newcomers spawn in place; cleared once a gateway brings someone in, so a town that loses its last gateway hears again */
@@ -190,6 +193,10 @@ export class Simulation {
     this.mobile.register(this.refuse);
     this.couriers = new Couriers(w, this.mobile);
     this.mobile.register(this.couriers);
+    this.schools = new Schools(w, {
+      scheduleNext: (c) => this.scheduleNext(c), depart: (c) => this.depart(c),
+      escort: (a, c, then, onShift) => this.escortTrip(a, c, then, onShift), fetch: (a, c) => this.fetchTrip(a, c),
+    }, this.lifeEvents);
     w.onCitizenRemoved = (c) => { this.traffic.leave(c); this.transit.drop(c); this.taxis.drop(c); this.mobile.forget(c); this.pool.forget(c); this.releaseParking(c); this.dropVenue(c); };
   }
 
@@ -197,6 +204,7 @@ export class Simulation {
     const w = this.w;
     w.tick++;
     if (w.tick % DAY === 0) this.newDay();
+    this.schools.tick();
     if (w.tick % STATS_EVERY === 0) this.recomputeStats();
     if (w.tick % GROWTH_EVERY === 0) this.growth();
     if (w.tick % GROWTH_EVERY === 13) this.leisureGrowth();
@@ -276,6 +284,8 @@ export class Simulation {
       info.workers = wk;
       info.wage = wageOf(b.id, b.level);
       if (isCivicId(b.id)) info.upkeep = upkeepOf(b.id, b.level); // per level: a large park costs more than a pocket park
+      const school = this.schools.describe(b);
+      if (school) info.school = school;
       if (b.zone === Zone.Commercial) { info.visitors = this.visitors.get(key) ?? 0; info.visitorCapacity = venueCapacityOf(b.id, b.level); }
       const sp = leisureAt(b.id, b.level, b.x, b.y);
       if (sp) {
@@ -318,6 +328,7 @@ export class Simulation {
       }
       if (b.zone !== Zone.Residential && b.zone !== Zone.Parking && c.job && c.wx === b.x && c.wy === b.y) workers.push(row(c, c.state === S.Work));
       if (c.state === S.AtVenue && c.venue === key) visitors.push(row(c, true));
+      else if (c.study && !c.job && c.sx === b.x && c.sy === b.y) visitors.push(row(c, c.state === S.Work)); // pupils (sim/schools.ts)
       if (c.site === key && (c.state === S.AtSite || c.state === S.ToSite)) builders.push(row(c, c.state === S.AtSite));
     }
     for (const v of w.vehicles.values()) {
@@ -372,7 +383,8 @@ export class Simulation {
     const parcelName = (x: number, y: number) => w.parcelAt(x, y)?.name;
     const info: CitizenInfo = {
       id, name: nameFor(id, c.sn), role: 'citizen',
-      occupation: c.job ? (c.kind === BUS_DEPOT_KIND && isMechanic(c.id) ? 'bus mechanic' : OCCUPATIONS[c.kind]?.name) : c.stage === LifeStage.Child ? 'child' : c.stage === LifeStage.Retired ? 'retired' : 'looking for work',
+      occupation: c.job ? (c.kind === BUS_DEPOT_KIND && isMechanic(c.id) ? 'bus mechanic' : OCCUPATIONS[c.kind]?.name) : c.study ? (c.study >= Study.FeCourse ? 'student' : 'pupil')
+        : c.stage === LifeStage.Child ? 'child' : c.stage === LifeStage.Retired ? 'retired' : 'looking for work',
       home: { x: c.hx, y: c.hy, parcel: parcelName(c.hx, c.hy) },
       activity: this.activityOf(c), mode: c.leg ? (c.leg.drive ? 'drive' : c.leg.ride && this.transit.isRiding(c) ? 'ride' : 'walk') : 'none',
       ownsCar: c.car, money: Math.round(c.money), status: c.leg?.drive && c.wait > 1 ? 'queued' : c.leg?.ride ? (this.transit.isRiding(c) ? 'moving' : 'idle') : c.leg ? 'moving' : 'idle', waitTicks: c.wait,
@@ -440,8 +452,8 @@ export class Simulation {
     const wk = week(c, tick);
     const fresh = c.statsDay === day;
     let care: string | undefined;
-    if (c.errand && c.state === S.AtVenue) care = 'seeing a doctor';
-    else if (c.errand && c.state === S.ToVenue) care = 'on the way to the doctor';
+    if (c.errand === 1 && c.state === S.AtVenue) care = 'seeing a doctor';
+    else if (c.errand === 1 && c.state === S.ToVenue) care = 'on the way to the doctor';
     else if (c.health < HEALTH.staysHomeBelow) care = 'too ill to go out';
     else if (c.offSickDay === day) care = 'off sick today';
     else if (c.care > 0) care = "doctor's visit planned";
@@ -475,7 +487,7 @@ export class Simulation {
       const done = school ? yg - (spec.ages[0] - 4) + mod(day, LIFE.daysPerYear) / LIFE.daysPerYear : spec.years ? c.due / spec.days : c.att / spec.days;
       info.studying = {
         place: { x: c.sx, y: c.sy, name: placeName(c.sx, c.sy, 0) }, stage: c.study,
-        attendance: c.due ? c.att / c.due : 1, progress: Math.max(0, Math.min(1, school ? done / spec.years : done)),
+        attendance: c.due ? Math.min(1, c.att / c.due) : 1, progress: Math.max(0, Math.min(1, school ? done / spec.years : done)),
       };
       if (school) info.studying.yearGroup = yg;
     }
@@ -547,7 +559,8 @@ export class Simulation {
       const how = c.leg?.drive ? (c.car && g?.modes.includes('car') ? 'driving' : 'in a taxi') : 'walking with a suitcase';
       return c.mig === MIG.In ? `moving to town: ${how} from ${where} to their new home` : `leaving town: ${how} to ${where}`;
     }
-    const going = c.state === S.ToWork ? ', going to work' : c.state === S.ToHome ? ', going home' : c.state === S.ToVenue ? ', going out' : '';
+    const pupil = c.study > 0 && !c.job, school = c.study >= Study.Degree ? 'university' : c.study === Study.FeCourse || c.study === Study.Evening ? 'college' : 'school';
+    const going = c.state === S.ToWork ? (pupil ? `, going to ${school}` : ', going to work') : c.state === S.ToHome ? ', going home' : c.state === S.ToVenue ? (c.errand === ERRAND_SCHOOL ? ', on the school run' : ', going out') : '';
     if (c.leg?.lift) {
       const d = this.w.citizens.get(c.leg.lift.driver);
       const car = d ? `${nameFor(d.id, d.sn)}'s car` : 'a car';
@@ -580,17 +593,19 @@ export class Simulation {
         if (c.stage === LifeStage.Child) return 'at home';
         if (c.stage === LifeStage.Retired) return 'at home, retired';
         return c.job ? 'at home' : 'at home, between jobs';
-      case S.ToWork: return `${legWord()} to work`;
-      case S.Work: return this.mobile.activity(c) ?? (familyOf(c.kind) === Zone.Yard ? 'at the yard' : 'on shift');
+      case S.ToWork: return `${legWord()} to ${pupil ? school : 'work'}`;
+      case S.Work: return pupil ? (c.study >= Study.Degree ? 'at lectures' : `at ${school}`) : this.mobile.activity(c) ?? (familyOf(c.kind) === Zone.Yard ? 'at the yard' : 'on shift');
       case S.ToHome: return `${legWord()} home`;
       case S.ToSite: return `${legWord()} to a building site`;
       case S.AtSite: return 'working on a building site';
       case S.ToVenue: {
+        if (c.errand === ERRAND_SCHOOL) return `${legWord()} to school with a child`;
         if (c.errand) return `${legWord()} to the doctor`;
         const sp = this.venueSpecOf(c);
         return `${legWord()} ${sp ? VENUE_WORDS[sp.type].going : this.hour < 16 ? 'to a café' : 'out for the evening'}`;
       }
       case S.AtVenue: {
+        if (c.errand === ERRAND_SCHOOL) return 'at the school gate';
         if (c.errand) return 'seeing a doctor at the hospital';
         const sp = this.venueSpecOf(c), b = sp && c.venue ? this.w.buildings.get(c.venue) : undefined;
         if (sp && b) return eventOn(sp, this.today) && Math.abs(this.hour - eventStartAt(sp, b.x, b.y) - 1) < 1.6 ? VENUE_WORDS[sp.type].event : VENUE_WORDS[sp.type].at;
@@ -604,10 +619,10 @@ export class Simulation {
     const at = (x: number, y: number, label: string) => ({ x, y, label });
     if (c.mig === MIG.Out && c.gx !== undefined && c.gy !== undefined) return at(c.gx, c.gy, `${KIND_NAMES[w.buildings.get(tileKey(c.gx, c.gy))?.id ?? 0] ?? 'gateway'} (leaving town)`);
     if (c.mig === MIG.In) return at(c.hx, c.hy, 'new home');
-    if (c.state === S.ToWork) return at(c.wx, c.wy, `${KIND_NAMES[c.kind]} (work)`);
+    if (c.state === S.ToWork) return c.study && !c.job ? at(c.sx, c.sy, KIND_NAMES[w.buildings.get(tileKey(c.sx, c.sy))?.id ?? 0] ?? 'school') : at(c.wx, c.wy, `${KIND_NAMES[c.kind]} (work)`);
     if (c.state === S.ToHome) return at(c.hx, c.hy, 'home');
     if (c.state === S.ToSite && c.site) { const [x, y] = parseKey(c.site); return at(x, y, 'building site'); }
-    if (c.state === S.ToVenue && c.venue && c.errand) { const [x, y] = parseKey(c.venue); return at(x, y, 'hospital (doctor)'); }
+    if (c.state === S.ToVenue && c.venue && c.errand) { const [x, y] = parseKey(c.venue); return at(x, y, c.errand === ERRAND_SCHOOL ? 'school (the school run)' : 'hospital (doctor)'); }
     if (c.state === S.ToVenue && c.venue) {
       const [x, y] = parseKey(c.venue); const b = w.buildings.get(c.venue);
       const sp = b && leisureAt(b.id, b.level, b.x, b.y);
@@ -638,7 +653,7 @@ export class Simulation {
       if (parcel) w.credit(parcel.owner, -upkeepOf(b.id, b.level)); // per level (parks have three); one-level kinds as before
     }
     for (const c of w.citizens.values()) {
-      if (c.job || c.stage !== LifeStage.Adult) { c.idleDays = 0; continue; } // children and retirees are not looking for work
+      if (c.job || c.study || c.stage !== LifeStage.Adult) { c.idleDays = 0; continue; } // children, retirees and students are not looking for work
       if (c.mig) continue; // moving in or out already
       if (++c.idleDays > MAX_IDLE_DAYS) this.leaveTown(c);
     }
@@ -1159,7 +1174,7 @@ export class Simulation {
   /** Pick the next departure: early enough for the commute (and a café stop), on a working day, after some rest. */
   private scheduleNext(c: Citizen) {
     const now = this.w.tick;
-    c.preStop = Math.random() < P_PRE_STOP;
+    c.preStop = c.job && Math.random() < P_PRE_STOP; // no café on the way to school
     const lead = this.lead(c);
     const depTod = mod(c.shiftStart - lead, DAY);
     let t = Math.floor(now / DAY) * DAY + depTod;
@@ -1182,6 +1197,11 @@ export class Simulation {
           if (c.mig) { this.migrantHome(c); break; } // moving in, or packed up and leaving (sim/gateways.ts)
           if (c.care > 0 && tick >= c.care && this.maybeDoctor(c)) break;
           if (!c.job) {
+            if (c.study) { // pupils and students keep the school's timetable (sim/schools.ts), and look for no job
+              if (tick >= c.nextAt) this.schools.setOff(c);
+              else if (c.nextAt - tick > 4 * TPH) this.maybeOuting(c);
+              break;
+            }
             if (c.stage === LifeStage.Adult && (tick + c.id) % JOB_SEARCH_EVERY === 0 && this.findJob(c)) break;
             this.maybeOuting(c);
           } else if (tick >= c.nextAt) this.depart(c);
@@ -1221,14 +1241,23 @@ export class Simulation {
       this.scheduleNext(c); // skip this shift; the next one is at least REST_TICKS away
       return;
     }
-    if (!this.commutePath(c)) { this.w.quitJob(c); return; }
+    if (!this.commutePath(c)) { this.dropCommute(c); return; }
     const startAbs = c.nextAt + this.lead(c);
     c.nextAt = startAbs + c.shiftLen; // shift ends on schedule however long the trip takes
     if (this.mobile.worksFromHome(c)) { c.state = S.Work; return; } // private hire: logs on at home (sim/mobile.ts)
     if (c.preStop && c.money >= MIN_SPENDING_MONEY && this.goToVenue(c, S.ToWork)) return;
-    if (!this.plan(c, c.wx, c.wy)) { this.w.quitJob(c); return; }
+    if (!this.plan(c, c.wx, c.wy)) { this.dropCommute(c); return; }
     c.state = S.ToWork;
     this.shareToWork(c);
+    this.schools.leaving(c); // a young child goes along to school on a parent's way to work (sim/schools.ts)
+  }
+  /** No way to work: the job goes; no way to school: the place goes (sim/schools.ts admits again where there is a way). */
+  private dropCommute(c: Citizen) {
+    if (c.study && !c.job) this.schools.leave(c, EduResult.Left); else this.w.quitJob(c);
+  }
+  /** The end of a shift or a school day: a wage, or a day attended. */
+  private shiftDone(c: Citizen) {
+    if (c.study && !c.job) this.schools.attended(c); else this.payWage(c);
   }
 
   /** The walking route home→work, cached; drivers plan afresh each trip with live traffic. */
@@ -1240,15 +1269,16 @@ export class Simulation {
 
   private endShift(c: Citizen) {
     if (c.state === S.Work && this.mobile.holdShift(c)) return; // out on the road: finish the job and come back first (sim/mobile.ts)
+    if (c.state === S.Work && c.study && !c.job && this.schools.pickUp(c)) return; // an under-8 waits to be fetched
     if (c.state === S.Work && this.waitForLift(c)) return; // a lift home with someone finishing a little later
-    this.payWage(c);
+    this.shiftDone(c);
     this.w.leaveSite(c);
     if (!this.w.citizens.has(c.id)) return;
     const h = this.hour;
     const p = h >= 16 && h <= 23.5 ? P_AFTER_EVENING : P_AFTER_OTHER;
     if (c.money >= MIN_SPENDING_MONEY && Math.random() < p && this.goToVenue(c, S.ToHome)) { this.bringCompany(c, false); return; }
     this.goHome(c);
-    if (c.state === S.ToHome) this.shareFromWork(c);
+    if (c.state === S.ToHome) { if (c.study) this.schools.homeward(c); this.shareFromWork(c); }
   }
 
   private goHome(c: Citizen) {
@@ -1258,9 +1288,10 @@ export class Simulation {
 
   private arriveHome(c: Citizen) {
     c.state = S.Home;
+    c.eduBits &= ~EDU_HOMEWARD;
     if (c.mig) { this.migrantHome(c); return; }
-    if (c.stage !== LifeStage.Child) this.payHomeTax(c);
-    if (this.w.citizens.has(c.id) && c.job) this.scheduleNext(c);
+    if (c.stage !== LifeStage.Child && !(c.study && !c.job)) this.payHomeTax(c); // full-time students pay no council tax
+    if (this.w.citizens.has(c.id) && (c.job || c.study)) this.scheduleNext(c);
   }
 
   // ---- venues: cafés before work, bars and restaurants after, parks and leisure venues by type --------------------
@@ -1350,10 +1381,35 @@ export class Simulation {
     return true;
   }
 
+  /**
+   * A grown-up takes child c to school (sim/schools.ts): a trip to the school door with no stay, then home or on to
+   * work. The child rides along when they drive (sim/carpool.ts), else sets off beside them.
+   */
+  private escortTrip(a: Citizen, c: Citizen, then: number, onShift = false): boolean {
+    if (!this.plan(a, c.sx, c.sy)) return false;
+    if (then === S.ToWork && !onShift) a.nextAt = a.nextAt + this.lead(a) + a.shiftLen; // as depart: the shift ends on schedule
+    a.venue = tileKey(c.sx, c.sy); a.venueThen = then; a.errand = ERRAND_SCHOOL; a.state = S.ToVenue;
+    const start = this.carStart(a);
+    if (start && this.takeLift(c, a, start, null, [c.sx, c.sy])) c.state = S.ToWork;
+    else this.depart(c);
+    return true;
+  }
+  /** A grown-up walks to the school gate to fetch child c, and back home (the child waits there, sim/schools.ts). */
+  private fetchTrip(a: Citizen, c: Citizen): boolean {
+    const car = a.car;
+    a.car = false; // on foot: the child walks home beside them
+    const ok = this.plan(a, c.sx, c.sy);
+    a.car = car;
+    if (!ok) return false;
+    a.venue = tileKey(c.sx, c.sy); a.venueThen = S.ToHome; a.errand = ERRAND_SCHOOL; a.state = S.ToVenue;
+    return true;
+  }
+
   private arriveVenue(c: Citizen) {
     const w = this.w;
     const b = c.venue ? w.buildings.get(c.venue) : undefined;
     if (!b) { this.leaveVenue(c); return; }
+    if (c.errand === ERRAND_SCHOOL) { c.state = S.AtVenue; c.venueUntil = w.tick; return; } // the school gate: a wave, and on
     if (c.errand) { // a doctor's visit: no bill, a short wait
       c.state = S.AtVenue;
       c.venueUntil = w.tick + HEALTH.doctorMinTicks + Math.round(Math.random() * (HEALTH.doctorMaxTicks - HEALTH.doctorMinTicks));
@@ -1385,7 +1441,7 @@ export class Simulation {
 
   private leaveVenue(c: Citizen) {
     if (c.state === S.AtVenue && !c.errand && c.venueThen !== S.ToWork && this.waitForLift(c)) return; // going home with family or a friend
-    if (c.errand && c.state === S.AtVenue) this.seenDoctor(c);
+    if (c.errand === 1 && c.state === S.AtVenue) this.seenDoctor(c);
     const key = c.venue;
     this.dropVenue(c);
     c.errand = 0;
@@ -1797,24 +1853,26 @@ export class Simulation {
     const start = this.carStart(d);
     if (!start || start[0] !== d.hx || start[1] !== d.hy) return;
     const w = this.w, now = w.tick;
-    const due = (p: Citizen) => p !== d && p.state === S.Home && p.job && p.nextAt >= now && p.nextAt - now <= CARPOOL.window && !p.preStop
+    // pupils too: the school run (sim/schools.ts), dropped off at the school door
+    const due = (p: Citizen) => p !== d && p.state === S.Home && (p.job || p.study > 0) && p.nextAt >= now && p.nextAt - now <= (p.study && !p.job ? this.schools.liftWindow(p) : CARPOOL.window) && !p.preStop
       && !(p.cond & ACUTE) && p.health >= HEALTH.staysHomeBelow;
     const cands: Candidate[] = [];
     const share = householdShare(d.hh);
     for (const id of w.households.get(d.hh)?.ids ?? []) {
       const p = w.citizens.get(id);
-      if (p && p.hx === d.hx && p.hy === d.hy && due(p) && Math.random() < share) cands.push({ p, dest: [p.wx, p.wy] });
+      if (p && p.hx === d.hx && p.hy === d.hy && due(p) && ((p.study && !p.job) || Math.random() < share)) cands.push({ p, dest: [p.wx, p.wy] });
     }
     // neighbours (same parcel, a few tiles away) working at or near the same place
     const social = this.socialIndex();
     for (const id of social.parcel.get(w.parcelIdAt(d.hx, d.hy)) ?? []) {
       const p = w.citizens.get(id);
-      if (!p || p.hh === d.hh || Math.abs(p.hx - d.hx) + Math.abs(p.hy - d.hy) > CARPOOL.neighbourR || !due(p)) continue;
+      if (!p || !p.job || p.hh === d.hh || Math.abs(p.hx - d.hx) + Math.abs(p.hy - d.hy) > CARPOOL.neighbourR || !due(p)) continue;
       if (Math.abs(p.wx - d.wx) + Math.abs(p.wy - d.wy) > CARPOOL.sameDest) continue;
       if (Math.random() < coworkerShare(d.id, p.id)) cands.push({ p, dest: [p.wx, p.wy], on: [p.hx, p.hy] });
     }
     this.shareRide(d, start, [d.wx, d.wy], cands, (p) => {
-      p.nextAt = p.nextAt + this.lead(p) + p.shiftLen; // as depart: the shift ends on schedule
+      if (p.study && !p.job) this.schools.liftIn(p); // the school day ends with the bell
+      else p.nextAt = p.nextAt + this.lead(p) + p.shiftLen; // as depart: the shift ends on schedule
       p.state = S.ToWork;
     });
   }
@@ -1831,9 +1889,9 @@ export class Simulation {
       if (this.sharesWith(d, p, 'work')) cands.push({ p, dest: [p.hx, p.hy] });
     }
     this.shareRide(d, start, [d.hx, d.hy], cands, (p) => {
-      this.payWage(p);
+      this.shiftDone(p);
       this.w.leaveSite(p);
-      if (this.w.citizens.has(p.id)) p.state = S.ToHome;
+      if (this.w.citizens.has(p.id)) { p.state = S.ToHome; if (p.study) this.schools.homeward(p); }
     });
   }
   /** d just set off home by car from a venue: family and friends there without a car who share with d come too. */
@@ -2509,8 +2567,8 @@ export class Simulation {
     if (c.leg?.drive) { c.parkedAt = null; c.parkKerb = false; } // the car comes home too
     this.traffic.leave(c);
     c.legs = []; c.leg = null; c.pts = null;
-    c.x = c.hx + 0.5; c.y = c.hy + 0.5; c.state = S.Home; c.path = []; c.pi = 0; c.trail = [];
-    if (c.job) this.scheduleNext(c);
+    c.x = c.hx + 0.5; c.y = c.hy + 0.5; c.state = S.Home; c.path = []; c.pi = 0; c.trail = []; c.eduBits &= ~EDU_HOMEWARD;
+    if (c.job || c.study) this.scheduleNext(c);
   }
 
   // ---- parking ---------------------------------------------------------------------

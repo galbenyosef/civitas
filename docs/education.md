@@ -4,7 +4,9 @@ Card "we need an education tree etc" (UTD 851126b0). Rich: "do we have the notio
 schools, high schools, sixth form, colleges, universities etc." and "lets consider the education of the population and
 an education tree / progress for them". Design 2026-10-18. **E1 (the citizen model and the wire) is built**: see
 section 12 for what it provides. The rest is design. Rich has not answered section 11 yet, so the build follows the
-recommended answers (A to every question). **E2 (the institutions catalogue, section 3 "Built in E2" and the tech track in section 6) is built** too.
+recommended answers (A to every question). **E2 (the institutions catalogue, section 3 "Built in E2" and the tech track in section 6) is built** too,
+and so is **E3 (the schools simulation, section 13)**: children are admitted, walk (or are taken) to school, attend, sit
+results and move up a stage.
 
 Code this touches: `shared/src/education.ts` (new: levels, stages, tables), `shared/src/buildings/education.ts` (new:
 the kinds), `server/src/sim/schools.ts` (new: admissions, attendance, graduation), hooks in
@@ -189,7 +191,7 @@ Decisions made while building it, so the later phases need not rediscover them:
 
 - **All eight kinds, halls included, are family code 14**, civic and not leisure, with no `service` flag. The design put the halls in the residential family (code 1), but a group must share one family code and a code-1 civic kind would meet the residential spawn and growth code before E5 exists. E5 may move them (a kind-id's code can change while the kinds are drafts; the tile would then need a re-placement). The `LEISURE_CODES` loops (`leisureCoverage`, `leisureGrowth`, `pickLeisure`, the child outing) visit code-14 buildings but `leisureAt` returns `undefined` for them (`isLeisure` is by kind id and the family is civic), and every one of those loops skips an `undefined` spec, so a school is invisible to them. The client's "at the library" label is by family code and unchanged; `ui.ts` `SHORT_EDU` names where each education kind's staff work.
 - **The group is a ladder of stages** (`stages: true` on the group in `groups.ts`), so the "never shrinks up the ladder" checks of holds and cost are skipped for it; the picker's count is `pupilCapacity` (`tierSummary` with `holds: 'pupils'`).
-- **Tech and counters**: tech track `education` with nodes `edu1`-`edu5` as in section 6 (`shared/src/tech.ts`) and the counters `pupils` and `graduates`, which start at 0 in `emptyProgress` (`server/src/world.ts`). Nothing bumps them yet: E3's `recomputeStats` does, so until then `edu4` (150 pupils) and `edu5` (200 graduates) cannot be earned in a live game, as intended while the kinds are drafts. `edu1` requires `civ1`. The policy features (free school meals, school buses, adult learning, apprenticeships, tuition fees) are E6's.
+- **Tech and counters**: tech track `education` with nodes `edu1`-`edu5` as in section 6 (`shared/src/tech.ts`) and the counters `pupils` and `graduates`, which start at 0 in `emptyProgress` (`server/src/world.ts`). E3's census bumps them (section 13), so `edu4` (150 pupils) and `edu5` (200 graduates) can be earned once schools stand; while the kinds are drafts only `?dev` places them. `edu1` requires `civ1`. The policy features (free school meals, school buses, adult learning, apprenticeships, tuition fees) are E6's.
 - **The lamps, benches and trees** on lawns, quads and forecourts sit at hashed offsets (`lampRow`, `benchRow`, `scatterTrees` in `edukit.ts`), so no campus looks stamped. The windows light up at night per window and per building as for every civic kind; the floodlight heads and lamp heads use the `venue` window class.
 
 ### Catchment
@@ -463,7 +465,7 @@ is no crime model (police coverage only), so there is no link until there is one
 | --- | --- | --- | --- | --- | --- |
 | E1 | **Built.** **Citizen model and wire.** `shared/src/education.ts` (levels, tracks, stages, `EDU`, base mix, `eduDefaults`, year group, birthday); `Citizen` fields; snapshot defaults; `CitizenInfo.life.education`, `PersonRow.edu`, `CITIZEN_STUDY`; newcomer seeding (no tilt yet); `loadtest/education.ts` | opus | world.ts, snapshot.ts, protocol.ts, life.ts, simulation.ts (`makeCitizen`, `describeLife`) | none | M |
 | E2 | **Built.** **Institutions catalogue.** `buildings/education.ts` kinds 101-108 with two UK designs each; un-reserve the `education` group; the edu1-edu5 tech track and counters; `SHORT` label by kind; viewer | sonnet | buildings/*, groups.ts, tech.ts, compiled.ts (regenerate, never hand-merge), ui.ts | none (attribute names from this doc) | L |
-| E3 | **Schools sim.** `sim/schools.ts`: admissions batches, the pupil timetable on the commute machinery, attendance, weekly rollover, graduation and drop-out, escorts via carpool, the `school` inspect block, `lifeEvents` | opus | sim/schools.ts, simulation.ts (Home branch, `endShift`, `newDay`, describe), carpool.ts | E1, E2 | L |
+| E3 | **Built.** **Schools sim.** `sim/schools.ts`: admissions batches, the pupil timetable on the commute machinery, attendance, weekly rollover, graduation and drop-out, escorts via carpool, the `school` inspect block, `lifeEvents` | opus | sim/schools.ts, simulation.ts (Home branch, `endShift`, `newDay`, describe), carpool.ts | E1, E2 | L |
 | E4 | **Jobs, wages, migration.** Skill gate in `findJob`, `jobMisses` by level, `Building.qualified`, wage multipliers, `EDU.match` tilt, brain drain, happiness parts; tuning runs | opus | simulation.ts (`findJob`, `hire`, `payWage`, `lifeFamily`), life.ts, gateways.ts | E1 (runs beside E3) | M |
 | E5 | **Higher and adult education.** University intake via gateways, halls of residence, families moving in, FE courses, evening classes (`errand` 2), apprenticeships, research ambition | opus | gateways.ts, simulation.ts (`spawn`, `arriveVia`, `ambition`), sim/schools.ts | E3, E4 | L |
 | E6 | **Policies and the tree UI.** `policies.ts`, `Player.policies`, `setPolicy` intent, Policies panel, Education track in the tech panel; school buses as FleetKind 9 (the server part goes to opus) | sonnet (+ opus for `mobile.ts`) | policies.ts, net.ts, ui.ts, fleet.ts, sim/mobile.ts | E2; the effects need E3 | M |
@@ -549,8 +551,8 @@ per tick within noise (0.82-0.88 against 0.82-1.03).
 ### On the wire
 
 - `CITIZEN_STUDY = 1 << 25` and `citizenStudy(f)` (`protocol.ts`). `Simulation.agents()` ORs it in through `extra`
-  for a citizen with `study > 0` in `ToWork` or `ToHome`. E3 should narrow `ToHome` to the trip home from school,
-  for example with a flag set at `endShift`, because today a pupil coming home from the park also carries it. The
+  for a citizen with `study > 0` in `ToWork` or `ToHome`. E3 narrowed `ToHome` to the trip home from school
+  (`EDU_HOMEWARD`, set at `endShift`, cleared on arrival), so a pupil coming home from the park does not carry it. The
   client does not read it yet: E7 draws the student look.
 - `PersonRow.edu`: the EduLevel of every resident, worker and visitor row.
 - `CitizenLife.birthday: { weekday, hour }` (`birthdayOf`, where weekday 0 is Monday) and
@@ -586,3 +588,135 @@ about 11 s). First run:
 
 E3-E7 extend the probe with enrolment by stage, attendance, graduations, brain drain and the job fill rate by skill.
 
+
+## 13. Built: E3, the schools simulation
+
+Built 2026-10-18 on branch `edu-e3`. `server/src/sim/schools.ts` (class `Schools`, `Simulation.schools`) runs
+admissions, the school day, attendance, results and drop-outs. Nothing runs per pupil per tick: the batches are a
+census and a pass over the citizens at midnight and at 03:30, and the census alone once a game hour.
+
+### How a pupil's day works
+
+- **The commute machinery, unchanged.** At admission a pupil gets the school's bell in the shift fields (`shiftStart`,
+  `shiftLen`, `cycle` Monday-Friday `[1,1,1,1,1,0,0]`, `phase` 0) and **the school door mirrored into `wx`/`wy`**,
+  while `job` stays false and `kind` 0. `depart`, `ToWork`, `Work`, `endShift`, `lead`, `commutePath` and the carpool
+  all read `wx`/`wy`, so they run as for a worker. Anything new that reads `wx`/`wy` must keep checking `c.job`. Each
+  school hashes its bell from its door (start 08:30-09:00, end 15:00-15:30, `EDU.startFrom/startSpan/endFrom/endSpan`),
+  each pupil adds ±5 minutes (`pupilJitter`), and a university student hashes their own lectures (a start between
+  09:00 and 11:00, 5 hours).
+- **Hooks in `simulation.ts`** (all thin): the Home branch sends a pupil due out to `schools.setOff` and skips the job
+  search (`c.study`); `depart` calls `schools.leaving` (breakfast club) and, with no way there, `dropCommute` gives up
+  the place rather than a job; `endShift` asks `schools.pickUp` (an under-8 waits to be fetched), then `shiftDone`
+  counts a day attended (`schools.attended`, `att++`) instead of a wage; the trip home sets `EDU_HOMEWARD` (bit 2 of
+  `eduBits`, transient) and arriving home clears it, so `CITIZEN_STUDY` now marks only the trips to and from school;
+  `arriveHome`/`teleportHome` reschedule for `c.job || c.study`; `scheduleNext` gives pupils no café stop; `newDay`
+  does not count students as idle; full-time students pay no council tax (`arriveHome`); `shareToWork` takes household
+  pupils on the school run (always, not by the household's habit) and drops them at the school door.
+- **Escorts for the under-8s** (`EDU.escortAge`), in this order: a household driver leaving for work within 45 minutes
+  (`liftWait`): the child waits and the carpool takes them; an older brother or sister at the same school due within 30
+  minutes (`siblingWindow`); a grown-up at home who is free for 3 hours (`freeFor`) walks them in and goes home (or
+  drives, and the child rides along); a parent due at work within 1.5 hours (`onTheWay`) drops them off on the way.
+  From the other side, a parent leaving for work (on foot or by transit, `schools.leaving`; or by car, `shareToWork`
+  with `schools.liftWindow`) takes an under-8 due within 1.5 hours (`breakfastClub`): the child waits at school for the
+  bell. Younger brothers and sisters at the same school go along. Failing all of these the child misses the day ("no
+  one to take them"; the school bus of E6 is the fix). The grown-up's trip is a venue trip with `errand` 3
+  (`ERRAND_SCHOOL`): no bill, no stay at the gate, then home or on to work; the doctor stays `errand` 1. After school a
+  free grown-up at home walks over to fetch an under-8 (`pickUp`): the child waits about as long as the walk takes;
+  with nobody free they walk home alone.
+- **The census** (`census()`, hourly and before each batch): which schools stand (any built kind with a `SCHOOL_SPECS`
+  entry), their pupils and the pupils in class now, their staff, and the staff with a degree (teachers) and with a
+  postgraduate degree. `needed = ceil(staff capacity × teachersShare)`, `needPg = ceil(capacity × postgradShare)`, and
+  **staffing** = min(teachers / needed, postgrads / needPg, 1). A school **admits** `floor(pupilCapacity × staffing)`;
+  pupils already there stay. **Quality** follows staffing over the year (`1 - qualityDrop × (1 - staffing)`, 0.5-1,
+  smoothed by `qualityDays` a day) and multiplies the pass chance. Then the counters: `pupils` (pupils at schools on
+  an owner's parcels) and `graduates` (residents of their parcels with a degree or more), as peaks via `World.bump`.
+  Nothing is saved but the citizens' own fields: a loaded world recounts at the first census (run lazily if a pupil is
+  due out before it).
+- **Midnight, daily:** `due++` for every pupil after a school day; a sixth-former or student below
+  `EDU.dropOutBelow` attendance after `dropOutAfter` days drops out with `dropOutPerDay`; a pupil whose school has gone
+  leaves it (`EduResult.Left`) and is admitted elsewhere. **Saturday 00:00 is results day**: a leaver (a school stage:
+  by their age at next Monday against the stage's leaving age; a degree or master's: `due >= STAGES[s].days`) who
+  attended `EDU.minAttend` passes with `pass × quality × (1 + nursery bonus)`. A pass raises `edu` (nursery sets
+  `EDU_NURSERY` instead), sets the track at 16-18 (sixth-form college STEM or arts by hash, FE college trades) and is
+  logged; a fail sets `EDU_DROPPED` (section 5); a nursery year with low attendance is just `Left`. Offers on results
+  day: `uniShare` (45%) of sixth-form passers take a place at the nearest university with room, and `postgradTake`
+  (20%) of graduates a master's (`goOn`), so they never start looking for work. **Monday 00:00**: admissions for the
+  new year.
+- **Admissions** (Monday 00:00 and 03:30 daily): every child of school age by their age at the start of the school year
+  the next school day belongs to (so after Saturday's results the leavers belong to next year's stage) and without a
+  place, against every school of their stage with room within its catchment (Manhattan tiles from home; the university
+  is city-wide), nearest pair first: the UK distance rule. A sixth-form college needs GCSEs, an FE college takes anyone
+  16-17 (as `Study.SixthForm`). A drop-out is not re-admitted before 18. The school's tooltip counts the children whose
+  nearest school is full (`waiting`); `events.noSchoolAtLast` counts those with no school of their stage in reach.
+
+### The API for E5-E7
+
+- `Simulation.schools: Schools`. `SCHOOLS.on` (`EDU=0` in the environment turns the whole thing off for A/B runs).
+- `schools.enrolAt(c, building, study): boolean`: a place at that school if it takes the stage and has room its
+  staffing allows; moves a pupil enrolled elsewhere. **E5** uses it for students arriving through a gateway (Degree at
+  106; halls are E5's) and adult courses (`Study.FeCourse` at 105; `Study.Evening` needs E5 to count `eveningPlaces`).
+  `schools.leave(c, EduResult)` ends a stage with a log entry. Adults enrolled this way are students: no job search, not
+  idle, no council tax; an evening class keeps its job (`c.job` true: the timetable is not touched).
+- `schools.describe(b)` → `BuildingInfo.school: SchoolInfo` (`shared/src/protocol.ts`): stage, pupils, present,
+  places, admitting, teachers, teachersNeeded, postgrads and postgradsNeeded (university and research), catchment,
+  hours, quality, passed/failed/droppedOut (the latest results day), waiting. **E7** draws the tooltip from it.
+- `schools.events` (probes, and E7's charts): enrolled, graduations, nurseryDone, failed, dropOuts, left, attended,
+  escort `{ lift, sibling, adult, onTheWay, missed }`, fetched, walkedHomeAlone, admissions, waitingAtLast,
+  noSchoolAtLast, wentOn. `Simulation.lifeEvents` gains `graduations` and `dropOuts`. `schools.list()` and
+  `schools.census()` for probes.
+- `shared/src/education.ts`: `SCHOOL_SPECS[kindId]` / `schoolSpec(kind)` (the catalogue attributes as numbers:
+  stage, places, evening, catchment, ages, teachersShare, postgradShare, beds), `schoolTakes(spec, study)`,
+  `studyForAge(age)`, `EDU_HOMEWARD`, and the E3 tunables in `EDU`.
+- **E4** owns the skill gate: with it, schools hire degree holders for 60% of their places and fill up; without it they
+  hire whoever is nearest, so the census sees roughly the base mix (about 43% degree or more) and most schools run at
+  60-80% of their places. **E6**: free school meals add `EDU.mealsBonus` in `Schools.result`; school buses replace
+  "missed". **E7**: `CITIZEN_STUDY` now means a school trip.
+
+### The probe
+
+`npx tsx packages/server/src/loadtest/schools.ts --districts 2 --days 8` (seed 1, deterministic; `--checks 0`,
+`--quiet`, `--save FILE`): the 2×2 test city with a nursery, primary and secondary school in every district, a
+sixth-form college, an FE college, and a university, halls and research institute on a parcel south of the city;
+before the first tick 30% chances per four beds of a family (two adults and 1-3 children aged 0-17). Day 0 is a Monday.
+First run (19 of 19 checks pass, about 45 s):
+
+- **The city** after 8 game days: 5,192 citizens, 463 under 18 (8.9%). 243 enrolled at the end: nursery 8, primary 76,
+  secondary 110, sixth form 41, degree 7, master's 1. Attendance this stage so far: nursery 63%, primary 91%,
+  secondary 97%, sixth form 98% (illness and the under-8s nobody could take). In class at 11:00: 143 on the first
+  Monday (staff still being hired), 173-218 through the week, 234 the next Monday.
+- **Teacher shortfall**, with no skill gate yet (E4): teachers are whoever took the job, so most schools have 4-12 of
+  the 6-15 degree holders they need and admit 60-80% of their places; a primary with 1 of 6 admitted 20 of 120 and had
+  10 waiting; two schools in the far district hired no staff at all and admitted nobody (9 and 24 waiting). Firing
+  half the qualified teachers of a primary drops it from 80 to 40 places (the check). The university ran at 22/36
+  teachers and 5/24 postgraduates: quality 0.60.
+- **Catchments**: 115 primary-age children had no primary within 12 tiles (the probe puts one primary per 22×22
+  district); 9 more waited for a full school in reach.
+- **Results day**: 50 graduations (of those still in town: primary 10, GCSEs 16, Level 3 14, degrees 6 of the 20 seeded second-years) and 10
+  nursery years; 21 fails (mostly too few days attended in a first week); 0 drop-outs; 9 offers on results day, 7
+  school leavers starting a degree on Monday and 1 graduate a master's.
+- **Escorts for the under-8s**: 46 lifts in a household car, 30 with an older brother or sister, 103 walked in by a
+  grown-up at home, 53 dropped off on a parent's way to work; 37 missed days with nobody to take them. After school 138
+  were fetched and 161 walked home on their own.
+- **The school run**: at most 201 pupils on the way at once (08:30); of 1,023 morning trips 81% walk, 14% ride in a
+  household car, 5% drive (sixth-formers who turned 18). The tiles have no transit. `CITIZEN_STUDY` in 85,000 agent
+  samples: never on a trip home that is not from school, always on a pupil going to school.
+- **Counters**: `pupils` 248 (edu4 needs 150), `graduates` 1,942 (edu5 needs 200).
+- **Saves**: a snapshot keeps every pupil's place, the loaded world runs and the census recounts all 243.
+
+**Tick cost**, same seed, median of 3 (2026-10-18):
+
+| Run | main 03fe71f | edu-e3 | edu-e3, `EDU=0` |
+| --- | --- | --- | --- |
+| this probe, 8 days, all ticks | 2.176 ms | 2.187 ms (+0.5%) | 2.089 ms |
+| this probe, school hours on school days | 2.469 ms | 2.527 ms (+2.3%) | 2.423 ms |
+| `loadtest/ab.ts --hour 8 --ticks 3000` (the Commons, no schools) | 0.832 ms | 0.837 ms (noise) | |
+
+Main runs the probe's city and families without simulating schools (the children stay home). Within the 5% target. With
+no school placed the branch plays exactly as main: `ab.ts` prints identical speeds, give-ups, re-routes and trips.
+`EDU=0` came out 4% below main, which this change does not explain (with schools off nothing new runs and nothing new
+draws a random number); main's own three runs spread 2.5%, so take main as the baseline and the rest as noise.
+
+**Traffic**: school runs add their walkers to the 08:00-09:00 peak and a 15:00-16:00 one, and household cars make
+drop-offs on the way to work; with no schools placed the `docs/traffic-tuning.md` baselines are unchanged (above).
+The probe's `--save` writes a Tuesday-morning world for a live look: children in school jumpers with backpacks walking to
+the secondary schools at 08:30-09:00 (screenshots in the E3 report).
