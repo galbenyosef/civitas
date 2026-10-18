@@ -9,7 +9,8 @@
  *   npx tsx packages/server/src/loadtest/boats.ts [--days 2] [--districts 2] [--off]
  *
  * A motorway connection at the west end gives both runs a road way out (`--no-motorway` leaves it off). `--off` runs the same city with the harbours module disconnected (no lanes, no events, no port exports, and the
- * port opens as a gateway with no sea-route check, as before B4): the baseline for the tick cost. `--no-lorries` keeps
+ * port opens as a gateway with no sea-route check, as before B4): the baseline for the tick cost. Every variant fills
+ * with the harbours on and switches at the start of the measured days, with Math.random re-seeded there. `--no-lorries` keeps
  * the harbours but sends no fish, container or export lorries, to tell their road traffic from the module's own cost.
  */
 import {
@@ -73,8 +74,6 @@ log(`${districts}×${districts} districts; ${placed.join(', ')}`);
 
 const game = createGame(w, { onConnection() {} }, { devTools: true, sandbox: false });
 const { sim, harbours } = game;
-if (off) { harbours.tick = () => {}; sim.ports = null; sim.gateways.seaRoute = () => true; }
-if (argv.includes('--no-lorries')) { sim.ports = null; sim.harbourFreight = () => {}; } // the harbours without their road traffic
 
 // ---- fill: newcomers move straight in until the population levels off ------------------------------------------------
 const tf = performance.now();
@@ -103,6 +102,11 @@ while (w.tick % DAY) game.step();
 log(`filled: ${w.citizens.size} people in ${((performance.now() - tf) / 1000).toFixed(0)} s; harbour staff ${[...w.builtOf(15)].filter((b) => b.id >= 24 && b.id <= 28).map((b) => `${KIND_NAMES[b.id]} ${b.occupants}`).join(', ')}`);
 
 // ---- measure ------------------------------------------------------------------------------------------------------------
+// A fair A/B: both runs fill the same city with the harbours on, then the variant is switched here and Math.random is
+// re-seeded, so the measured days start from one city and one random stream
+if (off) { harbours.tick = () => {}; sim.ports = null; sim.gateways.seaRoute = () => true; }
+if (argv.includes('--no-lorries')) { sim.ports = null; sim.harbourFreight = () => {}; } // the harbours without their road traffic
+Math.random = seededRandom(SEED * 7919 + 1);
 const t0Tot = { ...harbours.totals }, gw0 = { ...sim.gateways.totals };
 let seaIn = 0;
 const noteIn = sim.gateways.noteIn.bind(sim.gateways);
