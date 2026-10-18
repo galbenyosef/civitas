@@ -424,9 +424,10 @@ export class MapView {
    */
   private layoutLabels(cam: PerspectiveCamera, wpp: number, vw: number, vh: number) {
     if (this.labelsDirty) { this.buildLabels(); this.labelsDirty = false; }
-    const sig = `${cam.position.x.toFixed(1)},${cam.position.z.toFixed(1)},${wpp.toFixed(4)},${vw},${vh}`;
+    const sig = `${cam.position.x.toFixed(2)},${cam.position.y.toFixed(2)},${cam.position.z.toFixed(2)},${wpp.toFixed(4)},${vw},${vh}`;
     if (sig === this.lastLayout) return;
     this.lastLayout = sig;
+    cam.updateMatrixWorld(); // the rig moved the camera this frame; the render that updates its matrices comes after
     const far = wpp > 1.2;
     // owners first (far out every owner's name, nearer only where their land has room for it), then lines, then estates and
     // parcels by size; a parcel name already shown is not repeated (sample cities name several parcels after one area)

@@ -336,7 +336,7 @@ body.spectate #tools, body.spectate #picker, body.spectate #money, body.spectate
 #ctxmenu .ci.disabled:hover { background: transparent; }
 
 /* the world map (mapmode.ts, docs/world-map.md) */
-body.map-on #tools, body.map-on #panel, body.map-on #cpanel, body.map-on #tip, body.map-on #picker { display: none !important; }
+body.map-on #tools, body.map-on #panel, body.map-on #cpanel, body.map-on #tip, body.map-on #picker, body.map-on #tourLabels { display: none !important; }
 #ui > #mapLabels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 #mapLabels.hidden { display: none; }
 #mapLabels .mlabel { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11px; color: #f2f4f7; text-shadow: 0 1px 2px #000, 0 0 3px #000; }
