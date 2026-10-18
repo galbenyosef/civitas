@@ -373,6 +373,8 @@ Primary, 96% attendance") from `life.education.history`.
 
 ## 7. Effects
 
+Built in E4: section 17 lists what was built and how it differs from this design.
+
 **Jobs require education by tier, softly.** Each workplace kind and level gets a `skill` attribute `[level, share]`:
 that share of its places needs that level. The rest are unskilled places (receptionists, cleaners, assistants). Kinds
 without the attribute read a default by family and level from `shared/src/education.ts`:
@@ -949,3 +951,138 @@ loads and runs). Part B runs the 2×2 test city of the schools probe for `--days
 every rider was set down, the owner paid $15 a bus, meals were billed exactly pupils fed × $0.4, fees paid and (after switching
 off at day 5) a grant was charged, the hashed 30% were turned away from the university, the E4 hooks answer, and with buses off
 no round is sent. `--save FILE --until 2.2` writes a Wednesday 05:00 world with the policies on, for a live look.
+
+## 17. Built: E4, jobs, wages and migration
+
+Built on branch `edu-e4` (2026-10-18), rebased on E3. This section follows section 7, with these differences: skilled
+places come in a single tier, "over-qualified" has the narrow meaning below, and a job seeker never passes a near
+unskilled place to reach a skilled one (see "Tuning"). All of it sits behind `SKILLS.on`. `ab.ts --set edu=0` turns
+off only this. `EDU=0` in the environment turns it off together with E3's schools (`SCHOOLS.on`). The control plays
+exactly as main did before E4 (same seeded results on `ab.ts`).
+
+### `shared/src/education.ts`
+
+- `SKILLS = { on }`: the switch.
+- `skillDefault(kind, family, level, attrs)` gives `[level, share]` for a workplace. A level's `skill` attribute
+  `[level, share]` overrides it. Section 7's table becomes a single tier at the lower level, with two-tier rows added up:
+  - shops L1-3: secondary 20/30/40%
+  - department store, shopping centre and hotel (L4+): further 30%
+  - industry L1-3: further 30/40/50%, L4 50%, L5+ 60%
+  - offices L1: further 40%; L2: degree 40%; L3: degree 60%; L4+: degree 70%. London's office towers are level-1
+    landmarks and count as the top tier.
+  - health: GP 40% to teaching hospital 80% degree
+  - police, fire and builders: further 30%
+  - the airport: further 40%
+  - education kinds (from their `stage` attribute): degree 60%; the university postgraduate 40%; the research
+    institute postgraduate 60%
+  - everything else: none
+- The tables are built once from `MANIFEST`:
+  - `skillNeed(kind, level)`: the level the skilled places need.
+  - `skilledPlaces(kind, level)`: `ceil(capacity × share)`.
+  - `workTrack(kind)`: trades for industry and builders, STEM for health, the university and research, arts and
+    business for offices.
+- `overQualified({ job, edu, skill })`: a graduate (degree or more) in a place that needs two or more levels less
+  (an unskilled place counts as needing none). A degree holder in a further-level industrial place is not
+  over-qualified.
+- `wageMul(c, kind)`: `EDU.wage[edu]` in a skilled place, × `EDU.trackMatch` when the track fits the workplace; 1 in
+  an unskilled place.
+- `trackFor(id, edu)`: the hash-seeded track, shared with `eduDefaults`.
+- New `EDU` tunables: `gradLeave` 0.5 and `healthBonus` 2.
+
+### `server/src/sim/skills.ts` (`Simulation.skills`)
+
+- **`placeFor(b, edu)` → `Place.None | Unskilled | Skilled`**. A skilled place goes to someone with
+  `edu >= skillNeed` while `qualified < skilledPlaces`. An unskilled place is free while
+  `occupants - qualified < capacity - skilledPlaces`.
+  - `findJob` takes the nearest building that has a place for the seeker's level.
+  - `jobMisses` is keyed `tkey(home) * 8 + edu`, and a miss stands while none of the workplaces it passed has a place
+    for that level.
+- **`hired(c, b)`** (first line of `hire`): takes the skilled place if there is one, else an unskilled one. It sets
+  `Citizen.skill` (the level the place needs, 0 for unskilled) and `Building.qualified`.
+- **Giving the place back:** `World.quitJob` decrements `qualified` and clears `skill`. `World.mergeLots` re-counts
+  `qualified` at the new door.
+- **Loading a save:** `snapshot.ts` rebuilds `qualified` via `rehire(c, b)`. A worker saved before E4 (no `skill`)
+  gets a skilled place on load when qualified and one is free.
+- **`newcomer(id, age)`** (`spawnCitizen`, `arriveVia`): the `EDU.match` tilt.
+  - With chance 0.6 (hash-seeded, so it draws no random numbers) the level is drawn from the open skilled places by
+    the level they need, weighted by count. These are re-counted at most every 25 ticks, and each draw holds its place
+    until the next count.
+  - Someone drawn for a degree place at 18-21 arrives aged 22-29 instead.
+  - `makeCitizen` takes the result as an optional `EduFields`.
+- **Wages:** `payWage` multiplies by `wageMul`. Civic payroll pays the higher wage too.
+- **Brain drain:**
+  - `day(c)` (`newDay`) counts `Citizen.drain`, the days a graduate who is not studying has been out of work or
+    over-qualified.
+  - `drainMul(c)` (×3 from `drainDays` 2) multiplies the living-alone leaving chance in `lifeFamily`.
+  - `graduated(c)`, wired to E3's `Schools.onGraduated`, sets `Citizen.grad`. That gives "graduated" +5 for 2 days.
+    Two days later, a graduate with no matching job leaves with chance 0.5.
+  - Graduates who leave this way, or after `MAX_IDLE_DAYS` out of work, count in `stats.brainDrain`. The home's owner
+    gets a notice at most once a game day: "Graduates are leaving…".
+- **Happiness** (`sim/life.ts`):
+  - "studying" +2 replaces "out of work" for an adult student.
+  - "over-qualified" -2.
+  - "graduated" +5.
+  - The health target is +2 for a degree or more (`healthBonus`).
+  - "Good school nearby" and "no school place" are left to the school-place work.
+- **`fill()`**: places filled and skilled places filled, by group (shops, industry, offices, other). `stats` holds
+  `matched`, `newcomers`, `brainDrain`, `skilledHires`, `unskilledHires` and `overQualifiedHires`.
+
+### Tuning
+
+The first build let a qualified seeker pass the nearest unskilled place to reach a skilled one up to 10 tiles further.
+On the 1×1 Commons that lengthened the mean commute from 4.51 to 5.37 tiles. It also left unskilled places empty when
+jobs outnumber people. Builders' yards and the police stood short-staffed ("other" 74% filled against 95%),
+construction slowed, and the town held 6% fewer people on five of five seeds, with peak cars up 30% and give-ups doubled
+on a sample seed. That rule was dropped. The search is now the nearest place the seeker's level may take, and the
+tilt alone keeps skilled places filling.
+
+### Numbers
+
+`loadtest/education.ts --districts 1 --days 3` (seed 1, on/off with `EDU=0`), where jobs outnumber adults about 2 to 1:
+
+| | shops filled | industry | offices | other | unemployed | commute (tiles) |
+| --- | --- | --- | --- | --- | --- | --- |
+| on | 79.8% (skilled 81%) | 52.0% (59%) | 40.1% (35%) | 100% | 0 | 4.43 |
+| off | 82.3% | 51.2% | 39.0% | 94.5% | 0 | 4.51 |
+
+On, 59.8% of newcomers were drawn for open skilled places, 22.9% of workers are over-qualified, the mean wage multiplier
+is 1.113, and 13 graduates left over 3 days. At `--built 1` and `--built 2` every fill rate is within 2 points of the
+control. 30 of 30 checks pass:
+
+- `qualified` matches the skilled holders.
+- No workplace is over its skilled places.
+- Every skilled holder is qualified.
+- Wages follow the rule.
+- The tilt is about `EDU.match`.
+- `qualified` and `skill` round-trip a save.
+- A pre-E4 save places its qualified workers.
+
+E3's `loadtest/schools.ts` passes 19 of 19 with E4 on.
+
+**Demos** (`demo:check --run 1 --fill`, on against `EDU=0`). Both still fill their offices:
+
+| | offices filled | industry | shops | other | unemployed | brain drain | gateway out | tick (last day) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| showcase on | 97% (skilled 95%) | 97% | 97% | 99% | 86 of 16,722 | 198 | 852 | 26.9 ms |
+| showcase off | 98% | 97% | 98% | 99% | 41 of 16,830 | 0 | 685 | 26.2 ms |
+| London on | 51% (skilled 37%) | 24% | 74% | 82% | 128 of 32,531 | 256 | 1,197 | 66.1 ms |
+| London off | 54% | 24% | 72% | 81% | 112 of 32,641 | 0 | 1,050 | 64.3 ms |
+
+London has 76,726 jobs for 32,500 people, so it never fills. About 60% of newcomers were drawn for open skilled
+places in both demos. The cost is more leavers: brain drain adds 15-25% to the people leaving through the gateways.
+
+**Traffic A/B** (`ab-matrix.ts --hours 8,17 --seeds 1-6 --ticks 1500 --row on= --row off=edu=0`; medians of six seeds,
+paired differences on minus off):
+
+| | sim ms/tick | speed | queued | give-ups | commute mean (drivers) | cars mean / peak |
+| --- | --- | --- | --- | --- | --- | --- |
+| 08:00 off | 1.576 | 26.7% | 66.8% | 391.5 | 73.9 (97.9) | 135.2 / 186 |
+| 08:00 on | 1.596 | 27.0% | 66.5% | 374.0 | 69.7 (91.5) | 136.7 / 193 |
+| 17:00 off | 0.920 | 29.3% | 64.6% | 234.0 | 54.6 (93.9) | 82.4 / 168 |
+| 17:00 on | 0.978 | 30.1% | 63.7% | 222.0 | 50.5 (73.0) | 84.3 / 178 |
+
+- **Paired differences:** give-ups -8 (08:00) and -19.5 (17:00), queued -0.4 and +0.3 points, commutes -7 and -4
+  ticks. Every one is within the seed noise (`docs/traffic-tuning.md`: about ±15 give-ups).
+- **Tick cost:** the matrix ran four at a time on a machine at load 17. Its +0.04 and +0.08 ms per tick were checked
+  sequentially, interleaved, at 17:00 on seeds 1 and 5, three runs each. The medians were the same: seed 1 on 0.791,
+  off 0.796; seed 5 on 0.788, off 0.799. The cost is within noise, well under the 5% target.

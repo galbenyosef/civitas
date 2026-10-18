@@ -3,6 +3,7 @@ import {
   type EduFields,
 } from '@msimcity/shared';
 import { hasJobs, type Building, type Citizen, type World } from '../world';
+import { env } from '../env';
 
 /**
  * Jobs, wages and migration by education (docs/education.md section 7, phase E4). A workplace has skilled places,
@@ -12,9 +13,10 @@ import { hasJobs, type Building, type Citizen, type World } from '../world';
  * calls `hired`, World.quitJob gives the place back, newcomers draw their level through `newcomer`, and the daily
  * step counts brain drain through `day`.
  *
- * `EDU=0` in the environment turns all of it off (SKILLS.on): the simulation then plays as before E4, the A/B control.
+ * `EDU=0` in the environment turns all of it off (SKILLS.on), and the schools with it (E3); `ab.ts --set edu=0` turns off
+ * this part only. Either way the simulation then plays as before E4: the A/B control.
  */
-if (globalThis.process?.env?.EDU === '0') SKILLS.on = false; // not bare: local mode runs this in a browser worker
+if (env('EDU') === '0') SKILLS.on = false; // with the schools (sim/schools.ts SCHOOLS.on)
 
 /** No place for this citizen here, an unskilled place, a skilled place. */
 export const Place = { None: 0, Unskilled: 1, Skilled: 2 } as const;
