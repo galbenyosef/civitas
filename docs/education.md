@@ -1,0 +1,471 @@
+# Education: schools, qualifications and the education tree
+
+Card "we need an education tree etc" (UTD 851126b0). Rich: "do we have the notion of age and school etc? We also need
+schools, high schools, sixth form, colleges, universities etc." and "lets consider the education of the population and
+an education tree / progress for them". Design 2026-10-18; nothing here is built yet.
+
+Code this touches: `shared/src/education.ts` (new: levels, stages, tables), `shared/src/buildings/education.ts` (new:
+the kinds), `server/src/sim/schools.ts` (new: admissions, attendance, graduation), hooks in
+`server/src/sim/simulation.ts`, `server/src/sim/life.ts`, `server/src/world.ts`, `server/src/snapshot.ts`,
+`shared/src/protocol.ts`, `shared/src/tech.ts`, `shared/src/history.ts`, and the client panels.
+
+## 1. Today
+
+**Age: yes. School: no.**
+
+- **Age.** Every citizen has `born`, a fractional game day (`server/src/world.ts` `Citizen.born`). `ageOf` in
+  `server/src/sim/life.ts` turns it into years at `LIFE.daysPerYear = 7`: one game week is one year of age. `stageFor`
+  gives the `LifeStage` (`shared/src/protocol.ts`: Adult 0, Child 1, Retired 2): a child under `LIFE.adultAge` (18),
+  retired from 62 to 68 (`retireAgeOf`, hash-seeded per id). The stage is refreshed once a game day by
+  `Simulation.lifeStep`, rides in the agent wire flags (bits 12-13), and shows in `PersonRow.age/stage` and
+  `CitizenInfo.life` (`describeLife`).
+- **Births and deaths.** Couples living together aged 20-45 have babies (`lifeFamily`, `LIFE.birthPerDay` 0.03, at most
+  3 children), born at age 0 by `spawnChild`. Children inherit the household and surname, and they leave town if no
+  grown-up is left at home (`lifeStep`, `orphansLeft`). People die of old age from 65 on (`deathChance`).
+- **Newcomers are always single adults aged 18-45** (`seededAge(id, LIFE.newcomerMin, newcomerMax)` in `spawnCitizen`
+  and `arriveVia`). No family moves in with children.
+- **So there are few children, and all of them are young.** `loadtest/lives.ts --districts 1 --weeks 4` (run for this
+  doc): 1,497 people, 40 children (2.7%), all under 10. Nobody in town is 10-17, because a child born today turns 18
+  after 126 game days (16.8 hours of wall time at 8 minutes a game day).
+- **What children do all day.** They stay at home (`activityOf`: "at home"), come along on a parent's outing
+  (`bringCompany`, `LIFE.childJoins`), and from age 8 (`CHILD_OUT_AGE`) go alone by day (09:30-17:30) to a free park
+  or library within 14 tiles (`maybeChildOuting`, `CHILD_TRIP_MAX`). They pay no tax, ride transit free
+  (`sim/transit.ts` fare), own no car, and their occupation reads "child".
+- **Nothing resembling school exists.** The `education` group is reserved in `shared/src/buildings/groups.ts` (label
+  Education, holds "pupils") with no kinds. Libraries are leisure venues (tech `cul1`). The only "school" in `tech.ts`
+  is `civ6` Medical school, which unlocks the teaching hospital, a health building. `docs/feature-gaps.md` lists
+  education as a gap ("Citizens have no skills"), and `docs/structures.md` sketches a 6×6 university campus.
+- **The client is ready for pupils.** `client/src/render/people.ts` dresses 55% of children who are dressed for work in
+  a school jumper with a backpack. No child is ever in a work state, so no one wears it today.
+- **Jobs need no skill.** `Simulation.findJob` hires the nearest vacancy by road. `hire` takes the workplace's
+  occupation and shift. `payWage` pays `wageOf(kind, level)` per 8-hour shift: offices 20/26/32 by level, industry
+  14/19/24, shops 15/20/25. A building grows only when 70% occupied (`growth`), and residential demand is
+  `jobs - population + 6`, where `population` counts children and retirees too.
+- **Charts** (`shared/src/history.ts`) have no age or education series. Rings match series by key, so new keys need no
+  save bump.
+
+## 2. The citizen model
+
+### Age and birthday
+
+Keep `born` and `ageOf` as they are. A citizen's **birthday** is `mod(born, 7)`: a weekday and hour of the game week,
+because a game week is a year. For newcomers it already comes from the id (`seededAge` hashes `id` with 211 and 213,
+and the fraction lands anywhere in the week). For babies it is the real moment of birth. The panel shows
+"9, turns 10 on Thursday". **Year group** (UK rule: aged 4 by the start of the school year is Reception) is
+`floor(ageAt(weekStart)) - 4`, where `weekStart` is the Monday 00:00 of the current game week. It is a pure function,
+so it is never stored.
+
+### Education level
+
+A small ladder, `EduLevel` in `shared/src/education.ts`:
+
+| Value | Level | UK meaning | Earned at |
+| --- | --- | --- | --- |
+| 0 | none | no qualifications | |
+| 1 | primary | left primary school | primary, age 11 |
+| 2 | secondary | GCSEs | secondary school, age 16 |
+| 3 | further | A-levels, or a vocational Level 3 (BTEC, T-level) | sixth form or FE college, age 18; adult courses |
+| 4 | degree | bachelor's degree | university, 3 years |
+| 5 | postgraduate | master's or PhD | university or research institute |
+
+Attending nursery is not a level. It is one flag bit that raises the chance of passing primary.
+
+**Track** (optional, `EduTrack`): 0 none, 1 STEM, 2 arts and business, 3 trades. It is chosen at 16: sixth form leads
+to 1 or 2, FE college to 3. The choice is hash-seeded and leans toward the open skilled vacancies near home. A degree
+keeps its track. The track adds gameplay only through the match bonus in section 7. It is stored from phase E1 so the
+later phases need no migration, and has no effect until phase E4.
+
+### Storage
+
+New `Citizen` fields (`server/src/world.ts`), all plain numbers:
+
+| Field | Meaning |
+| --- | --- |
+| `edu` | `EduLevel`, the highest completed |
+| `track` | `EduTrack` |
+| `study` | the stage enrolled in: 0 none, 1 nursery, 2 primary, 3 secondary, 4 sixth form, 5 FE course, 6 degree, 7 postgraduate, 8 evening class |
+| `sx`, `sy` | the door tile of the place of study (meaningful while `study > 0`) |
+| `att`, `due` | days attended, and school days held, in this stage so far |
+| `eduBits` | bit 0 went to nursery, bit 1 dropped out (shown in the panel) |
+
+A pupil has no job, so the timetable fields (`shiftStart`, `shiftLen`, `cycle`, `phase`, `nextAt`) are free for the
+school day. Section 4 relies on this.
+
+**Saves need no format bump.** `snapshotOf` writes citizens as plain objects, and `worldFromSnapshot` loads them as
+`{ ...lifeDefaults(...), ...saved }` (`server/src/snapshot.ts`). Add `...eduDefaults(saved.id, age)` beside
+`lifeDefaults`. It seeds a pre-education citizen from the id: adults from the base distribution below, and children
+by age (a 13-year-old has `edu: 1`). Version 8 stays. Building counters (`pupils`, `qualified`) are rebuilt on load
+from the citizens, as `occupants` is.
+
+**Base distribution for adults** (newcomers and old saves; roughly England 25-64):
+
+| Level | none | primary | secondary | further | degree | postgraduate |
+| --- | --- | --- | --- | --- | --- | --- |
+| Share | 6% | 2% | 22% | 27% | 30% | 13% |
+
+Newcomers aged 18-21 never hold a degree. Section 7 explains how migration tilts this mix.
+
+### On the wire
+
+- **Agent frames:** add bit 25, `CITIZEN_STUDY`: on the way to, at, or on the way back from a place of study. Bits
+  25-30 are free (`protocol.ts` comment, `docs/mobile-jobs.md` section 7). Pupils travel in `ToWork`, so `dressFor`
+  already dresses them for school. The bit lets the client tell a pupil from library staff (both send family code
+  14) and draw students with a backpack and no uniform. Older clients ignore the bit.
+- **Inspect only:** `CitizenInfo.life.education = { level, track?, studying?: { place: {x, y, name}, stage, yearGroup?, attendance, progress }, history: { stage, place, year, result }[] }`
+  and `PersonRow.edu`. `history` is rebuilt from the current fields plus a capped list of at most 6 entries
+  (`eduLog`), saved like `friends`.
+- **Buildings:** `inspect` gains `school: { stage, pupils, places, teachers, teachersNeeded, catchment, passRate, waiting }`.
+- **Parcels:** `ParcelStats` gains optional `pupils`, `places`, `grads` (residents with a degree or more) and
+  `eduIndex`, so the parcel panel and the world map show attainment by district.
+
+## 3. Institutions
+
+### The family code
+
+All 16 family codes are taken (`shared/src/buildings/codes.ts`). Education kinds are **sub-kinds of the library
+family, code 14**. Libraries are already where people go to learn, and the family already holds non-leisure kinds
+(the Tower of London and Buckingham Palace are library-family attractions, `docs/buildings.md` "Landmarks"). Two
+groups may share a code: harbours and metro both use 15. A school is not leisure (`isLeisure` is by id, from leisure
+attributes, so it is false), and it is not flagged `service`, so `coverage()`, happiness and tax tolerance stay as
+tuned. Schools get their own catchment (below). The `LEISURE_CODES` loops (`leisureCoverage`, `leisureGrowth`,
+`pickLeisure`) will visit schools and drop them at `leisureAt` returning null. That costs little, but phase E2 should
+check it. The client's `SHORT[14]` label "at the library" (`client/src/ui.ts`) needs the kind id, not the family
+code, for school staff.
+
+### Kind ids
+
+Ids 29-39 are reserved (boats, transport cards), and the highest id in use is 100 (Tower Bridge). Education takes
+**101-115**:
+
+| Id | Kind | Rung | Footprint | Ages | Places | Staff (teachers share) | Cost / upkeep | Catchment | Tech |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 101 | nursery | 1 | 1×1 | 3-4 | 30 | 6 (0.5) | 300 / 10 | 8 | edu1 |
+| 102 | primary school | 2 | 2×2 | 4-11 | 120 | 10 (0.6) | 900 / 30 | 12 | edu1 |
+| 103 | secondary school (academy) | 3 | 3×3 | 11-16 | 300 | 24 (0.6) | 2,000 / 60 | 20 | edu2 |
+| 104 | sixth-form college | 4 | 2×2 | 16-18 | 120 | 10 (0.7) | 1,400 / 40 | 24 | edu3 |
+| 105 | further-education college | 5 | 3×2 | 16+ | 160 day + 60 evening | 18 (0.5) | 2,400 / 70 | 30 | edu3 |
+| 106 | university campus | 6 | 6×6 | 18+ | 600 | 60 (0.6 degree, 0.4 postgraduate) | 7,000 / 180 | none (city-wide, and draws newcomers) | edu4 |
+| 107 | research institute | 7 | 3×3 | | 0 | 40 (0.6 postgraduate) | 5,000 / 150 | | edu5 |
+| 108 | halls of residence | | 2×2 | students | 80 beds | 2 | 1,500 / 25 | | edu4 |
+| 109-110 | spare (special school, adult learning centre) | | | | | | | | |
+| 111-114 | London universities (section 9) | | ≤4×4 | | | | | | lnd2 |
+
+The 6×6 campus fits within `MAX_FOOTPRINT` (8). Places, catchment and stage are attributes (`pupilCapacity`, `catchment`,
+`stage`, `ages`). Staff, wage, cost and upkeep are per level as for any civic kind (`docs/buildings.md`). Wages run
+24-26 for schools, 28 at the university and 32 at the research institute, near a GP surgery's 24. Teachers come from
+the educated population (section 7). An understaffed school admits pupils only in proportion: effective places =
+`places × min(1, qualified / (staff × teachersShare))`. Few graduates means understaffed schools, which means fewer
+graduates. This loop is the reason education matters, and section 7 explains how migration stops it locking up.
+
+Halls of residence (108) are a **residential-family sub-kind (code 1)** that is placed, not grown. It houses only
+enrolled students: `spawn()` skips it, and the university's student intake fills it (section 4). It is not growable,
+so `growth()` leaves it alone.
+
+### Catchment
+
+Admissions run in **batches**, never per tick (`sim/schools.ts`):
+
+- **Weekly at Monday 00:00** (the school year rolls over, in `newDay` when `day % 7 === 0`): every pupil moves up a
+  year. Leavers graduate or not (section 5). Children who have just reached the starting age, and every child without
+  a place, are sorted by distance and admitted to the nearest school of their stage with room within its catchment:
+  the UK distance rule. The cost is one pass over children plus one `eachBuiltNear` per school with room.
+- **Daily at 05:00**, the same for children who arrived or moved home that day and for places freed or opened.
+  This is a short list.
+- A child with no place in reach stays home, as today. Their parents' happiness takes "no school place" (section 7),
+  and the school's tooltip counts them in `waiting`.
+
+### The models (UK flavour, at least two designs per rung, `buildings:check`)
+
+- **Nursery:** a single-storey building with coloured cladding panels, a fenced play area, a sandpit and a buggy
+  shelter; or a converted Victorian villa with a canopy and a painted fence.
+- **Primary:** a London board school in yellow stock brick with tall gabled windows, a bell cupola and separate
+  "BOYS" and "GIRLS" entrances, on a tarmac playground with hopscotch; or a 1960s single-storey school with a flat
+  roof, a playing field and a climbing frame.
+- **Secondary:** a 2000s academy with a curved glazed atrium, coloured render panels and a floodlit 3G pitch; or a
+  1950s brick secondary modern with a four-storey teaching block, a sports hall and playing fields.
+- **Sixth form:** an Edwardian grammar school with a clock gable and a new glass wing; or a modern block with a café
+  front.
+- **FE college:** a 1970s concrete tower with workshop sheds, roller doors, a motor-vehicle bay and a bricklaying
+  yard; or a new glazed campus with an apprenticeship hall.
+- **University (6×6):** *redbrick*, Victorian Gothic in red brick and terracotta with a clock tower round a grassed
+  quad (Birmingham, Manchester); or *plate-glass*, 1960s brutalist towers on podium walkways beside a lake (Essex,
+  Sussex). The quad and the lake get lamp posts and benches with per-instance scatter (the organic-variation rule).
+- **Research institute:** a glass and steel lab with rooftop plant and fume stacks (the Crick).
+- **Halls:** a 1960s slab or modern cluster flats with a bike shed.
+
+## 4. The day
+
+**Calendar.** One game week is one year of age, so it is also **one school year**. Monday to Friday (`day % 7 < 5`,
+0 = Monday as in `leisure.ts`) are school days, and the weekend is the holidays. Term structure is cosmetic: the panel
+calls Monday-Tuesday the autumn term, Wednesday-Thursday the spring term and Friday the summer term. Saturday is
+results day for leavers, and on Monday at 00:00 everyone moves up a year. Each school hashes its own start
+(08:30-09:00) and finish (15:00-15:30), and each university its own lecture days. That gives organic variation, so
+traffic does not spike at one tick.
+
+**Pupils use the commuting machinery.** At admission a pupil gets the school's timetable in the free shift fields.
+The `Home` branch of `moveCitizens` treats `c.job || c.study` alike for `nextAt`, and an adult student skips the job
+search. `depart`, `ToWork`, `Work` and `endShift` run unchanged. `endShift` skips `payWage` for a pupil and calls
+`schools.attended(c)` (`att++`): one increment per pupil per school day. Days missed through illness (`staysOffSick`)
+count in `due` but not in `att`. Pupils are in `Work` during school hours, so `maybeChildOuting` naturally only
+happens after school.
+
+**Getting there.**
+
+- **Under 8 (`CHILD_OUT_AGE`): escorted.** First choice: `sim/carpool.ts` already drops household members on the way
+  to work (`CARPOOL.detour`, `window`). The school becomes one more drop-off for a parent leaving within the window.
+  Otherwise a free adult or retiree in the household walks them: a venue trip to the school door with a zero-length
+  stay, as `tripToVenue` does. Otherwise an older sibling going to the same school takes them. Failing all three,
+  the child misses the day ("no one to take them"). The family's panel shows it, and the school bus fixes it.
+- **8 and over:** walk if the school is within 15 tiles (45 game minutes at `WALK_TILES_PER_HOUR` 20). Otherwise
+  take the bus (children already ride free), a lift, or the school bus.
+- **School buses:** `FleetKind` 9, free in `shared/src/fleet.ts`, built on the roaming-worker framework
+  (`docs/mobile-jobs.md` section 1). It is a role of a secondary school's staff (hash-seeded, like `isMechanic`). One
+  unit per school runs a morning and an afternoon round of `kerb` stops near the homes of pupils living more than 12
+  tiles away. It costs nothing while idle, and the policy turns it on (section 6).
+- **Students** (FE, university) travel as adults: drive, walk or ride transit with ordinary mode choice. A university
+  is a big transit destination, and its riders show in the line stats.
+
+**University towns.** A university admits school leavers from town and, for the rest of its places, **newcomers aged
+18-21** queued at the gateways as students (`Gateways.request` with a student tag). They go to halls when it has beds,
+otherwise to any home. They study for 3 years (3 game weeks), then stay if a matching job is in reach, or leave
+(brain drain, section 7). Halls next to a campus, cheap cafés and a rail station make a student quarter.
+
+**Traffic.** School runs land on the 08:00-09:00 commuting peak and add a 15:00-16:00 one. That is realistic, but it
+changes the traffic-tuning baselines (`docs/traffic-tuning.md`). E3 re-measures with `loadtest/ab.ts`.
+
+## 5. Progress over time
+
+**The clock** (`shared/src/constants.ts`): `TICK_MS` 200, `TICKS_PER_HOUR` 100 (20 s of wall time), `TICKS_PER_DAY`
+2,400 (8 minutes), one year 7 game days (56 minutes). Local mode can fast-forward 2× and 4×.
+
+**Proposed compression: keep the life clock, and make education matter on a session's scale through adults.** Changing
+how fast children age would shift the population pyramid, household turnover and every saved age, and it would break
+the tidy rule that a game week is a school year. The stages therefore follow real UK ages:
+
+| Stage | Ages | Years (= game weeks) | School days | To pass | Wall time |
+| --- | --- | --- | --- | --- | --- |
+| nursery | 3-4 | 1 | 5 | none (a bonus) | 56 min |
+| primary | 4-11 | 7 | 35 | ≥ 60% attended, then a pass roll | 6.5 h |
+| secondary (GCSE) | 11-16 | 5 | 25 | ≥ 60%, then a pass roll | 4.7 h |
+| sixth form or FE | 16-18 | 2 | 10 | ≥ 60%, then a pass roll | 1.9 h |
+| degree | 18+ | 3 | 15 (lecture days only: ~10) | ≥ 60% of lecture days | 2.8 h |
+| postgraduate | 21+ | 1 | 5 | ≥ 60% | 56 min |
+| **adult courses** | | | | | |
+| FE course (full time, for the unemployed) | 19+ | | 4 attended days | one level up, to `further` at most | ~35 min |
+| evening class | 19+ | | 6 evenings | one level up, to `secondary` at most | about a game week |
+| apprenticeship | 16-24 | | 8 shift days at the employer | `further` with `track` trades | ~1.5 game weeks |
+
+A child born in town now leaves school after about 17 hours. That is fine in the persistent world, and two hours of
+play will never show it. What makes education felt within a session is:
+
+1. **Families move in** (E5). A share of newcomers (default 20%) arrive as a couple with 1-3 children aged 0-15, so
+   schools have pupils from the first hour and parents choose homes near schools.
+2. **Adult courses** turn the unemployed and the low-skilled into qualified workers within a game day or two.
+3. **Students** arrive for a university and become graduates within three game weeks.
+4. **Migration** (section 7) brings qualified people for qualified vacancies straight away.
+
+**Graduation.** On results day, a leaver who attended at least 60% of the school days held passes with probability
+`passBase[stage] × quality × bonuses`. `quality` is the school's teacher staffing over the year (0.5-1), and the
+bonuses are nursery (+5%) and free school meals (+5%). A pass sets `edu`. A fail keeps the old level and sets
+`eduBits` dropped-out. Nothing happens per tick: graduation is one pass over leavers once a game week. Events go into
+`lifeEvents` (`graduations`, `dropOuts`, `brainDrain`) and the charts.
+
+**Dropping out.** A sixth-former or student whose attendance falls below 40% at the end of a game day, or who is
+offered a job while unhappy with money (`money < 15`), drops out with a small daily chance. A school pupil cannot drop
+out before 16.
+
+**Returning to education.** An adult who has been out of work for 2 or more days (`idleDays`) with an FE college in
+reach enrols on a full-time FE course (policy "adult learning"). Low-qualified adults in work take evening classes
+the way the doctor's visit works: `c.care` schedules a trip, and `c.errand = 2` marks it as a class at an FE college
+or central library, for 2 hours from 18:30. Retirees can join evening classes for leisure, which feeds the leisure
+need and gives no level.
+
+## 6. The education tree
+
+### Player-facing: an Education track in `tech.ts`, plus policies
+
+Add `'education'` to `TechNode['track']` and `TRACK_NAMES`, and two counters to `Counter` and `COUNTER_LABELS`:
+`pupils` (school places filled in your parcels at once) and `graduates` (residents of your parcels with a degree or
+more). `recomputeStats` bumps them as it bumps `housed` and `jobs` (`World.bump`).
+
+| Node | Name | Requires | Condition | Cost | Unlocks |
+| --- | --- | --- | --- | --- | --- |
+| edu1 | Schools | civ1 | housed 60 | 500 | nursery, primary |
+| edu2 | Secondary education | edu1 | housed 200 | 1,200 | secondary, policies: free school meals, school buses |
+| edu3 | Further education | edu2, zon2 | jobs 150 | 1,800 | sixth form, FE college, policies: adult learning, apprenticeships |
+| edu4 | Higher education | edu3, con2 | pupils 150 | 4,500 | university, halls, policy: tuition fees |
+| edu5 | Research | edu4, zon3 | graduates 200 | 7,000 | research institute (raises the office ambition cap near it) |
+| lnd2 | London universities | edu4, cul5 | `locked`, like lnd1 | 10,000 | UCL, Imperial, King's, LSE |
+
+Optional: add edu4 to `civ6` Medical school's `requires`. That changes an existing path, so it is a later call.
+
+**Policies** (new `shared/src/policies.ts`): a short list, each opened by a tech feature id and toggled per player.
+They are stored in `Player.policies: string[]` (saved with players, no bump) and sent in `PlayerDTO.policies`. A
+`setPolicy` intent goes to `net.ts`, and a Policies panel opens beside the tech tree.
+
+| Policy | Daily cost | Effect |
+| --- | --- | --- |
+| Free school meals | $0.4 per pupil | +5% pass chance, child health +0.3 a day, parents' happiness "free school meals" +2 |
+| School buses | $15 per bus | school bus units for secondary schools (section 4) |
+| Adult learning | $1 per learner | FE courses for the unemployed, and evening classes |
+| Apprenticeships | 20% of an apprentice's wage | up to 10% of staff at industrial and yard workplaces train up to `further`, trades track |
+| Tuition fees | income: $2 per student a day (ledger `fees`) | off: you pay a $1 grant per student; on: 30% fewer students enrol, and more graduates leave |
+
+### Population progress: the people's tree
+
+Rich asked for a tree or progress for the population itself. The ladder is shown as a **funnel in an Education tab of
+the Charts panel** (`client/src/charts.ts`). It has one node per level with residents holding it, students enrolled
+in each stage, this week's graduations and drop-outs, and the next milestone each node opens ("200 graduates: Research").
+The **citizen panel** shows each person's own path as a timeline ("Nursery: Little Acorns, Year 4 at St Mary's
+Primary, 96% attendance") from `life.education.history`.
+
+**City-level measures:**
+
+- **Education index**: 20 × the mean level points of residents aged 25-64 (none 0 … postgraduate 5), so 0-100. The
+  base distribution gives about 62. It is maintained from per-level counters kept up to date on every change, never
+  from a scan.
+- **Charts:** new `WORLD_SERIES` in a new `HistGroup` `'education'`: `eduIndex`, `pupils`, `students`, `gradsDay`
+  (graduations per day), `brainDrain` (graduates leaving per day). New `PLAYER_SERIES`: `myGrads`, `myPlaces`.
+  Saves need no bump (`docs/charts.md`).
+- **Attainment by district:** `ParcelStats.eduIndex`, `grads`, `pupils`, `places` in the parcel panel. The world map
+  (`docs/world-map.md`) colours parcels and estates by `eduIndex`.
+- **Map heatmap:** an "Education" overlay button beside the traffic heat (`client/src/main.ts` `setHeat`). The server
+  sends a per-chunk byte array of each home's mean resident level only while the overlay is on, and
+  `ChunkView` tints the ground as `tintRoads` does with congestion. School catchments draw as rings when a school is
+  hovered.
+
+## 7. Effects
+
+**Jobs require education by tier, softly.** Each workplace kind and level gets a `skill` attribute `[level, share]`:
+that share of its places needs that level. The rest are unskilled places (receptionists, cleaners, assistants). Kinds
+without the attribute read a default by family and level from `shared/src/education.ts`:
+
+| Workplace | Skilled share |
+| --- | --- |
+| shops L1-3, high street | secondary 20/30/40% |
+| department store, shopping centre, hotel | further 30% |
+| industry L1-3 | further (trades) 30/40/50% |
+| factory complex, heavy plant | further 50% + degree 10% |
+| offices L1 / L2 / L3 | further 40% / degree 40% / degree 60% |
+| office tower, corporate HQ (merged L4-7) | degree 60-70% + postgraduate 10% |
+| GP to teaching hospital | degree 40-60%; teaching hospital + postgraduate 20% |
+| police, fire, builders | further 30% |
+| schools / university / research | degree 60% / postgraduate 40% / postgraduate 60% |
+| airport | degree 10% (pilots) + further 30% |
+
+`findJob`'s predicate takes a vacancy when `b.occupants < cap` **and** either the citizen is qualified and
+`b.qualified < ceil(cap × share)`, or there is an unskilled place left
+(`b.occupants - b.qualified < cap - ceil(cap × share)`). An over-qualified worker may take any place, with a happiness
+penalty "over-qualified" (-2). The negative-result cache `jobMisses` must be keyed by home and level
+(`tkey(home) * 8 + edu`), because a miss for one level is not a miss for another. `hire` and `quitJob` keep
+`Building.qualified` up to date.
+
+**Growth follows the workforce.** Growth needs 70% occupancy (`growth()`). Unfilled skilled places therefore hold a
+building back, and higher tiers arrive as the educated workforce grows. Nothing new gates growth. Phase E5 also
+lets the research institute raise `ambition` for offices within 20 tiles by one level.
+
+**Wages scale with education.** `payWage` multiplies by `EDU.wage[level]` for a worker in a skilled place, and by the
+track-match bonus (+10%) when the track fits the workplace (trades in industry, STEM in a lab or hospital):
+
+| none | primary | secondary | further | degree | postgraduate |
+| --- | --- | --- | --- | --- | --- |
+| 0.9 | 0.95 | 1.0 | 1.1 | 1.25 | 1.4 |
+
+The income tax on wages goes to the parcel owner, so an educated city pays its owners more. That is the player's
+return on spending on schools. Civic payroll (`w.payroll`) pays teachers from the treasury, so schools cost upkeep
+plus wages.
+
+**Happiness** (`happinessParts`): "good school nearby" +3 for a household with children whose children all have
+places; "no school place" -4; "studying" +2 for students instead of "out of work"; "graduated" +5 for 2 days;
+"over-qualified" -2. **Health:** `healthTarget` +2 for a degree or more (a small, real-world link). **Crime:** there
+is no crime model (police coverage only), so there is no link until there is one.
+
+**Migration.**
+
+- **Matching newcomers (the balance guard).** A newcomer's level is drawn from the base distribution with probability
+  `1 - EDU.match`, and otherwise from the levels the city's open skilled vacancies need, weighted by count
+  (`EDU.match` 0.6). Until a city educates its own people, migration fills its offices, so the early game behaves as
+  today.
+- **Brain drain.** In `lifeFamily`'s leaving check, a resident with a degree or more who has been out of work, or
+  over-qualified, for 2 or more days has the leaving chance × `EDU.drainMul` (3). A graduate with no matching job in
+  reach 2 days after graduating leaves with chance 0.5. Brain drain is counted, charted, and noticed to the owner
+  ("graduates are leaving: they find no work to match their degrees").
+
+## 8. Balance and performance
+
+- **Tick cost.** No per-tick work per child. Per school day each pupil costs a commute out and back, which is the
+  ordinary cost of a trip. Attendance is one increment at `endShift`. Admissions run weekly plus a short daily list.
+  Graduation is weekly. The education index uses counters. Hiring adds two comparisons per candidate building. The
+  real cost is traffic from extra trips: at 15% children (with families moving in), about 10% more trips on school
+  days. Target: under 5% more sim ms per tick at Commons scale. Measure with `loadtest/ab.ts --set edu=0` (an
+  `EDU=0` environment switch, like `CARPOOL`) and a new `loadtest/education.ts` probe that prints the level mix,
+  enrolment by stage, attendance, graduations, brain drain and the job fill rate by skill.
+- **Job and resident balance.** Residential demand stays `jobs - population + 6`. Schools add jobs, as any civic
+  building does. Pupils are not jobs. `EDU.match` keeps skilled vacancies fillable. Phase E4 must show with
+  `loadtest/jobsearch.ts` that idle adults and open jobs stay within today's band on a 2×2 test city.
+- **Tunables in one place:** `EDU` in `shared/src/education.ts` (pass rates, shares, wage multipliers, match, drain,
+  family share, policy costs), with the life tunables beside `LIFE`.
+- **Old worlds** get seeded levels, no pupils until the first admission batch, and no format bump.
+
+## 9. Showcase and London
+
+- **Showcase** (`docs/demo.md`): every rung is a catalogue kind, so `demo:check` already demands a placement and a
+  `TOUR` stop. Put a nursery and a primary beside the A-district homes, a secondary with its pitch at the edge of
+  downtown, a sixth form and FE college by the station, and the campus with halls in the riverside quarter. Add
+  `SHOWCASE_FEATURES` entries: `school-run` (seeded: within `FEATURE_DAYS` a pupil attends a showcase primary, with
+  `todo` until families move in, E5), `school-bus` (a FleetKind 9 unit on a round) and `graduation` (a run report line
+  in `server/src/demo/check.ts`: graduations and the education index after `--run 2`).
+- **London**: four real universities as London landmarks (`landmarks-london-3.ts`, kind ids 111-114, family 14,
+  `tags: ['london']`, collection tiers 11-14, each within 4×4, one design each). Each works as a university rung (it
+  admits students and employs academics):
+  - UCL's Wilkins Building with the portico and dome, on Gower Street in Bloomsbury (51.5246, -0.1340)
+  - Imperial's Queen's Tower, South Kensington (51.4988, -0.1749)
+  - King's College's Strand building beside Somerset House (51.5115, -0.1160)
+  - LSE's Centre Building on Houghton Street, Aldwych (51.5144, -0.1165)
+
+  `londonMap.ts` already names Bloomsbury and Holborn. The London scenario fits them before the streets, as it does
+  the other landmarks. `lnd2` is `locked`, as `lnd1` is.
+
+## 10. Phased plan
+
+| # | Subtask | Model | Files | Depends on | Size |
+| --- | --- | --- | --- | --- | --- |
+| E1 | **Citizen model and wire.** `shared/src/education.ts` (levels, tracks, stages, `EDU`, base mix, `eduDefaults`, year group, birthday); `Citizen` fields; snapshot defaults; `CitizenInfo.life.education`, `PersonRow.edu`, `CITIZEN_STUDY`; newcomer seeding (no tilt yet); `loadtest/education.ts` | opus | world.ts, snapshot.ts, protocol.ts, life.ts, simulation.ts (`makeCitizen`, `describeLife`) | none | M |
+| E2 | **Institutions catalogue.** `buildings/education.ts` kinds 101-108 with two UK designs each; un-reserve the `education` group; the edu1-edu5 tech track and counters; `SHORT` label by kind; viewer | sonnet | buildings/*, groups.ts, tech.ts, compiled.ts (regenerate, never hand-merge), ui.ts | none (attribute names from this doc) | L |
+| E3 | **Schools sim.** `sim/schools.ts`: admissions batches, the pupil timetable on the commute machinery, attendance, weekly rollover, graduation and drop-out, escorts via carpool, the `school` inspect block, `lifeEvents` | opus | sim/schools.ts, simulation.ts (Home branch, `endShift`, `newDay`, describe), carpool.ts | E1, E2 | L |
+| E4 | **Jobs, wages, migration.** Skill gate in `findJob`, `jobMisses` by level, `Building.qualified`, wage multipliers, `EDU.match` tilt, brain drain, happiness parts; tuning runs | opus | simulation.ts (`findJob`, `hire`, `payWage`, `lifeFamily`), life.ts, gateways.ts | E1 (runs beside E3) | M |
+| E5 | **Higher and adult education.** University intake via gateways, halls of residence, families moving in, FE courses, evening classes (`errand` 2), apprenticeships, research ambition | opus | gateways.ts, simulation.ts (`spawn`, `arriveVia`, `ambition`), sim/schools.ts | E3, E4 | L |
+| E6 | **Policies and the tree UI.** `policies.ts`, `Player.policies`, `setPolicy` intent, Policies panel, Education track in the tech panel; school buses as FleetKind 9 (the server part goes to opus) | sonnet (+ opus for `mobile.ts`) | policies.ts, net.ts, ui.ts, fleet.ts, sim/mobile.ts | E2; the effects need E3 | M |
+| E7 | **City views.** History series and the Education tab funnel; `ParcelStats` fields; heat overlay; citizen timeline; school tooltip; student look in people.ts | sonnet | history.ts, charts.ts, main.ts, chunkView.ts, ui.ts, render/people.ts | E3 | M |
+| E8 | **Showcase and London.** Placements and tour stops, registry entries, London universities 111-114 and `lnd2` | sonnet | demo/showcase.ts, demo/london.ts, landmarks-london-3.ts, tech.ts | E2 (E3 for the seeded tests) | M |
+
+**In parallel:** E1 and E2 first. Then E3 and E4 together (both edit `simulation.ts`, in different functions; merge E4
+after E3). E6's UI can start after E2. E7 and E8 follow E3. E5 comes last.
+
+**Hot spots shared with other agents:** `server/src/sim/simulation.ts` (keep hooks thin and put the logic in
+`sim/schools.ts`), `server/src/world.ts`, `shared/src/protocol.ts`, `shared/src/tech.ts`,
+`shared/src/buildings/compiled.ts` (generated: rebase and rerun `buildings:compile`), `client/src/ui.ts`,
+`shared/src/demo/showcase.ts`.
+
+## 11. Questions for Rich
+
+1. **How fast should children grow up?**
+   - **A. Keep one game week per year of age** (recommended). A child born today leaves school about 17 hours later.
+     Schools matter sooner through families moving in, adult courses and students.
+   - B. Children age twice as fast until 18 (one year every 3.5 days). Old saves need their ages re-dated once.
+2. **How strict should job requirements be?**
+   - **A. Soft** (recommended). Each tier has a skilled share. Anyone can take the unskilled places, and migration
+     brings qualified people for the skilled ones.
+   - B. Hard. Office L2 and up hire graduates only. Offices may stand half-empty until you educate people.
+3. **Should newcomers arrive as families with children?**
+   - **A. Yes, about 20% of newcomers are a couple with 1-3 children aged 0-15** (recommended). Schools fill from the
+     first hour.
+   - B. No. Only children born in town go to school, so schools stay empty for a long time.
+4. **What shape should the player's tree take?**
+   - **A. A new Education track in the existing tech tree (5 nodes), with a Policies panel for free school meals,
+     school buses, adult learning, apprenticeships and tuition fees** (recommended).
+   - B. A separate civic or policy tree with its own currency.
+5. **Should we use the real London universities?**
+   - **A. Yes: UCL, Imperial, King's and LSE as London landmarks that work as universities, locked like the other
+     landmarks** (recommended).
+   - B. Generic redbrick and plate-glass campuses only.
