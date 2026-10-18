@@ -161,7 +161,7 @@ from the agent's `extra` bits:
 | 24 | `FLEET_WORKING`: at a stop doing the job (bins on the lift, a rider or courier at the door, brushes down) |
 
 A fleet vehicle sends kind 0 in bits 4-7 (VehicleKind 10-15 stay as they are) and the nearest body in the class bits
-(sedan for cars and two-wheelers, van, truck), so an old client draws something sensible. Bits 25-30 stay free.
+(sedan for cars and two-wheelers, van, truck), so an old client draws something sensible. Bit 25 is `CITIZEN_STUDY` (docs/education.md); bits 26-30 stay free.
 
 `CitizenInfo.fleet` (inspect only): the worker's role, the vehicle id (the panel links to it, so it can be followed),
 what the unit is doing now, and today's jobs and takings. A fleet vehicle's own panel lists its driver and passenger

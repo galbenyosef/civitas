@@ -4,7 +4,7 @@ import {
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
-  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate,
+  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate, type EduFields,
 } from '@msimcity/shared';
 import { LIFE, stageFor } from './sim/life';
 import type { GoalState } from './goals';
@@ -117,7 +117,7 @@ export interface Vehicle extends Mover {
   /** what the buyer pays on delivery when it is not FREIGHT_FEE (harbour freight: fish by the box, sim/harbours.ts) */
   fee?: number;
 }
-export interface Citizen extends Mover {
+export interface Citizen extends Mover, EduFields {
   hx: number; hy: number;               // home tile
   job: boolean; wx: number; wy: number; // workplace tile
   kind: number;                         // workplace kind (occupation)
@@ -162,6 +162,7 @@ export interface Citizen extends Mover {
   ledgerDay: number; in7: number[]; out7: number[]; // money in / out per game day, last 7 days (slot = day % 7)
   statsDay: number; tripsToday: number; trafficTicksToday: number; // today's counters; statsDay is the day they belong to
   trafficTicksLife: number;             // ticks held up in traffic since the last life step
+  // education (shared/src/education.ts EduFields, docs/education.md): edu, track, study, sx/sy, att/due, eduBits, eduLog
   // migration (sim/gateways.ts): 1 travelling in from a gateway, 2 leaving town once home, 3 on the way out to gateway (gx, gy)
   mig?: number; gx?: number; gy?: number;
 }

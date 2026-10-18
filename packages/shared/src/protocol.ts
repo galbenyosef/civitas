@@ -93,7 +93,8 @@ export const LIFE_STAGE_NAMES = ['adult', 'child', 'retired'] as const;
  * platform or riding a metro train; OR it into packCitizenFlags). Bits 19-22 the fleet kind of a mobile worker's vehicle (FleetKind: taxi,
  * private hire, bicycle, moped, courier van, bin lorry, sweeper, trades van; 0 for anything else), bit 23 loaded (a taxi with a fare, a
  * rider or van with something to deliver), bit 24 working at a stop (bins on the lift, a rider at the door): shared/src/fleet.ts
- * packFleet, docs/mobile-jobs.md; a fleet vehicle sends kind 0 and the nearest body class. Bits 25-30 are free.
+ * packFleet, docs/mobile-jobs.md; a fleet vehicle sends kind 0 and the nearest body class. Bit 25 studying (CITIZEN_STUDY: a pupil or
+ * student on the way to, at or back from their place of study, docs/education.md). Bits 26-30 are free.
  * A quad with state Home tells the client to drop that agent.
  */
 export const packCitizenFlags = (state: number, mode: number, kind: number, cls = 0, queued = false, emergency = false, stage = 0, bag = false, rev = false, ind = 0) =>
@@ -115,6 +116,9 @@ export const citizenIndicator = (f: number) => (f >> 16) & 3;
 /** bit 18: below ground, on a metro platform or train (docs/underground.md); the surface does not draw them */
 export const CITIZEN_UNDER = 1 << 18;
 export const citizenUnder = (f: number) => (f & CITIZEN_UNDER) !== 0;
+/** bit 25: a pupil or student on the way to, at or back from school (docs/education.md), so the client draws a backpack, not staff */
+export const CITIZEN_STUDY = 1 << 25;
+export const citizenStudy = (f: number) => (f & CITIZEN_STUDY) !== 0;
 
 /** One person (or dwelling vehicle) listed in a building's people panel. */
 export interface PersonRow {
@@ -129,6 +133,8 @@ export interface PersonRow {
   /** residents: household id and its surname, so the panel can group families */
   household?: number;
   householdName?: string;
+  /** citizens: highest qualification (EduLevel, shared/src/education.ts) */
+  edu?: number;
 }
 /** Who belongs to or is visiting a building. Only sent when the inspect request asks for `full`. */
 export interface BuildingPeople {
@@ -383,6 +389,29 @@ export interface CitizenLife {
   sickDays: number;
   /** 0-100: how much they need a day out (0 = just had one); visits restore it, a park nearby slows the drain */
   leisureNeed?: number;
+  /** the moment of the game week they turn a year older (a game week is a year): weekday 0 = Monday, hour */
+  birthday?: { weekday: number; hour: number };
+  education?: CitizenEducation;
+}
+/** A citizen's schooling for the panel (docs/education.md); level, track and stage are EduLevel, EduTrack and Study. */
+export interface CitizenEducation {
+  level: number;
+  track?: number;
+  studying?: {
+    place: { x: number; y: number; name: string };
+    stage: number;
+    /** school stages: 0 = Reception, then Year 1 to Year 13 */
+    yearGroup?: number;
+    /** share of the school days held so far that they attended, 0-1 */
+    attendance: number;
+    /** share of the stage done, 0-1 */
+    progress: number;
+  };
+  /** finished stages, oldest first (at most EDU.logMax); week = game week it ended; result: EDU_RESULT_NAMES */
+  history: { stage: number; place: string; week: number; result: number }[];
+  /** went to nursery, dropped out of a stage */
+  nursery?: boolean;
+  droppedOut?: boolean;
 }
 
 /** One node of the technology tree as the client shows it. */

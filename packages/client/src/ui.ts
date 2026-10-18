@@ -5,6 +5,7 @@ import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, LEDGER_LABELS, type KindToolId, type LedgerDTO, type LedgerCat } from '@msimcity/shared';
 import { FLEET_LABEL } from '@msimcity/shared';
+import { EDU_LEVEL_NAMES, EDU_TRACK_NAMES, STUDY_NAMES, WEEKDAY_NAMES, yearGroupName } from '@msimcity/shared';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
 const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐' };
@@ -679,7 +680,14 @@ export class UI {
     const meter = (v: number, cls: string) => `<div class="bar meter ${cls}"><i style="width:${Math.max(0, Math.min(100, v))}%"></i></div>`;
     const person = (r: PersonRef) => `<div class="person" data-cid="${r.id}" title="click to select ${esc(r.name)}"><span class="pname">${esc(r.name)} <span class="page">${r.age}</span></span><span class="prel">${esc(r.relation === 'friend' ? r.activity : `${r.relation} · ${r.activity}`)}</span></div>`;
     let html = `<div class="sect">Life</div>`;
-    html += row('Age', `${life.age} · ${life.stage}`);
+    html += row('Age', `${life.age} · ${life.stage}${life.birthday ? ` · turns ${life.age + 1} on ${WEEKDAY_NAMES[life.birthday.weekday]}` : ''}`);
+    const ed = life.education;
+    if (ed) {
+      // the level and track; a pupil or student: where, which year, attendance (docs/education.md; the full timeline is E7)
+      html += row('Education', esc(`${EDU_LEVEL_NAMES[ed.level] ?? ''}${ed.track ? ` · ${EDU_TRACK_NAMES[ed.track]}` : ''}`));
+      const st = ed.studying;
+      if (st) html += row('Studying', esc(`${STUDY_NAMES[st.stage] ?? ''}${st.yearGroup !== undefined ? `, ${yearGroupName(st.yearGroup)}` : ''} · ${Math.round(100 * st.attendance)}% attendance`));
+    }
     html += row('Health', `<span class="${life.health < 45 ? 'bad' : ''}">${life.health}</span>${life.conditions.length ? ` · ${esc(life.conditions.join(', '))}` : ''}`);
     html += meter(life.health, life.health < 45 ? 'poor' : life.health < 70 ? 'fair' : 'good');
     if (life.care) html += row('Right now', esc(life.care));

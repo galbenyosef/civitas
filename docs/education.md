@@ -2,7 +2,9 @@
 
 Card "we need an education tree etc" (UTD 851126b0). Rich: "do we have the notion of age and school etc? We also need
 schools, high schools, sixth form, colleges, universities etc." and "lets consider the education of the population and
-an education tree / progress for them". Design 2026-10-18; nothing here is built yet.
+an education tree / progress for them". Design 2026-10-18. **E1 (the citizen model and the wire) is built**: see
+section 12 for what it provides. The rest is design. Rich has not answered section 11 yet, so the build follows the
+recommended answers (A to every question).
 
 Code this touches: `shared/src/education.ts` (new: levels, stages, tables), `shared/src/buildings/education.ts` (new:
 the kinds), `server/src/sim/schools.ts` (new: admissions, attendance, graduation), hooks in
@@ -107,8 +109,8 @@ Newcomers aged 18-21 never hold a degree. Section 7 explains how migration tilts
 
 ### On the wire
 
-- **Agent frames:** add bit 25, `CITIZEN_STUDY`: on the way to, at, or on the way back from a place of study. Bits
-  25-30 are free (`protocol.ts` comment, `docs/mobile-jobs.md` section 7). Pupils travel in `ToWork`, so `dressFor`
+- **Agent frames:** bit 25, `CITIZEN_STUDY` (built in E1): on the way to, at, or on the way back from a place of study.
+  Bits 26-30 stay free (`protocol.ts` comment, `docs/mobile-jobs.md` section 7). Pupils travel in `ToWork`, so `dressFor`
   already dresses them for school. The bit lets the client tell a pupil from library staff (both send family code
   14) and draw students with a backpack and no uniform. Older clients ignore the bit.
 - **Inspect only:** `CitizenInfo.life.education = { level, track?, studying?: { place: {x, y, name}, stage, yearGroup?, attendance, progress }, history: { stage, place, year, result }[] }`
@@ -430,7 +432,7 @@ is no crime model (police coverage only), so there is no link until there is one
 
 | # | Subtask | Model | Files | Depends on | Size |
 | --- | --- | --- | --- | --- | --- |
-| E1 | **Citizen model and wire.** `shared/src/education.ts` (levels, tracks, stages, `EDU`, base mix, `eduDefaults`, year group, birthday); `Citizen` fields; snapshot defaults; `CitizenInfo.life.education`, `PersonRow.edu`, `CITIZEN_STUDY`; newcomer seeding (no tilt yet); `loadtest/education.ts` | opus | world.ts, snapshot.ts, protocol.ts, life.ts, simulation.ts (`makeCitizen`, `describeLife`) | none | M |
+| E1 | **Built.** **Citizen model and wire.** `shared/src/education.ts` (levels, tracks, stages, `EDU`, base mix, `eduDefaults`, year group, birthday); `Citizen` fields; snapshot defaults; `CitizenInfo.life.education`, `PersonRow.edu`, `CITIZEN_STUDY`; newcomer seeding (no tilt yet); `loadtest/education.ts` | opus | world.ts, snapshot.ts, protocol.ts, life.ts, simulation.ts (`makeCitizen`, `describeLife`) | none | M |
 | E2 | **Institutions catalogue.** `buildings/education.ts` kinds 101-108 with two UK designs each; un-reserve the `education` group; the edu1-edu5 tech track and counters; `SHORT` label by kind; viewer | sonnet | buildings/*, groups.ts, tech.ts, compiled.ts (regenerate, never hand-merge), ui.ts | none (attribute names from this doc) | L |
 | E3 | **Schools sim.** `sim/schools.ts`: admissions batches, the pupil timetable on the commute machinery, attendance, weekly rollover, graduation and drop-out, escorts via carpool, the `school` inspect block, `lifeEvents` | opus | sim/schools.ts, simulation.ts (Home branch, `endShift`, `newDay`, describe), carpool.ts | E1, E2 | L |
 | E4 | **Jobs, wages, migration.** Skill gate in `findJob`, `jobMisses` by level, `Building.qualified`, wage multipliers, `EDU.match` tilt, brain drain, happiness parts; tuning runs | opus | simulation.ts (`findJob`, `hire`, `payWage`, `lifeFamily`), life.ts, gateways.ts | E1 (runs beside E3) | M |
@@ -469,3 +471,89 @@ after E3). E6's UI can start after E2. E7 and E8 follow E3. E5 comes last.
    - **A. Yes: UCL, Imperial, King's and LSE as London landmarks that work as universities, locked like the other
      landmarks** (recommended).
    - B. Generic redbrick and plate-glass campuses only.
+
+## 12. Built: E1, the citizen model and the wire
+
+Built 2026-10-18 on branch `edu-e1`. Nobody studies yet: E1 adds the fields, seeds them and sends them, and no stage
+is ever entered until E3's admissions. The sim plays exactly as before. `loadtest/ab.ts --hour 8 --ticks 3000` gives
+identical results on this branch and on main 1fffb1d (the same speeds, give-ups and re-routes), at the same sim ms
+per tick within noise (0.82-0.88 against 0.82-1.03).
+
+### `shared/src/education.ts` (exported from `@msimcity/shared`)
+
+- `EduLevel` None 0 … Postgrad 5, `EDU_LEVEL_NAMES` (panel wording: "GCSEs", "A-levels or Level 3"), `EDU_LEVEL_SHORT`
+  (charts: none, primary, secondary, further, degree, postgrad).
+- `EduTrack` None 0, Stem 1, Arts 2, Trades 3, and `EDU_TRACK_NAMES`.
+- `Study` None 0, Nursery 1, Primary 2, Secondary 3, SixthForm 4, FeCourse 5, Degree 6, Postgrad 7, Evening 8, and
+  `STUDY_NAMES`. This is also the value of an education kind's `stage` attribute (E2). SixthForm covers every 16-18
+  course, at a sixth-form college (104) or an FE college (105), and the track tells A-levels from vocational.
+  FeCourse is the adult full-time course. Apprenticeships (E5) are not a Study value: an apprentice keeps their job and
+  timetable.
+- `STAGES[study]`: `{ ages: [from, to), years, days, earns, pass }`. `days` counts the school days held over the whole
+  stage (5 a year), or the days attended to finish an adult course (years 0). `earns` is the level a pass gives, or
+  the cap for adult courses (one level up). `pass` is the base pass chance (primary 0.97, GCSE 0.8, sixth form 0.85,
+  degree 0.9, postgraduate 0.85, adult courses 0.9). E3 tunes them.
+- `EduResult` Passed 0, Failed 1, DroppedOut 2, Left 3, and `EDU_RESULT_NAMES`. `EDU_NURSERY` (1) and `EDU_DROPPED` (2)
+  are the `eduBits`.
+- `EDU`: `baseMix`, `trackFurther` and `trackDegree` (STEM, arts and trades shares: 35/35/30 and 50/45/5), `degreeAge` 22,
+  `minAttend` 0.6, `dropOutBelow` 0.4, `nurseryBonus` and `mealsBonus` 0.05, `wage` [0.9 … 1.4], `trackMatch` 1.1,
+  `match` 0.6, `drainMul` 3, `drainDays` 2, `familyShare` 0.2, `logMax` 6. E3-E6 add their tunables here.
+- `EduFields` (the citizen fields below), `EduLogEntry`, `eduDefaults(id, age)`, `maxLevelAt(age)`,
+  `eduIndexOf(levelCounts)`, `yearGroup(born, day, daysPerYear = 7)`, `yearGroupName(yg)` ("Reception", "Year 7"),
+  `birthdayOf(born)` → `{ weekday, hour }`, and `logEdu(c, entry)`, which appends and keeps the newest `EDU.logMax`.
+
+### The citizen
+
+`Citizen extends Mover, EduFields` (`server/src/world.ts`). The fields are `edu`, `track`, `study`, `sx`, `sy`, `att`,
+`due`, `eduBits` and `eduLog`, all as in section 2. `eduLog` holds plain tuples
+`[stage, door x, door y, kind id, game week it ended, EduResult]`, so a demolished school still has a name.
+
+- **Seeding** (`eduDefaults`, hash salts 231 and 233). An adult draws from `EDU.baseMix`, capped by `maxLevelAt(age)`:
+  nobody holds a degree before 22, so newcomers aged 18-21 hold `further` at most. A child is seeded by age: none under
+  11, then at least primary, GCSEs from 16 and Level 3 from 18, capped by the same base draw. Further and degree holders
+  get a track. `makeCitizen` spreads it, which covers `spawnCitizen`, `arriveVia` and `spawnChild` (a baby is 0, so it
+  gets none). The E4 `EDU.match` tilt and the E5 families are not built: newcomers draw from the base mix.
+- **Saves.** `worldFromSnapshot` assigns `eduDefaults(id, ageOf(c))` to a citizen saved without `edu`. The format
+  stays at version 8, and a save round-trips the fields as they are. E3 must rebuild building counters such as
+  `pupils` and `qualified` on load from `study`, `sx` and `sy`, as `occupants` is rebuilt.
+
+### On the wire
+
+- `CITIZEN_STUDY = 1 << 25` and `citizenStudy(f)` (`protocol.ts`). `Simulation.agents()` ORs it in through `extra`
+  for a citizen with `study > 0` in `ToWork` or `ToHome`. E3 should narrow `ToHome` to the trip home from school,
+  for example with a flag set at `endShift`, because today a pupil coming home from the park also carries it. The
+  client does not read it yet: E7 draws the student look.
+- `PersonRow.edu`: the EduLevel of every resident, worker and visitor row.
+- `CitizenLife.birthday: { weekday, hour }` (`birthdayOf`, where weekday 0 is Monday) and
+  `CitizenLife.education: CitizenEducation`. It holds `{ level, track?, studying?, history, nursery?, droppedOut? }`,
+  and `studying` holds `{ place: { x, y, name }, stage, yearGroup?, attendance, progress }`. The `yearGroup` is
+  sent for the primary, secondary and sixth-form stages. `attendance` is `att / due`, or 1 before the first school
+  day. `progress` comes from the year group for school stages, so a child who joins mid-stage reads right. For a
+  degree or postgraduate stage it is `due / days`, and for an adult course `att / days`. Each `history` row is
+  `{ stage, place, week, result }`, where `week` is the game week (school year) the stage ended. `describeEducation`
+  in `simulation.ts` builds it.
+- **Citizen panel** (`client/src/ui.ts` `lifeHtml`): "Age 34 · adult · turns 35 on Thu", an "Education" row with the
+  level and track, and a "Studying" row (stage, year group, attendance) once E3 enrols people. The timeline and the
+  student look are E7.
+
+### The probe
+
+`npx tsx packages/server/src/loadtest/education.ts --districts 1 --days 3` (deterministic with `--seed`; it takes
+about 11 s). First run:
+
+- **The pure helpers.** 100,000 ids at age 40 match `baseMix` to within 0.26 points, with an index of 62.4. Nobody
+  exceeds their age cap, nobody aged 18-21 holds a degree, and a 13-year-old has primary. The year group gives
+  Reception at 4 by Monday 00:00 and holds all week. The birthday falls on Thursday at 12:00, and the log keeps the
+  newest 6.
+- **The city.** 1,293 citizens. The adult mix is none 6.7%, primary 1.5%, secondary 21.2%, further 28.3%, degree
+  29.5% and postgraduate 12.9%, against base 6/2/22/27/30/13. The education index of residents aged 25-64 is 62.4.
+  Tracks are 34/33/33 for further and 48/48/4 for degrees.
+- **The panels.** `describeCitizen` returns `life.education` and `life.birthday`, and every residents' row carries
+  `PersonRow.edu`. A pupil with stage, year group, attendance and progress reads right (the probe enrols one by hand).
+- **The wire.** No agent carries `CITIZEN_STUDY` while nobody studies, and a commuter marked as a pupil does.
+- **Saves.** A save round-trips the fields. The same save with the fields stripped loads at version 8 with every
+  level equal to `eduDefaults(id, age)`, and it runs 600 ticks. Re-dated to ages 0-70, it seeds children by age:
+  under 11 none, 11-15 primary, 16-17 mostly GCSEs. 24 of 24 checks pass.
+
+E3-E7 extend the probe with enrolment by stage, attendance, graduations, brain drain and the job fill rate by skill.
+

@@ -1,6 +1,6 @@
-import { CHUNK_SIZE, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, type TransitLine, type SeaGate } from '@msimcity/shared';
+import { CHUNK_SIZE, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, eduDefaults, type TransitLine, type SeaGate } from '@msimcity/shared';
 import { World, emptyProgress, lifeDefaults, type Citizen, type Parcel, type Player, type Site } from './world';
-import { LIFE, seededAge } from './sim/life';
+import { LIFE, seededAge, ageOf } from './sim/life';
 import { historyOf, type HistoryJSON } from './history';
 
 /**
@@ -104,6 +104,8 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links
     const c: Citizen = { ...lifeDefaults(saved.id, w.tick, seededAge(saved.id, LIFE.legacyMin, LIFE.legacyMax), 80), ...saved };
+    // citizens saved before education (docs/education.md): levels seeded from the id and their age, studying nowhere
+    if (c.edu === undefined) Object.assign(c, eduDefaults(c.id, ageOf(c, w.tick)));
     c.errand = 0;
     const home = w.buildings.get(tileKey(c.hx, c.hy));
     if (!home) continue;

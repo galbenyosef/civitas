@@ -12,6 +12,7 @@ import {
   zoneOf, isBuildable, underConstruction, isGatewayId, GATEWAY_OF, GATEWAY_WORDS, bridgeSpanAt, BRIDGE_STYLE_NAMES,
   type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
   buildingValue, LAND_PRICE_PER_TILE, ROAD_COST,
+  eduDefaults, birthdayOf, yearGroup, STAGES, Study, EDU_NURSERY, EDU_DROPPED, CITIZEN_STUDY, type CitizenEducation,
 } from '@msimcity/shared';
 import type { Building, Citizen, Leg, Mover, Vehicle, World, MergePlan } from '../world';
 import { noteTrail, resetTrail, tkey, untkey, lifeDefaults, hasJobs } from '../world';
@@ -81,6 +82,11 @@ const PEOPLE_ROW_CAP = 80;           // rows per list in the building panel
 const GARAGE_WAIT_MAX = 150;          // ticks a car will wait for a gap to pull out before the trip is abandoned
 
 const S = CitizenState;
+/**
+ * CITIZEN_STUDY for a pupil or student out on the commute (pupils use ToWork and Work for school; docs/education.md).
+ * Until sim/schools.ts (E3) marks the trip, a pupil's ToHome after an outing carries it too.
+ */
+const studyFlag = (c: Citizen) => (c.study && (c.state === S.ToWork || c.state === S.ToHome) ? CITIZEN_STUDY : 0);
 /** A trip dispatch decided on: from a building (freight, patrols, call-outs) or an entry tile (visitors). */
 /**
  * A job search from a home that found nothing (Simulation.findJob): the tiles it looked at, padded by two for the
@@ -303,7 +309,7 @@ export class Simulation {
     const w = this.w;
     const key = tileKey(b.x, b.y);
     const residents: PersonRow[] = [], workers: PersonRow[] = [], visitors: PersonRow[] = [], builders: PersonRow[] = [];
-    const row = (c: Citizen, here: boolean): PersonRow => ({ id: c.id, name: nameFor(c.id, c.sn), activity: this.activityOf(c), here, age: Math.floor(ageOf(c, w.tick)), stage: c.stage });
+    const row = (c: Citizen, here: boolean): PersonRow => ({ id: c.id, name: nameFor(c.id, c.sn), activity: this.activityOf(c), here, age: Math.floor(ageOf(c, w.tick)), stage: c.stage, edu: c.edu });
     for (const c of w.citizens.values()) {
       if (b.zone === Zone.Residential && c.hx === b.x && c.hy === b.y) {
         const r = row(c, c.state === S.Home);
@@ -448,7 +454,32 @@ export class Simulation {
       income7: Math.round(wk.income), spend7: Math.round(wk.spend),
       tripsToday: fresh ? c.tripsToday : 0, trafficMinToday: fresh ? Math.round((c.trafficTicksToday * 60) / TPH) : 0,
       sickDays: c.sickDays, leisureNeed: Math.round(leisureNeed(c) * 100),
+      birthday: birthdayOf(c.born, LIFE.daysPerYear), education: this.describeEducation(c),
     };
+  }
+  /** Level, track, the stage under way and the finished ones (docs/education.md). */
+  private describeEducation(c: Citizen): CitizenEducation {
+    const w = this.w;
+    const placeName = (x: number, y: number, kind: number) => `${KIND_NAMES[w.buildings.get(tileKey(x, y))?.id ?? kind] ?? 'school'} at (${x}, ${y})`;
+    const info: CitizenEducation = {
+      level: c.edu,
+      history: c.eduLog.map(([stage, x, y, kind, week, result]) => ({ stage, place: placeName(x, y, kind), week, result })),
+    };
+    if (c.track) info.track = c.track;
+    if (c.eduBits & EDU_NURSERY) info.nursery = true;
+    if (c.eduBits & EDU_DROPPED) info.droppedOut = true;
+    if (c.study) {
+      // schools go by year group (a child may join mid-stage); courses by school days held, adult courses by days attended
+      const spec = STAGES[c.study], day = w.tick / DAY, school = c.study >= Study.Primary && c.study <= Study.SixthForm;
+      const yg = yearGroup(c.born, day, LIFE.daysPerYear);
+      const done = school ? yg - (spec.ages[0] - 4) + mod(day, LIFE.daysPerYear) / LIFE.daysPerYear : spec.years ? c.due / spec.days : c.att / spec.days;
+      info.studying = {
+        place: { x: c.sx, y: c.sy, name: placeName(c.sx, c.sy, 0) }, stage: c.study,
+        attendance: c.due ? c.att / c.due : 1, progress: Math.max(0, Math.min(1, school ? done / spec.years : done)),
+      };
+      if (school) info.studying.yearGroup = yg;
+    }
+    return info;
   }
   /** How o is related to c, both in the same household. */
   private relationOf(c: Citizen, o: Citizen): string {
@@ -1058,6 +1089,7 @@ export class Simulation {
       car: w.ownsCar(id, 0), legs: [], leg: null, parkedAt: null, parkKerb: false,
       ...w.moverDefaults(id),
       ...lifeDefaults(id, w.tick, age, health),
+      ...eduDefaults(id, age),
       leisure: LEISURE.start + LEISURE.startSpread * hash2(id, 219), // newcomers arrive neither bored nor fresh from a holiday
     };
   }
@@ -2799,19 +2831,19 @@ export class Simulation {
       if (c.leg?.lift) continue; // in someone's car, or waiting for it to set off (sim/carpool.ts): not drawn
       if (c.leg?.hail) {
         // waiting at the kerb for a taxi: standing there; in it, or waiting indoors for one that comes in at the door: not drawn
-        if (this.taxis.waiting(c) === 'kerb') yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: 0, kind: familyOf(c.kind), cls: 0, queued: true, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out };
+        if (this.taxis.waiting(c) === 'kerb') yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: 0, kind: familyOf(c.kind), cls: 0, queued: true, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out, extra: studyFlag(c) };
         continue;
       }
       if (c.leg?.ride) {
         // on board: inside the bus, not drawn; at the stop: standing in the crowd (queued marks a walker standing still)
         if (this.transit.isRiding(c)) continue;
         // on a metro platform: below ground (CITIZEN_UNDER), drawn only by the underground view
-        yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: 0, kind: familyOf(c.kind), cls: 0, queued: true, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out, under: this.transit.isUnder(c) };
+        yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: 0, kind: familyOf(c.kind), cls: 0, queued: true, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out, under: this.transit.isUnder(c), extra: studyFlag(c) };
         continue;
       }
       const drive = !!c.leg?.drive;
       if (drive && c.lane < 0) continue; // waiting in the garage for a gap
-      yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: drive ? 1 : 0, kind: familyOf(c.kind), cls: drive ? c.cls : 0, queued: drive && c.wait > 1, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out, ind: drive ? indicatorOf(c, false) : 0 };
+      yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: drive ? 1 : 0, kind: familyOf(c.kind), cls: drive ? c.cls : 0, queued: drive && c.wait > 1, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out, ind: drive ? indicatorOf(c, false) : 0, extra: studyFlag(c) };
     }
     for (const v of this.w.vehicles.values()) {
       if (v.phase === 'dwell' || v.lane < 0) continue;
