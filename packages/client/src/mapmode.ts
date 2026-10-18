@@ -165,7 +165,7 @@ export class MapMode implements MapInput {
   move(px: number, py: number, dx: number, dy: number) {
     const pr = this.press;
     if (!pr) return;
-    if (!pr.moved && Math.hypot(px - pr.px, py - pr.py) >= 4) pr.moved = true;
+    if (!pr.moved && Math.hypot(px - pr.px, py - pr.py) >= 5) { pr.moved = true; if (!pr.cut) this.d.canvas.style.cursor = 'grabbing'; } // as a select-tool drag in 3D (input.ts CLICK_SLOP)
     if (pr.cut) {
       const g = this.ground(px, py);
       if (g && this.cut) { this.cut.b = g; this.preview(); }
@@ -177,6 +177,7 @@ export class MapMode implements MapInput {
     const pr = this.press;
     this.press = null;
     if (!pr) return;
+    if (pr.moved && !pr.cut) this.d.canvas.style.cursor = '';
     if (pr.cut) {
       const plan = this.splitPlan();
       this.cut = null;

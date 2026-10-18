@@ -14,11 +14,11 @@ a line you drag, **rename** and **colour** it, and read its stats (area, buildin
 
 | | |
 | --- | --- |
-| Toggle | **Tab**, the **map** chip, or wheel/pinch past the 3D limit (`DIST_MAX` 220). Zooming back in below 150 returns to 3D at the tilt you left. Every letter key was taken (tools, camera, H N T M I O); Tab is free and is what many games use for a map. Esc leaves the map too (after dropping a cut, then the selection). `?map` opens on it. |
+| Toggle | **Tab**, the **map** chip, or scrolling, pinching or pressing − past the 3D limit (`DIST_MAX` 220). Zooming back in below 150 returns to 3D at the tilt you left. Every letter key was taken (tools, camera, H N T M I O); Tab is free and is what many games use for a map. Esc leaves the map too (after dropping a cut, then the selection). `?map` opens on it. |
 | Camera | the ordinary `CameraRig`, eased to north-up (yaw 0) and straight down (`MAP_PITCH` 1.565), with the zoom range widened to `MAP_DIST_MAX` 6000 (about 9000 tiles across on a 16:10 window). Near and far planes follow the distance. |
 | Rendering | a separate `Scene` (`render/worldmap.ts` `MapView`): the main scene is not rendered at all, so no buildings, agents, shadows or fog cost anything. Everything is `MeshBasicMaterial`, unlit, not tone mapped. |
 | Streaming | the chunk subscription set becomes empty: no chunk geometry, agents or traffic bytes arrive while the map is up. Leaving the map subscribes again as usual. |
-| Navigation | left drag pans (a click without a drag selects), right drag and trackpad two-finger scroll pan, pinch and the wheel zoom about the cursor, WASD pans. Rotation is off: the map stays north-up. |
+| Navigation | the game's scheme (main 7e2280e): scroll and pinch zoom about the cursor, + and − zoom, a drag pans (left, with 5 px of slop before a press stops being a click, as the select tool; right drag too), Shift+scroll and WASD pan, and the "scroll pans" setting applies. Rotation is off: Alt+scroll, middle and Alt drag, Q E R F do nothing, so the map stays north-up. A click selects, shift-click adds. Spectators (a read-only showcase) can open the map (`map` is a read-only intent) but get no editing controls. |
 
 ### Ground: sectors and levels of detail
 
