@@ -21,6 +21,8 @@ export interface GroupDef {
    * order, so the one-family-code rule and the never-shrinks-up-the-ladder checks do not apply. The picker lists them the same way.
    */
   collection?: boolean;
+  /** A ladder still in development: every rung may be a draft (validation otherwise calls that a mistake). Drop it when the first rung goes live. */
+  draft?: boolean;
 }
 
 export const GROUPS: GroupDef[] = [
@@ -29,6 +31,7 @@ export const GROUPS: GroupDef[] = [
   { id: 'fire', label: 'Fire', section: 'Services', color: '#d6453a', holds: 'firefighters' },
   { id: 'builders', label: 'Builders', section: 'Services', color: '#a8713f', holds: 'builders' },
   { id: 'parking', label: 'Parking', section: 'Transport', color: '#5c6270', holds: 'bays' },
+  { id: 'metro', label: 'Underground', section: 'Transport', color: '#dc241f', holds: 'staff', draft: true },
   { id: 'park', label: 'Parks', section: 'Leisure', color: '#4f9a5c', holds: 'visitors' },
   { id: 'cinema', label: 'Cinemas', section: 'Leisure', color: '#b8434f', holds: 'seats' },
   { id: 'theatre', label: 'Theatres', section: 'Leisure', color: '#7a3e8f', holds: 'seats' },

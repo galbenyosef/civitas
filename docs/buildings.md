@@ -16,6 +16,7 @@ Every building kind is data. One file per kind family under `packages/shared/src
 | `terminal.ts` | The airport terminal (8×7), the worked example of a multi-tile structure (docs/airport.md) |
 | `rail.ts` | The rail halt (4×2), rail station (6×3) and freight yard (6×3): transport-hub sub-kinds with a platform or loading dock along the back row (docs/rail.md) |
 | `motorway.ts` | The motorway connection (2×3, kind id 21): the road gateway newcomers, leavers, visitors and inter-city freight use (README "Gateways") |
+| `metro.ts` | The metro entrance (1×1, kind id 22) and metro station (2×1, kind id 23): the surface half of an underground station, whose platform is a run of tiles in the under layer beneath the door; the "Underground" ladder, drafts until the Showcase and London place them (docs/underground.md) |
 | `residential-merged.ts`, `commercial-merged.ts`, `office-merged.ts`, `industrial-merged.ts`, `zonekit.ts` | Merged lots: the bigger zone kinds growth assembles from neighbouring lots (see "Merged lots"), and the recipe parts they are drawn with |
 | `block-interior.ts` | Block interiors: the deep plots that grow back into a block's landlocked middle and the communal garden (see "Block interiors") |
 | `landmarks-london.ts` | London landmarks (kind ids 91-100): the Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, and ids 96-100 reserved for the second five (see "Landmarks") |
@@ -353,7 +354,9 @@ A new kind needs a family code and, when its code already has a base kind, a fre
 - A level `feature` that no tech node unlocks, or a level whose designs are all drafts.
 - A footprint edge outside 1 to 8, a door off the front row, or a footprint bigger than 1×1 on a kind that is neither civic nor a growable sub-kind. A car park bigger than one tile is civic and built by builders; the painted surface lot stays 1×1. A growable kind bigger than 1×1 (a merged lot) must be a sub-kind with no tool: the zone's base kind stays 1×1 so zoning stays per tile.
 - A `minLevel` outside 1 to 7, on a kind that is not growable, or with more levels than fit below 7.
-- A ladder mistake: an unknown `group`, tiers that do not run 1..n, rungs of one group on different family codes, a rung without a tool, `blurb` or `howTo`, two shortcut keys in one group, or a tier attribute out of range.
+- A ladder mistake: an unknown `group`, tiers that do not run 1..n, rungs of one group on different family codes, a rung without a tool, `blurb` or `howTo`, two shortcut keys in one group, or a tier attribute out of range. A ladder whose every rung is a draft is a mistake too, unless its group sets `draft: true` in `groups.ts` (the Underground ladder does until U8 undrafts its rungs).
+
+**The showcase.** A new kind or feature lands with its showcase placement and tour stop, or `npm run demo:check` fails. A landmark goes in its own city's demo instead. See docs/demo.md, "Keeping it complete".
 
 ## Groups and tiers
 

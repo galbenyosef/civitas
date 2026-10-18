@@ -10,6 +10,7 @@ import { park, cinema, theatre, sports, library } from './leisure';
 import { terminal } from './terminal';
 import { railHalt, railStation, freightYard } from './rail';
 import { motorwayStub } from './motorway';
+import { metroEntrance, metroStation } from './metro';
 import { CIVIC_TIERS } from './civic-tiers';
 import { PARKING_TIERS } from './parking';
 import { LEISURE_TIERS } from './leisure-tiers';
@@ -25,7 +26,7 @@ import { LONDON_LANDMARKS } from './landmarks-london';
  * (`npm run buildings:compile`) reads it. The game reads the generated
  * compiled.ts and recipes.ts. Add a family file and list its kinds here.
  */
-const BASE: KindDef[] = [residential, commercial, industrial, office, police, fire, hospital, yard, parking, park, cinema, theatre, sports, library, terminal, busDepot, busStop, railHalt, railStation, freightYard, motorwayStub,
+const BASE: KindDef[] = [residential, commercial, industrial, office, police, fire, hospital, yard, parking, park, cinema, theatre, sports, library, terminal, busDepot, busStop, railHalt, railStation, freightYard, motorwayStub, metroEntrance, metroStation,
   // size ladders (groups.ts): the smaller and bigger rungs around the kinds above
   ...CIVIC_TIERS, ...PARKING_TIERS, ...LEISURE_TIERS,
   // merged lots (zones.ts): bigger zone kinds that growth assembles from neighbouring lots

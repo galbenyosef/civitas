@@ -2,7 +2,7 @@ import {
   DEFAULT_TAX, Terrain, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, KIND_ID, KIND_NAMES, chunkKey, isBuildable, isRoad, packTile, terrainOf,
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
-  isMergedKind, planBridge, BridgeStyle, isDemoOwner,
+  isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS } from '../world';
 import { seedCity } from '../loadtest/cities';
@@ -79,11 +79,39 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
       });
       w.dirtyParcels.add(parcel.id);
     }
+    // a scenario's river: open water, whoever's land it is (no tool makes water)
+    for (const r of s.water ?? []) eachTile(r, (x, y) => { unmerge(x, y); w.setTile(x, y, packTile(Terrain.Water, false, 0, 0)); });
     for (const r of s.clear ?? []) eachTile(r, (x, y) => { unmerge(x, y); const t = w.getTile(x, y); if (!isRoad(t)) w.setTile(x, y, packTile(terrainOf(t), false, 0, 0)); });
+    // straight road drags, as the road tool lays them on the owner's dry land (the track drawn later crosses them)
+    for (const [a, b] of s.roads ?? []) {
+      if (a[0] !== b[0] && a[1] !== b[1]) { problems.push(`${s.id}: road ${at(a)} to ${at(b)} is not straight`); continue; }
+      const dx = Math.sign(b[0] - a[0]), dy = Math.sign(b[1] - a[1]), n = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+      for (let i = 0; i <= n; i++) {
+        const x = a[0] + dx * i, y = a[1] + dy * i, t = w.getTile(x, y), why = env.land(x, y);
+        if (isRoad(t)) continue;
+        if (why) problems.push(`${s.id}: road at ${at([x, y])}: ${why}`);
+        else if (!isBuildable(t)) problems.push(`${s.id}: road at ${at([x, y])} is on water (lay a bridge)`);
+        else if (w.auxAt(x, y) && !isRailAux(w.auxAt(x, y))) problems.push(`${s.id}: road at ${at([x, y])} is on a structure, runway or junction`);
+        else { unmerge(x, y); w.setTile(x, y, packTile(terrainOf(t), true, 0, 0)); }
+      }
+    }
     for (const z of s.zones ?? []) {
       const k = kindId(z.zone);
       eachTile(z.rect, (x, y) => { unmerge(x, y); const t = w.getTile(x, y); if (!isRoad(t) && isBuildable(t)) w.setTile(x, y, packTile(terrainOf(t), false, familyOf(k), DEMO_TOWN.built), subFor(k)); });
     }
+  }
+  // merged lots (docs/buildings.md "Merged lots") stand on their zoned lots as growth builds them: through the shared
+  // placement rule with those lots seen as empty, before the block middles round them are settled
+  for (const s of sections) for (const p of s.placements ?? []) {
+    const k = kindId(p.kind);
+    if (!k || !isMergedKind(k)) continue;
+    const v = planStructure(k, p.door[0], p.door[1], {
+      ...env,
+      tile: (x, y) => { const t = w.getTile(x, y); return zoneOf(t) === familyOf(k) && !w.auxAt(x, y) ? packTile(terrainOf(t), false, familyOf(k), 0) : t; },
+    }, p.rot ?? 0);
+    if (!v.ok) { problems.push(`${s.id}: ${p.id ?? p.kind} at ${at(p.door)} rot ${p.rot ?? 0}: ${v.reason}`); continue; }
+    const level = p.level ?? firstLevelOf(k);
+    w.placeStructure(v.placed, { work: workOf(k, level), priority: 0, built: true, target: level });
   }
   // rezoned blocks get their middles settled as seedCity's are: a garden in a ring of homes, else deep plots (sim/blocks.ts)
   for (const s of sections) for (const z of s.zones ?? []) settleInteriors(w, z.rect[0] - 1, z.rect[1] - 1, z.rect[0] + z.rect[2], z.rect[1] + z.rect[3], DEMO_TOWN.built);
@@ -92,7 +120,7 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
     for (const p of s.placements ?? []) {
       const k = kindId(p.kind);
       if (!k) { problems.push(`${s.id}: no catalogue kind ${p.kind}`); continue; }
-      if (k === BUS_STOP_KIND) continue; // phase 2: a stop needs the traffic model's junction test
+      if (k === BUS_STOP_KIND || isMergedKind(k)) continue; // phase 2: a stop needs the traffic model's junction test; merged lots are up
       const [x, y] = p.door;
       if (isMultiTile(k)) {
         if (p.rot === undefined) { problems.push(`${s.id}: ${p.id ?? p.kind} is multi-tile and needs a rotation`); continue; }

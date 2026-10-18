@@ -1,15 +1,21 @@
 import { KIND_ID, MANIFEST, type KindToolId } from '../buildings/compiled';
+import { MOTORWAY_KIND } from '../gateways';
 import { ZONE_COST } from '../constants';
 import type { KindManifest } from '../buildings/schema';
 import type { Tool } from '../protocol';
-import type { TransitMode } from '../transit';
+import { STOP_KINDS, type TransitMode } from '../transit';
 import { placedFromDoor, footprintOf, FRONT, FRONT_NAMES, type Placed } from '../structures';
 import { kindManifest, CIVIC_COST } from '../tile';
 import { techFor, TRACK_NAMES } from '../tech';
 import { RUNWAY_COST, RUNWAY_MIN, RUNWAY_MAX, TERMINAL_ROW } from '../airport';
 import { RAIL_COST, CROSSING_COST } from '../rail';
 import { ROUNDABOUT_COST, FLYOVER_COST } from '../junctions';
-import { BRIDGE_TILE_COST, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES, BridgeStyle } from '../bridges';
+import { BRIDGE_TILE_COST, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES, BridgeStyle, isBridgeAux, bridgeStyle, bridgeSpanAt, basculeSeed, basculeLiftAt } from '../bridges';
+import { isCrossing } from '../rail';
+import { GROW_FORMS, firstLevelOf } from '../zones';
+import { capacityOf, isGrowableId, terrainOf, Terrain } from '../tile';
+import { PLANE_TYPES, timetable, type PlaneType, type Airport } from '../flights';
+import { heliTimetable, type Pad, type PadKind } from '../helicopters';
 import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
 
 /**
@@ -17,7 +23,7 @@ import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
  * running, for showing the game and teaching it. This file is the scenario as data. The server's demo seeder
  * (server/src/demo/seed.ts) builds it through the same planners players use; the client's tour panel
  * (client/src/tour.ts) flies the camera through it in `TOUR` order; `npm run demo:check` fails when a placeable kind,
- * a size-ladder rung, a linear surface or a line mode is missing from the showcase.
+ * a size-ladder rung, a linear surface, a line mode or a registered feature (SHOWCASE_FEATURES) is missing from it.
  *
  * Geometry. The town is a 3×3 grid of Commons-style districts (`seedCity`, 22×22 tiles, roads every 5 tiles, zones
  * pre-built to level 3) spanning x and y from -35 to 34, with the perimeter roads on x = -35 and 34, y = -35 and 34.
@@ -30,7 +36,7 @@ import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
  * would click (the door) and its rotation (FRONT order: 0 the door faces +y/south, 1 east, 2 north, 3 west).
  */
 
-export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry'
+export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside'
   | 'london-areas' | 'london-landmarks' | 'london-rail' | 'london-buses';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
@@ -46,6 +52,11 @@ export interface DemoPlacement {
   door: DemoXY;
   /** FRONT order; required for multi-tile kinds */
   rot?: 0 | 1 | 2 | 3;
+  /**
+   * The level it stands at, for a merged lot (zones.ts GROW_FORMS: a zone kind bigger than 1×1 that growth assembles,
+   * never placed by a player): the seeder builds it on lots of its zone as growth would. Default its first level.
+   */
+  level?: number;
 }
 export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 'office'; rect: DemoRect }
 /** a runway dragged from `from` to `to` (shared/src/airport.ts planRunway) */
@@ -60,6 +71,8 @@ export interface DemoTrack { id: string; name: string; drags: readonly (readonly
 export interface DemoBridge { id: string; name: string; from: DemoXY; to: DemoXY; style?: keyof typeof BridgeStyle; landmark?: string }
 /** a roundabout or flyover clicked on the junction `at` (junctions.ts); a flyover's deck carries the `deck` road */
 export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: DemoXY; deck?: 'ew' | 'ns' }
+/** A tour stop on something that is neither a kind nor a drag (a level crossing, the river): its caption is SPOT_CAPTIONS[spot]. */
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY }
 export interface DemoLine {
   id: string; mode: TransitMode; number: number; colour: number;
   /** stops in calling order: bus stop tiles or station doors */
@@ -76,6 +89,8 @@ export interface DemoBlock {
   id: string; kind: string; name: string; rect: DemoRect; inspect: DemoXY;
   /** the tour caption, in place of the kind's blurb (a named area of a sample city) */
   blurb?: string;
+  /** how it comes about, in place of the kind's howTo */
+  how?: string;
 }
 export interface DemoSection {
   id: SectionId; name: string; blurb: string;
@@ -85,6 +100,10 @@ export interface DemoSection {
   clear?: DemoRect[];
   /** blocks rezoned (built to the town's level) */
   zones?: DemoZone[];
+  /** open water painted into the terrain (a scenario's river: no tool makes water) */
+  water?: DemoRect[];
+  /** straight road drags as the road tool lays them, on own dry land (bridges are `bridges`, laid after) */
+  roads?: readonly (readonly [DemoXY, DemoXY])[];
   placements?: DemoPlacement[];
   runways?: DemoRunway[];
   tracks?: DemoTrack[];
@@ -92,6 +111,7 @@ export interface DemoSection {
   bridges?: DemoBridge[];
   lines?: DemoLine[];
   blocks?: DemoBlock[];
+  spots?: DemoSpot[];
 }
 export interface DemoDef {
   id: DemoId; name: string; blurb: string;
@@ -119,6 +139,34 @@ const LINE_2_STOPS = [-33, -23, -9, -4, 1, 6, 15, 20, 25, 30];
 /** blocks of a seedCity district that are not homes (its zone pattern repeats in every district) */
 const NON_HOME_BLOCKS: [number, number][] = [[2, 0], [0, 1], [2, 1], [3, 1], [0, 2], [1, 2], [3, 2], [1, 3], [2, 3]];
 
+/**
+ * The riverside quarter south of the freight line: a river on rows 44-47 (four wide, the span Tower Bridge's model is
+ * drawn for), four streets carried over it on bridges of every style, and a row of ten 4×4 blocks between the river road
+ * (y = 49) and y = 54, with a street every 5 tiles from x = -20 to 30, and a row of ten blocks of homes behind them
+ * (y = 55-58, a street on y = 59) whose people work in the quarter. The quarter is reached only over the bridges.
+ */
+const RIVER_ROWS = [44, 47] as const;
+const QUARTER_X = Array.from({ length: 11 }, (_, i) => -20 + 5 * i);
+const qblock = (i: number, row = 0): DemoRect => [-19 + 5 * i, 50 + 5 * row, 4, 4];
+/** the streets that cross the river: from the perimeter road (y = 34) over the railway land to the river road */
+const RIVER_BRIDGES: { id: string; name: string; x: number; style: keyof typeof BridgeStyle }[] = [
+  { id: 'bridge-girder', name: 'Mill Lane bridge', x: -20, style: 'Girder' }, // over the freight line's level crossing too
+  { id: 'bridge-arch', name: 'Stone bridge', x: 5, style: 'Arch' },
+  { id: 'bridge-bascule', name: 'Lifting bridge', x: 15, style: 'Bascule' },
+  { id: 'bridge-suspension', name: 'Suspension bridge', x: 25, style: 'Suspension' },
+];
+/** bus line 3's stops: beside the street down to the stone bridge, then the river road's north side out to its dead end at x = 33 */
+const RIVER_LINE_STOPS: DemoXY[] = [[6, 40], [12, RIVER_ROWS[1] + 1], [22, RIVER_ROWS[1] + 1], [32, RIVER_ROWS[1] + 1]];
+/** A merged lot (docs/buildings.md "Merged lots") with its footprint's top-left corner at (ax, ay): the door that puts it there. */
+function mergedAt(kind: string, ax: number, ay: number, rot: 0 | 1 | 2 | 3, level: number): DemoPlacement {
+  const k = (KIND_ID as Record<string, number>)[kind], fp = footprintOf(k), [w, h] = rot & 1 ? [fp.h, fp.w] : [fp.w, fp.h];
+  for (let y = ay; y < ay + h; y++) for (let x = ax; x < ax + w; x++) {
+    const p = placedFromDoor(k, x, y, rot);
+    if (p.ax === ax && p.ay === ay) return { kind, door: [x, y], rot, level };
+  }
+  throw new Error(`no door puts ${kind} at (${ax}, ${ay})`);
+}
+
 export const SECTIONS: DemoSection[] = [
   {
     id: 'downtown', name: 'Downtown',
@@ -132,6 +180,12 @@ export const SECTIONS: DemoSection[] = [
       { id: 'block-commercial', kind: 'commercial', name: 'Shops', rect: block(1, 1, 2, 0), inspect: [3, -9] },
       { id: 'block-office', kind: 'office', name: 'Offices', rect: block(1, 1, 3, 1), inspect: [8, -4] },
       { id: 'block-industrial', kind: 'industrial', name: 'Industry', rect: block(1, 1, 0, 2), inspect: [-10, 1] },
+      // the middles of the blocks (sim/blocks.ts settleInteriors): deep plots grown back from the frontage, and a
+      // communal garden inside a ring of homes
+      { id: 'block-deep', kind: 'res-deep', name: 'Deep plots', rect: block(1, 1, 1, 0), inspect: [-4, -7] },
+      { id: 'block-garden', kind: 'block-garden', name: 'Communal garden', rect: block(1, 1, 2, 2), inspect: [1, 2],
+        blurb: 'A communal garden: the 2×2 middle of a block ringed by homes, which no road reaches, planted by the residents as a shared garden. Only the homes round it count it, as a small park nearby; nobody else can get in.',
+        how: 'Nothing to build. Zone a block all homes and own its middle: once every home round it stands, the residents plant it. It costs nothing and has no upkeep.' },
     ],
   },
   {
@@ -190,6 +244,8 @@ export const SECTIONS: DemoSection[] = [
       { kind: 'builders-depot', door: [-29, -19], rot: 2 },
       { kind: 'construction-company', door: [-29, -16], rot: 0 },
     ],
+    // the general and teaching hospitals' air ambulances and the police headquarters' helicopter (docs/helicopters.md)
+    spots: [{ id: 'helipads', spot: 'helipads', name: 'Helipads', rect: [-34, -27, 18, 10], inspect: [-27, -21] }],
   },
   {
     id: 'rail', name: 'Rail and freight',
@@ -242,12 +298,13 @@ export const SECTIONS: DemoSection[] = [
   },
   {
     id: 'airport', name: 'Airport',
-    blurb: 'An airport terminal facing the east perimeter road, with a 16-tile runway five rows behind it: a flight an hour, landing fees for the owner.',
+    blurb: 'An airport terminal facing the east perimeter road, with a 20-tile runway five rows behind it: a flight an hour, every type from the business jet to the jumbo, landing fees for the owner.',
     land: [{ name: 'Airfield', rect: [35, -12, 15, 24] }],
     // homes across the road from the terminal, whose nearest jobs are the ground crew's
     zones: [block(2, 1, 3, 1), block(2, 1, 3, 2)].map((rect): DemoZone => ({ zone: 'residential', rect })),
     placements: [{ kind: 'airport', door: [35, 0], rot: 3 }],
-    runways: [{ id: 'runway', from: [46, -8], to: [46, 7] }],
+    // 20 tiles: long enough for the jumbo (flights.ts PLANE_TYPES minRunway), so every plane type flies here
+    runways: [{ id: 'runway', from: [46, -10], to: [46, 9] }],
   },
   {
     id: 'industry', name: 'Industry',
@@ -256,15 +313,62 @@ export const SECTIONS: DemoSection[] = [
     zones: [block(0, 2, 0, 3), block(0, 2, 1, 3), block(0, 2, 1, 2)].map((rect): DemoZone => ({ zone: 'industrial', rect })),
     blocks: [{ id: 'block-estate', kind: 'industrial', name: 'Industrial estate', rect: [-34, 24, 9, 9], inspect: [-34, 30] }],
   },
+  {
+    id: 'riverside', name: 'Riverside',
+    blurb: 'A river south of the freight line, crossed by a stone arch, a steel girder, a suspension and a lifting bascule bridge, with a level crossing on the way down, and a quarter beyond it where every merged building stands: terraces to tower estates, parades to hotel towers, workshops to a heavy plant, a headquarters with a rooftop helipad.',
+    land: [{ name: 'Riverside', rect: [-35, 41, 70, 20] }],
+    // the river runs on off the town's land both ways (into the lake to the west)
+    water: [[-60, RIVER_ROWS[0], 131, RIVER_ROWS[1] - RIVER_ROWS[0] + 1]],
+    roads: [
+      // the four streets down to the river; the freight line's track (rail section) crosses the first on a level crossing
+      ...RIVER_BRIDGES.map((b): [DemoXY, DemoXY] => [[b.x, 35], [b.x, RIVER_ROWS[0] - 1]]),
+      ...RIVER_BRIDGES.map((b): [DemoXY, DemoXY] => [[b.x, RIVER_ROWS[1] + 1], [b.x, RIVER_ROWS[1] + 1]]),
+      [[-20, 49], [30, 49]], [[-20, 54], [30, 54]], [[-20, 59], [30, 59]],
+      // the river road runs on past the quarter to a dead end, where line 3's buses turn round (sim/busroute.ts)
+      [[31, 49], [33, 49]],
+      ...QUARTER_X.map((x): [DemoXY, DemoXY] => [[x, 50], [x, 58]]),
+    ],
+    bridges: RIVER_BRIDGES.map((b): DemoBridge => ({ id: b.id, name: b.name, from: [b.x, RIVER_ROWS[0]], to: [b.x, RIVER_ROWS[1]], style: b.style })),
+    // line 3, there and back from the street down to the stone bridge, along the river road to its dead end: the buses
+    // turn round there by themselves (docs/transit.md); stops on the river side of the road, facing no junction
+    lines: [{ id: 'line-bus-3', mode: 'bus', number: 3, colour: 0x2fa37a, loop: false, vehicles: 2, stops: RIVER_LINE_STOPS }],
+    // works to the west, then shops, offices and homes; the merged lots stand on these zones (their own tiles first)
+    zones: [
+      ...[0, 1, 2].map((i): DemoZone => ({ zone: 'industrial', rect: qblock(i) })),
+      ...[3, 4].map((i): DemoZone => ({ zone: 'commercial', rect: qblock(i) })),
+      ...[5, 6].map((i): DemoZone => ({ zone: 'office', rect: qblock(i) })),
+      ...[7, 8, 9].map((i): DemoZone => ({ zone: 'residential', rect: qblock(i) })), // the last a ring of homes round a communal garden
+      // the homes behind, for the quarter's jobs (the town has more jobs than people without them)
+      ...QUARTER_X.slice(1).map((_x, i): DemoZone => ({ zone: 'residential', rect: qblock(i, 1) })),
+    ],
+    // one of every merged lot (zones.ts GROW_FORMS but the deep plots, which settle into block middles by themselves),
+    // the north ones facing the river road, the south ones y = 54
+    placements: [
+      ...RIVER_LINE_STOPS.map((door, i): DemoPlacement => ({ id: `bus-stop-${21 + i}`, kind: 'bus-stop', door })),
+      mergedAt('ind-plant', -19, 50, 2, 7),
+      mergedAt('ind-works', -14, 50, 2, 5), mergedAt('ind-row', -14, 53, 0, 3),
+      mergedAt('ind-depot', -9, 50, 2, 4),
+      mergedAt('com-centre', -4, 50, 2, 6), mergedAt('com-parade', -4, 53, 0, 3),
+      mergedAt('com-store', 1, 50, 2, 5), mergedAt('com-hotel', 3, 50, 2, 7),
+      mergedAt('off-tower', 6, 50, 2, 5),
+      mergedAt('off-hq', 11, 50, 2, 7), mergedAt('off-centre', 11, 53, 0, 3), // the supertall with the helipad on its crown
+      mergedAt('res-estate', 16, 50, 2, 7), mergedAt('res-terrace', 16, 53, 0, 3),
+      mergedAt('res-midrise', 21, 50, 2, 4), mergedAt('res-tower', 23, 50, 2, 7), mergedAt('res-block', 21, 52, 0, 5),
+    ],
+    spots: [
+      { id: 'river', spot: 'river', name: 'The river', rect: [-20, RIVER_ROWS[0], 51, RIVER_ROWS[1] - RIVER_ROWS[0] + 1] },
+      { id: 'level-crossing', spot: 'level-crossing', name: 'Level crossing', rect: [-20, 38, 1, 1], inspect: [-30, 35] },
+    ],
+  },
 ];
 
 /** Tour order: placement, block, runway, track, junction and line ids, plus 'welcome' (the whole town). */
 export const TOUR: string[] = [
   'welcome',
-  'block-residential', 'block-commercial', 'block-office', 'block-industrial',
+  'block-residential', 'block-commercial', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
   'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'roundabout', 'flyover',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
-  'police-box', 'police-post', 'police', 'divisional-station', 'police-hq',
+  'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
   'fire-post', 'fire', 'large-fire-station', 'fire-hq',
   'handyman', 'yard', 'builders-depot', 'construction-company',
   'rail-halt', 'track-passenger', 'rail-station', 'line-rail-1',
@@ -275,11 +379,14 @@ export const TOUR: string[] = [
   'library', 'central-library', 'museum',
   'airport', 'runway',
   'block-estate', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
+  'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3',
+  'ind-plant', 'ind-works', 'ind-row', 'ind-depot', 'com-centre', 'com-parade', 'com-store', 'com-hotel',
+  'off-tower', 'off-hq', 'off-centre', 'res-estate', 'res-terrace', 'res-midrise', 'res-tower', 'res-block',
 ];
 
 export const DEMOS: DemoDef[] = [
-  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'civic', 'rail', 'leisure', 'airport', 'industry'],
-    blurb: 'A lived-in town with one of every large building, both kinds of line and an airport, all running. Take the guided tour.' },
+  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'civic', 'rail', 'leisure', 'airport', 'industry', 'riverside'],
+    blurb: 'A lived-in town with one of every large building and every merged lot, both kinds of line, an airport every plane type flies to, helicopters, and a river with every style of bridge, all running. Take the guided tour.' },
   { id: 'transport', name: 'Transport demo', slot: 91, sections: ['downtown', 'transport', 'rail', 'airport', 'industry'],
     blurb: 'Buses, parking, rail, freight and the airport, in the same town.' },
   { id: 'leisure', name: 'Leisure demo', slot: 92, sections: ['downtown', 'leisure'],
@@ -308,7 +415,7 @@ export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER |
 type SurfaceTool = Exclude<Tool, 'road' | 'bulldoze' | KindToolId>;
 export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true };
 /** Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. */
-export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, freight: true };
+export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, freight: true };
 
 interface Caption { title: string; what: string; how: string; facts: [string, string][] }
 const money = (n: number) => `$${n.toLocaleString('en-GB')}`;
@@ -349,6 +456,35 @@ const BRIDGE_CAPTION: Caption = {
   how: `Drag a road straight out from a road on one bank across the water to the far bank (Civil engineering): the bridge goes down when the drag reaches dry land in line, up to ${BRIDGE_MAX_SPAN} tiles of water. Both ends land on road; bends and junctions on the water are refused. Bulldozing any of the deck takes the whole bridge away.`,
   facts: [['Tool', 'Road (3), drag across the water'], ['Needs', 'road on both banks in line, open water between'], ['Technology', techLine('bridges')], ['Cost', `${money(BRIDGE_TILE_COST)} a tile of deck`]],
 };
+/** What each style is, added to a bridge stop's caption when the scenario names the style. A new style fails the typecheck here. */
+const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
+  Arch: 'This one is stone arches on piers, the usual choice for a short crossing.',
+  Girder: 'This one is steel girders on concrete piers, for middling spans.',
+  Suspension: 'This one hangs its deck from cables between two towers, the usual choice for the longest spans.',
+  Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
+};
+/** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
+export type SpotKind = 'level-crossing' | 'river' | 'helipads';
+const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
+  'level-crossing': {
+    title: 'Level crossing',
+    what: 'A road over railway track. Barriers come down across the road ahead of each train and the traffic waits until it has passed. Here the freight line\'s trains cross the street down to the river.',
+    how: 'Drag track straight across a straight road, or lay a road straight across straight track. Not at a junction or a corner, not where the track turns, and no road may run along the track beside it.',
+    facts: [['Tool', 'Railway track or Road, drag across'], ['Needs', 'straight track, a straight road carrying on both sides'], ['Technology', techLine('rail')], ['Cost', `${money(CROSSING_COST)} on top of the track`]],
+  },
+  river: {
+    title: 'The river',
+    what: `Open water: nothing is built on it and only bridges cross it, each up to ${BRIDGE_MAX_SPAN} tiles of water between road on both banks. The quarter beyond it is reached only over its four bridges, one of each style, so everyone who lives or works there crosses one.`,
+    how: 'Water is part of the terrain: no tool makes or fills it. Drag a road straight across it to bridge it.',
+    facts: [['Bridges here', 'stone arch, steel girder, bascule, suspension'], ['Longest bridge', `${BRIDGE_MAX_SPAN} tiles of water`], ['Technology', techLine('bridges')]],
+  },
+  helipads: {
+    title: 'Helipads',
+    what: 'Helicopters land on the helipads drawn on buildings: air ambulances at the hospitals, the police helicopter at police headquarters, executive flights on the tallest offices (the headquarters and the office tower across the river), and the royal flight at Buckingham Palace in the London demo. The timetable is worked out from the pads alone, so everyone sees the same flights.',
+    how: 'Nothing to build: a hospital, police headquarters or tall office whose design has a pad brings its service. Hover a helicopter for its callsign and errand, click it for its crew, and press I or O to ride in the cockpit.',
+    facts: [['Air ambulance', '2-5 flights a pad a day, some go on to a second hospital'], ['Police', '2-3 a day, an hour or more on the pad'], ['Executive', '1-3 a day, some hop between towers'], ['Royal', 'Buckingham Palace (London demo)']],
+  },
+};
 const LINE_CAPTIONS: Record<TransitMode | 'freight', Omit<Caption, 'title'>> = {
   bus: {
     what: 'A bus line: the owner\'s stops in calling order, run there and back (or as a loop) by buses from a depot, one bus per driver on shift, 05:30 to 00:30. Riders whose car is at home weigh it against walking and driving, wait at the stop and pay $2 a ride to the owner.',
@@ -359,6 +495,11 @@ const LINE_CAPTIONS: Record<TransitMode | 'freight', Omit<Caption, 'title'>> = {
     what: 'A passenger rail line between stations. Trains run a timetable that is a pure function of the line and its route, 05:00 to 01:00, 40 riders a carriage; a there-and-back line runs one train, a loop as many as fit.',
     how: 'Lay track behind each platform and join it up, then open the lines panel and pick the stations in calling order. Consecutive stations must be joined by track a train can run without reversing.',
     facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('railstation')], ['Fare', '$2 a ride']],
+  },
+  metro: {
+    what: 'An underground line between metro stations. The tunnel is bored for you when the line is saved; trains run the same timetable as rail, 05:00 to 01:00, in twin bores and never in traffic.',
+    how: 'Put metro entrances and station halls on your land, then open the lines panel and pick them in calling order.',
+    facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('metrostation')], ['Fare', '$2 a ride']],
   },
   freight: {
     what: 'A freight line between two yards. Deliveries from factories within 12 tiles of one yard to shops within 12 tiles of the other go by train when that is shorter: a truck to the yard, containers on the train, a truck for the last mile. The shipper pays the line owner $4 a container.',
@@ -392,18 +533,37 @@ export interface TourStop {
 const kindIdOf = (s: string): number => (KIND_ID as Record<string, number>)[s] ?? 0;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-function kindCaption(k: KindManifest, door: DemoXY, rot: number): Caption {
+const FAMILY_WORD: Record<string, string> = { residential: 'homes', commercial: 'shops', office: 'offices', industrial: 'works' };
+/**
+ * What a merged lot is and how it comes about (docs/buildings.md "Merged lots", "Block interiors"), for a growable kind
+ * bigger than 1×1 with no blurb of its own: nobody places them, so their catalogue entries carry no tool text.
+ */
+function mergedText(k: KindManifest): Pick<Caption, 'what' | 'how'> | null {
+  const f = GROW_FORMS.flat().find((g) => g.kindId === k.kindId);
+  if (!f) return null;
+  const lots = FAMILY_WORD[k.family] ?? k.family;
+  const levels = f.minLevel === f.topLevel ? `level ${f.minLevel}` : `levels ${f.minLevel} to ${f.topLevel}`;
+  return f.deep
+    ? { what: `A ${k.name}: a frontage building that has grown back into the landlocked middle of its block, one lot wide and two deep with its door on the road (${levels}). The middle of a 4×4 block has no road of its own, so only the building in front can use it.`,
+        how: 'Nobody places it. Zone a block all round and growth builds the middle into deep plots from the frontage; a block ringed by homes keeps its middle for a communal garden instead.' }
+    : { what: `A ${k.name}: ${f.w}×${f.h} lots of ${lots} merged into one building by growth (${levels}). When a busy building wins the demand roll, it may take in the lots beside it of the same zone and owner, and everyone who lived or worked there moves into the new building.`,
+        how: 'Nobody places it: zone the land and let it grow. A merge needs neighbouring lots of one zone and one owner, its door on a road, demand, and High-rise for levels 4 to 7. Each neighbourhood\'s ambition, a hash, caps how tall its streets get, so not every block turns into towers.' };
+}
+
+function kindCaption(k: KindManifest, door: DemoXY, rot: number, level?: number): Caption {
   const fp = footprintOf(k.kindId), multi = fp.w * fp.h > 1;
   const l = k.levels[0];
   const facts: [string, string][] = [];
   if (k.tool) facts.push(['Tool', `${k.tool.label}${k.tool.key ? ` (${k.tool.key})` : ''}`]);
-  facts.push(['Footprint', `${fp.w}×${fp.h}${multi ? `, door faces ${FRONT_NAMES[rot]} here (Z/C turn it)` : ''}`]);
+  facts.push(['Footprint', `${fp.w}×${fp.h}${multi ? `, door faces ${FRONT_NAMES[rot]} here${k.tool ? ' (Z/C turn it)' : ''}` : ''}`]);
   facts.push(['Placed at', `${door[0]}, ${door[1]}`]);
   facts.push(['Technology', k.tool ? techLine(k.tool.id) : 'grows by itself']);
   if (k.flags.growable) facts.push(['Zoning', `${money(ZONE_COST)} a tile, then it grows with demand`]);
   else facts.push(['Cost', `${money(CIVIC_COST[k.kindId] ?? l.cost ?? 0)}${l.upkeep ? `, ${money(l.upkeep)} a day upkeep` : ''}`]);
-  if (l.capacity) facts.push([k.flags.growable && k.family === 'residential' ? 'Residents' : 'Jobs', `${l.capacity}${k.flags.growable ? ' at level 1' : ''}`]);
-  return { title: cap(k.tool?.label?.replace(/\s*\(.*\)$/, '') ?? k.name), what: k.blurb ?? '', how: k.howTo ?? '', facts };
+  const lv = level ?? firstLevelOf(k.kindId), held = k.flags.growable ? capacityOf(k.kindId, lv) : l.capacity;
+  if (held) facts.push([k.flags.growable && k.family === 'residential' ? 'Residents' : 'Jobs', `${held}${k.flags.growable ? ` at level ${lv}${level ? ' here' : ''}` : ''}`]);
+  const text = k.blurb ? null : isGrowableId(k.kindId) && multi ? mergedText(k) : null;
+  return { title: cap(k.tool?.label?.replace(/\s*\(.*\)$/, '') ?? k.name), what: k.blurb ?? text?.what ?? '', how: k.howTo ?? text?.how ?? '', facts };
 }
 
 /** Where the camera stands for a footprint: in front of the door, a little to the side, far enough to see it whole. */
@@ -441,7 +601,7 @@ export function demoTour(id: DemoId): TourStop[] {
         const area = placed ? [placed.ax, placed.ay, placed.w, placed.h] as const : [p.door[0], p.door[1], 1, 1] as const;
         // a tall landmark (the Shard is 9.6 tiles) is framed from further out so its top stays in view
         const tall = Math.max(...k.levels.flatMap((l) => l.designs.map((dz) => dz.height)));
-        out.push({ id: sid, ...base, ...kindCaption(k, p.door, rot), ...framing(area[0], area[1], area[2], area[3], rot, tall > 3 ? tall / 3 : 1), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door });
+        out.push({ id: sid, ...base, ...kindCaption(k, p.door, rot, p.level), ...framing(area[0], area[1], area[2], area[3], rot, tall > 3 ? tall / 3 : 1), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door });
         continue;
       }
       const b = s.blocks?.find((q) => q.id === sid);
@@ -449,7 +609,7 @@ export function demoTour(id: DemoId): TourStop[] {
         const k = kindManifest(kindIdOf(b.kind));
         if (!k) continue;
         const c = kindCaption(k, b.inspect, 0);
-        out.push({ id: sid, ...base, ...c, title: b.name, what: b.blurb ?? c.what, facts: c.facts.filter(([f]) => f !== 'Placed at' && f !== 'Footprint'), ...framing(b.rect[0], b.rect[1], b.rect[2], b.rect[3], 0, 1.15), kind: k.kindId, rect: b.rect, inspect: b.inspect });
+        out.push({ id: sid, ...base, ...c, title: b.name, what: b.blurb ?? c.what, how: b.how ?? c.how, facts: c.facts.filter(([f]) => f !== 'Placed at' && f !== 'Footprint'), ...framing(b.rect[0], b.rect[1], b.rect[2], b.rect[3], 0, 1.15), kind: k.kindId, rect: b.rect, inspect: b.inspect });
         continue;
       }
       const r = s.runways?.find((q) => q.id === sid);
@@ -483,9 +643,15 @@ export function demoTour(id: DemoId): TourStop[] {
         const k = br.landmark ? kindManifest(kindIdOf(br.landmark)) : undefined;
         const style = BRIDGE_STYLE_NAMES[BridgeStyle[br.style ?? 'Arch']];
         // a landmark bridge reads as the landmark (its blurb) and works as any bridge (no staff, no visitors)
-        const c = k ? { ...BRIDGE_CAPTION, what: k.blurb ?? BRIDGE_CAPTION.what } : BRIDGE_CAPTION;
+        const c = k ? { ...BRIDGE_CAPTION, what: k.blurb ?? BRIDGE_CAPTION.what } : br.style ? { ...BRIDGE_CAPTION, what: `${BRIDGE_CAPTION.what} ${STYLE_NOTES[br.style]}` } : BRIDGE_CAPTION;
         const facts: [string, string][] = [['Span', `${span} tiles of water, ${br.style ? style : 'the tool\'s choice of style'}`], ...c.facts];
         out.push({ id: sid, ...base, ...c, title: br.name, facts, ...framing(area[0], area[1], area[2], area[3], ns ? 1 : 0, k ? 1.2 : 0.8), kind: k?.kindId, rect: area, inspect: br.from });
+        continue;
+      }
+      const sp = s.spots?.find((q) => q.id === sid);
+      if (sp) {
+        const [x, y, w, h] = sp.rect;
+        out.push({ id: sid, ...base, ...SPOT_CAPTIONS[sp.spot], title: sp.name, ...framing(x, y, w, h, 0, w * h === 1 ? 0.8 : 0.5), rect: sp.rect, inspect: sp.inspect });
         continue;
       }
       const l = s.lines?.find((q) => q.id === sid);
@@ -504,10 +670,161 @@ export function demoTour(id: DemoId): TourStop[] {
 // ---------------------------------------------------------------- keeping the showcase complete
 
 /**
+ * What a feature's check reads of a seeded demo. demo:check (server/src/demo/check.ts) seeds every demo through the
+ * real planners and fills this in from its World, so a feature is checked against what was built, not what was meant.
+ */
+export interface SeededDemo {
+  /** buildings and structures by kind id, with how many of each (a structure counts once, at its door) */
+  kinds: ReadonlyMap<number, number>;
+  /** visit every tile the seeding wrote: x, y, tile word, aux byte */
+  scan(f: (x: number, y: number, tile: number, aux: number) => void): void;
+  aux(x: number, y: number): number;
+  /** the helipads on its buildings (shared/src/helipads.ts chunkPads) */
+  pads: readonly Pad[];
+  /** its operational airports (a finished terminal with an intact runway) */
+  airports: readonly Airport[];
+  /** each saved bus line's turns as its buses plan them (BusService.plan): flat [x, y, kind, ...], kind 0 a dead end, 1 a junction mouth, 2 via the depot */
+  busTurns: readonly { number: number; turns: readonly number[] }[];
+}
+
+/**
+ * Something interesting that is not a catalogue kind (a bridge style, a level crossing, a plane type, a helicopter
+ * service, a merged lot), which a demo must show. `npm run demo:check` fails while any enabled feature is missing.
+ */
+export interface ShowcaseFeature {
+  id: string;
+  /** what it is, as the check's message names it */
+  caption: string;
+  /** the demo that must show it: the showcase unless `rule` says why it lives elsewhere */
+  demo?: DemoId;
+  rule?: string;
+  /** the tour stop that shows it, a stop of that demo's tour */
+  tour?: string;
+  /** the scenario has it (pure, over the demo's sections: showcaseProblems) */
+  scenario?: (sections: readonly DemoSection[]) => boolean;
+  /** the seeded demo has it (demo:check) */
+  seeded?: (d: SeededDemo) => boolean;
+  /** not enforced yet: why, and what turns it on */
+  todo?: string;
+}
+
+/** Days of timetable read from day 0: every plane type and helicopter service must fly within them. */
+export const FEATURE_DAYS = 7;
+const days = () => Array.from({ length: FEATURE_DAYS }, (_, d) => d);
+const placedKind = (kind: string) => (ss: readonly DemoSection[]) => ss.some((s) => s.placements?.some((p) => p.kind === kind));
+const anyTile = (d: SeededDemo, f: (x: number, y: number, t: number, a: number) => boolean) => { let hit = false; d.scan((x, y, t, a) => { if (!hit && f(x, y, t, a)) hit = true; }); return hit; };
+
+// Typed against the source unions, so a new bridge style, junction tool, plane type or helicopter service fails the
+// typecheck here until it has an entry, and demo:check then fails until the showcase shows it.
+const BRIDGE_TOUR: Record<keyof typeof BridgeStyle, string> = { Arch: 'bridge-arch', Girder: 'bridge-girder', Suspension: 'bridge-suspension', Bascule: 'bridge-bascule' };
+const JUNCTION_TOUR: Record<DemoJunction['tool'], string> = { roundabout: 'roundabout', flyover: 'flyover' };
+const PLANE_CAPTIONS: Record<PlaneType, string> = {
+  turboprop: 'a turboprop', regional: 'a regional jet', narrowbody: 'a narrow-body jet', widebody: 'a wide-body jet', jumbo: 'a jumbo jet', bizjet: 'a business jet',
+};
+const HELI_SERVICES: Record<PadKind, Pick<ShowcaseFeature, 'caption' | 'tour' | 'demo' | 'rule'>> = {
+  medical: { caption: 'air ambulances (a hospital helipad)', tour: 'helipads' },
+  police: { caption: 'the police helicopter (police headquarters)', tour: 'helipads' },
+  corporate: { caption: 'executive helicopters (a tall office with a rooftop pad)', tour: 'off-hq' },
+  royal: { caption: 'the royal flight (Buckingham Palace)', tour: 'buckingham-palace', demo: 'london',
+    rule: 'only Buckingham Palace has a royal pad, and landmarks stand in their own city\'s demo (the London landmarks in London), not the showcase' },
+};
+
+/** Every bascule span in the seeded demo lifts at least once in FEATURE_DAYS (shared/src/bridges.ts basculeLiftAt). */
+function basculeLifts(d: SeededDemo): boolean {
+  const spans: [number, number][] = [];
+  d.scan((x, y, _t, a) => {
+    if (!isBridgeAux(a) || bridgeStyle(a) !== BridgeStyle.Bascule) return;
+    const sp = bridgeSpanAt(x, y, (qx, qy) => d.aux(qx, qy));
+    if (sp && sp.x0 === x && sp.y0 === y) spans.push([x, y]);
+  });
+  return spans.length > 0 && spans.every(([x, y]) => {
+    for (let h = 0; h < FEATURE_DAYS * 24; h += 0.25) if (!Number.isNaN(basculeLiftAt(basculeSeed(x, y), h))) return true;
+    return false;
+  });
+}
+
+/**
+ * The feature registry: everything interesting the showcase must show that is not a catalogue kind (those are checked
+ * by kind: every placeable kind, ladder rung, surface tool and line mode, below). A new feature lands with its entry
+ * here, its placement in a section and its tour stop, or demo:check fails (docs/demo.md "Keeping it complete").
+ */
+export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
+  // ---- bridges: every style, laid as the road tool lays them, carrying real traffic
+  ...(Object.keys(BRIDGE_TOUR) as (keyof typeof BridgeStyle)[]).map((style): ShowcaseFeature => ({
+    id: `bridge-${style.toLowerCase()}`, caption: `a ${BRIDGE_STYLE_NAMES[BridgeStyle[style]]}`, tour: BRIDGE_TOUR[style],
+    scenario: (ss) => ss.some((s) => s.bridges?.some((b) => b.style === style)),
+    seeded: (d) => anyTile(d, (_x, _y, _t, a) => isBridgeAux(a) && bridgeStyle(a) === BridgeStyle[style]) && (style !== 'Bascule' || basculeLifts(d)),
+  })),
+  { id: 'river', caption: 'a river (open water) that the bridges cross', tour: 'river',
+    scenario: (ss) => ss.some((s) => s.water?.length), seeded: (d) => anyTile(d, (_x, _y, t) => terrainOf(t) === Terrain.Water) },
+  // ---- rail and roads
+  { id: 'level-crossing', caption: 'a level crossing (a road over track, with barriers)', tour: 'level-crossing',
+    seeded: (d) => anyTile(d, (_x, _y, t, a) => isCrossing(t, a)) },
+  ...(Object.keys(JUNCTION_TOUR) as DemoJunction['tool'][]).map((tool): ShowcaseFeature => ({
+    id: tool, caption: `a ${tool}`, tour: JUNCTION_TOUR[tool], scenario: (ss) => ss.some((s) => s.junctions?.some((j) => j.tool === tool)),
+  })),
+  { id: 'motorway-gateway', caption: 'a motorway connection, the gateway newcomers, visitors and freight arrive through', tour: 'motorway',
+    scenario: placedKind('motorway'), seeded: (d) => (d.kinds.get(MOTORWAY_KIND) ?? 0) > 0 },
+  // ---- aircraft: every plane type is scheduled at a showcase airport within FEATURE_DAYS (the jumbo needs 20 tiles of runway)
+  ...(Object.keys(PLANE_CAPTIONS) as PlaneType[]).map((type): ShowcaseFeature => ({
+    id: `plane-${type}`, caption: `${PLANE_CAPTIONS[type]} landing${PLANE_TYPES[type].minRunway ? ` (a runway of ${PLANE_TYPES[type].minRunway}+ tiles)` : ''}`, tour: 'runway',
+    seeded: (d) => d.airports.some((ap) => days().some((day) => timetable(ap, day).some((f) => f.type === type))),
+  })),
+  // ---- helicopters: every service has a pad, and flies within FEATURE_DAYS
+  ...(Object.keys(HELI_SERVICES) as PadKind[]).map((kind): ShowcaseFeature => ({
+    id: `heli-${kind}`, ...HELI_SERVICES[kind],
+    seeded: (d) => d.pads.some((p) => p.kind === kind) && days().some((day) => heliTimetable(d.pads, day).some((f) => f.kind === kind)),
+  })),
+  // ---- districts: every merged lot (zones.ts GROW_FORMS, from the catalogue, so a new form is enforced at once) and the
+  // block middles: the deep plots settle by themselves (sim/blocks.ts), the other forms are placed
+  ...GROW_FORMS.flat().map((f): ShowcaseFeature => {
+    const id = Object.keys(KIND_ID).find((k) => (KIND_ID as Record<string, number>)[k] === f.kindId)!;
+    return f.deep
+      ? { id, caption: `a ${f.name} (a block middle grown from the frontage)`, tour: 'block-deep', seeded: (d) => (d.kinds.get(f.kindId) ?? 0) > 0 }
+      : { id, caption: `a ${f.name} (a merged lot)`, tour: id, scenario: placedKind(id), seeded: (d) => (d.kinds.get(f.kindId) ?? 0) > 0 };
+  }),
+  { id: 'block-garden', caption: 'a communal garden (the middle of a ring of homes)', tour: 'block-garden', seeded: (d) => (d.kinds.get(KIND_ID['block-garden']) ?? 0) > 0 },
+  // ---- buses
+  { id: 'bus-turnaround', caption: 'a bus line that turns round at a dead end', tour: 'line-bus-3',
+    seeded: (d) => d.busTurns.some((l) => l.turns.some((_v, i) => i % 3 === 2 && l.turns[i] === 0)) },
+  // ---- metro (docs/underground.md)
+  { id: 'metro-interchange', caption: 'a metro line with an interchange',
+    todo: 'TODO(U8): the metro station kinds are drafts. When U8 places a real metro line in the showcase (and London) and undrafts them, give this entry a test that a metro line calls at a station shared with another line (an interchange), a `tour` stop, and drop this `todo`.' },
+];
+
+/** Problems with the feature registry that the scenario alone shows: a feature or its tour stop missing from its demo. */
+export function featureProblems(features: readonly ShowcaseFeature[] = SHOWCASE_FEATURES): string[] {
+  const out: string[] = [];
+  const ids = new Set<string>();
+  const tours = new Map<DemoId, Set<string>>();
+  const tourOf = (id: DemoId) => tours.get(id) ?? tours.set(id, new Set(demoTour(id).map((t) => t.id))).get(id)!;
+  for (const f of features) {
+    if (ids.has(f.id)) out.push(`feature ${f.id} is listed twice`);
+    ids.add(f.id);
+    if (f.todo) continue;
+    const demo = f.demo ?? 'showcase', where = demo === 'showcase' ? 'the showcase' : `the ${DEMO_BY_ID.get(demo)?.name ?? demo} demo`;
+    if (demo !== 'showcase' && !f.rule) out.push(`feature ${f.id} lives in ${where} but gives no rule why it is not in the showcase`);
+    if (!f.scenario && !f.seeded) out.push(`feature ${f.id} has nothing to check`);
+    if (f.scenario && !f.scenario(demoSections(demo))) out.push(`${f.caption} (feature ${f.id}) is not in ${where}`);
+    if (!f.tour) out.push(`feature ${f.id} has no tour stop`);
+    else if (!tourOf(demo).has(f.tour)) out.push(`feature ${f.id}'s tour stop ${f.tour} is not on the tour of ${where}`);
+  }
+  return out;
+}
+
+/** Problems a seeded demo shows: an enabled feature of that demo whose `seeded` test fails on what was built. */
+export function seededFeatureProblems(demo: DemoId, d: SeededDemo, features: readonly ShowcaseFeature[] = SHOWCASE_FEATURES): string[] {
+  return features.filter((f) => !f.todo && (f.demo ?? 'showcase') === demo && f.seeded && !f.seeded(d))
+    .map((f) => `${f.caption} (feature ${f.id}) is not in the seeded ${demo === 'showcase' ? 'showcase' : `${demo} demo`}`);
+}
+
+
+/**
  * What the showcase is missing, as messages (empty when complete). Every placeable kind (a tool, not a draft, not a
  * growing zone) must be placed, in particular every kind bigger than 1×1 and every size-ladder rung; every zoning tool
  * must have a grown block on the tour; every surface tool must be painted and every line mode run; every placement
- * kind must be on the tour; tour ids and placement ids must be unique and resolve.
+ * kind must be on the tour; tour ids and placement ids must be unique and resolve; every registered feature must be in
+ * its demo's scenario with a tour stop (featureProblems; their `seeded` tests run in demo:check).
  */
 export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): string[] {
   const out: string[] = [];
@@ -522,6 +839,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
     for (const j of s.junctions ?? []) dup(j.id);
     for (const b of s.bridges ?? []) dup(b.id);
     for (const l of s.lines ?? []) dup(l.id);
+    for (const sp of s.spots ?? []) dup(sp.id);
   }
   // landmarks (docs/buildings.md "Landmarks") stand in their own city's demo (the London ones in London), not the showcase;
   // a landmark drawn over a bridge (Tower Bridge) is placed by laying that bridge
@@ -550,6 +868,8 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   }
   const lines = all((s) => s.lines) as DemoLine[];
   for (const m of Object.keys(LINE_MODES) as (TransitMode | 'freight')[]) {
+    // a mode whose station kinds are all drafts (the metro until it is placed in the showcase) is not asked for yet
+    if (m !== 'freight' && MANIFEST.filter((k) => STOP_KINDS[k.kindId] === m).every((k) => k.draft)) continue;
     if (!lines.some((l) => (l.freight ? 'freight' : l.mode) === m)) out.push(`no ${m} line runs in the showcase`);
   }
   const tourIds = new Set(TOUR);
@@ -557,6 +877,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   for (const id of TOUR) if (id !== 'welcome' && !ids.has(id)) out.push(`tour stop ${id} names nothing in the scenario`);
   const toured = new Set(demoTour('showcase').map((t) => t.kind).filter((k): k is number => k !== undefined));
   for (const kind of placed) if (!toured.has(kindIdOf(kind))) out.push(`${kind} is placed but no tour stop shows it`);
+  out.push(...featureProblems());
   for (const s of sections) for (const l of s.lines ?? []) {
     const want = l.mode === 'bus' ? ['bus-stop'] : l.freight ? ['freight-yard'] : ['rail-halt', 'rail-station'];
     for (const st of l.stops) {

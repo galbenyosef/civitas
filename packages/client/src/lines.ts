@@ -55,7 +55,7 @@ export function busHtml(b: BusInfo, row: (k: string, v: string | number) => stri
 
 /** `mode` comes from the first stop clicked: bus stops make a bus line, rail stations a rail line (docs/rail.md) */
 interface Draft { id?: number; number: number; colour: number; loop: boolean; vehicles: number; stops: StopRef[]; mode?: TransitMode }
-const VEHICLE: Record<TransitMode, [string, string]> = { bus: ['bus', 'buses'], rail: ['train', 'trains'] };
+const VEHICLE: Record<TransitMode, [string, string]> = { bus: ['bus', 'buses'], rail: ['train', 'trains'], metro: ['train', 'trains'] };
 
 export class LinesPanel {
   readonly group = new Group();

@@ -53,7 +53,9 @@ from object to object with a caption from the catalogue's `blurb` and `howTo` (w
 footprint, rotation, technology, costs) and the object's live tooltip, with its outline and marks and a floating label on
 every stop. **Reset demo** puts the town back exactly as first built. The scenario is data in
 `shared/src/demo/showcase.ts`; the seeder (`server/src/demo/seed.ts`) builds it through the players' planners.
-`npm run demo:check` fails when a placeable kind, a ladder rung, a surface tool or a line mode is missing from the showcase.
+`npm run demo:check` fails when a placeable kind, a ladder rung, a surface tool, a line mode or a registered feature
+(`SHOWCASE_FEATURES`: every bridge style, a level crossing, every plane type, every helicopter service, every merged lot)
+is missing from the showcase.
 **London** (`?demo=london`, port 8194) is a sample city on London's shape: the Thames as water with its meander, causeway
 bridges, the City and Canary Wharf as merged towers, the West End, rings of homes, docks and industry down river, the parks,
 four termini with a line each, freight, buses and Heathrow, with a tour by area. The map is data in

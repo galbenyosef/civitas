@@ -6,15 +6,15 @@ teaching it.
 
 | Demo | Port | Sections | Tour stops |
 | --- | --- | --- | --- |
-| **Showcase** | 8190 | all seven | 60 |
-| Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 24 |
-| Leisure demo | 8192 | Downtown, Leisure | 21 |
-| Civic demo | 8193 | Downtown, Civic services | 25 |
+| **Showcase** | 8190 | all eight | 88 |
+| Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 29 |
+| Leisure demo | 8192 | Downtown, Leisure | 23 |
+| Civic demo | 8193 | Downtown, Civic services | 28 |
 | **London** | 8194 | Areas, Landmarks, Rail and Heathrow, Buses (its own map, below) | 66 |
 
 Code:
 
-- `shared/src/demo/showcase.ts` holds the scenario as data, the tour (`demoTour`) and the completeness rule (`showcaseProblems`).
+- `shared/src/demo/showcase.ts` holds the scenario as data, the tour (`demoTour`), the completeness rule (`showcaseProblems`) and the feature registry (`SHOWCASE_FEATURES`).
 - `server/src/demo/seed.ts` is the seeder: `seedDemoTown`, `seedDemoNetwork`, `fillDemo` and `worldHash`.
 - `server/src/demo/check.ts` is `npm run demo:check`.
 - `server/src/testcities.ts` is the world launcher. Demos are its second kind of child world, beside test cities.
@@ -189,7 +189,7 @@ The town under every demo is a 3×3 grid of Commons-style districts from `seedCi
 - Districts are named A1 (north-west) to C3 (south-east), rows A to C running north to south.
 - Inside a district, a **block** is the 4×4 of lots between roads. `block(di, dj, bi, bj)` in the data file gives its rectangle.
 
-Sections clear the blocks they use and place their objects there. Rail, freight and the airport sit on extra land outside the perimeter road, where no road crosses the track or the runway.
+Sections clear the blocks they use and place their objects there. Rail, freight, the airport and the riverside sit on extra land outside the perimeter road.
 
 A section (`DemoSection`) lists:
 
@@ -199,10 +199,17 @@ A section (`DemoSection`) lists:
 | `clear` | blocks bulldozed to bare ground before anything is placed |
 | `zones` | blocks rezoned and built to level 3: homes beside the airport, the industrial estate, shops by the east freight yard |
 | `placements` | `{ kind, door, rot }`: the catalogue kind's string id, the tile a player would click, and the FRONT rotation (0 the door faces south, 1 east, 2 north, 3 west). `id` defaults to the kind and must be unique. Bus stops are placements too |
+| `water` | rectangles painted as open water: a scenario's river (no tool makes water) |
+| `roads` | straight road drags, laid as the road tool lays them on the owner's dry land. Track drawn later straight across one makes a level crossing |
 | `runways` | `{ from, to }`: a runway drag |
 | `tracks` | drags as a player makes them; each runs along its longer axis first and turns once |
+| `junctions` | a roundabout or flyover clicked on a junction (`deck` picks the road on top) |
+| `bridges` | a road bridge over water from `from` to `to`, laid through `planBridge`, with a forced `style` (the road tool's choice otherwise); `landmark` draws a bascule span as that landmark |
 | `lines` | bus or rail lines: stops in calling order (bus stop tiles or station doors), loop or there and back, vehicles. `freight: true` for a line between yards |
-| `blocks` | grown land the tour stops at: zones nobody places |
+| `blocks` | grown land the tour stops at: zones nobody places, and block middles (deep plots, a communal garden) |
+| `spots` | a tour stop on something that is neither a kind nor a drag, such as a level crossing, the river or the helipads. The caption is `SPOT_CAPTIONS[spot]` |
+
+A placement of a merged lot (a zone kind bigger than 1×1 that growth assembles, `GROW_FORMS` in shared/src/zones.ts) takes a `level`. Nobody places these. The seeder builds each on lots of its zone, as growth would: through `planStructure` with those lots seen as empty, before the block middles round it are settled.
 
 `TOUR` lists the ids in tour order, plus `welcome`. A focused demo is a `DEMOS` entry naming the sections it seeds. Its tour is `TOUR` filtered to those sections.
 
@@ -212,6 +219,8 @@ Some choices make every system busy:
 - **Districts A1 and A3 hold civic and leisure.** They replace job blocks, never homes, so the town keeps a few more jobs than people. All 10,000 people are employed, and every placed building is fully staffed, the airport and freight yards included.
 - **The industrial estate's nearest shops are by the east yard.** The estate is in C1 beside the west yard. Every shop nearer to it is homes, so its deliveries qualify for rail.
 - **The stadium faces the north road next to the rail station.** The halt sits among the homes of A2, 30 tiles away, inside the 40-tile limit on a night out.
+- **The riverside quarter is reached only over its bridges.** A river four tiles wide runs east-west south of the freight line, on rows 44 to 47. The bascule's model, Tower Bridge, is drawn for a 4-tile span. Four streets run down from the south perimeter road over the railway land and cross the river: a steel girder bridge at x = -20, a stone arch at 5, a bascule at 15 and a suspension bridge at 25. The freight line's track crosses the first street on a level crossing. Beyond the river, ten 4×4 blocks lie between the river road (y = 49) and y = 54. Together they hold one of every merged lot: works to the west, then shops, offices and homes. The last block is a ring of homes round a communal garden. Everyone who lives or works there crosses a bridge, so all four carry traffic. The traffic waits at the bascule's barriers while it lifts for a barge, and at the level crossing while a freight train passes.
+- **The runway is 20 tiles,** long enough for the jumbo (`PLANE_TYPES.jumbo.minRunway`). Every plane type therefore lands at the showcase airport.
 
 ## How seeding uses the players' planners
 
@@ -221,7 +230,12 @@ Seeding has two phases, because stops, track and lines need the simulation's ser
 | --- | --- | --- |
 | multi-tile kinds | `planStructure(kind, door, env, rot)`, then `World.placeStructure(…, { built: true })` | `Net.placeStructure` |
 | 1×1 kinds | own land, dry, not a road, nothing built there, `hasRoadAccess` | `Net.build`, civic branch |
+| water | painted into the terrain (scenario only) | none |
+| roads | own dry land, not a structure; a road on track is a level crossing (`roadOverTrackProblem`) | `Net.road` |
+| merged lots | `planStructure` with the lots of its zone seen as empty, then `World.placeStructure(…, { target: level })` | growth's `planMerge` |
 | runway | `planRunway(line, env)`, applied tile by tile | `Net.runway` |
+| roundabouts, flyovers | `planRoundabout`, `planFlyover`, then `World.placeJunction` | the junction tools |
+| bridges | `planBridge` with the scenario's style, then `World.placeBridge` | `Net.road` over water |
 | bus stops | bulldoze the lot, then `BusService.stopProblem` (no junction) | `Net.build`, `busstop` |
 | track | `Rail.paint(owner, trackDragPath(a, b))` (planTrack) | `Net.track` |
 | lines | `Transit.saveLine` | the lines panel |
@@ -245,13 +259,61 @@ A visitor therefore arrives in the morning with yesterday's counters filled in: 
 - Every line mode runs (bus, rail, freight). `LINE_MODES` is typed against `TransitMode`, so a new mode fails the typecheck too.
 - Every placed kind has a tour stop, and tour ids and placement ids are unique and resolve.
 - Each line's stops are placements of the right kind.
+- Every feature in the registry is in its demo, with a tour stop. See "The feature registry" below.
 
-The check then seeds every demo through the real planners, fails on any refusal and on a rail line that does not run, and seeds each one twice to compare hashes. With `--run <days>` it also runs the showcase, or `--demo <id>`, under the seeded random and prints who uses what: staff per placement, venue visits, riders per line, flights and containers.
+The check then seeds every demo through the real planners. It fails on any refusal and on a rail line that does not run, and it seeds each demo twice to compare hashes. It then runs every feature's `seeded` test on what was built. With `--run <days>` it also runs the showcase, or `--demo <id>`, under the seeded random. `--fill` first grows the town with the live demo's fast fill (`fillDemo`, about 75 s for the showcase), so the run starts from the town a visitor finds. The run prints who uses what:
+
+- staff per placement, venue visits and riders per line
+- the planes scheduled by type and the helicopter flights by service
+- the bascule's lifts for a barge and how long the level crossing's barriers were down
+- gateway arrivals and freight containers
 
 ```sh
 npm run demo:check
-npx tsx packages/server/src/demo/check.ts --run 2.3
+npx tsx packages/server/src/demo/check.ts --fill --run 1
 ```
+
+### The feature registry
+
+Catalogue kinds, surface tools and line modes are checked by kind. Everything else the showcase must show is an entry in `SHOWCASE_FEATURES` in `shared/src/demo/showcase.ts`: bridge styles, a level crossing, plane types, helicopter services and merged lots. Each entry (`ShowcaseFeature`) has these fields:
+
+| Field | What |
+| --- | --- |
+| `id`, `caption` | its name and what the check's message calls it |
+| `demo`, `rule` | the demo that must show it, the showcase unless `rule` says why it lives elsewhere |
+| `tour` | the stop that shows it, which must be on that demo's tour |
+| `scenario` | a test over the demo's sections, run by `showcaseProblems` (pure) |
+| `seeded` | a test over the seeded demo (`SeededDemo`: kinds built, every tile and aux byte written, the helipads, the operational airports), run by demo:check |
+| `todo` | not enforced yet: why, and what turns it on |
+
+Some entries are typed against the union they come from, the way `SURFACE_TOOLS` and `LINE_MODES` are. A new bridge style, junction tool, plane type (`PlaneType`) or helicopter service (`PadKind`) therefore fails the typecheck until it has an entry. Merged lots are read from the catalogue (`GROW_FORMS`), so a new form is enforced as soon as it compiles.
+
+| Feature | Test | Tour stop |
+| --- | --- | --- |
+| every bridge style (arch, girder, suspension, bascule) | a bridge of that style in the scenario and its deck in the world; every bascule span lifts for a barge within `FEATURE_DAYS` (7) | `bridge-<style>` |
+| river | water painted, and water in the world | `river` |
+| level crossing | a road tile on track in the world | `level-crossing` |
+| roundabout, flyover | the junction in the scenario | `roundabout`, `flyover` |
+| motorway gateway | a motorway connection placed and built | `motorway` |
+| every plane type | scheduled at a showcase airport within 7 days (`timetable`); the jumbo needs the 20-tile runway | `runway` |
+| every helicopter service | a pad of that service, and a flight of it within 7 days (`heliTimetable`) | `helipads`, `off-hq` |
+| royal flight | the same, in **London**. Rule: only Buckingham Palace has a royal pad, and landmarks stand in their own city's demo | London's `buckingham-palace` |
+| every merged lot | the non-deep ones placed and built; the deep plots built (they settle into block middles by themselves) | the kind's own stop, `block-deep` |
+| communal garden | built | `block-garden` |
+| bus turnaround | **todo**: a bus line that turns round at a dead end, turned on once automatic turnarounds land | none yet |
+
+### Adding a feature to the showcase
+
+Suppose the game gains canal locks, which are neither a catalogue kind nor a drag.
+
+1. Add an entry to `SHOWCASE_FEATURES`, with a `seeded` test that finds a lock in the seeded world (`d.scan` over tiles and aux bytes) and `tour: 'canal-lock'`. If the feature comes from a union (a style, a type, a service), type its entries as a `Record` over that union.
+2. Run `npm run demo:check`. It fails twice: the feature is not in the seeded showcase, and its tour stop is not on the tour.
+3. Put one in a section, through the planner its tool uses. If the seeder has no field for it yet, add one to `DemoSection` and lay it in `seed.ts` as the tool does.
+4. Give it a tour stop. A `spot` with a `SPOT_CAPTIONS` entry works for anything that is neither a kind nor a drag. Then add its id to `TOUR`.
+5. Run `npm run demo:check` until it passes. Then run `npx tsx packages/server/src/demo/check.ts --fill --run 1` and confirm the feature is used. Add a line to the run's report in `check.ts` if nothing shows its use yet.
+6. Reset the running demo, as for a new kind below.
+
+A feature that cannot be in the showcase gets `demo` and a `rule` that says why. A feature that cannot be met yet gets a `todo`, which keeps it listed but switches it off.
 
 Drafts are exempt on purpose. They can only be placed on a dev server, and the demos also run in production.
 
@@ -271,7 +333,7 @@ Each stop's card shows:
 - **Facts.** The tool and key, the footprint, which way the door faces here, the placement tile, the technology with its track and tier, the cost and upkeep, and the jobs.
 - **The live tooltip.** The server's ordinary `inspect` answer for the object, refreshed every 1.5 s and rendered by `ui.buildingHtml`, exactly what hovering it shows. Line stops add the line's live status, vehicles in service and riders.
 
-Captions come from the catalogue, so they stay in step with the game. Runways, track and lines are not catalogue kinds, so their captions are in `showcase.ts` (`SURFACE_CAPTIONS`, `LINE_CAPTIONS`).
+Captions come from the catalogue, so they stay in step with the game. Runways, track, junctions, bridges, lines and spots are not catalogue kinds, so their captions are in `showcase.ts` (`SURFACE_CAPTIONS`, `BRIDGE_CAPTION` with `STYLE_NOTES`, `LINE_CAPTIONS`, `SPOT_CAPTIONS`). Merged lots have no tool text in the catalogue, so their stops are captioned from their form (`mergedText`).
 
 On the map, a structure's footprint outline and marks are drawn (`FootprintOverlay`): door, platform, apron, dock and gates. A block or a runway strip gets a yellow outline, a line's extent an outline in the line's colour, a track a blue one. A track gets a mark on every tile it lays. A line gets a square at each stop and its ribbon, the lap its vehicles run, drawn from the `lines` message. While the panel is open, every stop near the view has a floating label, nearest first and never overlapping. Clicking a label jumps to that stop.
 
@@ -290,7 +352,7 @@ Suppose the catalogue gains a 3×3 ice rink, kind `ice-rink`, in a new rung of t
 7. Give the kind a `blurb` and `howTo` if it has none: the tour's caption is made from them.
 8. Reset the running demo (`POST /api/demos/showcase/reset`) or delete `data/demos/demo-showcase*.json`. The next start seeds the new town.
 
-A new surface tool or line mode works the same way: add a `runways`, `tracks` or `lines` entry to a section and its id to `TOUR`. A new zone kind with a zoning tool needs a `blocks` entry in Downtown.
+A new surface tool or line mode works the same way: add a `runways`, `tracks` or `lines` entry to a section and its id to `TOUR`. A new zone kind with a zoning tool needs a `blocks` entry in Downtown. A new merged lot (a growable kind bigger than 1×1) needs a placement with a `level` in the riverside quarter, on lots of its zone.
 
 ## What a run shows
 
@@ -300,10 +362,12 @@ The showcase after `--run 2.3`, matching what the live tooltips showed in the ru
 | --- | --- |
 | staff | every placed building full: 90/90 at the teaching hospital, 40/40 at the stadium, 28/28 ground crew, 30/30 at the bus depot, 10/10 at each freight yard |
 | venue visits yesterday | arena 117, botanical garden 118, opera house 94, stadium 92, museum 76, lakeside park 69, multiplex 56; a few for the smallest rungs |
-| planes | the airport is operational, a flight an hour on its 16-tile runway, 8 or 9 flights a day |
+| planes | the airport is operational, a flight an hour on its 20-tile runway, 7 to 8 flights a day; every type flies within the first week (the jumbo on day 2) |
 | buses | line 1 about 30 riders a day, line 2 about 20, with some changing between them |
 | trains | passenger line 1 runs one train (headway about 113 min) with 3 to 11 riders a day; freight line 9 runs one train |
 | containers | 144 delivered by train in 2.3 days, and about 160 trucked into the west yard on a day |
+
+The riverside, measured with `--fill --run 1` (2026-10-18, machine shared with other agents): 15,700 citizens and 16,842 jobs. Every merged lot is staffed or full but the heavy plant (39 of 420) and the factory complex (113 of 210). The bascule lifts twice on day 3. The level crossing's barriers are down 388 ticks of the day's 2,400. 47 helipads give 26 air ambulance, 4 police and 41 executive flights over days 2 and 3.
 
 Rail riders are few. Everyone takes the nearest job, so nobody commutes 30 tiles. The riders are the occasional night out at the stadium from the homes by the halt.
 

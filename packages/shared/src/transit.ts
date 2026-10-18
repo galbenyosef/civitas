@@ -8,7 +8,7 @@ import { surnameFor } from './names';
  * trains (the rail module) both run lines of this shape; the server keeps every line in one registry and plans
  * riders over all of them.
  */
-export type TransitMode = 'bus' | 'rail';
+export type TransitMode = 'bus' | 'rail' | 'metro';
 /** A stop on a line: the tile of the stop building (a bus stop) or the door tile of a station. */
 export interface StopRef { x: number; y: number }
 export interface TransitLine {
@@ -25,10 +25,12 @@ export interface TransitLine {
   loop: boolean;
   /** vehicles the owner wants in service (each needs a driver on shift) */
   vehicles: number;
+  /** the line's name ("Central"), shown in place of its number where there is one (metro lines); absent in older worlds */
+  name?: string;
 }
 
 /** Stop kinds by catalogue kind id, and the mode they serve (17: bus stop). Rail stations add their ids here. */
-export const STOP_KINDS: Record<number, TransitMode> = { 17: 'bus', 18: 'rail', 19: 'rail', 20: 'rail' }; // 18 rail halt, 19 rail station, 20 freight yard (buildings/rail.ts)
+export const STOP_KINDS: Record<number, TransitMode> = { 17: 'bus', 18: 'rail', 19: 'rail', 20: 'rail', 22: 'metro', 23: 'metro' }; // 18 rail halt, 19 rail station, 20 freight yard (buildings/rail.ts); 22 metro entrance, 23 metro station (buildings/metro.ts)
 export const BUS_STOP_KIND = 17;
 export const BUS_DEPOT_KIND = 16;
 export const stopModeOf = (kindId: number): TransitMode | undefined => STOP_KINDS[kindId];
@@ -145,6 +147,9 @@ export interface LinePreview {
   length: number;
   lapTicks: number;
   problem?: LineProblem;
+  /** metro lines (docs/underground.md): the tunnel tiles saving would bore, flat [x, y, …]; the new crossovers over
+   * another line's tunnel, flat [x, y, …]; and what boring costs the owner ($0 when the tunnel is all there) */
+  bore?: number[]; crossovers?: number[]; cost?: number;
 }
 /** LineProblem as one line of text: the message, then the fix. */
 export const problemText = (p: LineProblem) => (p.fix ? `${p.message}: ${p.fix.charAt(0).toLowerCase()}${p.fix.slice(1)}` : p.message);

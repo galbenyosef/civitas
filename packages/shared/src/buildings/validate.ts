@@ -346,7 +346,7 @@ export function groupErrors(kinds: KindDef[]): string[] {
     if (codes.size > 1 && !GROUP_BY_ID.get(g)?.collection) errs.push(`group '${g}': every rung must share one family code (got ${[...codes].join(', ')}) so the simulation treats them as one service`);
     const keyed = list.filter((k) => k.tool?.key);
     if (keyed.length > 1) errs.push(`group '${g}': only one rung may carry a shortcut key (the group's key); ${keyed.map((k) => k.id).join(', ')} all do`);
-    if (list.some((k) => k.draft) && !list.some((k) => !k.draft)) errs.push(`group '${g}': every rung is a draft`);
+    if (list.some((k) => k.draft) && !list.some((k) => !k.draft) && !GROUP_BY_ID.get(g)?.draft) errs.push(`group '${g}': every rung is a draft`);
   }
   return errs;
 }

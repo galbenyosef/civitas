@@ -1,4 +1,4 @@
-import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, isMultiTile, trackDragPath, BRIDGE_MAX_SPAN, type KindToolId } from '@msimcity/shared';
+import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, KIND_ID, isMultiTile, trackDragPath, BRIDGE_MAX_SPAN, type KindToolId } from '@msimcity/shared';
 import type { CameraRig } from './camera';
 import { Vector3 } from 'three';
 import { WheelClassifier, pinchFactor, type PadMode } from './gestures';
@@ -22,10 +22,16 @@ export const TOOL_KEYS: Record<string, ToolId> = {
   '1': 'select', '2': 'buy', '3': 'road', 'x': 'bulldoze', 'u': 'runway',
   ...Object.fromEntries(TOOL_KINDS.map((k) => [k.tool!.key.toLowerCase(), k.tool!.id as KindToolId])),
 };
-/** The multi-tile kind a tool places (its footprint follows the cursor and it is placed by a click, not a drag), or 0. */
+/**
+ * Kinds with a platform under their door (docs/underground.md section 2). The kiosk is 1×1 but turns with Z/C like a
+ * structure, because the platform runs along the street it faces (`rot & 1`); the hall is 2×1. The platform itself
+ * (planPlatform, the server's `rot` handling for the kiosk) belongs to shared/src/metro.ts and net.ts.
+ */
+const PLATFORM_KINDS = new Set<number>([KIND_ID['metro-entrance'], KIND_ID['metro-station']]);
+/** The kind a tool places when its footprint follows the cursor and it is placed by a click, not a drag (multi-tile, or a station with a platform), or 0. */
 export function structureTool(tool: string): number {
   const k = (KIND_TOOLS as Record<string, number>)[tool];
-  return k !== undefined && isMultiTile(k) ? k : 0;
+  return k !== undefined && (isMultiTile(k) || PLATFORM_KINDS.has(k)) ? k : 0;
 }
 
 export interface Rect { x: number; y: number; w: number; h: number }
