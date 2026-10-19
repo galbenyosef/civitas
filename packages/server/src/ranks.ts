@@ -1,5 +1,5 @@
 import {
-  RANKS, TOP_RANK, NEED_HOW, TICKS_PER_DAY, GOAL_BY_ID, TECH_BY_ID, Zone, CAMP_KIND, MAX_PARCEL_EDGE, DEFAULT_TAX, isLeisure, tileKey, charterRing, rankRewardText,
+  RANKS, TOP_RANK, NEED_HOW, TICKS_PER_DAY, GOAL_BY_ID, TECH_BY_ID, Zone, CAMP_KIND, MAX_PARCEL_EDGE, DEFAULT_TAX, isLeisure, charterRing, rankRewardText,
   type Milestone, type RankDTO, type RankNeedId, type RankUp, type ServerMsg,
 } from '@msimcity/shared';
 import { emptyStats, type World, type Player } from './world';
@@ -125,15 +125,16 @@ export class Ranks {
     }
     const t = this.tally(p);
     const fresh: Milestone[] = [];
+    const seen = new Set(s.seen); // (a set for the look-ups: a grown town has a few hundred keys)
     const note = (key: string, kind: Milestone['kind'], text: string) => {
-      s.seen.push(key);
+      s.seen.push(key); seen.add(key);
       const m = { tick: w.tick, kind, text };
       s.feed.unshift(m); fresh.push(m);
     };
     let up: RankUp | undefined;
     if (s.rank < TOP_RANK) {
       const next = s.rank + 1, have = this.measure(next, p, t);
-      RANKS[next].needs.forEach((q, i) => { const key = `need:${next}:${q.id}`; if (have[i] >= q.target && !s.seen.includes(key)) note(key, 'need', `${RANKS[next].name}: ${q.label} ✓`); });
+      RANKS[next].needs.forEach((q, i) => { const key = `need:${next}:${q.id}`; if (have[i] >= q.target && !seen.has(key)) note(key, 'need', `${RANKS[next].name}: ${q.label} ✓`); });
       if (this.met(next, have)) {
         s.rank = next; s.at[next] = w.tick;
         const def = RANKS[next];
@@ -144,13 +145,13 @@ export class Ranks {
         w.playersDirty = true;
       }
     }
-    for (const m of this.milestones(p, s, t)) if (!s.seen.includes(m.key)) note(m.key, m.kind, m.text);
+    for (const m of this.milestones(p, s, t)) if (!seen.has(m.key)) note(m.key, m.kind, m.text);
     // growth that has paused: say why and what to do (lots waiting for builders, else the next rank's first need short)
     const housed = p.progress.housed;
     if (housed > (s.peak ?? 0)) { s.peak = housed; s.peakAt = w.tick; }
     else if (housed >= 25 && s.peakAt !== undefined) {
       const k = Math.floor((w.tick - s.peakAt) / STALL_TICKS), key = `stall:${s.peak}:${k}`;
-      if (k >= 1 && k <= STALL_WORDS && !s.seen.includes(key)) note(key, 'need', this.stallText(p, s));
+      if (k >= 1 && k <= STALL_WORDS && !seen.has(key)) note(key, 'need', this.stallText(p, s));
     }
     if (s.feed.length > FEED_KEEP) s.feed.length = FEED_KEEP;
     if (s.seen.length > 600) s.seen = s.seen.slice(-600); // the keys are bounded by the steps above; a guard, not a rule
@@ -197,25 +198,24 @@ export class Ranks {
   private tally(p: Player): Tally {
     const w = this.w, seen = new Set<object>();
     const t: Tally = { homes: 0, shops: 0, works: 0, offices: 0, level2: 0, level3: 0, police: 0, fire: 0, leisure: 0, yards: 0, cx: 0, cy: 0, n: 0 };
-    for (const q of w.parcels.values()) {
-      if (q.owner !== p.id) continue;
-      for (let y = q.y; y < q.y + q.h; y++) for (let x = q.x; x < q.x + q.w; x++) {
-        const b = w.buildings.get(tileKey(x, y));
-        if (!b || b.level <= 0 || seen.has(b)) continue;
-        seen.add(b);
-        t.cx += x; t.cy += y; t.n++;
-        if (b.id === CAMP_KIND) continue; // tents are not a house
-        const z = b.zone;
-        if (z === Zone.Residential) t.homes++;
-        else if (z === Zone.Commercial) t.shops++;
-        else if (z === Zone.Industrial) t.works++;
-        else if (z === Zone.Office) t.offices++;
-        else if (z === Zone.Police) t.police++;
-        else if (z === Zone.Fire) t.fire++;
-        else if (z === Zone.Yard) t.yards++;
-        else if (isLeisure(b.id)) t.leisure++;
-        if (z >= Zone.Residential && z <= Zone.Office) { if (b.level >= 2) t.level2++; if (b.level >= 3) t.level3++; }
-      }
+    // every building once, kept when it stands on the player's land (cheaper than walking the land tile by tile)
+    for (const b of w.buildings.values()) {
+      if (b.level <= 0 || seen.has(b)) continue;
+      seen.add(b);
+      if (w.parcelAt(b.x, b.y)?.owner !== p.id) continue;
+      const x = b.x, y = b.y;
+      t.cx += x; t.cy += y; t.n++;
+      if (b.id === CAMP_KIND) continue; // tents are not a house
+      const z = b.zone;
+      if (z === Zone.Residential) t.homes++;
+      else if (z === Zone.Commercial) t.shops++;
+      else if (z === Zone.Industrial) t.works++;
+      else if (z === Zone.Office) t.offices++;
+      else if (z === Zone.Police) t.police++;
+      else if (z === Zone.Fire) t.fire++;
+      else if (z === Zone.Yard) t.yards++;
+      else if (isLeisure(b.id)) t.leisure++;
+      if (z >= Zone.Residential && z <= Zone.Office) { if (b.level >= 2) t.level2++; if (b.level >= 3) t.level3++; }
     }
     return t;
   }
