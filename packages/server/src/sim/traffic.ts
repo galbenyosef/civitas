@@ -52,6 +52,12 @@ interface Cong { v: number; at: number }
  */
 interface CostChunk { cong: Float64Array; at: Float64Array; flags: Uint8Array; kerb: Uint8Array }
 const CELLS = CHUNK_SIZE * CHUNK_SIZE;
+/**
+ * One chunk's lanes and road geometry caches, as dense arrays: `lanes` the queue of each lane (tile index × 4 + direction;
+ * the same arrays as Traffic.cells, which keeps them for going through every lane), and the degree, roundabout or flyover
+ * byte and crossing caches (degreeOf, junctionAux, isCrossingAt; -1 not worked out, as after invalidate).
+ */
+interface RoadChunk { lanes: (Mover[] | undefined)[]; deg: Int8Array; jaux: Int16Array; xing: Int8Array }
 interface Junction { signal: boolean; ver: number; deg: number; pid: number; offset: number; period: number; act?: Actuation }
 /** Actuated signal state: the axis on green, when that green began and when it is due to end. */
 interface Actuation { green: 'ns' | 'ew'; start: number; end: number; decided: boolean; at: number }
@@ -306,15 +312,10 @@ export const conflictsFor = conflicts;
 export class Traffic {
   private cells = new Map<number, Mover[]>();
   private cong = new Map<number, Cong>();
-  private degree = new Map<number, number>();
   private junctions = new Map<number, Junction>();
-  /** roundabout and flyover aux bytes by road tile (shared/src/junctions.ts), 0 for none; dropped with the degree cache */
-  private jaux = new Map<number, number>();
-  /**
-   * level crossings by road tile (shared/src/rail.ts isCrossing): 1 for a crossing, 2 for a bascule bridge's deck (its
-   * barriers close round each lift, shared/src/bridges.ts), 0 for none; dropped with the degree cache
-   */
-  private xing = new Map<number, number>();
+  /** lanes and road geometry caches by chunk (RoadChunk), and the last one looked up */
+  private roads = new Map<number, RoadChunk>();
+  private lastRx = NaN; private lastRy = NaN; private lastRoad: RoadChunk | undefined;
   /** barrier state per crossing for the tick under way */
   private bars = new Map<number, boolean>();
   private barsTick = -1;
@@ -350,6 +351,21 @@ export class Traffic {
   }
 
   static laneKey(x: number, y: number, dir: number) { return tkey(x, y) * 4 + dir; }
+  /** The RoadChunk of tile (x, y), made if there is none yet. */
+  private roadChunk(x: number, y: number): RoadChunk {
+    let rc = this.roadChunkIf(x, y);
+    if (!rc) {
+      rc = { lanes: new Array(CELLS * 4), deg: new Int8Array(CELLS).fill(-1), jaux: new Int16Array(CELLS).fill(-1), xing: new Int8Array(CELLS).fill(-1) };
+      this.roads.set((chunkOf(x) + 0x800) * 0x1000 + chunkOf(y) + 0x800, rc);
+      this.lastRoad = rc;
+    }
+    return rc;
+  }
+  private roadChunkIf(x: number, y: number): RoadChunk | undefined {
+    const cx = chunkOf(x), cy = chunkOf(y);
+    if (cx !== this.lastRx || cy !== this.lastRy) { this.lastRoad = this.roads.get((cx + 0x800) * 0x1000 + cy + 0x800); this.lastRx = cx; this.lastRy = cy; }
+    return this.lastRoad;
+  }
 
   beginTick() {
     this.present.clear(); this.stopped.clear();
@@ -399,7 +415,7 @@ export class Traffic {
     if (cc.at[i] === this.congEpoch) g = cc.cong[i];
     else { g = cc.cong[i] = this.congestionAt(x, y); cc.at[i] = this.congEpoch; }
     let f = cc.flags[i];
-    if (!f) f = cc.flags[i] = 1 | (this.degreeOf(x, y) >= 3 ? 2 : 0) | (this.isCrossingAt(x, y) ? (this.xing.get(tkey(x, y)) === 1 ? 4 : 8) : 0);
+    if (!f) f = cc.flags[i] = 1 | (this.degreeOf(x, y) >= 3 ? 2 : 0) | (this.isCrossingAt(x, y) ? (this.xingOf(x, y) === 1 ? 4 : 8) : 0);
     let c = 1 + TT.congestionWeight * g;
     if (f & 2) c += 0.6;
     if (cc.kerb[i]) c += 0.5;
@@ -447,21 +463,21 @@ export class Traffic {
   // ---- road geometry caches ------------------------------------------------------
 
   degreeOf(x: number, y: number): number {
-    const k = tkey(x, y);
-    let d = this.degree.get(k);
-    if (d === undefined) {
+    const rc = this.roadChunk(x, y), i = localIndex(x, y);
+    let d = rc.deg[i];
+    if (d < 0) {
       d = 0;
       for (const [dx, dy] of DIRS) { const t = this.w.peekTile(x + dx, y + dy); if (t !== undefined && isRoad(t)) d++; }
       if (isFlyoverAux(this.junctionAux(x, y))) d = 2; // two roads straight through on two levels: no junction box
-      this.degree.set(k, d);
+      rc.deg[i] = d;
     }
     return d;
   }
   /** The roundabout or flyover byte of a tile (shared/src/junctions.ts), 0 for none. */
   junctionAux(x: number, y: number): number {
-    const k = tkey(x, y);
-    let a = this.jaux.get(k);
-    if (a === undefined) { a = this.w.auxAt(x, y); if (!isJunctionAux(a)) a = 0; this.jaux.set(k, a); }
+    const rc = this.roadChunk(x, y), i = localIndex(x, y);
+    let a = rc.jaux[i];
+    if (a < 0) { a = this.w.auxAt(x, y); if (!isJunctionAux(a)) a = 0; rc.jaux[i] = a; }
     return a;
   }
   /**
@@ -469,18 +485,23 @@ export class Traffic {
    * tile counts as one: barriers on its approaches close while it lifts.
    */
   isCrossingAt(x: number, y: number): boolean {
-    const k = tkey(x, y);
-    let v = this.xing.get(k);
-    if (v === undefined) {
+    const rc = this.roadChunk(x, y), i = localIndex(x, y);
+    let v = rc.xing[i];
+    if (v < 0) {
       const t = this.w.peekTile(x, y), a = this.w.auxAt(x, y);
       v = isCrossing(t, a) ? 1 : isDeck(t, a) && bridgeStyle(a) === BridgeStyle.Bascule ? 2 : 0;
-      this.xing.set(k, v);
+      rc.xing[i] = v;
     }
     return v !== 0;
   }
+  /** The crossing cache of (x, y) (isCrossingAt): 1 a level crossing, 2 a bascule deck, 0 neither, -1 not worked out yet. */
+  private xingOf(x: number, y: number): number {
+    const rc = this.roadChunkIf(x, y);
+    return rc ? rc.xing[localIndex(x, y)] : -1;
+  }
   /** Are the barriers of the crossing (x, y) down this tick? */
   barrierDownAt(x: number, y: number): boolean {
-    const bascule = this.xing.get(tkey(x, y)) === 2;
+    const bascule = this.xingOf(x, y) === 2;
     if (!this.barrier && !bascule) return false;
     if (this.barsTick !== this.w.tick) { this.bars.clear(); this.barsTick = this.w.tick; }
     const k = tkey(x, y);
@@ -498,7 +519,7 @@ export class Traffic {
   barrierAhead(x0: number, y0: number, x1: number, y1: number): boolean {
     const mx = Math.floor((x0 + x1) / 2), my = Math.floor((y0 + y1) / 2);
     // a walker caught on a bascule span when the barriers close walks on off it, as a car drives off
-    if (this.isCrossingAt(Math.floor(x0), Math.floor(y0)) && this.xing.get(tkey(Math.floor(x0), Math.floor(y0))) === 2) return false;
+    if (this.isCrossingAt(Math.floor(x0), Math.floor(y0)) && this.xingOf(Math.floor(x0), Math.floor(y0)) === 2) return false;
     return this.isCrossingAt(mx, my) && this.barrierDownAt(mx, my) && !(x0 > mx + 0.02 && x0 < mx + 0.98 && y0 > my + 0.02 && y0 < my + 0.98);
   }
   /** No car is left at the kerb of a roundabout, a flyover, a level crossing or a bridge. */
@@ -514,8 +535,9 @@ export class Traffic {
   private apart(a: Mover, b: Mover) { return a.lane >= 0 && b.lane >= 0 && isEW(a.lane % 4) !== isEW(b.lane % 4) && (this.flyAt(a.x, a.y) || this.flyAt(b.x, b.y)); }
   isRoadAt(x: number, y: number) { const t = this.w.peekTile(x, y); return t !== undefined && isRoad(t); }
   private invalidate(x: number, y: number) {
-    this.degree.delete(tkey(x, y)); this.jaux.delete(tkey(x, y)); this.xing.delete(tkey(x, y));
-    for (const [dx, dy] of DIRS) this.degree.delete(tkey(x + dx, y + dy));
+    const rc = this.roadChunkIf(x, y);
+    if (rc) { const i = localIndex(x, y); rc.deg[i] = -1; rc.jaux[i] = -1; rc.xing[i] = -1; }
+    for (const [dx, dy] of DIRS) { const nc = this.roadChunkIf(x + dx, y + dy); if (nc) nc.deg[localIndex(x + dx, y + dy)] = -1; }
     this.dropCostFlags(x, y); for (const [dx, dy] of DIRS) this.dropCostFlags(x + dx, y + dy);
     // signal arms look at diagonal neighbours too (wide-road twins), so re-check the 3x3 around the change
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) this.junctions.delete(tkey(x + dx, y + dy));
@@ -577,7 +599,7 @@ export class Traffic {
   private approaching(x: number, y: number, axis: 'ns' | 'ew'): boolean {
     for (let d = 0; d < 4; d++) {
       if (isEW(d) !== (axis === 'ew')) continue;
-      const q = this.cells.get(Traffic.laneKey(x - DIRS[d][0], y - DIRS[d][1], d));
+      const q = this.laneQ(x - DIRS[d][0], y - DIRS[d][1], d);
       if (q && q.length) return true;
     }
     return false;
@@ -592,7 +614,7 @@ export class Traffic {
 
   // ---- occupancy -------------------------------------------------------------
 
-  laneCount(x: number, y: number, dir: number) { return this.cells.get(Traffic.laneKey(x, y, dir))?.length ?? 0; }
+  laneCount(x: number, y: number, dir: number) { return this.laneQ(x, y, dir)?.length ?? 0; }
   onTile(x: number, y: number): number {
     let n = 0;
     for (let d = 0; d < 4; d++) n += this.laneCount(x, y, d);
@@ -609,7 +631,7 @@ export class Traffic {
    * `extra` cars are already on their way in (the lane before, for boxClear).
    */
   private laneRoom(x: number, y: number, key: number, m: Mover, extra: Mover[] | null = null): boolean {
-    const q = this.cells.get(key);
+    const q = this.laneAt(key);
     if (!TT.laneByLength) {
       // two-wheelers (fleet.ts BIKE_CLASS) slip into the space a car leaves and take none of a car's: they do not count,
       // and the following gap alone keeps them clear of whatever is ahead (docs/mobile-jobs.md)
@@ -656,9 +678,9 @@ export class Traffic {
     let n = 0;
     for (let d = 0; d < 4; d++) {
       // arriving lanes: from the neighbour on the opposite side, heading d
-      const q = this.cells.get(Traffic.laneKey(tx - DIRS[d][0], ty - DIRS[d][1], d));
+      const q = this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
       if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m)) { M[n] = m; I[n] = d; O[n] = this.nextDirOf(m); n++; }
-      const o = this.cells.get(Traffic.laneKey(tx, ty, d));
+      const o = this.laneQ(tx, ty, d);
       if (o) for (const m of o) if (m.prog < this.clearAt(m)) { M[n] = m; I[n] = m.inDir; O[n] = d; n++; }
     }
     return n;
@@ -711,7 +733,7 @@ export class Traffic {
     m.len = VEHICLE_LEN[m.cls] ?? VEHICLE_LEN[0];
     const d = dirBetween(m.path[0], m.path[1], m.path[2], m.path[3]);
     const key = Traffic.laneKey(m.path[0], m.path[1], d);
-    const q = this.cells.get(key);
+    const q = this.laneAt(key);
     const tail = q && q.length ? leaderIn(q, q.length, isBike(m)) : null;
     if (tail && tail.prog < (tail.len + m.len) / 2 + MIN_GAP * m.gapMul) return 'blocked';
     if (TT.spawnClear && this.boxBusyExcept(m.path[0], m.path[1], m)) return 'blocked';
@@ -732,17 +754,33 @@ export class Traffic {
   }
   leave(m: Mover) {
     if (m.lane < 0) return;
-    const q = this.cells.get(m.lane);
+    const q = this.laneAt(m.lane);
     if (q) {
       const i = q.indexOf(m);
       if (i >= 0) q.splice(i, 1);
-      if (q.length === 0) this.cells.delete(m.lane);
+      if (q.length === 0) this.dropLane(m.lane);
     }
     m.lane = -1; m.committed = false;
   }
+  /** The queue of lane (x, y, d), if anyone is in it (the same array as in `cells`). */
+  private laneQ(x: number, y: number, d: number): Mover[] | undefined {
+    const rc = this.roadChunkIf(x, y);
+    return rc ? rc.lanes[localIndex(x, y) * 4 + d] : undefined;
+  }
+  /** The queue of the lane with key `key` (laneKey), if anyone is in it. */
+  private laneAt(key: number): Mover[] | undefined {
+    const d = key % 4, t = (key - d) / 4;
+    return this.laneQ(Math.floor(t / 65536) - 0x8000, (t % 65536) - 0x8000, d);
+  }
+  private dropLane(key: number) {
+    this.cells.delete(key);
+    const d = key % 4, t = (key - d) / 4, x = Math.floor(t / 65536) - 0x8000, y = (t % 65536) - 0x8000;
+    const rc = this.roadChunkIf(x, y);
+    if (rc) rc.lanes[localIndex(x, y) * 4 + d] = undefined;
+  }
   private push(key: number, m: Mover) {
-    let q = this.cells.get(key);
-    if (!q) { q = []; this.cells.set(key, q); }
+    let q = this.laneAt(key);
+    if (!q) { q = []; this.cells.set(key, q); const d = key % 4, t = (key - d) / 4, x = Math.floor(t / 65536) - 0x8000, y = (t % 65536) - 0x8000; this.roadChunk(x, y).lanes[localIndex(x, y) * 4 + d] = q; }
     q.push(m);
     m.lane = key;
   }
@@ -925,7 +963,7 @@ export class Traffic {
     const now = this.headingOf(m, this.tmp2) ? { x: m.x, y: m.y, hx: this.tmp2[0], hy: this.tmp2[1], len: m.len } : null;
     const tx = Math.floor(c[0]), ty = Math.floor(c[1]), h: [number, number] = [0, 0];
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (let dd = 0; dd < 4; dd++) {
-      const q = this.cells.get(Traffic.laneKey(tx + dx, ty + dy, dd));
+      const q = this.laneQ(tx + dx, ty + dy, dd);
       if (!q) continue;
       for (const o of q) {
         if (o === m || this.apart(m, o) || this.filtering(m, o)) continue;
@@ -969,7 +1007,7 @@ export class Traffic {
    */
   holderOf(m: Mover): Mover | null {
     if (m.lane < 0) return null;
-    const q = this.cells.get(m.lane);
+    const q = this.laneAt(m.lane);
     if (!q) return null;
     const idx = q.indexOf(m);
     if (idx > 0) return q[idx - 1];
@@ -981,7 +1019,7 @@ export class Traffic {
     const M = this.boxM, I = this.boxIn, O = this.boxOut;
     if (last) { for (let i = 0, k = this.inBox(bx, by); i < k; i++) if (M[i] !== m && !(fly && isEW(I[i]) !== isEW(dir)) && conflicts(dir, dir, I[i], O[i])) return M[i]; return null; }
     const outD = this.nextDirOf(m);
-    const nq = this.cells.get(Traffic.laneKey(bx, by, outD));
+    const nq = this.laneQ(bx, by, outD);
     if (m.committed) return nq && nq.length ? nq[nq.length - 1] : null;
     if (nq && nq.length && !this.laneRoom(bx, by, Traffic.laneKey(bx, by, outD), m)) return nq[0];
     if (nq && nq.length && this.degreeOf(bx, by) >= 3) { const t = nq[nq.length - 1]; if (t.prog < this.clearAt(t) + MIN_GAP) return t; }
@@ -995,16 +1033,16 @@ export class Traffic {
    */
   queuedBehind(m: Mover): boolean {
     if (m.lane < 0 || m.pi < 1) return false;
-    const q = this.cells.get(m.lane);
+    const q = this.laneAt(m.lane);
     if (q && q.indexOf(m) < q.length - 1) return true;
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1], d = m.inDir;
-    const b = this.cells.get(Traffic.laneKey(ax - DIRS[d][0], ay - DIRS[d][1], d));
+    const b = this.laneQ(ax - DIRS[d][0], ay - DIRS[d][1], d);
     return !!b && b.length > 0;
   }
   /** Has a car been held at the stop line into tile (x,y) for at least `ticks` (pedYieldAfter)? */
   carWaitingInto(x: number, y: number, ticks: number): boolean {
     for (let d = 0; d < 4; d++) {
-      const q = this.cells.get(Traffic.laneKey(x - DIRS[d][0], y - DIRS[d][1], d));
+      const q = this.laneQ(x - DIRS[d][0], y - DIRS[d][1], d);
       if (!q || !q.length) continue;
       const h = q[0];
       if (!h.committed && h.wait >= ticks && h.pi * 2 + 1 < h.path.length && h.path[h.pi * 2] === x && h.path[h.pi * 2 + 1] === y) return true;
@@ -1070,7 +1108,7 @@ export class Traffic {
   /** May `m`, waiting at the edge of tile B, drive into it and on into lane (B→C)? */
   private canEnter(m: Mover, bx: number, by: number, inD: number, outD: number): boolean {
     const nextKey = Traffic.laneKey(bx, by, outD);
-    const nq = this.cells.get(nextKey);
+    const nq = this.laneAt(nextKey);
     if (!this.laneRoom(bx, by, nextKey, m)) return false;
     // level crossings: never onto one with the barriers down, and only with room to get right off it on the far side;
     // a car still on one when they come down drives off whatever is ahead (lights, give-way, people waiting)
@@ -1120,9 +1158,9 @@ export class Traffic {
     const vx = ix + RING_POS[(p + 6) & 7][0], vy = iy + RING_POS[(p + 6) & 7][1];
     /** does c's route pass node k of its path at (x, y)? */
     const at = (c: Mover, k: number, x: number, y: number) => k * 2 + 1 < c.path.length && c.path[k * 2] === x && c.path[k * 2 + 1] === y;
-    const q1 = this.cells.get(Traffic.laneKey(ux, uy, dirBetween(ux, uy, bx, by)));
+    const q1 = this.laneQ(ux, uy, dirBetween(ux, uy, bx, by));
     if (q1) for (const c of q1) if (c !== m && c.wait < 2 && at(c, c.pi + 1, nx, ny) && this.stopLine(c) - c.prog < gap) return false;
-    const q0 = this.cells.get(Traffic.laneKey(vx, vy, dirBetween(vx, vy, ux, uy)));
+    const q0 = this.laneQ(vx, vy, dirBetween(vx, vy, ux, uy));
     if (q0) for (const c of q0) if (c !== m && c.wait < 2 && at(c, c.pi + 1, bx, by) && at(c, c.pi + 2, nx, ny) && 1 - c.prog + this.stopLine(c) < gap) return false;
     // never fill the ring: with every lane round it full nobody can move on (each waits for room in the next), so a
     // car comes on only while TRAFFIC_TUNING.ringSpare places stay free, counting cars already committed coming on
@@ -1130,11 +1168,11 @@ export class Traffic {
     let n = 1;
     for (let q = 0; q < 8; q++) {
       const rx = ix + RING_POS[q][0], ry = iy + RING_POS[q][1], sx = ix + RING_POS[(q + 1) & 7][0], sy = iy + RING_POS[(q + 1) & 7][1];
-      n += this.cells.get(Traffic.laneKey(rx, ry, dirBetween(rx, ry, sx, sy)))?.length ?? 0;
+      n += this.laneQ(rx, ry, dirBetween(rx, ry, sx, sy))?.length ?? 0;
       if (q & 1) continue;
       // the way in at this side: from the arm (two out from the island) towards the middle tile
       const ox = rx + RING_POS[q][0], oy = ry + RING_POS[q][1];
-      const lane = this.cells.get(Traffic.laneKey(ox, oy, dirBetween(ox, oy, rx, ry)));
+      const lane = this.laneQ(ox, oy, dirBetween(ox, oy, rx, ry));
       if (lane) for (const c of lane) if (c !== m && c.committed) n++;
     }
     return n <= 8 * cap - TT.ringSpare;
@@ -1214,7 +1252,7 @@ export class Traffic {
     // from another approach that will turn into it
     const ahead: Mover[] = nq ? [...nq] : [];
     for (let d = 0; d < 4; d++) {
-      const q = this.cells.get(Traffic.laneKey(bx - DIRS[d][0], by - DIRS[d][1], d));
+      const q = this.laneQ(bx - DIRS[d][0], by - DIRS[d][1], d);
       if (q) for (const o of q) if (o !== m && o.committed && this.nextDirOf(o) === outD) ahead.push(o);
     }
     return this.laneRoom(cx, cy, Traffic.laneKey(cx, cy, d2), m, ahead);
@@ -1243,7 +1281,7 @@ export class Traffic {
     if ((nextDir === OPP[dir] && m.prog > 0.4) || (m.inDir === OPP[dir] && m.prog < 0.5)) base *= UTURN_SLOW;
 
     // follow the car ahead: in this lane, or the tail of the next lane on my route
-    const q = this.cells.get(m.lane)!;
+    const q = this.laneAt(m.lane)!;
     const idx = q.indexOf(m);
     const bike = isBike(m);
     let gap = Infinity;
@@ -1252,7 +1290,7 @@ export class Traffic {
     let tailNext: Mover | null = null;
     if (lead) gap = lead.prog - m.prog - (lead.len + m.len) / 2;
     else if (!last) {
-      const nq = this.cells.get(Traffic.laneKey(bx, by, nextDir));
+      const nq = this.laneQ(bx, by, nextDir);
       tailNext = nq && nq.length ? leaderIn(nq, nq.length, bike) : null;
       if (tailNext) gap = 1 - m.prog + tailNext.prog - (tailNext.len + m.len) / 2;
     }
@@ -1300,7 +1338,7 @@ export class Traffic {
       } else {
         const over = m.prog + allowed - 1;
         moved = allowed;
-        q.splice(idx, 1); if (q.length === 0) this.cells.delete(m.lane);
+        q.splice(idx, 1); if (q.length === 0) this.dropLane(m.lane);
         this.push(Traffic.laneKey(bx, by, nextDir), m);
         m.inDir = dir; m.pi++; m.prog = Math.min(over, 0.3); m.committed = false;
         // a bus never comes into a lane already past its stop line before a junction: its nose would be in the box,
