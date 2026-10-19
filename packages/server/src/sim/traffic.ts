@@ -1310,7 +1310,6 @@ export class Traffic {
    * mover is then off the road), 'stuck' when it has waited past the limit.
    */
   step(m: Mover): 'moving' | 'arrived' | 'stuck' {
-    const w = this.w;
     const n = m.path.length / 2;
     if (m.lane < 0 || m.pi >= n) return 'arrived';
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1];
