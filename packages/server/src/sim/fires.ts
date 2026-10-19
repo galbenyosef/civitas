@@ -10,6 +10,7 @@ import type { Simulation } from './simulation';
 const TPH = TICKS_PER_HOUR, DAY = TICKS_PER_DAY;
 /** the zones whose buildings burn: homes and works */
 const BURNS = [Zone.Residential, Zone.Commercial, Zone.Industrial, Zone.Office] as const;
+const BASE_NAMES: Record<number, string> = { [Zone.Residential]: 'house', [Zone.Commercial]: 'shop', [Zone.Industrial]: 'works', [Zone.Office]: 'office' };
 /** engines sent to one fire at most (the first got lost: no road, stuck and gave up) */
 const MAX_TRIES = 3;
 
@@ -406,7 +407,8 @@ export class Fires {
   }
 
   private touch(f: Fire) { this.changed = true; this.issues?.fireChanged(f.x, f.y); this.onChange?.(f.x, f.y); }
-  private name(b: Building) { return KIND_NAMES[b.id] ?? 'building'; }
+  /** a lot's family base kind reads as what it is (KIND_NAMES has 'residential'); a merged or placed kind its own name */
+  private name(b: Building) { return BASE_NAMES[b.id] ?? KIND_NAMES[b.id] ?? 'building'; }
 
   private save(): FireSave {
     const born: [number, number, number][] = [];
