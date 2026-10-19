@@ -1,5 +1,6 @@
 /**
- * searchprof.ts --mode reroutes (docs/search-perf.md, "Cheaper re-routes"): fill the London demo as the other modes do,
+ * searchprof.ts --mode reroutes (docs/search-perf.md, "Cheaper re-routes"): fill the London demo (or with --districts N a
+ * seedCity test city) as the other modes do,
  * then switch on `--set k=v,...` (TRAFFIC_TUNING) and run one more game day, recording
  *  - every A* search by caller: calls, time, nodes expanded, failures and failures that used the whole node budget;
  *    with `--reach-check`, whether a failed search's goal could be reached at all (an unbounded breadth-first search);
@@ -36,7 +37,8 @@ export async function main(argv: string[]) {
   for (const [n, f] of Object.entries(hook.orig)) hook.set[n](f);
 
   const t0 = performance.now();
-  const { game, label, fill } = await probeGame('london', 0);
+  const districts = Number(arg('districts', '0')), days = Number(arg('days', '1'));
+  const { game, label, fill } = await probeGame(districts ? null : 'london', districts);
   const w = game.world, sim = game.sim;
   console.log(`${label} filled: ${fill.pop} citizens, ${(fill.ticks / DAY).toFixed(2)} days, ${((performance.now() - t0) / 1000).toFixed(0)} s wall; set ${JSON.stringify(set)}`);
   Object.assign(TRAFFIC_TUNING, set);
@@ -100,7 +102,7 @@ export async function main(argv: string[]) {
   const prev = new Map<number, number>();
   for (const c of w.citizens.values()) prev.set(c.id, c.state);
   let vSum = 0, qSum = 0, spSum = 0, parkedSum = 0, trips = 0, tripTicks = 0, stuckSum = 0, stuckSamples = 0, simMs = 0;
-  const n = DAY;
+  const n = Math.round(days * DAY);
   for (let i = 0; i < n; i++) {
     const t = performance.now();
     game.step();
