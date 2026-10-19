@@ -85,7 +85,7 @@ is 1–2% of the search time.
 
 - **TypeScript** runs the game's own `findRoute`, `pathBetween` and `findPath` over a `World` built from the corpus.
   On worker threads, the tiles and fields sit in SharedArrayBuffers and searches are handed out one at a time
-  through an atomic counter. The main thread waits on an atomic.
+  through an atomic counter. The main thread waits until every worker has acknowledged the batch.
 - **Rust** (`tools/search-rs`) is a step-for-step port: the same node keys, step rules, BFS order, binary heap,
   tie-breaking and float arithmetic. JS Maps and Sets become open-addressing tables in per-thread scratch. The same
   batches are spread over a rayon pool. Batches of fewer than 8 searches run on the calling thread, because waking
@@ -94,9 +94,9 @@ is 1–2% of the search time.
 **Match rate: 100%** in both, for London and for the 8×8 test city (384,604 searches). The first worker-thread
 replay showed about one cost mismatch every ten passes. Its shared "workers done" counter let the main thread go on
 while a worker was still searching, so one search read the next tick's costs. With a per-worker acknowledgement of each
-batch there were no mismatches in 40 passes, and the worker figures below are from that version. London: 132,196 routes, 35,351 walks, 1,351 job searches and 9,440 venue searches. Every path,
-route cost (bit for bit), goal, building, miss box, full-workplace list and node count matches the game's, on one
-thread and at every thread count. The TypeScript node counts come from a check run under the hook.
+batch there were no mismatches in 40 passes, and the worker figures below are from that version. London has 132,196
+routes, 35,351 walks, 1,351 job searches and 9,440 venue searches. Every path, route cost (bit for bit), goal,
+building, miss box, full-workplace list and node count matches the game's, on one thread and at every thread count. The TypeScript node counts come from a check run under the hook.
 
 ## Phase profile
 
@@ -177,16 +177,16 @@ Top self time from the CPU profile of an unprofiled day (inspector, 200 µs samp
 London's 178,338 searches of one day. Times are the batches only, median of three. Per tick is the total over 2,400.
 The worker rows are from the fixed hand-out (load 7.9 at the start, 14.0 at the end). The other rows are from the first
 replay run (load 7.75 → 7.97); its worker figures were within 6% of these. The TS main thread measured 9,434 ms in the
-second run.
+second run, and under Rosetta 16,014 ms (the Rosetta worker rows are from that second run, load 4.5 → 3.9).
 
 | run | native arm64 ms (per tick) | vs TS 1 thread | Rosetta x64 ms |
 | --- | --- | --- | --- |
 | TS, main thread | 9,127 (3.80) | 1.0× | 16,814 |
-| TS, 1 worker | 9,400 | 0.97× | 16,343 |
-| TS, 2 workers | 5,708 | 1.6× | 9,773 |
-| TS, 4 workers | 4,297 | 2.1× | 7,529 |
-| TS, 8 workers | 3,993 (1.66) | 2.3× | 9,595 |
-| TS critical path | 3,570 | 2.6× (limit) | 6,023 |
+| TS, 1 worker | 9,400 | 0.97× | 15,902 |
+| TS, 2 workers | 5,708 | 1.6× | 9,434 |
+| TS, 4 workers | 4,297 | 2.1× | 7,134 |
+| TS, 8 workers | 3,993 (1.66) | 2.3× | 6,753 |
+| TS critical path | 3,570 | 2.6× (limit) | 6,003 |
 | Rust, one thread | 1,228 (0.51) | 7.4× | – |
 | Rust, rayon 2 | 811 | 11.3× | – |
 | Rust, rayon 4 | 703 (0.29) | 13.0× | – |
@@ -196,7 +196,7 @@ second run.
 The 8×8 test city (384,604 searches, native): TS main thread 4,803 ms, 2 / 4 / 8 workers 3,292 / 2,549 / 2,548 ms,
 critical path 1,914 ms. Rust one thread 654 ms, rayon 2 / 4 / 8 at 483 / 446 / 523 ms (every batch split, without
 `--min-par`), critical path 298 ms.
-Rust is 7.3 times faster on one thread.
+Rust is 7.3 times faster on one thread here too.
 
 The *critical path* is each batch's slowest search, summed. No number of threads can finish a batch sooner than that,
 so it is the floor for any per-tick batch. With 74 searches a tick (p95 145) and a heavy tail, one 4,000-node A\*
@@ -209,7 +209,7 @@ one or two searches, rayon was worse still (2.9 s at 8 threads), hence `--min-pa
 | measure | native arm64 | Rosetta x64 | Rosetta / native |
 | --- | --- | --- | --- |
 | TS replay of the searches, main thread | 9,127 ms | 16,814 ms | 1.84 |
-| TS replay, 4 workers | 4,410 ms | 7,529 ms | 1.71 |
+| TS replay, 4 workers | 4,297 ms | 7,134 ms | 1.66 |
 | A\* in the game (profiled, per tick) | 7.41 ms | 8.74 ms | 1.18 |
 | traffic step in the game (profiled, per tick) | 22.79 ms | 22.53 ms | 0.99 |
 | whole London tick, unprofiled (median of 3) | 54.29 ms | 53.09 ms | 0.98 |
@@ -304,7 +304,8 @@ Do not move the searches to Rust now.
 - Job searches are 0.04% of the tick.
 
 The bigger costs are elsewhere: the traffic step is 39–42% (`guardSweep` alone is 8% of CPU), `moveCitizens` 19–22%,
-and the flush's agent list. The flush ran with no clients here, so it is a probe artefact only in part.
+and the network flush at 13%. The flush ran with no clients connected, so part of its 7.5 ms built agent lists that
+nobody received.
 
 If route search cost does become a problem, do these first, cheapest first:
 
