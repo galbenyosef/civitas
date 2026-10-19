@@ -10,12 +10,16 @@
  *  - `hash`: a fingerprint of the game after the fill and after every tick of the day (every citizen's and vehicle's
  *    position, lane, progress, path node, wait, stuck clock and state; the traffic counters, totals and congestion; the
  *    population, jobs and money), so two builds can be shown to play the same game tick for tick. `--json FILE`.
+ *
+ * `--client` connects one client after the fill (hello, then a subscription to every chunk), as a browser would over a
+ * socket; every frame it is sent is counted and hashed (`wire` in the summary), and the network flush is timed per tick.
  */
 import { writeFileSync } from 'node:fs';
 import { Session } from 'node:inspector';
 import { TICKS_PER_DAY, TICKS_PER_HOUR, isDemoId, type DemoId } from '@msimcity/shared';
 import { Traffic } from '../sim/traffic';
 import type { World, Mover } from '../world';
+import type { Conn } from '../transport';
 import { probeGame } from './probe-city';
 
 type Fn = (this: unknown, ...a: unknown[]) => unknown;
@@ -45,11 +49,32 @@ export async function main(argv: string[]) {
   if (hook) for (const [n, f] of Object.entries(hook.orig)) hook.set[n](f); // the hook's counters off
 
   const t0 = performance.now();
-  const { game, label, fill } = await probeGame(demo, districts);
+  let connect: ((c: Conn) => void) | null = null;
+  const { game, label, fill } = await probeGame(demo, districts, { onConnection(fn) { connect = fn; } });
   const w = game.world;
   console.log(`${label} filled: ${fill.pop} citizens, ${(fill.ticks / DAY).toFixed(2)} days, ${((performance.now() - t0) / 1000).toFixed(0)} s wall, ${process.arch} node ${process.version}, mode ${mode}`);
   console.log(`world: ${w.chunks.size} chunks, ${w.vehicles.size} vehicles, tick ${w.tick}`);
   const traffic = (game.sim as unknown as { traffic: Traffic }).traffic;
+  // one client, everything it is sent hashed
+  const wire = { frames: 0, bytes: 0, hash: 0x811c9dc5 >>> 0 };
+  if (argv.includes('--client')) {
+    let onMsg: ((d: string) => void) | null = null;
+    const conn: Conn = {
+      open: true,
+      send(d) { wire.frames++; wire.bytes += d.length; let h = wire.hash; for (let i = 0; i < d.length; i++) { h ^= d.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } wire.hash = h; },
+      close() {}, onMessage(fn) { onMsg = fn; }, onClose() {},
+    };
+    if (!connect) throw new Error('no connection source');
+    (connect as (c: Conn) => void)(conn);
+    onMsg!(JSON.stringify({ t: 'hello', name: 'probe' }));
+    onMsg!(JSON.stringify({ t: 'sub', chunks: [...w.chunks.values()].map((c) => [c.cx, c.cy]) }));
+    console.log(`client connected: ${wire.frames} frames, ${wire.bytes} bytes on joining`);
+  }
+  // the network flush's time per tick
+  const flushMs = new Float64Array(Math.round(days * DAY));
+  let cur = 0; // the tick under way
+  const net = game.net as unknown as { flush(): void }, flush = net.flush.bind(net);
+  net.flush = () => { const t = performance.now(); flush(); flushMs[cur] += performance.now() - t; };
 
   const n = Math.round(days * DAY);
   const tick0 = w.tick + 1;
@@ -62,7 +87,6 @@ export async function main(argv: string[]) {
   const calls = new Float64Array(n * NM), self = new Float64Array(n * NM);
   const GS = ['calls', 'noHeading', 'nothingNear', 'withPeds', 'withCars', 'cut', 'pedsGathered', 'carsGathered'];
   const gs = new Float64Array(n * GS.length);
-  let cur = 0;
   if (mode === 'tcount') {
     const child: number[] = [0];
     const tp = Traffic.prototype as unknown as Record<string, Fn>;
@@ -129,7 +153,8 @@ export async function main(argv: string[]) {
   let employed = 0;
   for (const c of w.citizens.values()) if (c.job) employed++;
   const end = { tick: w.tick, citizens: w.citizens.size, vehicles: w.vehicles.size, employed, counters: { ...traffic.counters } };
-  Object.assign(out, { end, wallS });
+  Object.assign(out, { end, wallS, wire: { ...wire, hash: wire.hash.toString(16) } });
+  if (argv.includes('--client')) console.log(`wire: ${wire.frames} frames, ${wire.bytes} bytes, hash ${wire.hash.toString(16)}`);
   console.log(`after ${days} day(s): ${end.citizens} citizens, ${end.employed} employed, ${end.vehicles} vehicles; day wall ${wallS.toFixed(1)} s`);
 
   const windows: [string, (i: number) => boolean][] = [['08-09', (i) => hourOf(i) === 8], ['17-18', (i) => hourOf(i) === 17], ['day', () => true]];
@@ -137,8 +162,9 @@ export async function main(argv: string[]) {
     const idx: number[] = [];
     for (let i = 0; i < n; i++) if (inWin(i)) idx.push(i);
     const tm = sorted(idx.map((i) => tickMs[i]));
-    const win: Record<string, unknown> = { ticks: idx.length, tickMean: mean(tm), tickP50: pct(tm, 0.5), tickP95: pct(tm, 0.95), tickMax: tm[tm.length - 1] ?? 0 };
-    console.log(`\n== ${wn}: ${idx.length} ticks, tick mean ${mean(tm).toFixed(2)} ms, p95 ${pct(tm, 0.95).toFixed(2)} ms`);
+    const fm = sorted(idx.map((i) => flushMs[i]));
+    const win: Record<string, unknown> = { ticks: idx.length, tickMean: mean(tm), tickP50: pct(tm, 0.5), tickP95: pct(tm, 0.95), tickMax: tm[tm.length - 1] ?? 0, flushMean: mean(fm), flushP95: pct(fm, 0.95) };
+    console.log(`\n== ${wn}: ${idx.length} ticks, tick mean ${mean(tm).toFixed(2)} ms, p95 ${pct(tm, 0.95).toFixed(2)} ms; flush ${mean(fm).toFixed(2)} ms`);
     if (mode === 'tcount') {
       const per: Record<string, { calls: number; selfMs: number; usPerCall: number }> = {};
       let trafficSelf = 0;
