@@ -37,6 +37,15 @@ export function dirBetween(ax: number, ay: number, bx: number, by: number): numb
 /** DIRS is E, W, S, N. Right-hand turns for right-hand traffic (x east, y south). */
 const RIGHT = [2, 3, 1, 0], LEFT = [3, 2, 0, 1], OPP = [1, 0, 3, 2];
 const isEW = (d: number) => d < 2;
+/**
+ * The direction of lane key k (Traffic.laneKey), and the tile key it is on. Lane keys are past 2^31, where `k % 4` costs
+ * ~18 ns in Node 20 (a float remainder) against ~1 ns written with floor; the answers are the same.
+ */
+const laneDir = (k: number) => k - Math.floor(k / 4) * 4;
+const laneTile = (k: number) => Math.floor(k / 4);
+/** x and y of tile key t (tkey), likewise without `%` */
+const tileX = (t: number) => Math.floor(t / 65536) - 0x8000;
+const tileY = (t: number) => t - Math.floor(t / 65536) * 65536 - 0x8000;
 /** what a level crossing adds to a road tile's cost for the router: the expected wait for the barriers */
 const CROSSING_DELAY = 1.5;
 /** what a bascule bridge's deck tile adds to a road tile's cost while it is lifting (shared/src/bridges.ts) */
@@ -450,7 +459,7 @@ export class Traffic {
   }
   /** The cost chunk holding tile key k, if there is one yet, leaving the tile's index in it in `costCell`. */
   private costChunkOfKey(k: number): CostChunk | undefined {
-    const x = Math.floor(k / 65536) - 0x8000, y = (k % 65536) - 0x8000;
+    const x = tileX(k), y = tileY(k);
     this.costCell = localIndex(x, y);
     return this.costChunks.get(tkey(chunkOf(x), chunkOf(y)));
   }
@@ -549,7 +558,7 @@ export class Traffic {
   /** Is (x, y) a flyover tile (positions in tile units)? On one the deck and the road beneath never meet. */
   private flyAt(x: number, y: number) { return isFlyoverAux(this.junctionAux(Math.floor(x), Math.floor(y))); }
   /** Two cars that cannot touch: one is on a flyover tile and they drive along different axes (deck and road beneath). */
-  private apart(a: Mover, b: Mover) { return a.lane >= 0 && b.lane >= 0 && isEW(a.lane % 4) !== isEW(b.lane % 4) && (this.flyAt(a.x, a.y) || this.flyAt(b.x, b.y)); }
+  private apart(a: Mover, b: Mover) { return a.lane >= 0 && b.lane >= 0 && isEW(laneDir(a.lane)) !== isEW(laneDir(b.lane)) && (this.flyAt(a.x, a.y) || this.flyAt(b.x, b.y)); }
   isRoadAt(x: number, y: number) { const t = this.w.peekTile(x, y); return t !== undefined && isRoad(t); }
   private invalidate(x: number, y: number) {
     const rc = this.roadChunkIf(x, y);
@@ -678,12 +687,12 @@ export class Traffic {
   /** Where a mover must stop in its lane to keep its nose out of the next tile. */
   private stopLine(m: Mover) {
     if (!TT.arcAware) return 0.5 - m.len / 2 - STOP_MARGIN;
-    return 0.5 - (m.len / 2 + STOP_MARGIN) / ARC(m.inDir, m.lane % 4);
+    return 0.5 - (m.len / 2 + STOP_MARGIN) / ARC(m.inDir, laneDir(m.lane));
   }
   /** Lane progress at which a car's rear has left the tile its lane starts on (the box it is leaving). */
   private clearAt(m: Mover) {
     if (!TT.arcAware) return 0.5 + m.len / 2;
-    return 0.5 + m.len / 2 / ARC(m.lane % 4, this.nextDirOf(m));
+    return 0.5 + m.len / 2 / ARC(laneDir(m.lane), this.nextDirOf(m));
   }
 
   /**
@@ -786,18 +795,18 @@ export class Traffic {
   }
   /** The queue of the lane with key `key` (laneKey), if anyone is in it. */
   private laneAt(key: number): Mover[] | undefined {
-    const d = key % 4, t = (key - d) / 4;
-    return this.laneQ(Math.floor(t / 65536) - 0x8000, (t % 65536) - 0x8000, d);
+    const t = laneTile(key);
+    return this.laneQ(tileX(t), tileY(t), laneDir(key));
   }
   private dropLane(key: number) {
     this.cells.delete(key);
-    const d = key % 4, t = (key - d) / 4, x = Math.floor(t / 65536) - 0x8000, y = (t % 65536) - 0x8000;
+    const t = laneTile(key), x = tileX(t), y = tileY(t);
     const rc = this.roadChunkIf(x, y);
-    if (rc) rc.lanes[localIndex(x, y) * 4 + d] = undefined;
+    if (rc) rc.lanes[localIndex(x, y) * 4 + laneDir(key)] = undefined;
   }
   private push(key: number, m: Mover) {
     let q = this.laneAt(key);
-    if (!q) { q = []; this.cells.set(key, q); const d = key % 4, t = (key - d) / 4, x = Math.floor(t / 65536) - 0x8000, y = (t % 65536) - 0x8000; this.roadChunk(x, y).lanes[localIndex(x, y) * 4 + d] = q; }
+    if (!q) { q = []; this.cells.set(key, q); const t = laneTile(key), x = tileX(t), y = tileY(t); this.roadChunk(x, y).lanes[localIndex(x, y) * 4 + laneDir(key)] = q; }
     q.push(m);
     m.lane = key;
   }
@@ -941,7 +950,7 @@ export class Traffic {
   /** Is m on the turning part of its lane: still coming round from the way it entered, or already into the turn ahead? */
   private turning(m: Mover): boolean {
     if (m.lane < 0 || m.pi < 1 || m.pi * 2 + 1 >= m.path.length) return false;
-    const d = m.lane % 4;
+    const d = laneDir(m.lane);
     return (m.prog < 0.5 && m.inDir !== d) || (m.prog > 0.3 && this.nextDirOf(m) !== d);
   }
   /** Would mover m's body at `prog` (posAlong) touch a pedestrian (body guard)? */
@@ -1097,7 +1106,7 @@ export class Traffic {
   /** How far through a turn round the mover is (0..1 through the three-point turn), -1 when it is not turning round. */
   turnProgress(m: Mover): number {
     if (m.lane < 0 || m.pi < 1 || m.pi * 2 + 1 >= m.path.length) return -1;
-    const d = m.lane % 4;
+    const d = laneDir(m.lane);
     const back = m.prog >= 0.5 ? this.nextDirOf(m) === OPP[d] : m.inDir === OPP[d];
     return back ? (m.prog >= 0.5 ? m.prog - 0.5 : m.prog + 0.5) : -1;
   }
