@@ -1,5 +1,6 @@
 import type { Op, Color, Win } from './schema';
 import { repeat } from './helpers';
+import { adBoard } from './tierkit';
 
 /**
  * Recipe parts for the merged zone kinds (residential-merged.ts and the other three). Like tierkit.ts each part returns
@@ -128,3 +129,5 @@ export const spire = (x: number, y: number, z: number, h: number, r = 0.03, colo
 export const ground = (w: number, h: number, color: Color, x = 0, z = 0, t = 0.02): Op => ['box', w - 0.04, t, h - 0.04, x, 0, z, color];
 /** 0..n-1, for building parts with flatMap. */
 export const range = (n: number): number[] => Array.from({ length: n }, (_, i) => i);
+/** A roadside 48-sheet billboard on tall legs (docs/adverts.md section 2), its board named `name`: over a car park's hedge or a forecourt. */
+export const billboard = (x: number, z: number, legs = 0.2, name = 'billboard'): Op[] => adBoard(name, x, z, 'billboard', legs);

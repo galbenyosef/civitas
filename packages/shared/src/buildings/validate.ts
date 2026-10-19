@@ -77,6 +77,7 @@ export function checkOp(op: Op, where: string): string[] {
       if (/olor$/.test(n)) { if (!isColor(a)) errs.push(`${where}: ${name} ${n} ${JSON.stringify(a)} is not a palette name or 0xRRGGBB`); }
       else if (n === 'part' || n === 'roofPart') { if (!(typeof a === 'string' || (Number.isInteger(a) && (a as number) >= 0))) errs.push(`${where}: ${name} ${n} must be a part name or an op index`); }
       else if (n === 'face') { if (!FACES.includes(a as never)) errs.push(`${where}: ${name} face ${JSON.stringify(a)} is not one of ${FACES.join(', ')}`); }
+      else if (n === 'size' || n === 'at') return; // ad slots: checked with the design (facade.ts adslotErrors)
       else if (!Number.isInteger(a)) errs.push(`${where}: ${name} ${n} must be an integer`);
     });
     return errs;

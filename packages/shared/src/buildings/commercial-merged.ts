@@ -4,7 +4,7 @@ import { repeat } from './helpers';
 import { commercial } from './commercial';
 import { flags, signBoard } from './tierkit';
 import { range } from "./zonekit";
-import { block, bands, fins, awning, shopfront, stepped, carPark, tree, treeRow, ground, spire, roofPlant } from './zonekit';
+import { block, bands, fins, awning, shopfront, stepped, carPark, tree, treeRow, ground, spire, roofPlant , billboard } from './zonekit';
 
 /**
  * Merged commercial lots (zones.ts, docs/buildings.md "Merged lots"): a high-street parade, a department store, a
@@ -144,6 +144,7 @@ const retailPark = (): Op[] => {
     ...carPark(0, 0.55, 2.8, 1.6, 6),
     ...treeRow(-1.3, 1.3, 1.38, 6, 0.55),
     ...signBoard(1.25, -0.25, 0.4, 'navy', 'white', 0, 0.4),
+    ...billboard(0, 1.44), // over the hedge at the car park entrance (docs/adverts.md)
   ];
 };
 const deckMall = (): Op[] => [

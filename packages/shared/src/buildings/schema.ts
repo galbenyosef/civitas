@@ -1,4 +1,5 @@
 import type { PaletteName, WindowClass } from './palette';
+import type { AdSize } from './adslot';
 
 // ---------------------------------------------------------------- recipes
 
@@ -60,7 +61,13 @@ export type Op =
   /** dormer roofPart n [body='white']: n dormers along the roof's front slope (right slope for a ridge along z) */
   | ['dormer', PartRef, number, Color?]
   /** cornice part storey [colour='stone']: a band round the box on that storey's floor line (storey = storeys: on top) */
-  | ['cornice', PartRef, number, Color?];
+  | ['cornice', PartRef, number, Color?]
+  /**
+   * adslot part face bay storey size [at]: an ad slot (docs/adverts.md section 2, buildings/adslot.ts), an empty frame the
+   * game can rent out. On a facade box by cell; on a plain box bay and storey are 0 and it is centred, or placed `at`
+   * [along, up] (fractions of the wall). Never on the back wall, never over a window.
+   */
+  | ['adslot', PartRef, FaceName, number, number, AdSize, [number, number]?];
 
 export interface TaperOpts { win?: Win; shift?: [number, number] }
 export interface LatheOpts { seg?: number; twist?: number; stripe?: Color; every?: number; width?: number; axis?: 'y' | 'x' | 'z'; win?: Win }

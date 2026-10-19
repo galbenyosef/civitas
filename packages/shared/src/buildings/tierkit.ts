@@ -1,5 +1,6 @@
 import type { Op, Color, Win } from './schema';
 import { repeat } from './helpers';
+import { AD_SIZE, type AdSize } from './adslot';
 
 /**
  * Recipe parts shared by the size-tier kinds (civic-tiers.ts, parking.ts, leisure-tiers.ts). Each returns plain ops in
@@ -105,3 +106,16 @@ export const block = (w: number, h: number, d: number, x: number, z: number, bod
 export const plant = (x: number, y: number, z: number, n = 2): Op[] => repeat(n, (i) => ['box', 0.08, 0.06, 0.08, x + i * 0.11, y, z, 'plant']);
 /** A row of flags on poles along x. */
 export const flags = (x0: number, z: number, n: number, dx: number, colors: Color[], y = 0): Op[] => repeat(n, (i) => ['flag', x0 + i * dx, y, z, colors[i % colors.length]]);
+/**
+ * A free-standing advertising board on two posts, facing the road (docs/adverts.md section 2): a dark backing board named
+ * `name` (unique in the design) with an ad slot of `size` on its front, its foot `legs` above y. A banner by a stadium gate,
+ * a poster case by a car park.
+ */
+export const adBoard = (name: string, x: number, z: number, size: AdSize, legs = 0.04, y = 0): Op[] => {
+  const d = AD_SIZE[size], bw = d.w + 2 * d.border + 0.02, bh = d.h + 2 * d.border + 0.02;
+  return [
+    ...[-1, 1].map((k): Op => ['box', 0.016, legs + bh * 0.7, 0.016, x + k * bw * 0.32, y, z - 0.016, 'charcoal']),
+    ['box', bw, bh, 0.016, x, y + legs, z, 0x24382c, undefined, { name }],
+    ['adslot', name, 'front', 0, 0, size],
+  ];
+};

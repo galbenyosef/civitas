@@ -1,5 +1,6 @@
 import type { Color, CompiledFacade, CompiledOp, FacadeSpec, FaceName, Op, PartRef } from './schema';
 import { PALETTE, WINDOW_CLASSES, type WindowClass } from './palette';
+import { adFrame, fitPoster, isAdSize, AD_SIZES, type AdSize } from './adslot';
 
 /**
  * Facades: windows laid out per wall, and features placed by cell (docs/buildings.md "Facades").
@@ -31,6 +32,8 @@ export const FEATURES: Record<string, { args: string[]; min: number }> = {
   garage: { args: ['part', 'face', 'bay'], min: 3 },
   dormer: { args: ['roofPart', 'n', 'color'], min: 2 },
   cornice: { args: ['part', 'storey', 'color'], min: 2 },
+  // an ad slot (docs/adverts.md section 2, buildings/adslot.ts): a frame by cell on a facade box, or centred (or `at`) on a plain box's wall
+  adslot: { args: ['part', 'face', 'bay', 'storey', 'size', 'at'], min: 5 },
 };
 export const isFeature = (name: unknown): boolean => typeof name === 'string' && name in FEATURES;
 
@@ -331,7 +334,7 @@ const faceIndex = (f: unknown) => FACES.indexOf(f as FaceName);
 const FREE_ABOVE: Record<number, number> = { 1: 0.2, 2: 0.2, 3: 0.2, 4: 0.04, 5: 0.5, 6: 0.012 };
 
 /** Expand one feature op into primitive compiled ops; cell overrides go onto the target's facade. */
-export function featureOps(op: Op, t: FeatureTarget, featureColour: (c: Color | undefined, dflt: Color) => number): CompiledOp[] {
+export function featureOps(op: Op, t: FeatureTarget, featureColour: (c: Color | undefined, dflt: Color) => number, ads?: number[]): CompiledOp[] {
   const a = op as unknown as unknown[];
   const name = a[0] as string;
   const out: CompiledOp[] = [];
@@ -369,6 +372,23 @@ export function featureOps(op: Op, t: FeatureTarget, featureColour: (c: Color | 
       }
     }
     return out;
+  }
+
+  if (name === 'adslot') {
+    // by cell on a facade box (centred in the bay, in the storey or from its floor when taller), centred on a blank wall,
+    // or at `at` (fractions along the wall from its left and up it) on any box
+    const face = faceIndex(a[2]), size = a[5] as AdSize, at = a[6] as [number, number] | undefined;
+    const fr = faceFrame(t.box, face);
+    const [pw, ph] = fitPoster(size, fr.width, fr.y1 - fr.y0);
+    let s = fr.width / 2, yc = (fr.y0 + fr.y1) / 2;
+    if (t.facade) {
+      const g = facadeGrid(t.box, t.facade, face);
+      if (g.bays) s = g.m + ((a[3] as number) + 0.5) * g.bw;
+      const fl = fr.y0 + (a[4] as number) * g.sh;
+      yc = ph + 0.02 <= g.sh ? fl + g.sh / 2 : fl + 0.02 + ph / 2;
+    }
+    if (at) { s = at[0] * fr.width; yc = fr.y0 + at[1] * (fr.y1 - fr.y0); }
+    return adFrame(fr, s, yc, size, pw, ph, ads);
   }
 
   const f = t.facade!;
@@ -494,6 +514,7 @@ export function facadeErrors(ops: Op[], where: string, windows: WindowClass | un
       return;
     }
     const spec = target[0] === 'box' && target[9] && typeof target[9] === 'object' ? (target[9] as { facade?: FacadeSpec }).facade : undefined;
+    if (name === 'adslot') { errs.push(...adslotErrors(a, target, spec, w)); return; }
     if (!spec) { errs.push(`${w}: op ${ti} has no facade; give that box { facade: { storeys, bays } } so ${name} can place by cell`); return; }
     if (facadeSpecErrors(spec, (target as number[])[1] as never, (target as number[])[2] as never, (target as number[])[3] as never, w).length) return;
     const tb = target as unknown as number[];
@@ -515,6 +536,26 @@ export function facadeErrors(ops: Op[], where: string, windows: WindowClass | un
     else if (name === 'porch' || name === 'awning') { bay(a[3], 'fromBay'); bay(a[4], 'toBay'); if ((a[3] as number) > (a[4] as number)) errs.push(`${w}: fromBay after toBay`); }
     else if (name === 'garage') bay(a[3], 'bay');
   });
+  return errs;
+}
+
+/** An ad slot's own rules (docs/adverts.md section 2): on a box, never on the back wall (it must face a road side), a known size, and on a facade box a bay and storey in range. Frames covering windows are found after compiling (adslot.ts adFrameCollisions). */
+function adslotErrors(a: unknown[], target: Op, spec: FacadeSpec | undefined, w: string): string[] {
+  const errs: string[] = [];
+  if (target[0] !== 'box') return [`${w}: an ad slot goes on a box's wall; op is a ${target[0]}`];
+  const face = faceIndex(a[2]);
+  if (face < 0) return [`${w}: face must be one of ${FACES.join(', ')}`];
+  if (face === 2) errs.push(`${w}: an ad slot must face a road side (front, left or right), not the back`);
+  if (!isAdSize(a[5])) errs.push(`${w}: size ${JSON.stringify(a[5])} is not one of ${AD_SIZES.join(', ')}`);
+  const at = a[6];
+  if (at !== undefined && !(Array.isArray(at) && at.length === 2 && at.every((v) => typeof v === 'number' && v >= 0 && v <= 1))) errs.push(`${w}: at must be [along, up], fractions 0-1 of the wall`);
+  const intIn = (v: unknown, lo: number, hi: number) => Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi;
+  if (spec) {
+    const tb = target as unknown as number[];
+    const bays = face % 2 === 0 ? spec.bays : spec.sideBays ?? Math.max(1, Math.round((spec.bays * tb[3]) / tb[1]));
+    if (bays && !intIn(a[3], 0, bays - 1)) errs.push(`${w}: bay ${JSON.stringify(a[3])} outside 0-${bays - 1} on the ${a[2]} wall`);
+    if (!intIn(a[4], 0, spec.storeys - 1)) errs.push(`${w}: storey ${JSON.stringify(a[4])} outside 0-${spec.storeys - 1}`);
+  } else if (a[3] !== 0 || a[4] !== 0) errs.push(`${w}: on a box without a facade bay and storey are 0 (centre it, or place it with at)`);
   return errs;
 }
 

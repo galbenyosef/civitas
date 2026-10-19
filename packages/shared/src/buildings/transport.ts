@@ -98,6 +98,7 @@ export const busStop: KindDef = {
       ['cyl', 0.014, 0.014, 0.46, 0.36, 0.02, 0.4, 'steel', 6],           // flag post at the kerb
       ['box', 0.12, 0.12, 0.02, 0.36, 0.36, 0.41, 'yellow'], ['box', 0.07, 0.035, 0.022, 0.36, 0.41, 0.41, 'charcoal'],
       ['box', 0.1, 0.1, 0.1, -0.42, 0.02, 0.38, 'hedge'],                 // a planter
+      ['adslot', 4, 'right', 0, 0, 'panel'],                               // the advertising panel in the end pane (docs/adverts.md)
     ] }],
   }],
 };

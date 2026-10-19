@@ -1,7 +1,7 @@
 import type { KindDef, Op, Color } from './schema';
 import { repeat } from './helpers';
 import { cinema, theatre, sports, library } from './leisure';
-import { slab, carRow, bayLines, tree, pine, treeLine, flags, fence, lampPost, ASPHALT, PAVING } from './tierkit';
+import { slab, carRow, bayLines, tree, pine, treeLine, flags, fence, lampPost, adBoard, ASPHALT, PAVING } from './tierkit';
 
 /**
  * Size ladders for leisure (groups.ts): parks, cinemas, theatres, sport, libraries and museums. Each rung is a
@@ -362,6 +362,7 @@ export const stadium: KindDef = {
         ...standX(1.6, -1.25, -0.2, 4, -1, 'boxBlue'), ...standX(1.6, 1.25, -0.2, 4, 1, 'boxBlue'),
         ...floodlight(-1.8, -1.8, 1.9), ...floodlight(1.8, -1.8, 1.9), ...floodlight(-1.8, 1.4, 1.9), ...floodlight(1.8, 1.4, 1.9),
         ...flags(-1.0, 1.75, 6, 0.4, ['boxBlue', 'white'], 0.02), ['box', 0.6, 0.12, 0.04, 0.5, 0.36, 1.62, 'marquee', 'venue'],
+        ...adBoard('bannerW', -1.48, 1.78, 'banner', 0.08), ...adBoard('bannerE', 1.48, 1.78, 'banner', 0.08), // banners by the gates (docs/adverts.md)
       ] },
       { name: 'bowl stadium with a running track and a cantilevered roof ring', height: 1.42, ops: [
         slab(4, 4, PAVING),

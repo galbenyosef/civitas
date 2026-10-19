@@ -43,7 +43,10 @@ export const HELPER_MODELS: HelperModel[] = [
   {
     key: 'site', height: 0.2, ops: [
       ...([[-0.44, -0.44], [0.44, -0.44], [0.44, 0.44], [-0.44, 0.44]] as const).map(([x, z]): Op => ['box', 0.04, 0.2, 0.04, x, 0, z, 'grey']),
-      ['box', 0.9, 0.03, 0.02, 0, 0.14, -0.44, 'yellow'], ['box', 0.9, 0.03, 0.02, 0, 0.14, 0.44, 'yellow'],
+      ['box', 0.9, 0.03, 0.02, 0, 0.14, -0.44, 'yellow'],
+      // the front is a plywood hoarding with an ad slot (docs/adverts.md section 2); the renderer turns the site to face the road
+      ['box', 0.84, 0.17, 0.016, 0, 0.005, 0.442, 0xcbb994, undefined, { name: 'hoarding' }],
+      ['adslot', 'hoarding', 'front', 0, 0, 'hoarding'],
       ['box', 0.02, 0.03, 0.9, -0.44, 0.14, 0, 'yellow'], ['box', 0.02, 0.03, 0.9, 0.44, 0.14, 0, 'yellow'],
       ['cone', 0.12, 0.1, -0.28, 0, 0.28, 'sand', 7],
     ],
