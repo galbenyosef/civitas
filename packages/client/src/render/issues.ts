@@ -178,7 +178,7 @@ export class IssuesView {
     this.mesh.renderOrder = 12;
     this.group.add(this.mesh);
     // "show me": a ring pulsing on the tile
-    this.ring = new Mesh(new RingGeometry(0.62, 0.8, 40).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: 0xffd479, transparent: true, depthWrite: false, side: DoubleSide }));
+    this.ring = new Mesh(new RingGeometry(0.62, 1.08, 48).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: 0xffb020, transparent: true, depthWrite: false, depthTest: false, side: DoubleSide, toneMapped: false }));
     this.ring.visible = false; this.ring.renderOrder = 11;
     this.group.add(this.ring);
   }
@@ -196,7 +196,7 @@ export class IssuesView {
     if (this.ring.visible) {
       const f = (now - this.ringAt) / 1000;
       if (now > this.ringUntil) this.ring.visible = false;
-      else { const s = this.ringSize * (1 + 0.25 * Math.sin(f * 6)); this.ring.scale.set(s, 1, s); (this.ring.material as MeshBasicMaterial).opacity = 0.55 + 0.4 * Math.sin(f * 6); }
+      else { const s = this.ringSize * (1 + 0.25 * Math.sin(f * 6)); this.ring.scale.set(s, 1, s); (this.ring.material as MeshBasicMaterial).opacity = 0.8 + 0.2 * Math.sin(f * 6); }
     }
   }
 

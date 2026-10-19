@@ -1374,11 +1374,11 @@ export class Simulation {
     const sp = leisureAt(b.id, b.level, b.x, b.y);
     return sp ? sp.capacity : venueCapacityOf(b.id, b.level);
   }
-  /** Count an arrival: per leisure place for the day (parks grow with use) and by type and hour for probes. */
-  private noteVisit(key: string, type: string, leisure: boolean, stage: number) {
+  /** Count an arrival: per place for the day (parks grow with use) and by type and hour for probes. */
+  private noteVisit(key: string, type: string, stage: number) {
     (this.leisureStats[type] ??= new Array(24).fill(0))[Math.floor(this.hour) % 24]++;
     (this.leisureByStage[type] ??= [0, 0, 0])[stage]++;
-    void leisure; // cafés and bars are counted per place too: the issue bubbles' "no customers" reads them (sim/issues.ts)
+    // per place for leisure places and cafés and bars alike: the issue bubbles' "no customers" reads them (sim/issues.ts)
     const v = this.venueVisits.get(key);
     if (!v) { this.venueVisits.set(key, { day: this.today, today: 1, yesterday: 0 }); return; }
     if (v.day !== this.today) { v.yesterday = v.day === this.today - 1 ? v.today : 0; v.today = 0; v.day = this.today; }
@@ -1441,7 +1441,7 @@ export class Simulation {
     const payer = c.stage === LifeStage.Child ? (this.householdPayer(c) ?? c) : c;
     if (spend > 0) { payer.money -= spend; noteSpend(payer, spend, w.tick); }
     noteLeisureVisit(c, spec ? spec.value : LEISURE.barValue);
-    this.noteVisit(c.venue!, spec ? spec.type : 'bar', !!spec, c.stage);
+    this.noteVisit(c.venue!, spec ? spec.type : 'bar', c.stage);
     this.meetGuests(c, c.venue!);
     const parcel = w.parcelAt(b.x, b.y);
     if (parcel && spend > 0) {

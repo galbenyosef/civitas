@@ -281,6 +281,7 @@ export class Issues {
   private parkingFull(b: Building, st: TileState, key: string, now: number): boolean {
     const w = this.w, out = this.sim.kerbOut;
     const n = out.get(key) ?? 0;
+    if (!n && st.park === 0) { st.parkAt = now; return false; } // the common case: nobody sent to the kerb
     if (n) out.delete(key);
     st.park = st.park * Math.pow(0.5, (now - st.parkAt) / (IT.parkingHalfLifeHours * TPH)) + n;
     st.parkAt = now;
