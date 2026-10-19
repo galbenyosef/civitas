@@ -2480,7 +2480,7 @@ export class Simulation {
     let late = false;
     if (force) { if (w.tick - m.rerouted < 10) return; }
     else {
-      if (this.routeBudget <= 0 || (w.tick + m.id * 7) % REROUTE_EVERY !== 0 || w.tick - m.rerouted < 50) return;
+      if (this.routeBudget <= 0 || (w.tick + m.id * 7) % REROUTE_EVERY !== 0 || w.tick - m.rerouted < TT.rerouteCooldown) return;
       // held up (at a standstill for a while), or running late on the whole leg even if it is creeping along
       late = !!TT.delayReroute && this.runningLate(m, leg);
       if (m.wait < 10 && !late) return;
@@ -2499,10 +2499,14 @@ export class Simulation {
     const cost = force
       ? (x: number, y: number) => ((x === cx && y === cy && m.pi + 1 < n - 1) || (x === ax && y === ay) ? AVOID : this.traffic.cost(x, y))
       : (x: number, y: number) => (x === ax && y === ay ? AVOID : this.traffic.cost(x, y));
+    const gain = late ? TT.delayGain : 0.85;
+    // with rerouteBound the search stops once nothing it could still find would be taken (the margin keeps rounding from
+    // ever stopping it short of one that would)
+    const bound = !TT.rerouteBound ? Infinity : force ? AVOID : Math.min(AVOID, this.traffic.pathCost(m.path, m.pi + 1) * gain);
     // a driver running late searches wider: the way round a jam is often a long way round
-    const alt = findRoute(w, bx, by, gx, gy, cost, 0.4, late ? TT.delayNodes : 4000, dirBetween(ax, ay, bx, by)); // heading into B already (no turning on a flyover)
+    const alt = findRoute(w, bx, by, gx, gy, cost, 0.4, late ? TT.delayNodes : TT.rerouteNodes, dirBetween(ax, ay, bx, by), bound * (1 + 1e-9)); // heading into B already (no turning on a flyover)
     if (!alt || alt.path.length < 2 || alt.cost >= AVOID) return;
-    if (!force && alt.cost >= this.traffic.pathCost(m.path, m.pi + 1) * (late ? TT.delayGain : 0.85)) return;
+    if (!force && alt.cost >= (TT.rerouteBound ? bound : this.traffic.pathCost(m.path, m.pi + 1) * gain)) return;
     m.path = [ax, ay, ...alt.path]; m.pi = 1;
     leg.path = m.path;
     this.traffic.count(force ? 'stuckReroutes' : 'reroutes');

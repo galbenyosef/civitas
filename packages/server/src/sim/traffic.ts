@@ -346,7 +346,8 @@ export class Traffic {
       const st = this.stopped.get(k) ?? 0;
       const target = Math.min(1, (n * 0.25 + st * 0.75) / (2 * TT.laneCap));
       const c = this.cong.get(k);
-      const prev = c ? c.v * Math.exp(-(tick - c.at) / DECAY_TAU) : 0;
+      let prev = c ? c.v * Math.exp(-(tick - c.at) / DECAY_TAU) : 0;
+      if (TT.congPureReads && prev < 0.004) prev = 0; // as if congestionAt had dropped it
       const v = prev + (target - prev) * EMA_ALPHA;
       if (c) { c.v = v; c.at = tick; } else this.cong.set(k, { v, at: tick });
       this.dirty.add(k);
@@ -363,7 +364,7 @@ export class Traffic {
     const c = this.cong.get(tkey(x, y));
     if (!c) return 0;
     const v = c.v * Math.exp(-(this.w.tick - c.at) / DECAY_TAU);
-    if (v < 0.004) { this.cong.delete(tkey(x, y)); this.dirty.add(tkey(x, y)); return 0; }
+    if (v < 0.004) { if (!TT.congPureReads) { this.cong.delete(tkey(x, y)); this.dirty.add(tkey(x, y)); } return 0; }
     return v;
   }
   cost(x: number, y: number): number {

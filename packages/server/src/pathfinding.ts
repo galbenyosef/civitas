@@ -181,11 +181,12 @@ export function pathStillValid(w: World, path: number[]): boolean {
  * flat path and its total cost, or null. Round a roundabout only forwards and over
  * a flyover only straight on (shared/src/junctions.ts): a flyover's deck and the
  * road beneath are separate nodes. `startDir` (a DIRS index) is the way a driver
- * re-routing from the road tile ahead is already heading into it, -1 when unknown.
+ * re-routing from the road tile ahead is already heading into it, -1 when unknown. With `maxCost` the search gives up
+ * (null) once every route it could still find would cost at least that much.
  */
 export function findRoute(
   w: World, sx: number, sy: number, gx: number, gy: number,
-  cost: (x: number, y: number) => number, turnCost = 0.4, maxNodes = 4000, startDir = -1,
+  cost: (x: number, y: number) => number, turnCost = 0.4, maxNodes = 4000, startDir = -1, maxCost = Infinity,
 ): { path: number[]; cost: number } | null {
   if (sx === gx && sy === gy) return { path: [sx, sy], cost: 0 };
   for (const [dx, dy] of DIRS) if (sx + dx === gx && sy + dy === gy) return { path: [sx, sy, gx, gy], cost: 1 };
@@ -240,6 +241,8 @@ export function findRoute(
   const auxFn = (x: number, y: number) => w.auxAt(x, y);
   let expanded = 0;
   while (hn && expanded < maxNodes) {
+    // f never falls from one node taken to the next, and a route found from a node costs at least its f
+    if (heapF[0] >= maxCost) break;
     const k = pop();
     if (closed[k] === st) continue;
     closed[k] = st; expanded++;
