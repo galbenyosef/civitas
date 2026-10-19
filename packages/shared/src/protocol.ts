@@ -597,7 +597,7 @@ export type ServerMsg =
   // ---- issue bubbles and overlays (shared/src/issues.ts, server/src/sim/issues.ts) ----
   /** per chunk: base64 Uint8Array(CHUNK_SIZE^2) of issue codes (Issue, at a building's door tile); '' when the chunk has none. On subscribe and when the chunk's codes change */
   | { t: 'issues'; cx: number; cy: number; d: string }
-  /** your own parcels' problems, flat triples x, y, code: on hello, then when they change (at most every ISSUE_TUNING.evalHours) */
+  /** your own parcels' problems, flat triples x, y, code: on hello, then when they change (at most every ISSUE_TUNING.problemsHours) */
   | { t: 'problems'; p: number[] }
   /** per chunk: the overlay you asked for, base64 Uint8Array(CHUNK_SIZE^2) (overlayByte; 0 no data), sent when it changes */
   | { t: 'overlay'; ch: number; cx: number; cy: number; d: string };

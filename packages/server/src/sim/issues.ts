@@ -8,8 +8,9 @@ import { tkey, untkey } from '../world';
 import type { Simulation } from './simulation';
 
 const TPH = TICKS_PER_HOUR, DAY = TICKS_PER_DAY;
-/** how far round a flagged building a road edit counts as working on the way there (tiles, a square) */
-const REACH_R = 10;
+/** road tiles counted out from a flagged building's door: a building on the network reads the cap whatever is edited elsewhere */
+const REACH_CAP = 300;
+const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
 
 /** What one building or lot remembers between looks. Everything is recomputed after a restart (nothing is saved). */
 interface TileState {
@@ -19,7 +20,7 @@ interface TileState {
   work: number; idle: number;
   /** unstaffed: the tick staffing first fell short (later than now during a new crew's grace), or -1; staff employed when it was flagged */
   low: number; hired: number;
-  /** unstaffed or no customers: road tiles round it when it was flagged (a change means the player worked on the way there), or -1 */
+  /** unstaffed or no customers: road tiles joined to its door (up to REACH_CAP) when it was flagged, or -1; a change means the way there changed */
   roads: number;
   /** full parking: decaying count of drivers sent to the kerb, when it was last decayed, parking in reach at the last look */
   park: number; parkAt: number; parkCap: number;
@@ -153,13 +154,6 @@ export class Issues {
       const [x, y] = untkey(k);
       if (!w.buildings.has(tileKey(x, y))) { this.state.delete(k); this.set(x, y, 0); }
     }
-    for (const [key, m] of this.chunks) {
-      const [cx, cy] = key.split(',').map(Number);
-      for (const [i] of m) {
-        const x = cx * CHUNK_SIZE + (i % CHUNK_SIZE), y = cy * CHUNK_SIZE + Math.floor(i / CHUNK_SIZE);
-        if (!w.buildings.has(tileKey(x, y))) this.set(x, y, 0);
-      }
-    }
   }
 
   // ---- one building's look ----------------------------------------------------------------
@@ -170,22 +164,24 @@ export class Issues {
     if (!st) this.state.set(k, st = { since: -1, work: Infinity, idle: 0, low: -1, hired: 0, roads: -1, park: 0, parkAt: now, parkCap: -1, code: 0 });
     const site = w.sites.get(key);
     const uc = !!site || underConstruction(w.getTile(b.x, b.y));
-    const standing = b.level > 0 && !uc;
+    const standing = b.level > 0; // an upgrade being built still stands and works at its level
     if (!standing) st.since = -1; else if (st.since < 0) st.since = now;
     let code = 0;
     // 1 no road: a building or site with no road at its door, or an empty lot that no road and no frontage neighbour reaches
     if (!w.hasRoadAccess(b.x, b.y) && !this.blockOnly(b) && (b.level > 0 || uc || !this.frontageNear(b))) code = Issue.NoRoad;
-    // 2 no builders: nobody worked the site for an hour of builder time
-    if (site) {
+    // 2 no builders: nobody worked the site of a new building for an hour of builder time (a waiting upgrade is not stuck)
+    if (site && b.level === 0) {
       if (site.assigned > 0 || site.work < st.work || site.priority <= -2) st.idle = 0;
       else if (this.busy) st.idle += this.period;
       st.work = site.work;
       if (!code && st.idle >= IT.noBuildersHours * TPH && site.priority > -2) code = Issue.NoBuilders;
     } else { st.idle = 0; st.work = Infinity; }
     if (standing) {
+      // precedence: what stops it working first (nobody comes at all says more than where they park)
       if (!code && this.unstaffed(b, st, now)) code = Issue.Unstaffed;
-      if (this.parkingFull(b, st, key, now) && !code) code = Issue.ParkingFull;
+      const full = this.parkingFull(b, st, key, now); // always: it drains and decays the count
       if (!code && this.noCustomers(b, st, key, now)) code = Issue.NoCustomers;
+      if (!code && full) code = Issue.ParkingFull;
       if (!code && b.zone === Zone.Residential && this.unhappy(k, st)) code = Issue.Unhappy;
     } else st.low = -1;
     st.code = code;
@@ -228,7 +224,7 @@ export class Issues {
     const cap = capacityOf(b.id, b.level);
     if (cap <= 0) return false;
     const flagged = st.code === Issue.Unstaffed;
-    // what fixes it is hiring or a way there: new hires filling the share, or the roads round it changed; then the crew
+    // what fixes it is hiring or a way there: new hires filling the share, or the road joined to its door changed; then the crew
     // gets a grace to turn up for a shift before it can show again
     if (flagged) {
       st.hired = Math.min(st.hired, b.occupants);
@@ -244,15 +240,20 @@ export class Issues {
     return true;
   }
 
-  /** Road tiles within REACH_R of a building: a cheap sign that the way there changed (only counted for flagged buildings). */
+  /**
+   * Road tiles joined to a building's door, counted out to REACH_CAP (only for flagged buildings, a few hundred tile reads):
+   * cut off, it is the size of its scrap of road; joined up, the cap. A change means the way there changed.
+   */
   private roadsNear(b: Building) {
-    const w = this.w;
-    let n = 0;
-    for (let y = b.y - REACH_R; y <= b.y + REACH_R; y++) for (let x = b.x - REACH_R; x <= b.x + REACH_R; x++) {
-      const t = w.peekTile(x, y);
-      if (t !== undefined && isRoad(t)) n++;
-    }
-    return n;
+    const w = this.w, seen = new Set<number>(), queue: number[] = [];
+    const push = (x: number, y: number) => {
+      const k = tkey(x, y), t = w.peekTile(x, y);
+      if (seen.has(k) || t === undefined || !isRoad(t)) return;
+      seen.add(k); queue.push(x, y);
+    };
+    for (const [dx, dy] of DIRS4) push(b.x + dx, b.y + dy);
+    for (let i = 0; i < queue.length && seen.size < REACH_CAP; i += 2) for (const [dx, dy] of DIRS4) push(queue[i] + dx, queue[i + 1] + dy);
+    return Math.min(seen.size, REACH_CAP);
   }
   private roadsChanged(b: Building, st: TileState) { return st.roads >= 0 && this.roadsNear(b) !== st.roads; }
 
@@ -298,7 +299,7 @@ export class Issues {
     const shop = b.zone === Zone.Commercial && venueCapacityOf(b.id, b.level) > 0;
     if (!shop && !(sp && sp.staffed && !sp.blockOnly)) return false;
     const flagged = st.code === Issue.NoCustomers;
-    // roads changed round it since it was flagged: the player did something about the way there; give it a fresh day
+    // the road joined to its door changed since it was flagged: the player worked on the way there; give it a fresh day
     if (flagged && this.roadsChanged(b, st)) { st.since = now; st.roads = -1; return false; }
     const yesterday = Math.floor(now / DAY) * DAY - IT.noCustomersDays * DAY;
     if (st.since < 0 || st.since > yesterday) return false;

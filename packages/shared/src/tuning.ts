@@ -221,10 +221,12 @@ export const spendableMoney = (money: number, unlimited?: boolean) => (unlimited
 export const ISSUE_TUNING = {
   /**
    * Every building and zoned lot is looked at once per this many game hours, a slice of them each tick (by a hash of
-   * the tile), so the cost is spread. Half an hour: an icon follows its condition within the hour even when the
-   * problems message (sent at most this often) has just gone.
+   * the tile), so the cost is spread; the census of residents and staff it reads is taken at the start of each round.
+   * A change is seen within two rounds and the problems list goes out at most every problemsHours, so a badge follows
+   * its condition within the game hour.
    */
-  evalHours: 0.5,
+  evalHours: 0.25,
+  problemsHours: 0.5,
   /** no builders: a site no builder has come to while builders were at work somewhere, for this long (sites wait out the night) */
   noBuildersHours: 1,
   /** unstaffed: staff on shift or on the way under this share of what the roster expects at the hour ... */

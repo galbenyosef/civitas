@@ -1151,7 +1151,7 @@ export class Net {
     c.ovlSent = new Map();
     c.ovlQueue = c.ovl ? [...c.subs] : [];
   }
-  /** After every tick: changed icon planes, problem lists that changed (at most once per evalHours), overlay chunks a few at a time. */
+  /** After every tick: changed icon planes, problem lists that changed (at most once per problemsHours), overlay chunks a few at a time. */
   private flushIssues() {
     const w = this.w, is = this.issues;
     if (!is) return;
@@ -1161,7 +1161,7 @@ export class Net {
       is.dirty.clear();
       for (const c of this.clients) if (c.player && c.conn.open) for (const [key, msg] of out) if (c.subs.has(key)) c.conn.send(msg);
     }
-    const P = Math.max(1, Math.round(ISSUE_TUNING.evalHours * TICKS_PER_HOUR));
+    const P = Math.max(1, Math.round(ISSUE_TUNING.problemsHours * TICKS_PER_HOUR));
     if (is.version !== this.problemsVer && w.tick - this.problemsAt >= P) {
       this.problemsVer = is.version; this.problemsAt = w.tick;
       const by = is.byOwner();

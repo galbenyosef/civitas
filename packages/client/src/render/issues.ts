@@ -108,7 +108,7 @@ void main() {
   vec3 c = aP + vec3(0.0, bob, 0.0);
   float d = distance(cameraPosition, c);
   float pulse = flash > 0.0 ? 1.0 + 0.35 * (0.5 + 0.5 * sin(uTime * 9.0)) : 1.0;
-  float s = (0.9 + 0.22 * seed) * clamp(d / 30.0, 0.85, 2.8) * pulse;
+  float s = (1.0 + 0.22 * seed) * clamp(d / 24.0, 1.0, 3.4) * pulse;
   vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
   vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
   vec3 p = c + (right * position.x + up * (position.y + 0.5)) * s; // the point of the badge sits on the roof
@@ -249,7 +249,7 @@ export class IssuesView {
     for (let i = 0; i < this.geo.instanceCount; i++) {
       const d = camPos.distanceTo(this.v.set(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]));
       if (d > ICON_FADE_START + ICON_FADE_JITTER + ICON_FADE_LEN * 0.5) continue;
-      const s = (0.9 + 0.22 * this.data[i * 4 + 1]) * Math.min(2.8, Math.max(0.85, d / 30));
+      const s = (1.0 + 0.22 * this.data[i * 4 + 1]) * Math.min(3.4, Math.max(1.0, d / 24));
       this.v.y += s * 0.55; // the disc's middle, above the point
       this.v.project(camera);
       if (this.v.z > 1) continue;

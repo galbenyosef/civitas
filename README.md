@@ -387,14 +387,16 @@ changing behaviour in game time.
   ones. The tech chip pulses with the node's name when one becomes ready and affordable. Test cities and demos get none.
 - *Problems and overlays* (`server/src/sim/issues.ts`, `shared/src/issues.ts`, `client/src/render/issues.ts`,
   `client/src/problems.ts`, `client/src/overlays.ts`; docs/audit-2026-10.md 4.4). Every building and zoned lot is looked at
-  once per half game hour, a hashed slice each tick, and gets one code: **no road** (a lot no road and no frontage
+  every quarter of a game hour, a hashed slice each tick, and gets one code: **no road** (a lot no road and no frontage
   neighbour of its zone reaches, or a building with none at its door), **no builders** (a site nobody worked for an hour
   while builders were at work elsewhere; sites wait out the night), **unstaffed** (a civic building or staffed venue
   with staff at work or on the way under half of what its roster expects at that hour, for an hour; it clears when
-  enough turn up or new hires fill half the places), **parking full** (drivers it turned away who found no lot within
-  ten tiles and parked at the kerb, a count halving every 12 game hours; it clears at once when parking in reach
-  grows), **no customers** (a shop or staffed venue standing all of yesterday with nobody yesterday or yet today) and
-  **very unhappy** (a home whose residents' mean happiness is under 35, until it is over 45). Thresholds are
+  enough turn up, when new hires fill half the places or when the road joined to its door changes, and the crew then
+  has a day to turn up), **no customers** (a shop or staffed venue standing all of yesterday with nobody yesterday or
+  yet today; it clears with the first customer, or when the road joined to its door changes, for a fresh day),
+  **parking full** (drivers it turned away who found no lot within ten tiles and parked at the kerb, a count halving
+  every 12 game hours; it clears at once when parking in reach grows) and **very unhappy** (a home whose residents'
+  mean happiness is under 35, until it is over 45). When several hold, that order decides which shows. Thresholds are
   `ISSUE_TUNING` in `shared/src/tuning.ts`; nothing is saved, so a restart recomputes them. The Commons' own buildings
   get no badges outside sandboxes. A badge is an instanced billboard over the roof (one draw call, its own bob and size
   by hash), fading out past the name boards' distance and hidden in the map, underground and first-person views. The

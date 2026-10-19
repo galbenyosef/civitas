@@ -620,7 +620,7 @@ const GROUND_OVL = /* glsl */ `
 if (uOvl > 0.5 && vRoad < 16.0) {
   float b = mscOvlAt(floor(vWorldP.xz));
   float l = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
-  gl_FragColor.rgb = b > 0.5 ? mix(vec3(l), mscOvlRamp(b), 0.8) : vec3(l) * 0.7;
+  gl_FragColor.rgb = b > 0.5 ? mix(vec3(l), mscOvlRamp(b), 0.8) : mix(gl_FragColor.rgb, vec3(l), 0.7) * 0.85;
 }`;
 
 /** The same on buildings, by the tile their instance stands on, keeping some of the lit shading so shapes still read. */

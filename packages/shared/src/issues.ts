@@ -3,7 +3,8 @@
  * client/src/render/issues.ts, client/src/problems.ts). Shared so both sides agree on the codes and the wording.
  */
 
-/** What is wrong with a building or lot: one 3-bit code per tile (the door tile of a structure); 0 is nothing. Lower codes win. */
+/** What is wrong with a building or lot: one 3-bit code per tile (the door tile of a structure); 0 is nothing. When several hold,
+ * the first of no road, no builders, unstaffed, no customers, parking full, very unhappy is shown (server/src/sim/issues.ts). */
 export const Issue = { None: 0, NoRoad: 1, NoBuilders: 2, Unstaffed: 3, ParkingFull: 4, NoCustomers: 5, Unhappy: 6 } as const;
 export type IssueCode = (typeof Issue)[keyof typeof Issue];
 export const ISSUE_CODES = [1, 2, 3, 4, 5, 6] as const;

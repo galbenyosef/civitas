@@ -109,6 +109,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 function injectStyle() {
   const style = document.createElement('style');
   style.textContent = `
+#problemsBtn, #heat { white-space: nowrap; }
 #problemsBtn.bad { border-color: rgba(255,90,90,0.75); color: #ff8b8b; }
 #problemsBtn.bad b { color: #ff6b6b; }
 #problems { position: absolute; top: 52px; right: 12px; width: 330px; max-height: calc(100vh - 120px); overflow-y: auto; padding: 10px 12px 12px;
