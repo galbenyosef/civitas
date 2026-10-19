@@ -815,7 +815,7 @@ export class Traffic {
     m.len = VEHICLE_LEN[m.cls] ?? VEHICLE_LEN[0];
     const d = dirBetween(m.path[0], m.path[1], m.path[2], m.path[3]);
     const key = Traffic.laneKey(m.path[0], m.path[1], d);
-    const q = this.laneAt(key);
+    const q = this.laneQ(m.path[0], m.path[1], d);
     const tail = q && q.length ? leaderIn(q, q.length, isBike(m)) : null;
     if (tail && tail.prog < (tail.len + m.len) / 2 + MIN_GAP * m.gapMul) return 'blocked';
     if (TT.spawnClear && this.boxBusyExcept(m.path[0], m.path[1], m)) return 'blocked';
