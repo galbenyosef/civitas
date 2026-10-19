@@ -5,6 +5,61 @@ fun". The audit's finding: a newcomer online waits 10-12 real minutes for a firs
 on them, and the goals card has nothing to say until then. This note is the design first and the build second. The
 numbers in section 6 were measured with the gauntlet bot (`scratchpad/firstfive/play.mts`) at 05:00, 12:00 and 20:00.
 
+## 0. From a blank sheet: the Frontier start
+
+Rich's redirect (2026-10-19): judge the first five minutes from a blank sheet, the almost empty world of
+docs/start-from-zero.md option A, not beside the Commons. This section is that review; sections 1-7 are the shared-world
+path as first built and measured, which stays as it is.
+
+### What the player sees and does, from nothing
+
+A valley from the seed's terrain, no town anywhere. One country road comes in from the west edge and stops in the
+middle of a free 32×32 land charter that is already theirs. At the road's far end stands the gate, the motorway
+connection the rest of the world arrives through. $5,000 in the treasury. The clock reads 06:00, dawn: a frontier
+always starts at dawn, so nobody meets the overnight lull in their first half hour. Times are real time at 1×; local
+mode's 4× makes every number a quarter and pause holds any of them.
+
+| When | What they do | What they see within seconds |
+| --- | --- | --- |
+| 0:00 | The join card; the camera at the road end, the gate on the horizon. | **Goal 1 of 13, Lay a street**: "Road (3): drag a street on from the end of the country road into your land." (Claim your plot is gone: the charter is theirs.) |
+| 0:15-0:40 | Drag a street east from the road end, a side street or two. | Road tiles paint; "Nicely done! Lay a street"; the card flips to **Pitch camp**, "show me" lights the camp tool. |
+| 0:40 | Click a tile beside the street. | The camp stands at once: tents, a caravan, a fire pit, festoon lights. Toast: *"Camp pitched: eight settlers are on their way through the gate and arrive within the hour."* The card flips to **Zone homes**. |
+| 0:50-1:30 | (meanwhile) | Headlights at the gate: the first car with a roof box turns off the motorway and comes the whole length of the country road, then two people with suitcases, then another car. The camera leaves the player's hands for seven seconds to meet the first of them at the camp: **"Your first settlers are here: Ada Walker and 7 more are pitching camp."** |
+| 1:00-1:20 | Paint a dozen lots of Residential along the street. | Each lot opens a site within 8 seconds: fences and cranes. The card flips to **Hire your own builders**: "Handyman's workshop (Builders, the first size, $120)". |
+| 1:30 | Place the handyman beside the street, by the camp. | It opens at once: *"Your first builders' yard opens at once: 2 of your settlers take up tools and set off for your nearest lots now."* Two figures walk out of the camp with tools. |
+| 1:45-3:00 | Watch, or zone a few more lots. | The first house stands at about 2:15 (20 units of work, two builders); a car with a roof box leaves the gate for it. Then a house a minute. "residents in homes 4 / 12 …" |
+| 3:00-5:00 | Hover a builder; follow a settler; open the tech tree the chip is pulsing about (Parking lots). | 12 in homes by about 4:00: **First homes** done, *Commercial zoning, free*. The card flips to **Open the shops**. Twenty-odd people live on the land. |
+| 5-8 | Zone six shops. | Shop sites open, the two builders move on to them; the first shop opens at about 7; its staff come through the gate. |
+| 8-12 | A second builders' yard, or a park ($120). | Thirty to fifty residents; Masonry ready; the first two-storey house. |
+| 12-20 | Police box and fire post (civ1), a park, more homes and shops. | Patrol cars on the country road; the first visitors' cars turning in at the gate (visitor flow scales with population); the ledger's first day in the black. |
+| 20-30 | Industrial zoning ready; a second street. The camp's settlers move into finished homes; newcomers fill the tents behind them. | 100-150 residents; the hamlet reads as a village: lights at night, the gate's count of arrivals today. |
+
+### What the branch already gives that start, and what has to change
+
+What is already there and carries over unchanged: the camp and its settlers' wave through a gate (`Gateways.wave`), the
+instant crew (the handyman is a yard tier; `starterYard` hires the settlers and sends them out now), the first house
+at 20 work, the moment, the 14-goal chain's shape, the followers rule for the first two dozen beds, the transit camp.
+
+What the blank sheet breaks, and the fix in this pass:
+
+| Problem on an empty map | Why | Fix (this branch) |
+| --- | --- | --- |
+| No world, no road, no gate, no land | `seedCommons` is the only seeder; a player buys land | `seedFrontier`: the gate (kind 21) on a country road from the west edge to the middle of a 32×32 charter; `World.start = 'frontier'` in the snapshot; the first player to join gets the charter and `FRONTIER_MONEY` ($5,000); `START=frontier` on the server, "Start from zero" in local mode's new-game form (the default) |
+| **The stuck remote start**: nothing grows because residential demand is `jobs − population + 6` over the world, and with eight settlers and two handyman jobs that is 0 | growth() is world-wide, and here the town is the world | a young town's floor: while fewer than 24 people live on an owner's land, their lots grow as if demand were 12 (`FirstFive.youngTown`, one line in growth()); with the followers rule (spawn) the first two dozen beds fill behind the handyman's wages; after that the ordinary loop runs, and on a one-town world it is per town by construction |
+| Nobody to staff the handyman | builders are residents; homes take newcomers only once built | the camp's eight settlers, through the gate, at once (built already) |
+| Joining at night; the lull after the first shift | a shared clock | the frontier starts at 06:00; the starter crew's rest rule (built already) covers evening joins on a server |
+| The goals talk about the Commons | copy and the "show me" focus | frontier copy for the street and yard goals, the charter pre-completes Claim your plot, focus falls on the road end (`welcome.home`) |
+| $20,000 makes every choice free | START_MONEY | $5,000 on a frontier; the money floor is Audit #5's card, and this budget leaves it room (the opening below costs about $1,200) |
+
+What this pass leaves as hooks: appeal and prospects (B2: a per-town score and "looked and left"), visitors who stay,
+settlement ranks (Audit #4), the overdraft and administration (Audit #5), a country-road gate kind with a lower rate
+than the motorway's 30 an hour (the motorway connection stands in), and a second player's charter on a shared
+frontier (a later player buys land as today).
+
+### Measured on the frontier
+
+FRONTIER_TABLE
+
 ## 1. The idea in one paragraph
 
 People first, then builders, then houses. A new player's third act is to **pitch a pioneer camp** ($150, 2×2, opens
