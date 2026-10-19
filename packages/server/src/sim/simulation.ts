@@ -764,16 +764,16 @@ export class Simulation {
     for (const [owner, n] of filled) w.bump(owner, 'jobs', n, true);
   }
 
+  /** A citizen's happiness parts as the daily update reads them now (sim/issues.ts asks why a very unhappy home is). */
+  moodParts(c: Citizen) {
+    return happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick: this.w.tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools) });
+  }
   /**
    * Service coverage of a tile: for each service family (police, fire, health) the strongest staffed station whose
    * radius reaches it, summed. Radius and strength come from the station's tier (shared/src/tiers.ts); the original
    * stations are strength 1 within SERVICE_RADIUS, so with only those this is the count of distinct services in reach.
    * Smaller rungs give fractions (a police box is 0.4); happiness reads the whole part, growth and tax tolerance all of it.
    */
-  /** A citizen's happiness parts as the daily update reads them now (sim/issues.ts asks why a very unhappy home is). */
-  moodParts(c: Citizen) {
-    return happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick: this.w.tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools) });
-  }
   private coverage(x: number, y: number): number {
     const best = this.coverBest;
     best.fill(0);
