@@ -94,7 +94,7 @@ mode everything below happens four times sooner.
 | Minute | What happens | What is new on screen |
 | --- | --- | --- |
 | 5-8 | Shops rise; settlers and newcomers take the first shop jobs; 25-50 residents. | Shops' lights by night, the first visitor cars, a tech chip pulse (Emergency services, Libraries). |
-| 8-12 | **Masonry** is ready (300 units built) and bought; the first two-storey house goes up on a full lot. | Level-2 houses; the card's **A growing town (50)** completes; **Police and fire cover** asks for a police box and a fire post. |
+| 8-12 | **Masonry** is ready (1,500 units built; it was 300, which the faster crew met at minute 3) and bought; the first two-storey house goes up on a full lot. | Level-2 houses; the card's **A growing town (50)** completes; **Police and fire cover** asks for a police box and a fire post. |
 | 12-16 | A park, a police box, a fire post. 60-100 residents. | Patrol cars; the park's first visitors; the ledger's first day in the black (**Balance the books**). |
 | 16-24 | Industrial zoning ready; a second block of homes. The camp's settlers begin to move into finished homes (a third of them a day); newcomers fill the camp behind them. | A new block of cranes; the camp's population turning over; the bored hint if there is nothing to do yet. |
 | 24-30 | 150-250 residents; traffic on the Commons' grid starts to thicken; Public transport opens at 200. | The queued share in the top bar; the jam hint; **A real town (250)** near. |
@@ -139,7 +139,7 @@ unnecessary; the player may still bulldoze it).
   a little and keeps its shape (section 6). The yard's wages run from the moment it opens instead of from 07:00, which
   is a few dollars.
 - **Later balance.** Level 2 and 3 work is unchanged, so growth after Masonry runs at the old pace; `built` per
-  level-1 house is 20 instead of 60, so Masonry (300 units) needs fifteen houses rather than five, which the faster
+  level-1 house is 20 instead of 60, so Masonry needs more houses than before; its threshold is raised to 1,500 (Steel frame 4,000, Deep foundations 7,000) so that it stays a minute-8 reward, which the faster
   crew covers (ready at about 3 minutes against 9-11). Bot B and bot F to day 15 are in section 6.
 - **Online and local.** Nothing here touches the clock: it is all per-player events on the shared tick, so it works
   identically on the live world (no per-player time control) and in local mode (pause and 4× make it four times

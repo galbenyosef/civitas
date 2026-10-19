@@ -59,7 +59,7 @@ export const GOALS: GoalDef[] = [
   { id: 'shops', title: 'Open the shops', how: 'Commercial (5): zone a few lots near your homes.',
     why: 'Shops give your residents work close by, and their staff pay income tax to you rather than to the Commons.',
     parts: [{ label: 'commercial lots', target: 6 }, { label: 'shop jobs filled', target: 8 }], reward: { cash: 300 }, show: { tool: 'com', focus: 'plot' } },
-  { id: 'masonry', title: 'Masonry', how: 'Open the tech tree (T) and unlock Masonry once 300 units of building work are done.',
+  { id: 'masonry', title: 'Masonry', how: 'Open the tech tree (T) and unlock Masonry once 1,500 units of building work are done.',
     why: 'Two-storey buildings: each lot holds twice the people.',
     parts: [{ label: 'Masonry unlocked', target: 1 }], reward: { cash: 250 }, show: { panel: 'tech' } },
   { id: 'res50', title: 'A growing town', how: 'Keep zoning homes along your streets, and a few more shops.',
