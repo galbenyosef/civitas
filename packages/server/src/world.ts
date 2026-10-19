@@ -30,6 +30,11 @@ export interface Building {
   qualified?: number;
   /** homes: until this tick newcomers leave the last free bed to a family here (a couple moving in, a baby on the way) */
   holdUntil?: number;
+  /**
+   * halls of residence: the students living here (sim/learning.ts, docs/education.md section 18). A hall is a civic
+   * building whose `occupants` are its staff, so its residents are counted here instead (World.bedIn); rebuilt on load.
+   */
+  lodgers?: number;
 }
 /**
  * A building (or upgrade) waiting for builders. Lives beside the tile's construction flag. `kind` is the kind id.
@@ -132,6 +137,7 @@ export interface Citizen extends Mover, EduFields {
   skill?: number;                       // the level the worker's place needs (sim/skills.ts): 0 an unskilled place
   drain?: number;                       // days a graduate has been out of work or over-qualified (brain drain)
   grad?: number;                        // game day of graduating (set by the schools, E3): "graduated", and the brain-drain check
+  appr?: number;                        // an apprentice: shifts done of the apprenticeship (sim/learning.ts, E5); absent otherwise
   state: number;
   commute: number[] | null;             // cached home->work path (walkers)
   car: boolean;                         // owns a car
@@ -765,8 +771,13 @@ export class World {
     this.leaveHousehold(c);
     this.onCitizenRemoved?.(c);
     const home = this.buildings.get(tileKey(c.hx, c.hy));
-    if (home) home.occupants--;
+    if (home) this.bedIn(home, -1);
     this.quitJob(c);
+  }
+  /** Count n residents into (or, negative, out of) home b: a home's occupants, or the lodgers of a hall of residence. */
+  bedIn(b: Building, n: number) {
+    if (b.zone === Zone.Residential) b.occupants += n;
+    else b.lodgers = Math.max(0, (b.lodgers ?? 0) + n);
   }
   /** Move a citizen into another household (they must already live in its home, or be moving there). */
   setHousehold(c: Citizen, hh: number) {

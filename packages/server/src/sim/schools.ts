@@ -60,8 +60,8 @@ export interface SchoolHost {
 
 interface School {
   b: Building; spec: SchoolSpec;
-  /** census counts */
-  pupils: number; present: number; staff: number; teachers: number; postgrads: number;
+  /** census counts; `evening`: learners on evening classes (the FE college's eveningPlaces, E5), not in `pupils` */
+  pupils: number; present: number; staff: number; teachers: number; postgrads: number; evening: number;
   /** teachers and postgraduates needed (staff capacity × share), staffing now (0-1) and quality over the year (0.5-1) */
   needed: number; needPg: number; staffing: number; quality: number;
   /** the bell, hours */
@@ -110,7 +110,7 @@ export class Schools {
   setOff(c: Citizen) {
     const w = this.w, now = w.tick;
     const s = this.schoolOf(c);
-    if (!s) { this.leave(c, EduResult.Left); return; } // the school has gone: a place elsewhere at the next admissions
+    if (!s || c.study === Study.Evening) { this.leave(c, EduResult.Left); return; } // the school has gone (a place elsewhere at the next admissions), or an evening learner lost their job
     c.eduBits &= ~EDU_HOMEWARD;
     if (now > this.bellStart(c) + 2 * TPH) { this.host.scheduleNext(c); return; } // too late for today (home late from an outing)
     const unwell = (c.cond & ACUTE) !== 0 || c.health < HEALTH.staysHomeBelow;
@@ -242,13 +242,13 @@ export class Schools {
       let s = this.schools.get(k);
       if (!s || s.b !== b || s.spec !== spec) {
         s = {
-          b, spec, pupils: 0, present: 0, staff: 0, teachers: 0, postgrads: 0, needed: 0, needPg: 0, staffing: 0, quality: -1,
+          b, spec, pupils: 0, present: 0, staff: 0, teachers: 0, postgrads: 0, evening: 0, needed: 0, needPg: 0, staffing: 0, quality: -1,
           start: EDU.startFrom + EDU.startSpan * hash2(b.x * 7 + 3, b.y * 11 + 5), end: EDU.endFrom + EDU.endSpan * hash2(b.x * 5 + 1, b.y * 13 + 7),
           year: -1, passed: 0, failed: 0, dropped: 0, waiting: 0, owner: undefined, meals: false, fees: false,
         };
         this.schools.set(k, s);
       }
-      s.pupils = 0; s.present = 0; s.staff = 0; s.teachers = 0; s.postgrads = 0;
+      s.pupils = 0; s.present = 0; s.staff = 0; s.teachers = 0; s.postgrads = 0; s.evening = 0;
     }
     for (const k of this.schools.keys()) if (!seen.has(k)) this.schools.delete(k);
     const grads = new Map<string, number>(), at = this.attain, now = w.tick;
@@ -259,7 +259,8 @@ export class Schools {
       if (c.study) {
         at.study[c.study]++;
         const s = this.schools.get(tkey(c.sx, c.sy));
-        if (s) { s.pupils++; if (c.state === S.Work && !c.job) s.present++; }
+        if (s && c.study === Study.Evening) s.evening++;
+        else if (s) { s.pupils++; if (c.state === S.Work && !c.job) s.present++; }
       }
       if (c.job) {
         const s = this.schools.get(tkey(c.wx, c.wy));
@@ -328,8 +329,9 @@ export class Schools {
     return this.attain;
   }
   private qualityNow(s: School) { return 1 - EDU.qualityDrop * (1 - s.staffing); }
-  /** Places the staffing lets the school fill. */
-  private admitting(s: School) { return Math.floor(s.spec.places * s.staffing); }
+  /** Places the staffing lets the school fill (evening places for evening classes). */
+  private admitting(s: School, study = 0) { return Math.floor((study === Study.Evening ? s.spec.evening : s.spec.places) * s.staffing); }
+  private full(s: School, study: number) { return (study === Study.Evening ? s.evening : s.pupils) >= this.admitting(s, study); }
 
   /** Midnight: the day just held counts, staffing feeds quality, drop-outs; results on Saturday, the new year on Monday. */
   private midnight() {
@@ -382,7 +384,8 @@ export class Schools {
       s.passed++;
       if (c.study === Study.Nursery) { c.eduBits |= EDU_NURSERY; this.events.nurseryDone++; }
       else {
-        if (spec.earns > c.edu) { c.edu = spec.earns; this.onGraduated?.(c); }
+        const earns = spec.years ? spec.earns : Math.min(spec.earns, c.edu + 1); // an adult course: one level up, to its cap (E5)
+        if (earns > c.edu) { c.edu = earns; this.onGraduated?.(c); }
         // the track follows the course: A-levels at a sixth form (STEM or arts by inclination), vocational at an FE college
         if (c.study === Study.SixthForm) c.track = s.spec.stage === Study.FeCourse ? EduTrack.Trades : hash2(c.id, 233) < 0.5 ? EduTrack.Stem : EduTrack.Arts;
         if (c.study === Study.Degree && c.track === EduTrack.Trades && hash2(c.id, 247) < 0.8) c.track = EduTrack.Stem; // engineering
@@ -398,6 +401,11 @@ export class Schools {
     if (r !== EduResult.Passed) return;
     if (done === Study.SixthForm && hash2(c.id, 245) < EDU.uniShare) this.goOn(c, Study.Degree);
     else if (done === Study.Degree && hash2(c.id, 246) < EDU.postgradTake) this.goOn(c, Study.Postgrad);
+  }
+  /** An adult course finished by days attended (sim/learning.ts): results now, at the college it was taken at. */
+  finish(c: Citizen) {
+    const s = this.schoolOf(c);
+    if (s) this.result(c, s); else this.leave(c, EduResult.Left);
   }
   /** A place at the nearest school in town that takes `study` and has room (the university's catchment is the whole city). */
   private goOn(c: Citizen, study: number) {
@@ -472,7 +480,7 @@ export class Schools {
   enrolAt(c: Citizen, b: Building, study: number): boolean {
     let s = this.schools.get(tkey(b.x, b.y));
     if (!s || s.b !== b) { this.census(); s = this.schools.get(tkey(b.x, b.y)); }
-    if (!s || !schoolTakes(s.spec, study) || s.pupils >= this.admitting(s) || this.deterred(c, s, study)) return false;
+    if (!s || !schoolTakes(s.spec, study) || this.full(s, study) || this.deterred(c, s, study)) return false;
     if (c.study) this.leave(c, EduResult.Left);
     this.enrol(c, s, study);
     return true;
@@ -482,7 +490,8 @@ export class Schools {
   /** A place at s: the school's timetable in the free shift fields, its door as the commute's destination. */
   private enrol(c: Citizen, s: School, study: number) {
     c.study = study; c.sx = s.b.x; c.sy = s.b.y; c.att = 0; c.due = 0; c.eduBits &= ~EDU_HOMEWARD;
-    s.pupils++; this.events.enrolled++;
+    if (study === Study.Evening) s.evening++; else s.pupils++;
+    this.events.enrolled++;
     if (c.job) return;
     c.wx = s.b.x; c.wy = s.b.y; c.commute = null;
     // a school's own bell; a student's own lecture hours
@@ -522,9 +531,10 @@ export class Schools {
       quality: Math.max(0, s.quality), passed: s.passed, failed: s.failed, droppedOut: s.dropped, waiting: s.waiting,
     };
     if (s.needPg) { info.postgrads = s.postgrads; info.postgradsNeeded = s.needPg; }
+    if (spec.evening) { info.evening = s.evening; info.eveningPlaces = spec.evening; info.eveningAdmitting = this.admitting(s, Study.Evening); }
     return info;
   }
   /** Every school's record (probes). */
   list(): readonly Readonly<School>[] { return [...this.schools.values()]; }
-  admittingOf(s: Readonly<School>) { return this.admitting(s as School); }
+  admittingOf(s: Readonly<School>, study = 0) { return this.admitting(s as School, study); }
 }

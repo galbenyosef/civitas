@@ -28,9 +28,9 @@ export const POLICY = {
   mealsPerPupil: 0.4, mealsHealth: 0.3, mealsMood: 2,
   /** school buses: per bus that runs, a round each school morning (sim/schoolbus.ts) */
   busPerDay: 15,
-  /** adult learning (E5): per learner on an FE course or evening class */
+  /** adult learning (E5, server/src/sim/learning.ts): per learner on an FE course or evening class at the college's owner */
   learnerPerDay: 1,
-  /** apprenticeships (E5): the player pays this share of an apprentice's wage, up to apprenticeShare of a workplace's staff train */
+  /** apprenticeships (E5, server/src/sim/learning.ts): the player pays this share of an apprentice's wage, up to apprenticeShare of a workplace's places train */
   apprenticeWageShare: 0.2, apprenticeShare: 0.1,
   /** tuition fees: income per student a day when on, the grant the player pays per student when off; on, this share of university places go unfilled, and graduates leave this much more readily (E4) */
   feePerStudent: 2, grantPerStudent: 1, feeDeter: 0.3, feeDrainMul: 1.5,
@@ -45,18 +45,18 @@ export const POLICIES: PolicyDef[] = [
     blurb: 'A yellow bus from each of your secondary schools collects pupils who live over twelve tiles away.',
     runs: `$${POLICY.busPerDay} per bus that runs`,
     effects: ['one bus per secondary school, a morning round', 'driven by a member of the school staff', 'nothing to pay while it idles'] },
-  { id: 'learning', name: 'Adult learning', feature: 'policy-learning', setup: 200, live: false,
+  { id: 'learning', name: 'Adult learning', feature: 'policy-learning', setup: 200, live: true,
     blurb: 'Further-education courses for the unemployed and evening classes for workers who want to move up.',
     runs: `$${POLICY.learnerPerDay} per learner a day`,
-    effects: ['FE courses for those out of work two days or more', 'evening classes for the low-qualified in work', 'an adult can rise one level'] },
-  { id: 'apprentice', name: 'Apprenticeships', feature: 'policy-apprentice', setup: 200, live: false,
+    effects: ['FE courses at your colleges for those out of work two days or more', 'evening classes for workers without GCSEs', 'an adult can rise one level, up to Level 3'] },
+  { id: 'apprentice', name: 'Apprenticeships', feature: 'policy-apprentice', setup: 200, live: true,
     blurb: 'Factories, yards and workshops train young staff on the job, on a trades track.',
     runs: `${Math.round(POLICY.apprenticeWageShare * 100)}% of an apprentice's wage`,
-    effects: [`up to ${Math.round(POLICY.apprenticeShare * 100)}% of a workplace's staff train`, 'they reach Level 3 in the trades track', 'for industrial and yard workplaces'] },
+    effects: [`up to ${Math.round(POLICY.apprenticeShare * 100)}% of a workplace's staff train`, 'workers under 25 reach Level 3 in the trades track after 8 shifts', 'for industrial and yard workplaces on your land'] },
   { id: 'fees', name: 'Tuition fees', feature: 'policy-fees', setup: 300, live: true,
     blurb: 'Students at your universities pay their way. Off, you pay them a grant instead.',
     runs: `earns $${POLICY.feePerStudent} per student a day; off, you pay a $${POLICY.grantPerStudent} grant`,
-    effects: [`${Math.round(POLICY.feeDeter * 100)}% fewer university places taken`, 'more graduates leave town (needs the job model)'] },
+    effects: [`${Math.round(POLICY.feeDeter * 100)}% fewer university places taken`, 'more graduates leave town'] },
 ];
 export const POLICY_BY_ID = new Map<string, PolicyDef>(POLICIES.map((p) => [p.id, p]));
 export const isPolicyId = (s: unknown): s is PolicyId => typeof s === 'string' && POLICY_BY_ID.has(s);

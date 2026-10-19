@@ -13,7 +13,7 @@ import {
   type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
   buildingValue, LAND_PRICE_PER_TILE, ROAD_COST,
   eduDefaults, birthdayOf, yearGroup, STAGES, Study, EduResult, EDU_NURSERY, EDU_DROPPED, EDU_HOMEWARD, CITIZEN_STUDY, type CitizenEducation,
-  SKILLS, wageMul, type EduFields,
+  SKILLS, wageMul, EduLevel, type EduFields,
 } from '@msimcity/shared';
 import type { Building, Citizen, Leg, Mover, Vehicle, World, MergePlan } from '../world';
 import { noteTrail, resetTrail, tkey, untkey, lifeDefaults, hasJobs } from '../world';
@@ -36,6 +36,8 @@ import { Couriers } from './couriers';
 import { Skills, Place } from './skills';
 import { plantGardens, deepBackOk, GARDEN_KIND } from './blocks';
 import { Schools, ERRAND_SCHOOL } from './schools';
+import { Families } from './families';
+import { Learning, ERRAND_CLASS } from './learning';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -119,6 +121,8 @@ interface LegTrack { leg: Leg | null; at0: number; exp0: number; at: number; exp
 
 export class Simulation {
   population = 0; jobs = 0; employed = 0; vacantJobs = 0;
+  /** children in town (families move in with them, sim/families.ts): homes are built for the grown-ups the jobs need */
+  children = 0;
   moving = 0; driving = 0; outAndAbout = 0; parkedCars = 0;
   traffic: Traffic;
   private services: Building[] = [];
@@ -179,6 +183,9 @@ export class Simulation {
   visitsOf(key: string) { return this.visitsAt(key); }
   /** The staffed police, fire and health buildings coverage counts (rebuilt every few ticks): the coverage overlay (server/src/overlays.ts). */
   get staffedServices(): readonly Building[] { return this.services; }
+  /** families moving in with children (sim/families.ts), and higher and adult education (sim/learning.ts), docs/education.md section 18 */
+  families: Families;
+  learning: Learning;
   /** messages for a parcel owner's screen (net.ts sends them as toasts and clears the list) */
   notices: { owner: string; msg: string }[] = [];
   /** owners already told that newcomers spawn in place; cleared once a gateway brings someone in, so a town that loses its last gateway hears again */
@@ -209,6 +216,13 @@ export class Simulation {
     }, this.lifeEvents);
     this.skills = new Skills(w, (c) => this.leaveTown(c), (owner, msg) => this.notices.push({ owner, msg })); // it says it once a game day itself
     this.schools.onGraduated = (c) => this.skills.graduated(c);
+    const make = (id: number, home: Building, age: number, health: number, edu?: EduFields) => this.makeCitizen(id, home, age, health, edu);
+    this.families = new Families(w, this.skills, this.gateways, {
+      make, follow: (p, c) => this.followIn(p, c), settle: (p) => { if (this.vacantJobs > 0) this.findJob(p); },
+    });
+    this.learning = new Learning(w, this.schools, this.skills, this.gateways, {
+      make, classTrip: (c, x, y) => this.classTrip(c, x, y), rehome: (c, b) => this.moveHome(c, b, c.hh), leave: (c) => this.leaveTown(c),
+    }, this.lifeEvents);
     w.onCitizenRemoved = (c) => { this.traffic.leave(c); this.transit.drop(c); this.taxis.drop(c); this.mobile.forget(c); this.pool.forget(c); this.releaseParking(c); this.dropVenue(c); };
   }
 
@@ -217,13 +231,14 @@ export class Simulation {
     w.tick++;
     if (w.tick % DAY === 0) this.newDay();
     this.schools.tick();
+    this.learning.tick();
     if (w.tick % STATS_EVERY === 0) this.recomputeStats();
     if (w.tick % GROWTH_EVERY === 0) this.growth();
     if (w.tick % GROWTH_EVERY === 13) this.leisureGrowth();
     if (w.tick % GROWTH_EVERY === 19) plantGardens(w); // homes all round a block's middle plant a communal garden there (sim/blocks.ts)
     if (w.tick % SPAWN_EVERY === 3) this.spawn();
     if (w.tick % ENTRIES_EVERY === 7) this.findEntries();
-    this.gateways.tick((g, hx, hy) => this.arriveVia(g, hx, hy));
+    this.gateways.tick((g, hx, hy, tag) => this.arriveVia(g, hx, hy, tag));
     if (w.tick % SWEEP_EVERY === 11) this.traffic.sweep();
     this.traffic.beginTick();
     this.routeBudget = ROUTE_BUDGET;
@@ -333,7 +348,7 @@ export class Simulation {
     const residents: PersonRow[] = [], workers: PersonRow[] = [], visitors: PersonRow[] = [], builders: PersonRow[] = [];
     const row = (c: Citizen, here: boolean): PersonRow => ({ id: c.id, name: nameFor(c.id, c.sn), activity: this.activityOf(c), here, age: Math.floor(ageOf(c, w.tick)), stage: c.stage, edu: c.edu });
     for (const c of w.citizens.values()) {
-      if (b.zone === Zone.Residential && c.hx === b.x && c.hy === b.y) {
+      if ((b.zone === Zone.Residential || b.lodgers) && c.hx === b.x && c.hy === b.y) { // a hall's students too
         const r = row(c, c.state === S.Home);
         r.household = c.hh; r.householdName = surnameFor(w.households.get(c.hh)?.sn ?? c.sn);
         residents.push(r);
@@ -460,7 +475,7 @@ export class Simulation {
     for (const id of c.friends) { const o = w.citizens.get(id); if (o) friends.push(ref(o, 'friend')); }
     let colleagues = 0;
     if (c.job) for (const o of w.citizens.values()) if (o.job && o !== c && o.wx === c.wx && o.wy === c.wy) colleagues++;
-    const parts = happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: this.leisureCoverage(c.hx, c.hy).parks });
+    const parts = happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools) });
     const wk = week(c, tick);
     const fresh = c.statsDay === day;
     let care: string | undefined;
@@ -503,6 +518,7 @@ export class Simulation {
       };
       if (school) info.studying.yearGroup = yg;
     }
+    if (c.appr !== undefined) info.apprentice = Math.min(1, c.appr / STAGES[Study.Apprentice].days);
     return info;
   }
   /** How o is related to c, both in the same household. */
@@ -612,12 +628,14 @@ export class Simulation {
       case S.AtSite: return 'working on a building site';
       case S.ToVenue: {
         if (c.errand === ERRAND_SCHOOL) return `${legWord()} to school with a child`;
+        if (c.errand === ERRAND_CLASS) return `${legWord()} to an evening class`;
         if (c.errand) return `${legWord()} to the doctor`;
         const sp = this.venueSpecOf(c);
         return `${legWord()} ${sp ? VENUE_WORDS[sp.type].going : this.hour < 16 ? 'to a café' : 'out for the evening'}`;
       }
       case S.AtVenue: {
         if (c.errand === ERRAND_SCHOOL) return 'at the school gate';
+        if (c.errand === ERRAND_CLASS) return 'at an evening class';
         if (c.errand) return 'seeing a doctor at the hospital';
         const sp = this.venueSpecOf(c), b = sp && c.venue ? this.w.buildings.get(c.venue) : undefined;
         if (sp && b) return eventOn(sp, this.today) && Math.abs(this.hour - eventStartAt(sp, b.x, b.y) - 1) < 1.6 ? VENUE_WORDS[sp.type].event : VENUE_WORDS[sp.type].at;
@@ -634,7 +652,7 @@ export class Simulation {
     if (c.state === S.ToWork) return c.study && !c.job ? at(c.sx, c.sy, KIND_NAMES[w.buildings.get(tileKey(c.sx, c.sy))?.id ?? 0] ?? 'school') : at(c.wx, c.wy, `${KIND_NAMES[c.kind]} (work)`);
     if (c.state === S.ToHome) return at(c.hx, c.hy, 'home');
     if (c.state === S.ToSite && c.site) { const [x, y] = parseKey(c.site); return at(x, y, 'building site'); }
-    if (c.state === S.ToVenue && c.venue && c.errand) { const [x, y] = parseKey(c.venue); return at(x, y, c.errand === ERRAND_SCHOOL ? 'school (the school run)' : 'hospital (doctor)'); }
+    if (c.state === S.ToVenue && c.venue && c.errand) { const [x, y] = parseKey(c.venue); return at(x, y, c.errand === ERRAND_SCHOOL ? 'school (the school run)' : c.errand === ERRAND_CLASS ? 'college (evening class)' : 'hospital (doctor)'); }
     if (c.state === S.ToVenue && c.venue) {
       const [x, y] = parseKey(c.venue); const b = w.buildings.get(c.venue);
       const sp = b && leisureAt(b.id, b.level, b.x, b.y);
@@ -691,6 +709,7 @@ export class Simulation {
       const s = bucket(w.parcelIdAt(b.x, b.y));
       if (b.level > 0) { s.buildings++; s.value += buildingValue(b.id, b.level); } // book value (docs/world-map.md)
       if (b.zone === Zone.Residential) { s.population += b.occupants; continue; }
+      if (b.lodgers) s.population += b.lodgers; // students in a hall of residence (sim/learning.ts)
       if (b.zone === Zone.Parking) continue;
       const cap = capacityOf(b.id, b.level);
       s.jobs += cap; s.employed += b.occupants; s.byKind[b.id] += cap; s.staffed[b.id] += b.occupants;
@@ -698,14 +717,15 @@ export class Simulation {
       if (isServiceId(b.id) && b.occupants > 0) this.services.push(b);
     }
     for (const site of w.sites.values()) bucket(w.parcelIdAt(site.x, site.y)).sites++;
-    let moving = 0, driving = 0, out = 0, parked = 0;
+    let moving = 0, driving = 0, out = 0, parked = 0, children = 0;
     for (const c of w.citizens.values()) {
+      if (c.stage === LifeStage.Child) children++;
       if (c.state === S.ToWork || c.state === S.ToHome || c.state === S.ToSite || c.state === S.ToVenue) { moving++; if (c.leg?.drive) driving++; }
       if (c.state === S.AtVenue) out++;
       if (c.parkedAt) parked++;
     }
     for (const v of w.vehicles.values()) if (v.phase !== 'dwell') { moving++; driving++; } else parked++;
-    this.population = w.citizens.size;
+    this.population = w.citizens.size; this.children = children;
     this.jobs = jobs; this.employed = employed; this.vacantJobs = jobs - employed;
     this.moving = moving; this.driving = driving; this.outAndAbout = out; this.parkedCars = parked;
     const housed = new Map<string, number>(), filled = new Map<string, number>();
@@ -819,7 +839,7 @@ export class Simulation {
    */
   private growth() {
     const w = this.w;
-    const rDemand = Math.max(0, this.jobs - this.population + 6);
+    const rDemand = Math.max(0, this.jobs - (this.population - this.children) + 6); // the children of families moving in take beds, not jobs
     const cDemand = Math.max(0, this.population - this.jobs + 6);
     const merges: MergePlan[] = [];
     const claimed = new Set<number>(); // tiles under a merge planned this pass
@@ -857,7 +877,7 @@ export class Simulation {
       if (!canUp) continue;
       const target = b.level + 1;
       const merged = isMergedKind(b.id);
-      if (merged && target > this.ambition(b.x, b.y)) continue; // this neighbourhood stops here
+      if (merged && target > this.ambition(b.x, b.y) + this.learning.lift(b)) continue; // this neighbourhood stops here (a research institute near an office lifts it)
       const need = levelFeature(target);
       if (need && !w.ownerHas(b.x, b.y, need, hasFeature)) continue; // the owner's builders can't raise anything taller yet
       if (b.zone === Zone.Residential && target >= 3 && cov === 0) continue; // the top tiers want services nearby
@@ -905,7 +925,7 @@ export class Simulation {
     if (!forms.length || !owner) return null;
     const s = isMultiTile(b.id) ? w.structureAt(b.x, b.y) : null;
     const bx = s ? s.ax : b.x, by = s ? s.ay : b.y, bw = s ? s.w : 1, bh = s ? s.h : 1;
-    const ambition = this.ambition(b.x, b.y);
+    const ambition = this.ambition(b.x, b.y) + this.learning.lift(b);
     const h1 = hash2(b.x * 7 + 1, b.y * 11 + 2), h2 = hash2(b.x * 3 + 5, b.y * 5 + 9 + w.day);
     const n = forms.length, f0 = Math.floor(h1 * n);
     for (let i = 0; i < n; i++) {
@@ -1003,6 +1023,7 @@ export class Simulation {
     w.addCitizen(c);
     home.occupants++;
     if (this.vacantJobs > 0) this.findJob(c);
+    this.families.join(c, home, false); // about a fifth come with a partner and children (sim/families.ts)
   }
   // ---- migration through gateways (sim/gateways.ts) ------------------------------
 
@@ -1025,24 +1046,48 @@ export class Simulation {
     this.noticed.add(owner);
     this.notices.push({ owner, msg });
   }
-  /** A newcomer released at gate g for the home at (hx, hy): they appear at the gate and travel home with their luggage. */
-  private arriveVia(g: Gate, hx: number, hy: number) {
+  /**
+   * A newcomer released at gate g for the home at (hx, hy): they appear at the gate and travel home with their luggage.
+   * `tag`: a student coming for a university (sim/learning.ts), who has a bed and a place waiting.
+   */
+  private arriveVia(g: Gate, hx: number, hy: number, tag = 0) {
     const w = this.w;
     const home = w.buildings.get(tileKey(hx, hy));
+    if (tag) { const s = this.learning.student(home, tag); if (s) this.travelIn(s, g); return; }
     if (!home || home.zone !== Zone.Residential || home.level === 0 || home.occupants >= capacityOf(home.id, home.level)) return; // gone or filled meanwhile
     const id = w.nextId++;
     const n = this.skills.newcomer(id, seededAge(id, LIFE.newcomerMin, LIFE.newcomerMax));
     const c = this.makeCitizen(id, home, n.age, 70 + 28 * hash2(id, 212), n.edu);
-    c.mig = MIG.In; c.gx = g.x; c.gy = g.y; c.x = g.x + 0.5; c.y = g.y + 0.5;
     w.addCitizen(c);
     home.occupants++;
+    this.travelIn(c, g);
+    this.families.join(c, home, c.mig === MIG.In); // about a fifth come with a partner and children (sim/families.ts)
+  }
+  /** Newcomer c (in the world and their home) sets off from gate g for home. */
+  private travelIn(c: Citizen, g: Gate) {
+    c.mig = MIG.In; c.gx = g.x; c.gy = g.y; c.x = g.x + 0.5; c.y = g.y + 0.5;
     this.gateways.noteIn(g);
     this.noticed.clear();
-    if (this.migrate(c, g, hx, hy, true)) { c.state = S.ToHome; return; }
+    if (this.migrate(c, g, c.hx, c.hy, true)) { c.state = S.ToHome; return; }
     // no way from this gate to the home: they turn up at the door all the same
     this.gateways.unroutable++;
-    c.x = hx + 0.5; c.y = hy + 0.5;
+    c.x = c.hx + 0.5; c.y = c.hy + 0.5;
     this.migrantHome(c);
+  }
+  /**
+   * A family moving in with c (sim/families.ts): p, at the gate, rides in c's car or walks beside c; false when they
+   * cannot come along (c took a taxi, the car is full), and p goes straight to the door.
+   */
+  private followIn(p: Citizen, c: Citizen): boolean {
+    const start = this.carStart(c);
+    if (start) return CARPOOL.on && this.pool.booked(c) < CARPOOL.seats && this.takeLift(p, c, start, null, [p.hx, p.hy]);
+    const l = c.leg;
+    if (!l || l.drive || l.hail || l.lift || l.ride) return false;
+    resetTrail(p, Math.floor(p.x), Math.floor(p.y));
+    today(p, this.today); p.tripsToday++; p.tripStart = this.w.tick;
+    p.legs = [{ path: l.path.slice(), drive: false, arrive: 'none' }];
+    this.startLeg(p);
+    return true;
   }
   /**
    * Plan the trip between a gate and (dx, dy) from where the citizen is: their own car through a motorway, a taxi
@@ -1068,7 +1113,8 @@ export class Simulation {
       const [sx, sy] = inbound ? [g.fx, g.fy] : [fx, fy], [ex, ey] = inbound ? [dx, dy] : [g.fx, g.fy];
       const route = findRoute(w, sx, sy, ex, ey, (x, y) => this.traffic.cost(x, y));
       // their own car parks at home on the way in; a taxi just drops them off, and a car on the way out leaves town
-      if (route && route.path.length >= 4) { c.legs = [{ path: route.path, drive: true, arrive: inbound && mode === 'car' ? 'parkHome' : 'none', dest: [ex, ey] }]; c.x = sx + 0.5; c.y = sy + 0.5; }
+      // their own car coming in may carry the family (sim/families.ts): a carpool trip
+      if (route && route.path.length >= 4) { c.legs = [{ path: route.path, drive: true, arrive: inbound && mode === 'car' ? 'parkHome' : 'none', dest: [ex, ey], ...(inbound && mode === 'car' ? { pool: this.pool.token() } : {}) }]; c.x = sx + 0.5; c.y = sy + 0.5; }
     }
     if (!c.legs.length) {
       const wp = pathBetween(w, fx, fy, dx, dy);
@@ -1091,7 +1137,7 @@ export class Simulation {
     const w = this.w;
     if (c.mig === MIG.In) {
       c.mig = 0; c.gx = undefined; c.gy = undefined;
-      if (this.vacantJobs > 0) this.findJob(c);
+      if (this.vacantJobs > 0 && c.stage === LifeStage.Adult && !c.study) this.findJob(c); // not the children or students moving in
       return;
     }
     if (c.mig === MIG.Out) { // arrived at the gate (or gave up on the trip): gone, and the bed is free
@@ -1424,11 +1470,19 @@ export class Simulation {
     return true;
   }
 
+  /** An evening class (sim/learning.ts): a trip to the college door, the class, then home. */
+  private classTrip(c: Citizen, x: number, y: number): boolean {
+    if (!this.plan(c, x, y)) return false;
+    c.venue = tileKey(x, y); c.venueThen = S.ToHome; c.errand = ERRAND_CLASS; c.state = S.ToVenue;
+    return true;
+  }
+
   private arriveVenue(c: Citizen) {
     const w = this.w;
     const b = c.venue ? w.buildings.get(c.venue) : undefined;
     if (!b) { this.leaveVenue(c); return; }
     if (c.errand === ERRAND_SCHOOL) { c.state = S.AtVenue; c.venueUntil = w.tick; return; } // the school gate: a wave, and on
+    if (c.errand === ERRAND_CLASS) { c.state = S.AtVenue; c.venueUntil = this.learning.classEnd(c); return; } // until the class ends
     if (c.errand) { // a doctor's visit: no bill, a short wait
       c.state = S.AtVenue;
       c.venueUntil = w.tick + HEALTH.doctorMinTicks + Math.round(Math.random() * (HEALTH.doctorMaxTicks - HEALTH.doctorMinTicks));
@@ -1461,6 +1515,7 @@ export class Simulation {
   private leaveVenue(c: Citizen) {
     if (c.state === S.AtVenue && !c.errand && c.venueThen !== S.ToWork && this.waitForLift(c)) return; // going home with family or a friend
     if (c.errand === 1 && c.state === S.AtVenue) this.seenDoctor(c);
+    if (c.errand === ERRAND_CLASS && c.state === S.AtVenue) this.learning.attended(c);
     const key = c.venue;
     this.dropVenue(c);
     c.errand = 0;
@@ -1548,7 +1603,7 @@ export class Simulation {
     // the leisure need drains a little every day; parks near home give some of it back
     const lc = this.leisureCoverage(c.hx, c.hy);
     leisureDay(c, lc.parks);
-    c.happy = happinessOf(happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: lc.parks }));
+    c.happy = happinessOf(happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: lc.parks, kids: this.families.homeParts(c, this.schools) }));
     c.trafficTicksLife = 0;
   }
 
@@ -1640,7 +1695,7 @@ export class Simulation {
   private lifeFamily(c: Citizen, age: number, hh: { ids: number[] } | undefined) {
     const w = this.w;
     const home = w.buildings.get(tileKey(c.hx, c.hy));
-    if (!home) return;
+    if (!home || home.zone !== Zone.Residential) return; // students in halls (sim/learning.ts) have no family life there
     const spare = home.occupants < capacityOf(home.id, home.level);
     const hold = (b: Building) => { b.holdUntil = w.tick + LIFE.familyHoldDays * DAY; };
     if (c.partner) {
@@ -1665,9 +1720,10 @@ export class Simulation {
     if ((hh?.ids.length ?? 1) === 1 && c.stage !== LifeStage.Child) {
       // living alone: now and then people leave town, more often when life here is not good
       // a graduate with no work to match their degree for a while is likelier to go (brain drain, sim/skills.ts)
-      const drain = this.skills.drainMul(c);
+      // and more readily where the owner charges tuition fees (sim/schools.ts drainMul, the E6 policy)
+      const drain = this.skills.drainMul(c), fees = c.edu >= EduLevel.Degree ? this.schools.drainMul(c) : 1;
       const p = (LIFE.leaveBasePerDay + LIFE.leaveUnhappyPerDay * Math.max(0, (LIFE.leaveUnhappyBelow - c.happy) / LIFE.leaveUnhappyBelow))
-        * ((home.holdUntil ?? 0) > w.tick ? LIFE.leaveCrowdedMul : 1) * drain;
+        * ((home.holdUntil ?? 0) > w.tick ? LIFE.leaveCrowdedMul : 1) * drain * fees;
       if (Math.random() < p) { this.lifeEvents.leftTown++; if (drain > 1) this.skills.drained(c); else this.leaveTown(c); return; }
     }
     if (c.stage === LifeStage.Adult && Math.random() < LIFE.partnerPerDay) {
@@ -1701,7 +1757,7 @@ export class Simulation {
     const sizeOf = (m: Citizen) => w.households.get(m.hh)?.ids.length ?? 1;
     for (const [mover, stay] of sizeOf(a) <= sizeOf(b) ? [[a, b], [b, a]] : [[b, a], [a, b]]) {
       const home = w.buildings.get(tileKey(stay.hx, stay.hy));
-      if (!home || !movable(mover) || home.occupants >= capacityOf(home.id, home.level)) continue;
+      if (!home || home.zone !== Zone.Residential || !movable(mover) || home.occupants >= capacityOf(home.id, home.level)) continue;
       this.moveHome(mover, home, stay.hh);
       this.lifeEvents.movedIn++;
       return;
@@ -1709,14 +1765,14 @@ export class Simulation {
     // no bed free on either side: they live apart for now, and the first choice of home keeps its next free bed
     const [first, other] = sizeOf(a) <= sizeOf(b) ? [a, b] : [b, a];
     const target = w.buildings.get(tileKey(other.hx, other.hy));
-    if (target && movable(first)) target.holdUntil = w.tick + LIFE.familyHoldDays * DAY;
+    if (target && target.zone === Zone.Residential && movable(first)) target.holdUntil = w.tick + LIFE.familyHoldDays * DAY;
   }
   /** Move a citizen's home to b and into household hh (they must be at home or at work). */
   private moveHome(c: Citizen, b: Building, hh: number) {
     const w = this.w;
     const old = w.buildings.get(tileKey(c.hx, c.hy));
-    if (old) old.occupants--;
-    b.occupants++;
+    if (old) w.bedIn(old, -1); // a home, or a hall of residence (sim/learning.ts)
+    w.bedIn(b, 1);
     c.hx = b.x; c.hy = b.y; c.commute = null;
     if (c.state === S.Home) { c.x = b.x + 0.5; c.y = b.y + 0.5; }
     w.setHousehold(c, hh);
@@ -2945,6 +3001,7 @@ export class Simulation {
     const tax = wage * rate;
     c.money += wage - tax;
     noteIncome(c, wage - tax, w.tick);
+    if (c.appr !== undefined) this.learning.shift(c, wage); // an apprentice's day on the job (sim/learning.ts)
     if (!parcel) return;
     if (isCivicId(c.kind) && !isLeisure(c.kind)) w.payroll(parcel.owner, wage); // public payroll (part grant-funded); leisure venues pay staff from their takings
     w.credit(parcel.owner, tax);

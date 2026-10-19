@@ -236,6 +236,8 @@ if (days > 0) {
       console.log(`  ${KIND_NAMES[sc.b.id].padEnd(26)} (${sc.b.x}, ${sc.b.y}): pupils ${sc.pupils}/${sim.schools.admittingOf(sc)} admitted of ${sc.spec.places + sc.spec.evening}, staff ${sc.staff}, teachers ${sc.teachers}/${sc.needed}, quality ${sc.quality.toFixed(2)}, waiting ${sc.waiting}, last results ${sc.passed} passed ${sc.failed} failed ${sc.dropped} dropped out`);
     }
     console.log(`  school events: ${JSON.stringify(sim.schools.events)}; life ${JSON.stringify({ graduations: sim.lifeEvents.graduations, dropOuts: sim.lifeEvents.dropOuts })}`);
+    // higher and adult education, families moving in (E5, docs/education.md section 18)
+    console.log(`  families moving in: ${JSON.stringify(sim.families.stats)}; learning: ${JSON.stringify(sim.learning.stats)}`);
   }
   console.log(`  freight: ${JSON.stringify(rail.freightStats)}`);
   console.log(`  transit: ${JSON.stringify(sim.transit.stats)}`);

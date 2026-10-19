@@ -261,6 +261,8 @@ export interface SchoolInfo {
   passed: number; failed: number; droppedOut: number;
   /** children of this stage nearest here with no place anywhere in reach, at the last admissions */
   waiting: number;
+  /** an FE college: learners on evening classes, its evening places and those its teachers let it fill (E5) */
+  evening?: number; eveningPlaces?: number; eveningAdmitting?: number;
 }
 
 /** An airport terminal's runway and timetable, for its tooltip. Ticks are absolute game ticks. */
@@ -471,6 +473,8 @@ export interface CitizenEducation {
   };
   /** finished stages, oldest first (at most EDU.logMax); week = game week it ended; result: EDU_RESULT_NAMES */
   history: { stage: number; place: string; week: number; result: number }[];
+  /** an apprentice (E5): share of the apprenticeship done at their workplace, 0-1 */
+  apprentice?: number;
   /** went to nursery, dropped out of a stage */
   nursery?: boolean;
   droppedOut?: boolean;

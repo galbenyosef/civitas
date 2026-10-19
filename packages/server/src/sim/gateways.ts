@@ -29,7 +29,8 @@ const RELEASE_EVERY = 5;
 /** share of a plane's (or a ro-ro ferry's) arriving passengers who are moving here (the rest are visitors and returning residents) */
 const PLANE_NEWCOMER_SHARE = 0.08;
 
-interface QueuedArrival { hx: number; hy: number; due: number }
+/** `tag`: a student coming for a university (sim/learning.ts), 0 for anyone else */
+interface QueuedArrival { hx: number; hy: number; due: number; tag: number }
 export interface Gate {
   key: number; x: number; y: number; kind: number; spec: GatewaySpec;
   /** the road tile in front of the door: cars start and end their trips on it rather than pulling out of the building */
@@ -99,8 +100,9 @@ export class Gateways {
    * A home with room wants a newcomer: queue one at the best gate (nearest, weighted by capacity, a little noise so
    * neighbouring homes spread over the gates), due after `jitter` ticks. False when there is no gate at all (the
    * caller falls back to spawning in place); true also when every gate's queue is full (the newcomer does not come).
+   * `tag` goes back to the caller with the arrival (a student, sim/learning.ts).
    */
-  request(home: Building, jitter: number): boolean {
+  request(home: Building, jitter: number, tag = 0): boolean {
     if (!this.gates.size || this.w.filling) return false;
     let best: Gate | null = null, bestS = Infinity;
     for (const g of this.gates.values()) {
@@ -110,14 +112,14 @@ export class Gateways {
       if (s < bestS) { bestS = s; best = g; }
     }
     if (!best) return true;
-    best.queue.push({ hx: home.x, hy: home.y, due: this.w.tick + Math.floor(Math.random() * jitter) });
+    best.queue.push({ hx: home.x, hy: home.y, due: this.w.tick + Math.floor(Math.random() * jitter), tag });
     const k = tkey(home.x, home.y);
     this.pending.set(k, (this.pending.get(k) ?? 0) + 1);
     return true;
   }
 
   /** Release the newcomers due at each gate while it has capacity this hour; `arrive` puts them on their way. */
-  tick(arrive: (g: Gate, hx: number, hy: number) => void) {
+  tick(arrive: (g: Gate, hx: number, hy: number, tag: number) => void) {
     const now = this.w.tick;
     if (now % REFRESH_EVERY === 5 || !this.scanned) { this.scanned = true; this.refresh(); }
     if (now % RELEASE_EVERY !== 0) return;
@@ -133,7 +135,7 @@ export class Gateways {
         g.queue[i] = g.queue[g.queue.length - 1]; g.queue.pop();
         this.unpend(q.hx, q.hy);
         g.tokens -= 1;
-        arrive(g, q.hx, q.hy);
+        arrive(g, q.hx, q.hy, q.tag);
       }
     }
   }

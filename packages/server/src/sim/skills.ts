@@ -32,7 +32,7 @@ export class Skills {
   open = [0, 0, 0, 0, 0, 0];
   private openAt = -Infinity;
   /** since the simulation started (probes, the demo check): newcomers drawn for open skilled places, graduates who left */
-  stats = { matched: 0, newcomers: 0, brainDrain: 0, skilledHires: 0, unskilledHires: 0, overQualifiedHires: 0 };
+  stats = { matched: 0, newcomers: 0, brainDrain: 0, skilledHires: 0, unskilledHires: 0, overQualifiedHires: 0, promoted: 0 };
   /** owners told about brain drain today: once a game day each */
   private told = new Map<string, number>();
 
@@ -60,6 +60,19 @@ export class Skills {
       c.skill = 0;
       if (SKILLS.on) { this.stats.unskilledHires++; if (c.edu >= EduLevel.Degree) this.stats.overQualifiedHires++; } // a graduate in an unskilled place
     }
+  }
+
+  /**
+   * A worker in an unskilled place who has just moved up a level (an apprenticeship, an evening class: sim/learning.ts)
+   * takes a skilled place at their own workplace when one is free and they now qualify for it.
+   */
+  promote(c: Citizen, b: Building) {
+    if (!SKILLS.on || !c.job || c.skill || b.x !== c.wx || b.y !== c.wy) return;
+    const need = skillNeed(b.id, b.level);
+    if (!need || c.edu < need || (b.qualified ?? 0) >= skilledPlaces(b.id, b.level)) return;
+    c.skill = need;
+    b.qualified = (b.qualified ?? 0) + 1;
+    this.stats.promoted++;
   }
 
   /**

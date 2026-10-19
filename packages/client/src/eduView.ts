@@ -23,6 +23,7 @@ export function schoolHtml(s: SchoolInfo): string {
   let h = `<div class="sect">${cap(STUDY_NAMES[s.stage] ?? 'school')}</div>`;
   h += row(who, `${s.pupils} / ${s.places}`) + meter(s.places ? s.pupils / s.places : 0, 'good');
   if (s.pupils) h += row('In class now', s.present);
+  if (s.eveningPlaces) h += row('Evening classes', `${s.evening ?? 0} / ${s.eveningAdmitting ?? s.eveningPlaces}`, 'Workers without GCSEs at evening classes (the Adult learning policy), against the evening places its teachers allow');
   if (s.admitting < s.places) h += row('Taking', `<span class="${short ? 'bad' : ''}">${s.admitting} of ${s.places} places</span>`, 'A school admits in proportion to the teachers it has');
   h += row(uni ? 'Lecturers with a degree' : 'Teachers with a degree', `<span class="${short ? 'bad' : ''}">${s.teachers} / ${s.teachersNeeded}</span>`);
   if (s.postgradsNeeded) h += row('Postgraduate staff', `<span class="${(s.postgrads ?? 0) < s.postgradsNeeded ? 'bad' : ''}">${s.postgrads ?? 0} / ${s.postgradsNeeded}</span>`);
@@ -49,6 +50,7 @@ export function educationHtml(ed: CitizenEducation): string {
     const what = `${cap(STUDY_NAMES[st.stage] ?? '')}${st.yearGroup !== undefined ? `, ${yearGroupName(st.yearGroup)}` : ''}`;
     steps.push(step('now', what, st.place.name, `${Math.round(100 * st.attendance)}% attendance`, st.progress));
   }
+  if (ed.apprentice !== undefined) steps.push(step('now', 'Apprenticeship', '', 'training on the job for Level 3, trades', ed.apprentice));
   if (ed.droppedOut && !st) steps.push(step('failed', 'Left education', '', 'dropped out'));
   if (steps.length) h += `<div class="sect">School and college</div><div class="edutl">${steps.join('')}</div>`;
   return h;

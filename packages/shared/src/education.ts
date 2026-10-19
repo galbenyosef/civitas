@@ -25,8 +25,8 @@ export const EDU_TRACK_NAMES = ['', 'STEM', 'arts and business', 'trades'] as co
  * Sixth form (4) covers every 16-18 course: at a sixth-form college (A-levels, tracks 1-2) or at an FE college
  * (vocational Level 3, track 3). FeCourse (5) is the full-time adult course for the unemployed.
  */
-export const Study = { None: 0, Nursery: 1, Primary: 2, Secondary: 3, SixthForm: 4, FeCourse: 5, Degree: 6, Postgrad: 7, Evening: 8 } as const;
-export const STUDY_NAMES = ['', 'nursery', 'primary school', 'secondary school', 'sixth form', 'FE course', 'degree', 'postgraduate', 'evening class'] as const;
+export const Study = { None: 0, Nursery: 1, Primary: 2, Secondary: 3, SixthForm: 4, FeCourse: 5, Degree: 6, Postgrad: 7, Evening: 8, Apprentice: 9 } as const;
+export const STUDY_NAMES = ['', 'nursery', 'primary school', 'secondary school', 'sixth form', 'FE course', 'degree', 'postgraduate', 'evening class', 'apprenticeship'] as const;
 
 /** How a stage ended, in the education log. */
 export const EduResult = { Passed: 0, Failed: 1, DroppedOut: 2, Left: 3 } as const;
@@ -62,6 +62,7 @@ export const STAGES: readonly StageSpec[] = [
   { ages: [18, 99], years: 3, days: 15, earns: EduLevel.Degree, pass: 0.9 },
   { ages: [21, 99], years: 1, days: 5, earns: EduLevel.Postgrad, pass: 0.85 },
   { ages: [19, 99], years: 0, days: 6, earns: EduLevel.Secondary, pass: 0.9 },
+  { ages: [18, 25], years: 0, days: 8, earns: EduLevel.Further, pass: 1 },
 ];
 
 /** Education tunables, in one place (docs/education.md section 8). */
@@ -118,6 +119,24 @@ export const EDU = {
   uniShare: 0.45, postgradTake: 0.2,
   /** sixth-formers and students below EDU.dropOutBelow drop out with this chance a day, once a few days have been held */
   dropOutPerDay: 0.15, dropOutAfter: 3,
+  // ---- higher and adult education, families moving in (E5, server/src/sim/learning.ts and families.ts) ----
+  /** a family's children: 1, 2 or 3 of them (indexed by count - 1), aged 0 to familyKidMax; the grown-ups are familyParentGap
+   * to familyParentGap + 6 years older than the eldest, and at least familyAdultMin */
+  familyKids: [0.45, 0.4, 0.15], familyKidMax: 15, familyAdultMin: 22, familyParentGap: 21,
+  /** a university asks for at most this share of its places a day in students from outside town, through the gateways */
+  intakePerDay: 0.06,
+  /** students from outside arrive aged intakeAge to intakeAge + intakeSpan with A-levels; halls within hallsReach of the campus first */
+  intakeAge: 18, intakeSpan: 2.5, hallsReach: 30,
+  /** a student coming from outside town asks for a home (halls, else a home with room) within this of the campus */
+  studentHomeReach: 25,
+  /** adult learning: the unemployed out of work idleFor days take an FE course with this chance a day; workers below GCSEs an evening class */
+  feIdleDays: 2, feTakeUp: 0.5, eveningTakeUp: 0.2,
+  /** evening classes, school days: set off between eveningGo and eveningGo + eveningSpread hours, class until eveningEnd (+ a few minutes) */
+  eveningGo: 17.75, eveningSpread: 0.5, eveningEnd: 20.5,
+  /** apprenticeships: workers aged up to apprMaxAge below Level 3, at industrial and yard workplaces whose owner has the policy; this chance a day */
+  apprMaxAge: 25, apprTakeUp: 0.3,
+  /** a staffed research institute lets offices within this many tiles (Manhattan) grow one level taller */
+  researchReach: 20,
 } as const;
 
 /**
@@ -154,7 +173,7 @@ export function studyForAge(age: number): number {
 }
 /** Whether a school of this spec takes a pupil for this stage (the FE college runs sixth-form courses too). */
 export const schoolTakes = (s: SchoolSpec, study: number) => s.stage === study || (study === Study.SixthForm && s.stage === Study.FeCourse)
-  || (study === Study.Postgrad && s.stage === Study.Degree);
+  || (study === Study.Postgrad && s.stage === Study.Degree) || (study === Study.Evening && s.evening > 0);
 
 /**
  * One finished stage in the education log (`Citizen.eduLog`), oldest first: [Study, door x, door y, kind id, the

@@ -114,7 +114,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
     c.errand = 0;
     const home = w.buildings.get(tileKey(c.hx, c.hy));
     if (!home) continue;
-    home.occupants++;
+    w.bedIn(home, 1); // a home's occupants, or a hall of residence's lodgers
     if (c.job) {
       const wb = w.buildings.get(tileKey(c.wx, c.wy));
       if (wb) { wb.occupants++; rehire(c, wb); } else { c.job = false; c.commute = null; }

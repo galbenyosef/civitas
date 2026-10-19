@@ -1,4 +1,4 @@
-import { TICKS_PER_DAY, TICKS_PER_HOUR, LifeStage, hash2, mod, SKILLS, EDU, overQualified } from '@msimcity/shared';
+import { TICKS_PER_DAY, TICKS_PER_HOUR, LifeStage, hash2, mod, SKILLS, EDU, POLICY, overQualified } from '@msimcity/shared';
 import type { Citizen } from '../world';
 
 /**
@@ -174,8 +174,11 @@ export function leisureDay(c: Citizen, parkValue: number) {
 
 // ---- happiness -----------------------------------------------------------------------------------
 
-/** coverage: distinct services in reach; parks: the summed leisure value of parks in reach of home */
-export interface HappyInputs { coverage: number; tick: number; parks?: number }
+/**
+ * coverage: distinct services in reach; parks: the summed leisure value of parks in reach of home; kids: a parent's
+ * children at school (sim/families.ts homeParts): school 1 every one has a place, -1 one has none; meals: free school meals
+ */
+export interface HappyInputs { coverage: number; tick: number; parks?: number; kids?: { school: number; meals: boolean } }
 /** Contributions to happiness (points around a neutral 50), each with a label for the panel. */
 export function happinessParts(c: Citizen, h: HappyInputs): { label: string; delta: number }[] {
   const parts: { label: string; delta: number }[] = [];
@@ -202,6 +205,9 @@ export function happinessParts(c: Citizen, h: HappyInputs): { label: string; del
   // education (sim/skills.ts): a graduate in a place far below their level, and the first days after graduating
   if (overQualified(c)) add('over-qualified', -2);
   if (SKILLS.on && c.grad !== undefined && h.tick / DAY - c.grad < EDU.drainDays) add('graduated', 5);
+  // a parent's children at school (docs/education.md section 7), and free school meals (the E6 policy)
+  if (h.kids?.school) add(h.kids.school > 0 ? 'good school nearby' : 'no school place', h.kids.school > 0 ? 3 : -4);
+  if (h.kids?.meals) add('free school meals', POLICY.mealsMood);
   if (c.stage === LifeStage.Retired) add('retired', 3);
   const social = Math.min(6, c.friends.length * 2) + (c.partner ? 4 : 0);
   add(social > 0 ? (c.partner ? 'partner and friends' : 'friends') : 'lonely', social > 0 ? social : -3);
