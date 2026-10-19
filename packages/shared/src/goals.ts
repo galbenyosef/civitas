@@ -10,7 +10,7 @@ import { ECONOMY_TUNING } from './tuning';
 const OD = `$${ECONOMY_TUNING.overdraftLimit.toLocaleString('en-GB')} overdraft at ${Math.round(ECONOMY_TUNING.overdraftInterestPerDay * 100)}% interest a day`;
 
 export type GoalId =
-  | 'plot' | 'road' | 'camp' | 'homes' | 'yard' | 'res12' | 'shops' | 'masonry' | 'res50' | 'cover' | 'leisure' | 'books' | 'res250' | 'busline';
+  | 'plot' | 'road' | 'camp' | 'homes' | 'yard' | 'res12' | 'shops' | 'res50' | 'masonry' | 'cover' | 'leisure' | 'books' | 'res250' | 'busline';
 
 /** Where "show me" points the camera: the open land beside the Commons, or the player's own land. */
 export type GoalFocus = 'commons' | 'plot';
@@ -64,12 +64,12 @@ export const GOALS: GoalDef[] = [
   { id: 'shops', title: 'Open the shops', how: 'Commercial (5): zone a few lots near your homes.',
     why: 'Shops give your residents work close by, and their staff pay income tax to you rather than to the Commons.',
     parts: [{ label: 'commercial lots', target: 6 }, { label: 'shop jobs filled', target: 8 }], reward: { cash: 300 }, show: { tool: 'com', focus: 'plot' } },
-  { id: 'masonry', title: 'Masonry', how: 'Open the tech tree (T) and unlock Masonry once 1,500 units of building work are done.',
-    why: 'Two-storey buildings: each lot holds twice the people.',
-    parts: [{ label: 'Masonry unlocked', target: 1 }], reward: { cash: 250 }, show: { panel: 'tech' } },
   { id: 'res50', title: 'A growing town', how: 'Keep zoning homes along your streets, and a few more shops.',
     why: 'Fifty residents open Industrial zoning and most of tier 2.',
     parts: [{ label: 'residents', target: 50 }], reward: { cash: 300 }, show: { tool: 'res', focus: 'plot' } },
+  { id: 'masonry', title: 'Masonry', how: 'Open the tech tree (T) and unlock Masonry once 1,500 units of building work are done.',
+    why: 'Two-storey buildings: each lot holds twice the people.',
+    parts: [{ label: 'Masonry unlocked', target: 1 }], reward: { cash: 250 }, show: { panel: 'tech' } },
   { id: 'cover', title: 'Police and fire cover', how: 'Unlock Emergency services (T), then place a police box and a fire post: cheap, with few staff.',
     why: 'Covered homes grow faster and put up with higher taxes. Half their staff wages come from a regional grant.',
     parts: [{ label: 'police building', target: 1 }, { label: 'fire building', target: 1 }], reward: { cash: 200 }, show: { tool: 'policebox', focus: 'plot' } },

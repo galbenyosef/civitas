@@ -366,8 +366,8 @@ changing behaviour in game time.
   finished homes nearby over the following days and newcomers fill them behind; bulldozing the camp rehomes its people
   first. Numbers in `START_TUNING` (`shared/src/tuning.ts`).
 - *Onboarding* (`shared/src/goals.ts`, `server/src/goals.ts`, `client/src/onboarding.ts`). A chain of 14 goals for the
-  first two hours (claim a plot, a street, pitch camp, homes, your own builders' yard, 12 residents in homes, shops,
-  Masonry, 50 residents, police and fire cover, a park, a day in the black, 250 residents, a bus line), measured server-side a few times a game
+  first two hours (claim a plot, a street, pitch camp, homes, your own builders' yard, 12 residents in homes, shops, 50 residents,
+  Masonry, police and fire cover, a park, a day in the black, 250 residents, a bus line), measured server-side a few times a game
 - *Money that can run out* (`server/src/sim/finance.ts`, numbers in `ECONOMY_TUNING`; docs/early-game-audit.md "After
   Audit #5"). A player may spend down to a **$5,000 overdraft** (`overdraftLimit`); a build, purchase, unlock or policy
   that would go further is refused with a toast naming the limit and what can still be spent (`World.spendable`,
