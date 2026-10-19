@@ -166,7 +166,7 @@ export class Net {
       case 'unlock': return this.unlock(c, String(m.id));
       case 'setPolicy': { const r = setPolicy(this.w, c.player, String(m.id), m.on === true); return this.toast(c, r.msg, r.ok ? 'info' : undefined); }
       case 'recover': return this.recover(c, m.action, m.keys);
-      case 'dev': return this.dev(c, m.action, m.on);
+      case 'dev': return this.dev(c, m.action, m.on, m.amount);
       case 'sites': return this.siteList(c, m.id);
       case 'priority': return this.setPriority(c, m.x, m.y, m.priority);
       case 'inspectTrain': return this.send(c, { t: 'train', line: Number(m.line), train: Number(m.train), info: this.rail?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.metro?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.ferry?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? null });
@@ -194,7 +194,7 @@ export class Net {
   }
 
   /** Testing aids, only on a non-production server: unlimited funds, a cash grant, every technology. */
-  private dev(c: Client, action: string, on?: boolean) {
+  private dev(c: Client, action: string, on?: boolean, amount?: number) {
     if (!this.cfg.devTools) return this.toast(c, 'Dev tools are off on this server');
     const p = c.player!;
     if (action === 'unlimited') {
@@ -203,7 +203,11 @@ export class Net {
       this.w.playersDirty = true;
       return this.toast(c, p.devUnlimited ? 'Unlimited funds on' : 'Unlimited funds off', 'info');
     }
-    if (action === 'money') { this.w.credit(p.id, 100_000, 'other'); return this.toast(c, 'Granted $100,000', 'info'); }
+    if (action === 'money') {
+      const n = typeof amount === 'number' && Number.isFinite(amount) ? Math.round(amount) : 100_000;
+      this.w.credit(p.id, n, 'other');
+      return this.toast(c, `${n >= 0 ? 'Granted' : 'Took away'} $${Math.abs(n).toLocaleString('en-GB')}`, 'info');
+    }
     if (action === 'tech') {
       p.tech = [...new Set([...p.tech, ...ALL_TECH_IDS])];
       this.w.techVersion++;

@@ -520,8 +520,9 @@ export type ClientMsg =
   /** the recovery plan (sim/finance.ts, docs/start-from-zero.md B3): raise tax, sell empty land back, mothball or reopen
    *  services; `keys` ("x,y" doors) limits mothball/unmothball to those buildings, otherwise every service of yours */
   | { t: 'recover'; action: RecoverAction; keys?: string[] }
-  /** dev servers only (ignored in production): unlimited funds toggle, a cash grant, or every technology */
-  | { t: 'dev'; action: 'unlimited' | 'money' | 'tech'; on?: boolean }
+  /** dev servers only (ignored in production): unlimited funds toggle, a cash grant (`amount`, default $100,000; negative takes
+   *  money away, for economy runs from a lower start), or every technology */
+  | { t: 'dev'; action: 'unlimited' | 'money' | 'tech'; on?: boolean; amount?: number }
   | { t: 'ping'; n: number }
   /** a train's tooltip (sim/rail.ts); `full` adds who and what is on board (the selected train's panel) */
   | { t: 'inspectTrain'; line: number; train: number; full?: boolean }
