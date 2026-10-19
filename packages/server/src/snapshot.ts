@@ -1,5 +1,5 @@
 import { CHUNK_SIZE, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, eduDefaults, isPolicyId, type TransitLine, type SeaGate } from '@msimcity/shared';
-import { World, emptyProgress, lifeDefaults, type Citizen, type Parcel, type Player, type Site } from './world';
+import { World, emptyProgress, lifeDefaults, citizenLater, type Citizen, type Parcel, type Player, type Site } from './world';
 import { LIFE, seededAge, ageOf } from './sim/life';
 import { rehire } from './sim/skills';
 import { historyOf, type HistoryJSON } from './history';
@@ -122,7 +122,9 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links
-    const c: Citizen = { ...lifeDefaults(saved.id, w.tick, seededAge(saved.id, LIFE.legacyMin, LIFE.legacyMax), 80), ...saved };
+    // (`id` first: an object literal that starts with a spread clones the hidden class of what it spreads, a new one for
+    // every citizen; written this way they all share one, as citizens made in the game do: see citizenLater)
+    const c = { id: saved.id, ...lifeDefaults(saved.id, w.tick, seededAge(saved.id, LIFE.legacyMin, LIFE.legacyMax), 80), ...citizenLater(), ...(saved as Partial<Citizen>) } as Citizen;
     // citizens saved before education (docs/education.md): levels seeded from the id and their age, studying nowhere
     if (c.edu === undefined) Object.assign(c, eduDefaults(c.id, ageOf(c, w.tick)));
     c.errand = 0;

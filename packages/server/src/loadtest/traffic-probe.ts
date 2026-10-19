@@ -13,7 +13,8 @@
  *
  * `--client` connects one client after the fill (hello, then a subscription to every chunk), as a browser would over a
  * socket (`--client-at H`: at hour H of the day instead); every frame it is sent is counted and hashed (`wire` in the
- * summary). The network flush is timed per tick either way.
+ * summary). The network flush is timed per tick either way. `--reload` saves the filled world and loads it again
+ * (snapshot.ts) before the day, as a server restart does, and prints a hash of the snapshot's content.
  */
 import { writeFileSync } from 'node:fs';
 import { Session } from 'node:inspector';
@@ -22,6 +23,8 @@ import { Traffic } from '../sim/traffic';
 import type { World, Mover } from '../world';
 import type { Conn } from '../transport';
 import { probeGame } from './probe-city';
+import { snapshotOf, worldFromSnapshot } from '../snapshot';
+import { createGame } from '../game';
 
 type Fn = (this: unknown, ...a: unknown[]) => unknown;
 interface PfHook { orig: Record<string, Fn>; set: Record<string, (f: Fn) => void> }
@@ -51,7 +54,16 @@ export async function main(argv: string[]) {
 
   const t0 = performance.now();
   let connect: ((c: Conn) => void) | null = null;
-  const { game, label, fill } = await probeGame(demo, districts, { onConnection(fn) { connect = fn; } });
+  const source = { onConnection(fn: (c: Conn) => void) { connect = fn; } };
+  const probe = await probeGame(demo, districts, source);
+  const { label, fill } = probe;
+  let game = probe.game;
+  if (argv.includes('--reload')) {
+    // the server's restart: the world saved and loaded again (snapshot.ts), and a new game made round it
+    const text = JSON.stringify(snapshotOf(game.world));
+    console.log(`snapshot: ${text.length} bytes, ${sortedHash(JSON.parse(text))} with its keys sorted`);
+    game = createGame(worldFromSnapshot(JSON.parse(text))!, source, { devTools: false, sandbox: true });
+  }
   const w = game.world;
   console.log(`${label} filled: ${fill.pop} citizens, ${(fill.ticks / DAY).toFixed(2)} days, ${((performance.now() - t0) / 1000).toFixed(0)} s wall, ${process.arch} node ${process.version}, mode ${mode}`);
   console.log(`world: ${w.chunks.size} chunks, ${w.vehicles.size} vehicles, tick ${w.tick}`);
@@ -195,6 +207,15 @@ export async function main(argv: string[]) {
   const json = arg('json', '');
   if (json) { writeFileSync(json, JSON.stringify(out, null, 1)); console.log(`summary: ${json}`); }
   process.exit(0);
+}
+
+/** FNV-1a of a JSON value written with every object's keys in sorted order (so the same content, whatever the key order). */
+function sortedHash(v: unknown): string {
+  const canon = (x: unknown): unknown => Array.isArray(x) ? x.map(canon) : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, canon((x as Record<string, unknown>)[k])])) : x;
+  const s = JSON.stringify(canon(v));
+  let h = 0x811c9dc5 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
 }
 
 /** FNV-1a over 32-bit words: every float by its bits. */

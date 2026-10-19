@@ -16,7 +16,7 @@ import {
   SKILLS, wageMul, EduLevel, type EduFields,
 } from '@msimcity/shared';
 import type { Building, Citizen, Leg, Mover, Vehicle, World, MergePlan } from '../world';
-import { noteTrail, resetTrail, tkey, untkey, lifeDefaults, hasJobs } from '../world';
+import { noteTrail, resetTrail, tkey, untkey, lifeDefaults, citizenLater, hasJobs } from '../world';
 import {
   LIFE, HEALTH, Cond, ACUTE, COND_NAMES, ageOf, stageFor, seededAge, fluWave, deathChance, healthTarget,
   noteIncome, noteSpend, week, today, happinessParts, happinessOf,
@@ -1191,9 +1191,7 @@ export class Simulation {
       ...lifeDefaults(id, w.tick, age, health),
       ...edu,
       leisure: LEISURE.start + LEISURE.startSpread * hash2(id, 219), // newcomers arrive neither bored nor fresh from a holiday
-      // set later in some lives: here so every citizen keeps one shape, and the traffic step's reads of them stay fast
-      skill: undefined, drain: undefined, grad: undefined, appr: undefined, mig: undefined, gx: undefined, gy: undefined,
-      call: undefined, halt: undefined, dwell: undefined,
+      ...citizenLater(),
     };
   }
 

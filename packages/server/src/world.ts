@@ -203,6 +203,15 @@ export function lifeDefaults(id: number, tick: number, age: number, health: numb
     ledgerDay: day, in7: [0, 0, 0, 0, 0, 0, 0], out7: [0, 0, 0, 0, 0, 0, 0], statsDay: day, tripsToday: 0, trafficTicksToday: 0, trafficTicksLife: 0,
   };
 }
+/**
+ * The fields only some citizens are given, later in their lives, all undefined: every citizen is made with them
+ * (Simulation.makeCitizen, and a saved one as it is loaded), so all keep one shape. Objects that gain a field later
+ * each take a new hidden class, and London had eleven among its movers: past four, every read of a mover's fields in
+ * the traffic step went through V8's megamorphic path, about nine times slower.
+ */
+export const citizenLater = (): Pick<Citizen, 'skill' | 'drain' | 'grad' | 'appr' | 'mig' | 'gx' | 'gy' | 'call' | 'halt' | 'dwell'> => ({
+  skill: undefined, drain: undefined, grad: undefined, appr: undefined, mig: undefined, gx: undefined, gy: undefined, call: undefined, halt: undefined, dwell: undefined,
+});
 /** The people sharing one home as a family: partners, their children, adult children who have not moved out. */
 export interface Household { id: number; sn: number; ids: number[] }
 
