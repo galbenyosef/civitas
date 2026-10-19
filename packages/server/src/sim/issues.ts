@@ -1,9 +1,9 @@
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, CHUNK_SIZE, PARK_RADIUS, ISSUE_TUNING as IT, Issue, Zone, CitizenState as S,
   OCCUPATIONS, capacityOf, parkingOf, venueCapacityOf, isCivicId, isParkingId, isGrowableId, leisureAt, hasFeature, hash2,
-  tileKey, chunkKey, chunkOf, localIndex, underConstruction, isRoad,
+  tileKey, chunkKey, chunkOf, localIndex, underConstruction, isRoad, moodReasonOf,
 } from '@msimcity/shared';
-import type { Building, World } from '../world';
+import type { Building, Citizen, World } from '../world';
 import { tkey, untkey } from '../world';
 import type { Simulation } from './simulation';
 
@@ -24,8 +24,8 @@ interface TileState {
   roads: number;
   /** full parking: decaying count of drivers sent to the kerb, when it was last decayed, parking in reach at the last look */
   park: number; parkAt: number; parkCap: number;
-  /** the code it shows now */
-  code: number;
+  /** the code it shows now; for very unhappy, why (shared/src/issues.ts MOOD_REASONS) */
+  code: number; why: number;
 }
 
 /**
@@ -53,8 +53,12 @@ export class Issues {
   private state = new Map<number, TileState>();
   private slices: Building[][] = [];
   private period: number;
-  /** per period, from the census: residents and summed happiness per home, staff at work or on the way per workplace */
-  private homes = new Map<number, { n: number; sum: number }>();
+  /** per period, from the census: residents, summed happiness and the unhappiest resident per home, staff at work or on the way per workplace */
+  private homes = new Map<number, { n: number; sum: number; low: Citizen }>();
+  /** residents' mean happiness per owner (very unhappy is measured against the town), worked out on the period's first need */
+  private towns: Map<string, number> | null = null;
+  /** the tick a site of each owner's was last seen worked (no builders: nobody is building for them) */
+  private served = new Map<string, number>();
   private staff = new Map<number, number>();
   /** builders made progress somewhere during the last period (sites wait out the night without counting) */
   private busy = false;
@@ -126,6 +130,11 @@ export class Issues {
     return out;
   }
 
+  /** Why the very unhappy home at a tile is (shared/src/issues.ts MOOD_REASONS), 0 when it is not or nobody knows. */
+  whyAt(x: number, y: number): number {
+    return this.codeAt(x, y) === Issue.Unhappy ? this.state.get(tkey(x, y))?.why ?? 0 : 0;
+  }
+
   /** Happiness 0-100 of a home's residents at the last census, or -1 with nobody there (the happiness overlay). */
   happinessAt(x: number, y: number): number {
     const h = this.homes.get(tkey(x, y));
@@ -137,11 +146,11 @@ export class Issues {
   /** Once per period: who lives and works where, whether builders were busy, and the next period's slices. */
   private census(P: number) {
     const w = this.w;
-    this.homes.clear(); this.staff.clear();
+    this.homes.clear(); this.staff.clear(); this.towns = null;
     for (const c of w.citizens.values()) {
       const hk = tkey(c.hx, c.hy);
       const h = this.homes.get(hk);
-      if (h) { h.n++; h.sum += c.happy; } else this.homes.set(hk, { n: 1, sum: c.happy });
+      if (h) { h.n++; h.sum += c.happy; if (c.happy < h.low.happy) h.low = c; } else this.homes.set(hk, { n: 1, sum: c.happy, low: c });
       if (!c.job) continue;
       const st = c.state;
       if (st === S.Work || st === S.AtSite || st === S.ToSite || st === S.ToWork || (st === S.ToVenue && c.venueThen === S.ToWork)) {
@@ -169,7 +178,7 @@ export class Issues {
   private look(b: Building) {
     const w = this.w, now = w.tick, k = tkey(b.x, b.y), key = tileKey(b.x, b.y);
     let st = this.state.get(k);
-    if (!st) this.state.set(k, st = { since: -1, work: Infinity, idle: 0, low: -1, hired: 0, roads: -1, park: 0, parkAt: now, parkCap: -1, code: 0 });
+    if (!st) this.state.set(k, st = { since: -1, work: Infinity, idle: 0, low: -1, hired: 0, roads: -1, park: 0, parkAt: now, parkCap: -1, code: 0, why: 0 });
     const site = w.sites.get(key);
     const uc = !!site || underConstruction(w.getTile(b.x, b.y));
     const standing = b.level > 0; // an upgrade being built still stands and works at its level
@@ -177,12 +186,17 @@ export class Issues {
     let code = 0;
     // 1 no road: a building or site with no road at its door, or an empty lot that no road and no frontage neighbour reaches
     if (!w.hasRoadAccess(b.x, b.y) && !this.blockOnly(b) && (b.level > 0 || uc || !this.frontageNear(b))) code = Issue.NoRoad;
-    // 2 no builders: nobody worked the site of a new building for an hour of builder time (a waiting upgrade is not stuck)
+    // 2 no builders: nobody worked the site of a new building for an hour of builder time (a waiting upgrade is not stuck), and
+    // nobody worked any of its owner's sites in that hour either; a site queued behind its owner's own crew only after two days
     if (site && b.level === 0) {
+      if (site.work < st.work) { const o = w.parcelAt(b.x, b.y)?.owner; if (o) this.served.set(o, now); }
       if (site.assigned > 0 || site.work < st.work || site.priority <= -2) st.idle = 0;
       else if (this.busy) st.idle += this.period;
       st.work = site.work;
-      if (!code && st.idle >= IT.noBuildersHours * TPH && site.priority > -2) code = Issue.NoBuilders;
+      if (!code && st.idle >= IT.noBuildersHours * TPH && site.priority > -2) {
+        const served = this.served.get(w.parcelAt(b.x, b.y)?.owner ?? '') ?? -Infinity;
+        if (now - served >= IT.noBuildersHours * TPH || st.idle >= IT.noBuildersStuckHours * TPH) code = Issue.NoBuilders;
+      }
     } else { st.idle = 0; st.work = Infinity; }
     if (standing) {
       // precedence: what stops it working first (nobody comes at all says more than where they park)
@@ -190,8 +204,9 @@ export class Issues {
       const full = this.parkingFull(b, st, key, now); // always: it drains and decays the count
       if (!code && this.noCustomers(b, st, key, now)) code = Issue.NoCustomers;
       if (!code && full) code = Issue.ParkingFull;
-      if (!code && b.zone === Zone.Residential && this.unhappy(k, st)) code = Issue.Unhappy;
+      if (!code && b.zone === Zone.Residential && this.unhappy(b, k, st, now)) code = Issue.Unhappy;
     } else st.low = -1;
+    st.why = code === Issue.Unhappy ? this.why(k) : 0;
     st.code = code;
     if (this.burning?.(b.x, b.y)) code = Issue.Fire; // not kept in st.code: the other conditions' memory carries on under it
     if (!IT.commons && !this.sandbox && code && w.parcelAt(b.x, b.y)?.owner === 'sys') code = 0;
@@ -319,11 +334,41 @@ export class Issues {
     return none;
   }
 
-  /** Residents' mean happiness under unhappyBelow, until it is back over unhappyClear. */
-  private unhappy(k: number, st: TileState): boolean {
+  /**
+   * Residents' mean happiness under unhappyBelow in a home standing unhappyGraceHours, and unhappyMargin under its owner's
+   * town (or the whole town under unhappyTownBelow), until it is back over unhappyClear. A new town's newcomers all start
+   * broke, jobless and friendless; only the homes doing worse than the rest of it say something the player can act on.
+   */
+  private unhappy(b: Building, k: number, st: TileState, now: number): boolean {
     const h = this.homes.get(k);
     if (!h || !h.n) return false;
     const mean = h.sum / h.n;
-    return st.code === Issue.Unhappy ? mean <= IT.unhappyClear : mean < IT.unhappyBelow;
+    if (st.code === Issue.Unhappy) return mean <= IT.unhappyClear;
+    if (mean >= IT.unhappyBelow || now - st.since < IT.unhappyGraceHours * TPH) return false;
+    const town = this.townMood(this.w.parcelAt(b.x, b.y)?.owner ?? '');
+    return town < IT.unhappyTownBelow || mean <= town - IT.unhappyMargin;
+  }
+
+  /** Residents' mean happiness on an owner's land at this period's census (every home's owner, worked out once a period when first asked). */
+  private townMood(owner: string): number {
+    if (!this.towns) {
+      const sums = new Map<string, { n: number; sum: number }>();
+      for (const [k, h] of this.homes) {
+        const [x, y] = untkey(k), o = this.w.parcelAt(x, y)?.owner;
+        if (!o) continue;
+        const t = sums.get(o);
+        if (t) { t.n += h.n; t.sum += h.sum; } else sums.set(o, { n: h.n, sum: h.sum });
+      }
+      this.towns = new Map([...sums].map(([o, t]) => [o, t.sum / t.n]));
+    }
+    return this.towns.get(owner) ?? 50;
+  }
+
+  /** Why a home is very unhappy: its unhappiest resident's largest complaint the player can act on (MOOD_REASONS), 0 if none. */
+  private why(k: number): number {
+    const c = this.homes.get(k)?.low;
+    if (!c || !this.w.citizens.has(c.id)) return 0;
+    for (const p of this.sim.moodParts(c)) if (p.delta < 0) { const r = moodReasonOf(p.label); if (r) return r; }
+    return 0;
   }
 }

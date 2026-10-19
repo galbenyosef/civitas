@@ -27,7 +27,7 @@ import { mothballable, adminRefusal, type Finance } from './sim/finance';
 import type { Issues } from './sim/issues';
 import type { Fires } from './sim/fires';
 import { Overlays } from './overlays';
-import { ISSUE_TUNING, OVERLAY_COUNT } from '@msimcity/shared';
+import { ISSUE_TUNING, OVERLAY_COUNT, Issue } from '@msimcity/shared';
 
 interface Client {
   conn: Conn; player: Player | null; subs: Set<string>; lastHint: number;
@@ -1206,10 +1206,13 @@ export class Net {
   private problemsTo(c: Client, by = this.issues?.byOwner()) {
     if (!c.player || !by) return;
     const p = by.get(c.player.id) ?? [];
-    const sig = p.join(',');
+    // why each very unhappy home is (sim/issues.ts whyAt), when any is
+    let r: number[] | undefined;
+    for (let i = 0; i < p.length; i += 3) if (p[i + 2] === Issue.Unhappy) { r ??= new Array(p.length / 3).fill(0); r[i / 3] = this.issues!.whyAt(p[i], p[i + 1]); }
+    const sig = r ? `${p.join(',')}|${r.join(',')}` : p.join(',');
     if (sig === c.probSig) return;
     c.probSig = sig;
-    this.send(c, { t: 'problems', p });
+    this.send(c, r ? { t: 'problems', p, r } : { t: 'problems', p });
   }
   /** The overlay channel a client wants (0 none): every subscribed chunk is looked at again. */
   private setOverlay(c: Client, ch: number) {

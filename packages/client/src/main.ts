@@ -308,7 +308,7 @@ net.on('traffic', (m) => world.applyTraffic(m.cx, m.cy, m.d, m.k));
 // issue bubbles, your problems list and the data overlays (render/issues.ts, problems.ts, overlays.ts)
 net.on('issues', (m) => world.applyIssues(m.cx, m.cy, m.d));
 net.on('fires', (m) => firesView.set(m.f));
-net.on('problems', (m) => problems.set(m.p));
+net.on('problems', (m) => problems.set(m.p, m.r));
 net.on('overlay', (m) => world.applyOverlay(m.ch, m.cx, m.cy, m.d));
 const problems = new ProblemsPanel({
   world,
@@ -1111,7 +1111,7 @@ net.on('building', (m) => {
   if (!m.info) { ui.hideTip(); return; }
   ui.showTip(m.info);
   const code = world.issueAt(m.x, m.y); // its problem line under the stats (problems.ts)
-  if (code) document.getElementById('tip')!.insertAdjacentHTML('beforeend', issueTipHtml(code, problems.glyph(code)));
+  if (code) document.getElementById('tip')!.insertAdjacentHTML('beforeend', issueTipHtml(code, problems.glyph(code), problems.whyAt(m.x, m.y)));
   ui.moveTip(mouse.x, mouse.y);
 });
 net.on('road', (m) => {

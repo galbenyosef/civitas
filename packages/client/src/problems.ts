@@ -1,4 +1,4 @@
-import { ISSUE_CODES, ISSUE_TEXT, KIND_NAMES, isRoad, levelOf, underConstruction } from '@msimcity/shared';
+import { ISSUE_CODES, ISSUE_TEXT, KIND_NAMES, MOOD_REASONS, Issue, isRoad, levelOf, underConstruction } from '@msimcity/shared';
 import type { ClientWorld } from './world';
 import { issueGlyphUrl, ISSUE_COLOUR } from './render/issues';
 
@@ -6,7 +6,8 @@ import { issueGlyphUrl, ISSUE_COLOUR } from './render/issues';
  * The problems list (docs/audit-2026-10.md section 4.4): a top-bar chip "problems N", red while there are any, opening
  * a panel of your own buildings and lots the server flags (message `problems`: x, y, code triples), grouped by what is
  * wrong, with a line on what fixes it and a "show me" per entry that flies there and makes the badge pulse. It needs no
- * chunk data: names come from the tiles when they are loaded and say "lot" when they are not.
+ * chunk data: names come from the tiles when they are loaded and say "lot" when they are not. Very unhappy homes come with
+ * why (message `problems` r, shared/src/issues.ts MOOD_REASONS) and are listed under each reason with what helps.
  */
 export interface ProblemsDeps {
   world: ClientWorld;
@@ -26,6 +27,8 @@ export class ProblemsPanel {
   private el: HTMLDivElement;
   private open = false;
   private glyphs = new Map<number, string>();
+  /** why each very unhappy home is, by "x,y" */
+  private why = new Map<string, number>();
 
   constructor(private d: ProblemsDeps) {
     injectStyle();
@@ -61,14 +64,19 @@ export class ProblemsPanel {
     if (open) this.render();
   }
 
-  /** A new list from the server (flat x, y, code). */
-  set(p: number[]) {
+  /** A new list from the server (flat x, y, code; r why each very unhappy home is). */
+  set(p: number[], r?: number[]) {
     this.d.world.problems = p;
+    this.why.clear();
+    if (r) for (let i = 0; i < r.length; i++) if (r[i]) this.why.set(`${p[i * 3]},${p[i * 3 + 1]}`, r[i]);
     const n = p.length / 3;
     this.chip.innerHTML = `problems <b>${n}</b>`;
     this.chip.classList.toggle('bad', n > 0);
     if (this.open) this.render();
   }
+
+  /** why the very unhappy home at a tile of yours is (MOOD_REASONS id), 0 if not known */
+  whyAt(x: number, y: number) { return this.why.get(`${x},${y}`) ?? 0; }
 
   private name(x: number, y: number) {
     const w = this.d.world, t = w.getTile(x, y);
@@ -94,10 +102,18 @@ export class ProblemsPanel {
       const tx = ISSUE_TEXT[code];
       html += `<div class="pgroup" style="--pc:${ISSUE_COLOUR[code]}"><div class="ptitle"><img src="${this.glyph(code)}" alt=""><b>${tx.title}</b><span class="pn">${g.length}</span></div>`;
       html += `<div class="pexp">${tx.explain}</div>`;
-      for (const [x, y] of g.slice(0, PER_GROUP)) {
-        html += `<div class="prow"><a data-act="open" data-x="${x}" data-y="${y}" title="Open its panel">${esc(this.name(x, y))}</a><span class="pxy">${x}, ${y}</span><button class="chip" data-act="show" data-x="${x}" data-y="${y}">show me</button></div>`;
-      }
-      if (g.length > PER_GROUP) html += `<div class="pmore">and ${g.length - PER_GROUP} more</div>`;
+      const row = ([x, y]: [number, number]) => `<div class="prow"><a data-act="open" data-x="${x}" data-y="${y}" title="Open its panel">${esc(this.name(x, y))}</a><span class="pxy">${x}, ${y}</span><button class="chip" data-act="show" data-x="${x}" data-y="${y}">show me</button></div>`;
+      const more = (n: number) => (n > PER_GROUP ? `<div class="pmore">and ${n - PER_GROUP} more</div>` : '');
+      if (code === Issue.Unhappy) {
+        // under each reason, the most common first, with what helps
+        const by = new Map<number, [number, number][]>();
+        for (const e of g) { const r = this.whyAt(e[0], e[1]); let l = by.get(r); if (!l) by.set(r, l = []); l.push(e); }
+        for (const [r, l] of [...by].sort((a, b) => b[1].length - a[1].length || a[0] - b[0])) {
+          const why = MOOD_REASONS.find((m) => m.id === r);
+          html += `<div class="pwhy"><b>${why ? esc(why.title) : 'other reasons'}</b> ${l.length}${why ? `: ${esc(why.advice)}` : ': hover a resident to see why.'}</div>`;
+          html += l.slice(0, PER_GROUP).map(row).join('') + more(l.length);
+        }
+      } else html += g.slice(0, PER_GROUP).map(row).join('') + more(g.length);
       html += `</div>`;
     }
     this.el.innerHTML = html;
@@ -131,6 +147,8 @@ function injectStyle() {
 #problems .pxy { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 #problems .prow .chip { padding: 1px 8px; font-size: 11px; }
 #problems .pmore { color: var(--muted); padding-top: 2px; }
+#problems .pwhy { margin: 5px 0 2px; line-height: 1.35; color: var(--muted); }
+#problems .pwhy b { color: var(--fg); font-weight: 600; }
 #tip .issueline { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; padding-top: 5px; border-top: 1px solid var(--line); line-height: 1.35; }
 #tip .issueline img { width: 22px; height: 22px; flex: none; }
 #tip .issueline b { color: var(--pc); }
@@ -139,9 +157,11 @@ function injectStyle() {
   document.head.appendChild(style);
 }
 
-/** The tooltip's problem line for a tile's code (main.ts appends it to the building tooltip). */
-export function issueTipHtml(code: number, glyph: string): string {
+/** The tooltip's problem line for a tile's code (main.ts appends it to the building tooltip); why, for a very unhappy home of yours. */
+export function issueTipHtml(code: number, glyph: string, why = 0): string {
   const tx = ISSUE_TEXT[code];
   if (!tx) return '';
-  return `<div class="issueline" style="--pc:${ISSUE_COLOUR[code]}"><img src="${glyph}" alt=""><span><b>${tx.title}.</b> ${tx.explain}</span></div>`;
+  const r = code === Issue.Unhappy ? MOOD_REASONS.find((m) => m.id === why) : undefined;
+  const text = r ? `Most of all: ${esc(r.title)}. ${esc(r.advice)}` : tx.explain;
+  return `<div class="issueline" style="--pc:${ISSUE_COLOUR[code]}"><img src="${glyph}" alt=""><span><b>${tx.title}.</b> ${text}</span></div>`;
 }
