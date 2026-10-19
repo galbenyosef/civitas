@@ -1,5 +1,5 @@
 import {
-  RANKS, TOP_RANK, GOAL_BY_ID, TECH_BY_ID, Zone, CAMP_KIND, MAX_PARCEL_EDGE, DEFAULT_TAX, isLeisure, tileKey, charterRing, rankRewardText,
+  RANKS, TOP_RANK, NEED_HOW, TICKS_PER_DAY, GOAL_BY_ID, TECH_BY_ID, Zone, CAMP_KIND, MAX_PARCEL_EDGE, DEFAULT_TAX, isLeisure, tileKey, charterRing, rankRewardText,
   type Milestone, type RankDTO, type RankNeedId, type RankUp, type ServerMsg,
 } from '@msimcity/shared';
 import { emptyStats, type World, type Player } from './world';
@@ -22,7 +22,12 @@ export interface RankState {
   black?: number; blackDay?: number;
   /** a frontier's charter holder: the rank whose ring of land the charter has been given */
   ring?: number;
+  /** the most residents yet and the tick it was reached: growth that pauses gets a nudge in the feed */
+  peak?: number; peakAt?: number;
 }
+
+/** Residents not rising for this long (half a game day, four real minutes at 1×) is a pause worth a word; at most this many words a pause. */
+const STALL_TICKS = TICKS_PER_DAY / 2, STALL_WORDS = 3;
 
 /** Milestones kept per player, and sent. */
 const FEED_KEEP = 40, FEED_SEND = 12;
@@ -35,9 +40,9 @@ const steps = (first: number[], a: number, to: number, b: number, end: number) =
   return out;
 };
 // fine enough that a town still growing passes one every few minutes (docs/ranks.md: no stretch over six without news)
-const POP_STEPS = steps([10, 25, 50, 75, 100], 25, 500, 50, 1500).concat([1750, 2000, 2500, 3000, 4000, 5000]);
-const JOB_STEPS = steps([5, 10, 20, 30, 40, 50], 25, 500, 50, 1200).concat([1500, 2000]);
-const BUILT_STEPS = steps([500, 1000], 1000, 10000, 2500, 30000).concat([40000, 50000, 75000, 100000]);
+const POP_STEPS = steps([10, 25, 50, 75, 100], 25, 1000, 50, 1500).concat([1750, 2000, 2500, 3000, 4000, 5000]);
+const JOB_STEPS = steps([5, 10, 20, 30, 40, 50], 25, 1000, 50, 1200).concat([1500, 2000]);
+const BUILT_STEPS = steps([500, 1000], 1000, 10000, 2500, 50000).concat([60000, 75000, 100000]);
 const TAX_STEPS = [25, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000];
 
 /** What the needs and the feed's firsts read on a player's own land. */
@@ -140,6 +145,13 @@ export class Ranks {
       }
     }
     for (const m of this.milestones(p, s, t)) if (!s.seen.includes(m.key)) note(m.key, m.kind, m.text);
+    // growth that has paused: say why and what to do (lots waiting for builders, else the next rank's first need short)
+    const housed = p.progress.housed;
+    if (housed > (s.peak ?? 0)) { s.peak = housed; s.peakAt = w.tick; }
+    else if (housed >= 25 && s.peakAt !== undefined) {
+      const k = Math.floor((w.tick - s.peakAt) / STALL_TICKS), key = `stall:${s.peak}:${k}`;
+      if (k >= 1 && k <= STALL_WORDS && !s.seen.includes(key)) note(key, 'need', this.stallText(p, s));
+    }
     if (s.feed.length > FEED_KEEP) s.feed.length = FEED_KEEP;
     if (s.seen.length > 600) s.seen = s.seen.slice(-600); // the keys are bounded by the steps above; a guard, not a rule
     const mark = POP_STEPS.find((n) => n > p.progress.housed);
@@ -149,6 +161,15 @@ export class Ranks {
       ...this.rings(p, s),
     };
     return { msg: { t: 'rank', rank, ...(up ? { up } : {}), ...(fresh.length ? { fresh: fresh.reverse() } : {}) }, sig: JSON.stringify(rank) };
+  }
+
+  private stallText(p: Player, s: RankState): string {
+    let waiting = 0;
+    for (const q of this.w.sites.values()) if (this.w.parcelAt(q.x, q.y)?.owner === p.id) waiting++;
+    if (waiting >= 15) return `Growth has paused at ${s.peak} residents with ${waiting} lots waiting for builders: another builders' yard (Y) puts more crews on them`;
+    const next = RANKS[s.rank + 1];
+    const short = next?.needs.find((q, i) => this.measure(s.rank + 1, p, this.tally(p))[i] < q.target);
+    return `Growth has paused at ${s.peak} residents: ${(NEED_HOW[short?.id ?? 'residents']).replace(/\.$/, '')}`;
   }
 
   /** The milestones true now, each with its key (fired once ever): residents, jobs, building work, taxes, firsts, research, goals. */

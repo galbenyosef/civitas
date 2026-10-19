@@ -33,16 +33,16 @@ export interface RankDef {
 export const RANKS: RankDef[] = [
   { name: 'Camp', blurb: 'Tents round a fire pit at the end of the road, and a town to come.', needs: [], grant: 0, side: 32 },
   { name: 'Hamlet', blurb: 'A cluster of homes with a shop and somewhere to sit: people start to call it a place.',
-    needs: [{ id: 'residents', label: 'residents', target: 100 }, { id: 'shops', label: 'shops open', target: 2 }, { id: 'leisure', label: 'park or venue', target: 1 }],
-    grant: 2000, side: 48 },
+    needs: [{ id: 'residents', label: 'residents', target: 90 }, { id: 'shops', label: 'shops open', target: 2 }, { id: 'leisure', label: 'park or venue', target: 1 }],
+    grant: 2500, side: 48 },
   { name: 'Village', blurb: 'Its own jobs, a police box and a fire post: a village looks after itself.',
-    needs: [{ id: 'residents', label: 'residents', target: 320 }, { id: 'jobs', label: 'jobs filled on your land', target: 220 }, { id: 'cover', label: 'police and fire cover', target: 2 }],
-    grant: 3500, side: 64 },
+    needs: [{ id: 'residents', label: 'residents', target: 340 }, { id: 'jobs', label: 'jobs filled on your land', target: 270 }, { id: 'cover', label: 'police and fire cover', target: 2 }],
+    grant: 4000, side: 64 },
   { name: 'Town', blurb: 'Two-storey streets, a working economy and books that balance: a market town.',
-    needs: [{ id: 'residents', label: 'residents', target: 650 }, { id: 'jobs', label: 'jobs filled on your land', target: 500 }, { id: 'level2', label: 'two-storey buildings', target: 30 }, { id: 'black', label: 'days in the black in a row', target: 3 }],
+    needs: [{ id: 'residents', label: 'residents', target: 560 }, { id: 'jobs', label: 'jobs filled on your land', target: 460 }, { id: 'level2', label: 'two-storey buildings', target: 30 }, { id: 'black', label: 'days in the black in a row', target: 3 }],
     grant: 6000, side: 80 },
   { name: 'City', blurb: 'Schools or buses, and people coming from far off to work: a city, with the land rules of the wide world.',
-    needs: [{ id: 'residents', label: 'residents', target: 1000 }, { id: 'jobs', label: 'jobs filled on your land', target: 800 }, { id: 'school', label: 'pupils at school, or a bus line', target: 1 }],
+    needs: [{ id: 'residents', label: 'residents', target: 880 }, { id: 'jobs', label: 'jobs filled on your land', target: 740 }, { id: 'school', label: 'pupils at school, or a bus line', target: 1 }],
     grant: 10000, side: 96, open: true },
 ];
 export const TOP_RANK = RANKS.length - 1;

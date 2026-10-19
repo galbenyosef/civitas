@@ -176,6 +176,14 @@ const ownedBy = (w: World, r: { x: number; y: number; w: number; h: number }, id
   const m0 = p.money;
   a.clear(); measure();
   ok(a.last()?.up?.rank === 1 && p.money - m0 === RANKS[1].grant && !a.last()?.up?.land, `a Hamlet beside the Commons: +$${p.money - m0}, no land`);
+  // growth that pauses for half a game day gets a word in the feed, once a half day, at most three times a pause
+  const words: string[] = [];
+  for (let i = 0; i < 4 * 24 * 4; i++) { a.clear(); measure(); for (const f of a.last()?.fresh ?? []) if (/^Growth has paused/.test(f.text)) words.push(f.text); }
+  ok(words.length === 3, `a pause of two game days: ${words.length} nudges ("${words[0]?.slice(0, 70)}…")`);
+  p.progress.housed += 30; measure(); p.progress.housed -= 1;
+  const more: string[] = [];
+  for (let i = 0; i < 24 * 4; i++) { a.clear(); measure(); for (const f of a.last()?.fresh ?? []) if (/^Growth has paused/.test(f.text)) more.push(f.text); }
+  ok(more.length === 2 && more[0].includes(String(p.progress.housed + 1)), 'growth, then a new pause: a new nudge naming the new peak');
 }
 
 // ---- a sandbox has no ranks
