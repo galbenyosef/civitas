@@ -45,8 +45,8 @@ const BASCULE_UP_COST = 25;
 interface Cong { v: number; at: number }
 /**
  * The router's cost of one chunk's tiles, as dense arrays (docs/search-perf.md): Traffic.cost is called for every tile
- * every A* search looks at. `cong` is congestionAt as it was first read in tick `at` (-1: not read yet this tick; the
- * congestion of a tile changes only in endTick, which clears it); `flags` the parts that change only with the tiles
+ * every A* search looks at. `cong` is congestionAt as it was first read in epoch `at` (a new epoch each tick and after
+ * endTick, the only place congestion changes; its decay changes only with the tick); `flags` the parts that change only with the tiles
  * (0: not worked out, else 1 | 2 for a junction of three or more | 4 a level crossing | 8 a bascule deck), cleared by
  * invalidate as the degree and crossing caches are; `kerb` 1 where a car is parked at the kerb, kept by World.kerb.
  */
@@ -351,9 +351,8 @@ export class Traffic {
       const v = prev + (target - prev) * EMA_ALPHA;
       if (c) { c.v = v; c.at = tick; } else this.cong.set(k, { v, at: tick });
       this.dirty.add(k);
-      const cc = this.costChunkOfKey(k);
-      if (cc) cc.at[this.costCell] = -1;
     }
+    this.congEpoch++; // the router's cached congestion is stale now
     this.lastVehicles = this.vehicles; this.lastQueued = this.queued;
     this.lastSpeedPct = this.vehicles ? this.speedSum / this.vehicles : 1;
   }
@@ -371,10 +370,11 @@ export class Traffic {
     const cx = chunkOf(x), cy = chunkOf(y);
     let cc = this.lastCost;
     if (cx !== this.lastCx || cy !== this.lastCy) { cc = this.costChunk(cx, cy); this.lastCx = cx; this.lastCy = cy; this.lastCost = cc; }
-    const i = localIndex(x, y), tick = this.w.tick;
+    const i = localIndex(x, y);
+    if (this.w.tick !== this.epochTick) { this.epochTick = this.w.tick; this.congEpoch++; }
     let g: number;
-    if (cc.at[i] === tick) g = cc.cong[i];
-    else { g = cc.cong[i] = this.congestionAt(x, y); cc.at[i] = tick; }
+    if (cc.at[i] === this.congEpoch) g = cc.cong[i];
+    else { g = cc.cong[i] = this.congestionAt(x, y); cc.at[i] = this.congEpoch; }
     let f = cc.flags[i];
     if (!f) f = cc.flags[i] = 1 | (this.degreeOf(x, y) >= 3 ? 2 : 0) | (this.isCrossingAt(x, y) ? (this.xing.get(tkey(x, y)) === 1 ? 4 : 8) : 0);
     let c = 1 + TT.congestionWeight * g;
@@ -387,6 +387,8 @@ export class Traffic {
   }
   private costChunks = new Map<number, CostChunk>();
   private lastCx = NaN; private lastCy = NaN; private lastCost!: CostChunk;
+  /** bumped each new tick and by endTick: a cost chunk's congestion read in an earlier epoch is stale */
+  private congEpoch = 0; private epochTick = NaN;
   private costChunk(cx: number, cy: number): CostChunk {
     const nk = tkey(cx, cy);
     let cc = this.costChunks.get(nk);
