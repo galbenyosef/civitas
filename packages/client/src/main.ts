@@ -51,6 +51,7 @@ import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsH
 import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, type DemoInfo } from './tour';
 import { MapMode } from './mapmode';
 import { IssuesView } from './render/issues';
+import { FiresView } from './render/fires';
 import { OverlayMap } from './render/overlayMap';
 import { ProblemsPanel, issueTipHtml } from './problems';
 import { OverlayMenu } from './overlays';
@@ -86,6 +87,8 @@ scene.add(parks.group);
 // issue bubbles over stuck buildings and lots, and the data overlays' map (render/issues.ts, render/overlayMap.ts, docs/audit-2026-10.md 4.4)
 const issuesView = new IssuesView(world);
 scene.add(issuesView.group);
+const firesView = new FiresView(world); // house fires (render/fires.ts): flames, smoke, glow and scorch
+scene.add(firesView.group);
 const overlayMap = new OverlayMap();
 
 const hoverMesh = new Mesh(new PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false }));
@@ -304,6 +307,7 @@ net.on('lineStats', (m) => lines.applyStats(m));
 net.on('traffic', (m) => world.applyTraffic(m.cx, m.cy, m.d, m.k));
 // issue bubbles, your problems list and the data overlays (render/issues.ts, problems.ts, overlays.ts)
 net.on('issues', (m) => world.applyIssues(m.cx, m.cy, m.d));
+net.on('fires', (m) => firesView.set(m.f));
 net.on('problems', (m) => problems.set(m.p));
 net.on('overlay', (m) => world.applyOverlay(m.ch, m.cx, m.cy, m.d));
 const problems = new ProblemsPanel({
@@ -1162,6 +1166,8 @@ function frame(now: number) {
   overlayMap.update(world.overlayDirty, (k) => world.overlay.get(k));
   issuesView.group.visible = fpv.mode !== 'full' && underground.level < 0.5; // not in first person or the underground view (the map has its own scene)
   issuesView.frame(now);
+  firesView.group.visible = underground.level < 0.5;
+  firesView.frame(liveTickF());
   citizens.frame(now, dt);
   lines.frame();
   if (routeView.active) routeView.frame(citizens.positionOf(selectedCitizen), now);
@@ -1234,7 +1240,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

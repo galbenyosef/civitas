@@ -47,6 +47,8 @@ export class Issues {
   sandbox = false;
   /** self-timing for the load test: ms spent in tick() and ticks counted */
   ms = 0; ticks = 0;
+  /** a fire burning at a door tile (sim/fires.ts, set by game.ts): on fire outranks every other code */
+  burning: ((x: number, y: number) => boolean) | null = null;
 
   private state = new Map<number, TileState>();
   private slices: Building[][] = [];
@@ -78,6 +80,12 @@ export class Issues {
       this.look(b);
     }
     this.ms += performance.now() - t0; this.ticks++;
+  }
+
+  /** A fire started or went out at a door tile (sim/fires.ts): look again now rather than on the round, so the badge follows at once. */
+  fireChanged(x: number, y: number) {
+    const b = this.w.buildings.get(tileKey(x, y));
+    if (b) this.look(b); else { this.state.delete(tkey(x, y)); this.set(x, y, 0); }
   }
 
   /** The code at a tile (its door for a structure), 0 when none. */
@@ -185,6 +193,7 @@ export class Issues {
       if (!code && b.zone === Zone.Residential && this.unhappy(k, st)) code = Issue.Unhappy;
     } else st.low = -1;
     st.code = code;
+    if (this.burning?.(b.x, b.y)) code = Issue.Fire; // not kept in st.code: the other conditions' memory carries on under it
     if (!IT.commons && !this.sandbox && code && w.parcelAt(b.x, b.y)?.owner === 'sys') code = 0;
     this.set(b.x, b.y, code);
   }

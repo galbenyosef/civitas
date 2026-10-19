@@ -86,6 +86,8 @@ const FREIGHT_MAX_SCORE = 2 * MAX_LEVEL + 3, VISITOR_MAX_SCORE = 5 + MAX_LEVEL, 
 const FREIGHT_NODES = 1500, VISITOR_NODES = 2500, PATROL_NODES = 1200; // fallback road searches
 const VEHICLE_ID_BASE = 1 << 30;
 const PEOPLE_ROW_CAP = 80;           // rows per list in the building panel
+/** a fire engine on a call (Mover.call) stopped this many ticks (in traffic or at its door) drives on down the middle of the road (Simulation.weave), at this share of the speed */
+const WEAVE_AFTER = 8, WEAVE_SPEED = 0.6;
 const GARAGE_WAIT_MAX = 150;          // ticks a car will wait for a gap to pull out before the trip is abandoned
 
 const S = CitizenState;
@@ -190,6 +192,8 @@ export class Simulation {
   learning: Learning;
   /** the first five minutes (sim/firstfive.ts, docs/first-five.md): the camp's settlers, the starter crew, the first-settlers moment */
   start: FirstFive;
+  /** adds the tiles growth must leave alone this pass (sim/fires.ts: buildings on fire), as tkeys; set by game.ts */
+  held: ((into: Set<number>) => void) | null = null;
   /** messages for a parcel owner's screen (net.ts sends them as toasts and clears the list) */
   notices: { owner: string; msg: string }[] = [];
   /** owners already told that newcomers spawn in place; cleared once a gateway brings someone in, so a town that loses its last gateway hears again */
@@ -856,6 +860,7 @@ export class Simulation {
     const cDemand = Math.max(0, this.population - this.jobs + 6);
     const merges: MergePlan[] = [];
     const claimed = new Set<number>(); // tiles under a merge planned this pass
+    this.held?.(claimed); // tiles on fire (sim/fires.ts): nothing grows into or out of a burning building
     let searches = 0;
     // merges under construction per parcel, so builders are not swamped and a district rebuilds a block or two at a time
     const building = new Map<number, number>();
@@ -2750,6 +2755,13 @@ export class Simulation {
   harbourFreight(b: Building, to: [number, number], fee: number) { this.dispatchQueue.push({ vkind: VehicleKind.Freight, b, entry: null, to, fee }); }
   /** A delivery truck from (from) to (to) for its owner: the last mile of rail freight, from a yard to the shop. */
   spawnFreightTruck(from: [number, number], to: [number, number], owner: string | null): number | null { return this.spawnVehicle(VehicleKind.Freight, from, to, owner)?.id ?? null; }
+  /** A fire engine on blue lights from its station to a fire (sim/fires.ts), or null when no road joins them. It pulls up at the door, never looking for a space, and waits there (phase 'dwell'). */
+  spawnFireEngine(from: [number, number], to: [number, number], owner: string | null): number | null {
+    const v = this.spawnVehicle(VehicleKind.FireEngine, from, to, owner, true);
+    if (v?.leg) v.leg.arrive = 'none';
+    if (v) v.call = true;
+    return v?.id ?? null;
+  }
 
   private spawnVehicle(vkind: number, from: [number, number], to: [number, number], owner: string | null, priority = false): Vehicle | null {
     const w = this.w;
@@ -2759,6 +2771,7 @@ export class Simulation {
     const v: Vehicle = {
       id, x: from[0] + 0.5, y: from[1] + 0.5, path: [], pi: 0, vkind, phase: 'out', from, to, until: 0,
       parkedAt: null, parkKerb: false, owner, legs: [{ path: route.path, drive: true, arrive: vkind === VehicleKind.Patrol ? 'none' : 'park', dest: to }], leg: null,
+      call: false, weave: false, // set on a fire engine's call (sim/fires.ts); here so every vehicle has one shape
       ...w.moverDefaults(id),
     };
     v.priority = priority;
@@ -2780,7 +2793,10 @@ export class Simulation {
       if (!v.leg) { w.vehicles.delete(v.id); continue; }
       const leg = v.leg;
       let done = false;
-      if (leg.drive) {
+      const call = v.call ? this.callStep(v) : 0; // a fire engine on a call (sim/fires.ts): 1 waiting or weaving, 2 arrived weaving
+      if (call === 1) continue;
+      if (call === 2) done = true;
+      else if (leg.drive) {
         if (v.lane < 0) { if (this.traffic.enter(v) === 'blocked') { if (++v.wait > GARAGE_WAIT_MAX) { this.traffic.count('garageGiveUp'); this.despawn(v); } continue; } continue; }
         const r = this.traffic.step(v);
         if (r === 'stuck') { this.onStuck(v, leg); continue; }
@@ -2797,6 +2813,36 @@ export class Simulation {
       if (v.phase === 'out') this.startDwell(v);
       else this.despawn(v);
     }
+  }
+  /**
+   * A fire engine on a call that traffic has stopped (sim/fires.ts) drives on down the middle of the road with its lights
+   * on, out of the lanes: nobody has to make room in the simulation, and drawn it passes the queue on the crown of the
+   * road. It keeps to its route at WEAVE_SPEED of a car's speed, through junctions and signals, until it arrives. Returns
+   * true on arrival. callStep, before the ordinary drive step: 0 drive on as any vehicle, 1 done for this tick, 2 arrived.
+   */
+  private callStep(v: Vehicle): 0 | 1 | 2 {
+    if (!v.leg?.drive) return 0;
+    if (v.weave) return this.weave(v) ? 2 : 1;
+    if (v.lane < 0) {
+      // pulling out: enter() zeroes wait, so stuck counts the engine's wait at its door
+      if (this.traffic.enter(v) === 'blocked' && ++v.stuck > WEAVE_AFTER) v.weave = true;
+      return 1;
+    }
+    if (v.wait > WEAVE_AFTER) { this.traffic.leave(v); v.weave = true; return 1; } // stopped in traffic since the last step
+    return 0;
+  }
+  private weave(v: Vehicle): boolean {
+    const p = v.path, n = p.length / 2;
+    if (v.pi < 1) v.pi = 1;
+    let s = DRIVE_SPEED * WEAVE_SPEED;
+    while (s > 0 && v.pi < n) {
+      const left = 1 - v.prog;
+      if (s >= left) { s -= left; noteTrail(v, p[v.pi * 2], p[v.pi * 2 + 1]); v.pi++; v.prog = 0; } else { v.prog += s; s = 0; }
+    }
+    if (v.pi >= n) { v.x = p[(n - 1) * 2] + 0.5; v.y = p[(n - 1) * 2 + 1] + 0.5; v.weave = false; return true; }
+    const ax = p[(v.pi - 1) * 2], ay = p[(v.pi - 1) * 2 + 1], bx = p[v.pi * 2], by = p[v.pi * 2 + 1];
+    v.x = ax + 0.5 + (bx - ax) * v.prog; v.y = ay + 0.5 + (by - ay) * v.prog;
+    return false;
   }
   private startDwell(v: Vehicle) {
     const w = this.w;
@@ -2827,7 +2873,7 @@ export class Simulation {
     const route = findRoute(w, at[0], at[1], dest[0], dest[1], (x, y) => this.traffic.cost(x, y));
     if (!route || route.path.length < 4) { this.despawn(v); return; }
     v.x = at[0] + 0.5; v.y = at[1] + 0.5;
-    v.priority = false;
+    v.priority = false; v.call = false;
     resetTrail(v, at[0], at[1]);
     v.legs = [{ path: route.path, drive: true, arrive: 'none' }];
     this.startLeg(v);
@@ -3000,7 +3046,7 @@ export class Simulation {
       yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: drive ? 1 : 0, kind: familyOf(c.kind), cls: drive ? c.cls : 0, queued: drive && c.wait > 1, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out, ind: drive ? indicatorOf(c, false) : 0, extra: studyFlag(c) };
     }
     for (const v of this.w.vehicles.values()) {
-      if (v.phase === 'dwell' || v.lane < 0) continue;
+      if (v.phase === 'dwell' ? !v.call : v.lane < 0 && !v.weave) continue; // a fire engine at a fire (sim/fires.ts) is drawn parked at the kerb
       if (v.vkind > FLEET_VKIND) { const a = this.mobile.agentOf(v); if (a) yield a; continue; } // taxis, riders, bin lorries (sim/mobile.ts)
       const rev = v.cls === VehicleClass.Bus && this.traffic.reversing(v);
       yield { id: v.id, x: v.x, y: v.y, state: v.phase === 'back' ? S.ToHome : S.ToWork, mode: 1, kind: v.vkind, cls: v.cls, queued: v.wait > 1, emergency: v.priority, stage: 0, rev, ind: indicatorOf(v, rev) };

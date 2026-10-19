@@ -3,6 +3,7 @@ import { World, emptyProgress, lifeDefaults, type Citizen, type Parcel, type Pla
 import { LIFE, seededAge, ageOf } from './sim/life';
 import { rehire } from './sim/skills';
 import { historyOf, type HistoryJSON } from './history';
+import type { FireSave } from './sim/fires';
 
 /**
  * v8: the per-chunk under layer (tunnels and platforms, docs/underground.md), stored only where it is not all zero,
@@ -37,6 +38,8 @@ export interface Snapshot {
   start?: 'frontier'; home?: [number, number]; charter?: { x: number; y: number; w: number; h: number };
   /** mothballed services and yards (World.mothballed, sim/finance.ts) as [x, y] doors; optional, absent when there are none */
   mothballed?: [number, number][];
+  /** fires burning or in their aftermath, young buildings' ages, each player's warning fire (sim/fires.ts); optional, absent in older saves */
+  fires?: FireSave;
 }
 
 /**
@@ -66,6 +69,7 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.seaGates.length ? { seaGates: w.seaGates.map((g) => ({ ...g })) } : {}),
     ...(w.start === 'frontier' ? { start: 'frontier' as const, ...(w.home ? { home: w.home } : {}), ...(w.charter ? { charter: { ...w.charter } } : {}) } : {}),
     ...(w.mothballed.size ? { mothballed: [...w.mothballed].map((k) => parseKey(k) as [number, number]) } : {}),
+    ...(w.firesSave ? { fires: w.firesSave() } : {}),
   };
 }
 
@@ -114,6 +118,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
     if (ch && [ch.x, ch.y, ch.w, ch.h].every(Number.isInteger)) w.charter = { x: ch.x, y: ch.y, w: ch.w, h: ch.h };
   }
   for (const m of snap.mothballed ?? []) if (Array.isArray(m) && w.buildings.has(tileKey(m[0], m[1]))) w.mothballed.add(tileKey(m[0], m[1]));
+  if (snap.fires && typeof snap.fires === 'object') w.firesLoaded = snap.fires;
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links

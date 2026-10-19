@@ -9,6 +9,7 @@ import {
 import { LIFE, stageFor } from './sim/life';
 import type { GoalState } from './goals';
 import type { RankState } from './ranks';
+import type { FireSave } from './sim/fires';
 
 export interface Chunk {
   cx: number; cy: number;
@@ -90,6 +91,8 @@ export interface Mover {
   inDir: number;                        // direction the current lane was entered from (for turn geometry)
   committed: boolean;                   // past the stop line, crossing into the next tile
   priority: boolean;                    // emergency vehicles ignore signals
+  /** a fire engine on its way to a fire (sim/fires.ts): it pulls out into its forecourt to wait for a gap, and drives on down the middle of the road when traffic stops it */
+  call?: boolean;
   rerouted: number;                     // tick of the last re-route
   // walking: the leg's polyline, which point is being approached, and per-point crossing / node bookkeeping
   pts: number[] | null; pp: number; cross: number[] | null; node: number[] | null; xdir: number[] | null;
@@ -132,6 +135,8 @@ export interface Vehicle extends Mover {
   legs: Leg[]; leg: Leg | null;
   /** what the buyer pays on delivery when it is not FREIGHT_FEE (harbour freight: fish by the box, sim/harbours.ts) */
   fee?: number;
+  /** a fire engine on a call (Mover.call) held up in stopped traffic, driving on down the middle of the road out of the lanes (Simulation.weave) */
+  weave?: boolean;
 }
 export interface Citizen extends Mover, EduFields {
   hx: number; hy: number;               // home tile
@@ -240,6 +245,9 @@ export class World {
   nextId = 1;
   day = 0;
   tick = 0;
+  /** fires (sim/fires.ts): what to save, set by the Fires module; and what a loaded snapshot carried, taken once by it */
+  firesSave: (() => FireSave) | null = null;
+  firesLoaded: FireSave | null = null;
   /** merged lots since start (zones.ts): sites opened, lots absorbed, people moved, sites completed, people evicted at completion, structures broken back into lots */
   mergeStats = { opened: 0, absorbed: 0, residents: 0, workers: 0, completed: 0, evicted: 0, brokenUp: 0 };
 

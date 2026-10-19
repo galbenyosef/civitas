@@ -8,7 +8,7 @@ import { variant } from './models';
 import { SIGN_MAX_DIST } from './signs';
 import { sceneUniforms } from './materials';
 
-const CELL = 128, CODES = 6;
+const CELL = 128, CODES = 7;
 const MAX_ICONS = 4096;
 /** icons start to fade this far from the camera (past the name boards, render/signs.ts), each a hashed few tiles either way, over FADE_LEN */
 export const ICON_FADE_START = SIGN_MAX_DIST * 2.4, ICON_FADE_JITTER = 14, ICON_FADE_LEN = 26;
@@ -16,7 +16,7 @@ export const ICON_FADE_START = SIGN_MAX_DIST * 2.4, ICON_FADE_JITTER = 14, ICON_
 /** Ring colour per code: distinct hues that stay apart for colour-blind eyes, and every glyph has its own shape anyway. */
 export const ISSUE_COLOUR: Record<number, string> = {
   [Issue.NoRoad]: '#ff8a3d', [Issue.NoBuilders]: '#ffd23f', [Issue.Unstaffed]: '#b98cff',
-  [Issue.ParkingFull]: '#4fa3ff', [Issue.NoCustomers]: '#3ddbd9', [Issue.Unhappy]: '#ff5a7a',
+  [Issue.ParkingFull]: '#4fa3ff', [Issue.NoCustomers]: '#3ddbd9', [Issue.Unhappy]: '#ff5a7a', [Issue.Fire]: '#ff3418',
 };
 
 /** Draw one badge (a dark disc in its code's ring, a white glyph, a point underneath) into a CELL×CELL box at (ox, 0). */
@@ -72,6 +72,15 @@ function drawBadge(g: CanvasRenderingContext2D, ox: number, code: number) {
       g.beginPath(); g.moveTo(-8, 4); g.lineTo(-6, 18); g.moveTo(0, 4); g.lineTo(0, 18); g.moveTo(8, 4); g.lineTo(6, 18); g.stroke();
       break;
     }
+    case Issue.Fire: { // a flame with a bright heart
+      g.beginPath();
+      g.moveTo(0, 28); g.bezierCurveTo(-24, 28, -26, 4, -14, -8); g.bezierCurveTo(-12, 0, -8, 4, -5, 5);
+      g.bezierCurveTo(-8, -10, 0, -22, 4, -30); g.bezierCurveTo(8, -16, 22, -8, 22, 10); g.bezierCurveTo(22, 22, 12, 28, 0, 28);
+      g.fill();
+      g.fillStyle = c;
+      g.beginPath(); g.moveTo(0, 24); g.bezierCurveTo(-10, 24, -12, 12, -6, 4); g.bezierCurveTo(-2, 10, 4, 6, 4, 0); g.bezierCurveTo(10, 8, 12, 14, 10, 18); g.bezierCurveTo(8, 22, 4, 24, 0, 24); g.fill();
+      break;
+    }
     case Issue.Unhappy: { // a frowning face
       g.lineWidth = 4;
       g.beginPath(); g.arc(0, 0, 27, 0, Math.PI * 2); g.stroke();
@@ -81,6 +90,27 @@ function drawBadge(g: CanvasRenderingContext2D, ox: number, code: number) {
     }
   }
   g.restore();
+}
+
+/**
+ * Where a door tile's badge floats: over the middle of its structure, a little above the roof of the design standing there
+ * (the fires drawn over a burning building start from the same roof, render/fires.ts).
+ */
+export function roofAnchor(w: ClientWorld, x: number, y: number, above = 0.35): [number, number, number] {
+  const s = w.structureAt(x, y);
+  const ax = s ? s.ax : x, ay = s ? s.ay : y;
+  const mx = s ? s.ax + s.w / 2 : x + 0.5, my = s ? s.ay + s.h / 2 : y + 0.5;
+  const t = w.getTile(x, y);
+  let h = 0.5;
+  if (t !== undefined && !isRoad(t)) {
+    const kind = kindIdOf(zoneOf(t), w.subAt(x, y)), level = levelOf(t), uc = underConstruction(t);
+    // the same design pick and scale as render/chunkView.ts, so the badge sits on the roof that is drawn
+    const pick = hash2(ax * 13 + 5, ay * 17 + 11), sc = 0.95 + 0.1 * hash2(ay * 3 + 1, ax * 5 + 7);
+    const v = level > 0 ? variant(kind, level, pick) : uc ? variant(kind, 1, pick) : undefined;
+    if (v) h = v.height * (s ? 1 : sc) + (uc ? 1.2 : above);
+    else if (!uc) h = above > 0.3 ? 0.5 : 0.02;
+  }
+  return [mx, h, my];
 }
 
 /** One badge as an image URL, for the problems panel (client/src/problems.ts). */
@@ -212,7 +242,7 @@ export class IssuesView {
         if (!code) continue;
         const x = cx * CHUNK_SIZE + (i % CHUNK_SIZE), y = cy * CHUNK_SIZE + Math.floor(i / CHUNK_SIZE);
         const at = this.anchor(x, y);
-        this.pos[n * 3] = at[0]; this.pos[n * 3 + 1] = at[1]; this.pos[n * 3 + 2] = at[2];
+        this.pos[n * 3] = at[0]; this.pos[n * 3 + 1] = at[1] + (code === Issue.Fire ? 1.0 : 0); this.pos[n * 3 + 2] = at[2]; // on fire: above the flames (render/fires.ts)
         this.data[n * 4] = code; this.data[n * 4 + 1] = hash2(x * 5 + 1, y * 3 + 7); this.data[n * 4 + 2] = this.flashes.has(`${x},${y}`) ? 1 : 0; this.data[n * 4 + 3] = 0;
         this.tiles.push(x, y);
         n++;
@@ -223,23 +253,7 @@ export class IssuesView {
     (this.geo.getAttribute('aD') as InstancedBufferAttribute).needsUpdate = true;
   }
 
-  /** Where a door tile's badge floats: over the middle of its structure, a little above the roof of the design standing there. */
-  private anchor(x: number, y: number): [number, number, number] {
-    const w = this.world;
-    const s = w.structureAt(x, y);
-    const ax = s ? s.ax : x, ay = s ? s.ay : y;
-    const mx = s ? s.ax + s.w / 2 : x + 0.5, my = s ? s.ay + s.h / 2 : y + 0.5;
-    const t = w.getTile(x, y);
-    let h = 0.5;
-    if (t !== undefined && !isRoad(t)) {
-      const kind = kindIdOf(zoneOf(t), w.subAt(x, y)), level = levelOf(t), uc = underConstruction(t);
-      // the same design pick and scale as render/chunkView.ts, so the badge sits on the roof that is drawn
-      const pick = hash2(ax * 13 + 5, ay * 17 + 11), sc = 0.95 + 0.1 * hash2(ay * 3 + 1, ax * 5 + 7);
-      const v = level > 0 ? variant(kind, level, pick) : uc ? variant(kind, 1, pick) : undefined;
-      if (v) h = v.height * (s ? 1 : sc) + (uc ? 1.2 : 0.35);
-    }
-    return [mx, h, my];
-  }
+  private anchor(x: number, y: number): [number, number, number] { return roofAnchor(this.world, x, y); }
 
   /** The door tile of the badge under the pointer (screen px), or null. */
   pick(px: number, py: number, camera: Camera, width: number, height: number): [number, number] | null {
