@@ -11,7 +11,7 @@ London tick, replays every search of a London day in TypeScript and in a Rust po
 gets about 13% faster (1.15×). Extra threads add about 1% on top of that. See [Recommendation](#recommendation).
 
 **Update, later the same day:** steps 1 and 2 of the recommendation are done in TypeScript, with the same answers:
-A\* in a London tick went from 5.9 to FIN_ASTAR ms, and the whole tick from 40.7 to FIN_BARE ms. See
+A\* in a London tick went from 5.9 to 2.1 ms, and the whole tick from 40.7 to 36.9 ms (−9%). See
 [the TypeScript speed-ups](#2026-10-19-later-the-typescript-speed-ups).
 
 **Rosetta is not the problem.** The x64 Node under Rosetta and a native arm64 Node run the whole London tick at the
@@ -356,8 +356,8 @@ Checks: every answer of both corpora is the same (path, cost bit for bit, goal, 
 the node counts from a `--check-expanded` run): London 178,338 / 178,338, 8×8 384,604 / 384,604. A London day recorded
 on the branch is byte-for-byte the corpus recorded on main (all ten files: 178,899 searches, 17,387,999 cost reads), so
 `Traffic.cost` gave the same costs at the same ticks. `ab.ts` (defaults, and `--hour 17 --ticks 2400 --set bus=2`)
-gives the same JSON as main apart from the timings, and every London run ends the day at 31,990 citizens, 30,580
-employed and 9,172 vehicles, as on main.
+gives the same JSON as main apart from the timings, and every London run of this step ends the day at 31,990 citizens,
+30,580 employed and 9,172 vehicles, as on main.
 
 Replay (searches only, one thread, median of three):
 
@@ -403,7 +403,7 @@ if it costs less than 0.85 × the rest of the current route (or the AVOID price)
 and gives up when the cheapest open node's f reaches it: f never falls from one node taken to the next (the Manhattan
 heuristic is consistent, every tile costs at least 1), and a route found from a node costs at least its f. So the
 search ends with no route exactly where the full search would have found one that is then turned down. A margin of
-1e-9 keeps rounding from stopping a search short of one that would be taken.
+1e-9 keeps rounding from stopping a search short of one that would be taken. Every re-route decision is the same.
 
 | London, the day after the fill | A\* ms a tick | re-route A\* s a day | searches | taken | queued | speed | parked | trips | trip mean (ticks) | stuck (mean) | give-ups |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -414,19 +414,38 @@ search ends with no route exactly where the full search would have found one tha
 | re-route budget 1,000 nodes | 2.18 | 1.81 | 39,160 | 2,767 | 72.1% | 21.8% | 2,748 | 60,851 | 120.3 | 13.8 | 52,214 |
 | bound + cooldown 100 | 2.11 | 1.45 | 32,660 | 2,254 | (as cooldown 100) | | | | | | |
 | bound + budget 1,000 | 2.02 | 1.34 | 39,160 | 2,767 | (as budget 1,000) | | | | | | |
+| branch, final (bound from the start, so a slightly different fill) | 2.08 | 1.65 | 39,146 | 2,812 | 72.3% | 21.5% | 2,731 | 60,662 | 119.9 | 13.3 | 51,968 |
 
 *Stuck* is drivers held past the stuck limit (60 ticks), sampled every 100 ticks; *give-ups* are the Traffic counters'
-sent home, vehicles removed and garage give-ups; *parked* is `parkedCars`, the HUD's figure. The bound changes nothing
-in the game: every figure and every Traffic counter is the same as without it, alone and on top of the other options.
-(Fewer congestion reads means the lazy tidying drops a different set of decayed entries; a run with reads made free of
-side effects showed this changes one re-route in the day, so it was not kept.) The cooldown and the smaller budgets do
+sent home, vehicles removed and garage give-ups; *parked* is `parkedCars`, the HUD's figure. With the bound
+switched on for the day only, every figure and every Traffic counter is the same as without it, alone and on top of
+the other options. It is not quite bit for bit over longer runs: a bounded search reads fewer congestion values, so
+`congestionAt`'s lazy tidying drops a different set of decayed entries (below 0.004), and the tiny congestion
+differences this leaves add up. With the bound on from the start, the fill ends at 30,840 citizens instead of 30,838,
+and its day after (the row "branch, final") is within the day-to-day spread of the other rows. A run with congestion
+reads made free of side effects (an `endTick` that treats a decayed entry as gone) changed one re-route in the day,
+so that change was not kept either. The cooldown and the smaller budgets do
 change the game: they take 4–22% fewer re-routes, and the traffic stays within about 1% either way, which is how much
 one day moves when anything changes. They save 0.1–0.2 ms a tick on top of the bound, so they were not kept;
 `rerouteCooldown` (50) and `rerouteNodes` (4,000) are now `TRAFFIC_TUNING` entries for anyone who wants to try them.
 
 ### Whole tick
 
-FINAL_TABLE
+London, the final branch (both steps) against main, median of three runs each (loads 4.5–6.2 at the starts; one run
+ended at 37 when other work started):
+
+| per tick | main | branch | |
+| --- | --- | --- | --- |
+| unprofiled tick (bare), whole day: mean / p95 | 40.69 / 65.2 ms | 36.92 / 59.4 ms | −9.3% |
+| profiled tick, whole day | 42.97 ms | 39.08 ms | |
+| profiled tick, 08:00–09:00 / 17:00–18:00 | 47.73 / 66.46 ms | 40.82 / 60.13 ms | |
+| all route searches | 6.35 ms (14.8%) | 2.45 ms (6.3%) | −61% |
+| A\* mean / p95 | 5.92 / 13.31 ms | 2.12 / 4.52 ms | −64% |
+| A\* 08:00–09:00 / 17:00–18:00 | 8.14 / 9.45 ms | 2.71 / 3.58 ms | |
+| A\* nodes a call: mean, p99 | 117, 3,326 | 95, 2,200 | |
+| traffic step | 17.50 ms | 17.33 ms | |
+
+The bare runs were 40.57, 40.69, 42.08 ms on main and 36.03, 36.92, 36.95 ms on the branch.
 
 ### Next
 
@@ -435,7 +454,7 @@ FINAL_TABLE
 - The 720 failed fleet searches a day (spawnVehicle, headBack) are now the most expensive A\* calls (1.0 s a day, 4,000
   nodes each). They are reachable, just far: a cheaper first guess at "too far for 4,000 nodes" would need its own
   check that it changes no answers.
-- A Rust `findRoute` now has less to win: the A\* is 2.2 ms a tick, 6% of the tick.
+- A Rust `findRoute` now has less to win: the A\* is 2.1 ms of a 39 ms profiled tick (5%).
 
 ## Files
 
