@@ -154,7 +154,7 @@ export function autoAdSlot(ops: readonly CompiledOp[], seed: number, leisure: bo
             const c0 = g.m + bay * g.bw, c1 = c0 + g.bw, r0 = y + st * g.sh, r1 = r0 + g.sh;
             if (c1 > s - pw / 2 - 0.01 && c0 < s + pw / 2 + 0.01 && r1 > yc - ph / 2 - 0.01 && r0 < yc + ph / 2 + 0.01) c.push(face, st, bay, CELL.plain);
           }
-          host = [...main!.slice(0, 9), { ...f, c }] as BoxOp;
+          host = [...main!.slice(0, 9), { ...f, c }] as unknown as BoxOp;
         }
         const wins = windowRects(host, face);
         const s0 = s - pw / 2 - 0.015, s1 = s + pw / 2 + 0.015, y0 = yc - ph / 2 - 0.015, y1 = yc + ph / 2 + 0.015;

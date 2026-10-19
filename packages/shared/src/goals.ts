@@ -10,10 +10,10 @@ import { ECONOMY_TUNING } from './tuning';
 const OD = `$${ECONOMY_TUNING.overdraftLimit.toLocaleString('en-GB')} overdraft at ${Math.round(ECONOMY_TUNING.overdraftInterestPerDay * 100)}% interest a day`;
 
 export type GoalId =
-  | 'plot' | 'road' | 'camp' | 'homes' | 'yard' | 'res12' | 'shops' | 'res50' | 'masonry' | 'cover' | 'leisure' | 'books' | 'res250' | 'busline';
+  | 'plot' | 'road' | 'camp' | 'homes' | 'yard' | 'res12' | 'shops' | 'res50' | 'masonry' | 'cover' | 'leisure' | 'adverts' | 'books' | 'res250' | 'busline';
 
-/** Where "show me" points the camera: the open land beside the Commons, or the player's own land. */
-export type GoalFocus = 'commons' | 'plot';
+/** Where "show me" points the camera: the open land beside the Commons, the player's own land, or the nearest free ad slot. */
+export type GoalFocus = 'commons' | 'plot' | 'slot';
 
 export interface GoalDef {
   id: GoalId;
@@ -27,7 +27,7 @@ export interface GoalDef {
   /** cash paid on completion, and/or a technology granted for free (when already owned, its price is paid instead) */
   reward: { cash?: number; tech?: string };
   /** the "show me" button: a tool to pick, a panel to open, where to look */
-  show: { tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin'; focus?: GoalFocus };
+  show: { tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin' | 'adverts'; focus?: GoalFocus };
   /** on a frontier (docs/first-five.md section 0; welcome.start): other words, and another tool to light */
   frontier?: { how?: string; why?: string; tool?: string };
 }
@@ -76,6 +76,11 @@ export const GOALS: GoalDef[] = [
   { id: 'leisure', title: 'Somewhere to go', how: 'Park (G): place one among your homes ($120, no technology needed).',
     why: 'Bored residents are unhappy residents; a park nearby keeps them content.',
     parts: [{ label: 'park or venue', target: 1 }], reward: { cash: 150 }, show: { tool: 'citypark', focus: 'plot' } },
+  // adverts (docs/adverts.md): unlock Advertising, make a campaign, rent two frames. "Show me" opens the tech tree until it is
+  // unlocked, then the Campaigns panel, and flies to the nearest free frame (client onboarding.ts)
+  { id: 'adverts', title: 'Run your first campaign', how: 'Unlock Advertising (T), then open the ads chip: pick a theme and a claim, and rent two empty frames on shops, shelters or hoardings.',
+    why: 'Your posters go up on real walls for everyone to see, and rent for frames on your own frontage comes back to you.',
+    parts: [{ label: 'Advertising unlocked', target: 1 }, { label: 'campaign made', target: 1 }, { label: 'frames rented', target: 2 }], reward: { cash: 250 }, show: { panel: 'adverts', focus: 'slot' } },
   { id: 'books', title: 'Balance the books', how: 'Open the ledger (click the treasury) and finish a day with taxes covering wages and upkeep.',
     why: 'Running costs come out every day. The tax slider in a parcel panel is the quickest lever.',
     parts: [{ label: 'residents', target: 40 }, { label: 'days in the black', target: 1 }], reward: { cash: 300 }, show: { panel: 'ledger' } },

@@ -187,6 +187,7 @@ export class Ranks {
       [t.offices > 0, 'office', 'The first office opens'], [t.level2 > 0, 'level2', 'The first two-storey building'], [t.level3 > 0, 'level3', 'The first three-storey building'],
       [t.police > 0, 'police', 'A police building opens'], [t.fire > 0, 'fire', 'A fire building opens'], [t.leisure > 0, 'leisure', 'Somewhere to go: the first park or venue'],
       [t.yards > 1, 'yard2', 'A second builders\' yard'], [pr.pupils > 0, 'school', 'The first pupils at school'], [this.busLine(p), 'bus', 'The first bus line runs'],
+      [!!this.w.adverts?.counts(p.id).posted, 'poster', 'Your first poster goes up'],
       [(s.black ?? 0) >= 1, 'black', 'A day in the black: taxes covered the running costs'], [(s.black ?? 0) >= 7, 'black7', 'A week in the black'],
     ];
     for (const [ok, key, text] of firsts) if (ok) out.push({ key: `first:${key}`, kind: 'first', text });

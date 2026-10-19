@@ -26,6 +26,7 @@ import { setPolicy } from './policies';
 import { mothballable, adminRefusal, type Finance } from './sim/finance';
 import type { Issues } from './sim/issues';
 import type { Fires } from './sim/fires';
+import type { Adverts } from './sim/adverts';
 import { Overlays } from './overlays';
 import { ISSUE_TUNING, OVERLAY_COUNT, Issue } from '@msimcity/shared';
 
@@ -106,6 +107,8 @@ export class Net {
   finance: Finance | null = null;
   /** house fires (sim/fires.ts): the 'fires' message, building tooltips and the owners' notices; set by game.ts */
   fires: Fires | null = null;
+  /** campaigns and rented ad slots (sim/adverts.ts): the 'ads' message and the advert intents; set by game.ts */
+  adverts: Adverts | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
   tickStats: { avg: number; p95: number; max: number } | null = null;
   /** game ticks per TICK_MS of wall time, sent with the stats message when it is not 1 so the client's clock follows a paused or
@@ -195,6 +198,7 @@ export class Net {
       case 'goals': case 'hint': this.onboarding?.command(c.player, m); return this.goals(c);
       case 'inspectBoat': return this.send(c, { t: 'boat', id: Number(m.id), info: this.harbours?.inspectBoat(Number(m.id)) ?? null });
       case 'overlay': return this.setOverlay(c, Number(m.ch));
+      case 'adCampaign': case 'adRent': case 'adEnd': return this.advert(c, m);
     }
   }
 
@@ -268,6 +272,7 @@ export class Net {
     if (this.ferry) this.send(c, { t: 'ferryLines', lines: this.ferry.dtos() });
     if (this.harbours) this.send(c, this.harbours.msg());
     if (this.fires) this.send(c, { t: 'fires', f: this.fires.dtos() });
+    if (this.adverts) this.send(c, { t: 'ads', ...this.adverts.dto() });
     c.goalsSig = undefined; this.goals(c);
     c.rankSig = undefined; this.rankTo(c);
     c.probSig = undefined; this.problemsTo(c);
@@ -414,6 +419,26 @@ export class Net {
   private locked(p: Player, feature: string): string | null {
     if (hasFeature(p.tech, feature)) return null;
     return techFor(feature)?.name ?? feature;
+  }
+
+  /** Adverts (sim/adverts.ts, docs/adverts.md): create a campaign, put it up on slots, take posters down. */
+  private advert(c: Client, m: Extract<ClientMsg, { t: 'adCampaign' | 'adRent' | 'adEnd' }>) {
+    const a = this.adverts, p = c.player!;
+    if (!a) return;
+    if (m.t === 'adCampaign') {
+      const r = a.create(p, m, this.cfg.sandbox);
+      if (typeof r === 'string') return this.toast(c, r);
+      this.toast(c, `Campaign ready: "${r.text}". Now rent some slots for it`, 'info');
+    } else if (m.t === 'adRent') {
+      const r = a.rent(p, Number(m.campaign), m.slots, m.near);
+      if (typeof r === 'string') return this.toast(c, r);
+      this.toast(c, `${r.n === 1 ? 'A poster goes' : `${r.n} posters go`} up: $${r.cost} today, the same each day after`, 'info');
+    } else {
+      const r = a.end(p, m.slots, m.campaign === undefined ? undefined : Number(m.campaign), m.drop === true);
+      if (typeof r === 'string') return this.toast(c, r);
+      this.toast(c, m.drop ? 'Campaign ended' : `${r === 1 ? 'A poster' : `${r} posters`} taken down`, 'info');
+    }
+    this.goals(c);
   }
 
   /** Whether this player may edit land owned by `owner`: their own, or anyone's in a sandbox (a test city or demo: nobody's work is protected). */
@@ -1082,6 +1107,9 @@ export class Net {
     if (this.harbours?.changed) { this.harbours.changed = false; this.broadcast(this.harbours.msg()); }
     // fires burning, being put out and in their aftermath (sim/fires.ts): the whole short list whenever it changed
     if (this.fires?.changed) { this.fires.changed = false; this.broadcast({ t: 'fires', f: this.fires.dtos() }); }
+    // campaigns and rented ad slots (sim/adverts.ts): the whole short list whenever it changed, and the renters' notices
+    if (this.adverts?.changed) { this.adverts.changed = false; this.broadcast({ t: 'ads', ...this.adverts.dto() }); }
+    if (this.adverts?.notices.length) for (const n of this.adverts.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed
     if (w.tick % 10 === 0) {

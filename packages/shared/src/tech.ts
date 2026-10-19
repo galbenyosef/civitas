@@ -47,6 +47,8 @@ export const TECH: TechNode[] = [
   // zoning: what land may be used for
   { id: 'zon1', track: 'zoning', tier: 1, name: 'Commercial zoning', blurb: 'Shops, cafés and bars. Your residents spend money and pay sales tax here.', cost: 200, requires: [], condition: { counter: 'housed', min: 12 }, unlocks: ['com'] },
   { id: 'zon2', track: 'zoning', tier: 2, name: 'Industrial zoning', blurb: 'Factories and warehouses: well-paid shift work and freight on your roads.', cost: 300, requires: ['zon1'], condition: { counter: 'housed', min: 40 }, unlocks: ['ind'] },
+  // adverts (docs/adverts.md): the frames on shops, shelters and hoardings; the Campaigns panel. On the zoning track after Commercial zoning, as the frames are mostly on shops
+  { id: 'adv1', track: 'zoning', tier: 2, name: 'Advertising', blurb: 'Posters, billboards and shelter panels: rent the empty frames on shops, bus shelters and building sites and put your own campaigns on them. Rent goes to whoever owns the frontage. Posters wear and get tagged, faster in neglected streets.', cost: 250, requires: ['zon1'], condition: { counter: 'housed', min: 60 }, unlocks: ['adverts'] },
   { id: 'zon3', track: 'zoning', tier: 3, name: 'Office zoning', blurb: 'Office towers hold the most jobs per tile and draw the heaviest commuter traffic.', cost: 1000, requires: ['zon2', 'con1'], condition: { counter: 'jobs', min: 80 }, unlocks: ['off'] },
   // construction: how big things can be built
   { id: 'con1', track: 'construction', tier: 1, name: 'Masonry', blurb: 'Your builders can raise two-storey buildings. Zones in your parcels grow to level 2.', cost: 500, requires: [], condition: { counter: 'built', min: 1500 }, unlocks: ['level2'] },

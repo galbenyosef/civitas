@@ -174,7 +174,7 @@ export class ChunkView {
       if (turn) this.turnUV(i, turn);
       for (let k = 0; k < 4; k++) tmpC.toArray(this.colors, (i * 4 + k) * 3);
       if (!building || part) continue;
-      if (anchor) { this.structure(items, anchor, t, h2, pick); continue; }
+      if (anchor) { this.structure(items, anchor, t, h2, pick, chunk.parcel[i]); continue; }
 
       // ---- buildings: face the road, jitter a little, rise while under construction
       let yaw: number;
@@ -191,7 +191,7 @@ export class ChunkView {
           tmpQ.setFromAxisAngle(UP, yaw); tmpS.set(s, s, s);
           const palette = FACADE_TINT[kind];
           const tint = palette ? palette[Math.floor(h2 * palette.length)].clone() : new Color(WHITE);
-          items.push({ key: v.key, matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: tint.multiplyScalar(0.9 + 0.2 * hash2(x * 7 + 3, z)), sign: { kind, x, y: z, r: Math.round(yaw / (Math.PI / 2)) & 3 } });
+          items.push({ key: v.key, matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: tint.multiplyScalar(0.9 + 0.2 * hash2(x * 7 + 3, z)), sign: { kind, x, y: z, r: Math.round(yaw / (Math.PI / 2)) & 3 }, ad: [x, z, chunk.parcel[i]] });
           if (uc) {
             tmpP.y = v.height * s; tmpQ.setFromAxisAngle(UP, Math.floor(h2 * 4) * (Math.PI / 2)); tmpS.set(1, 1, 1);
             items.push({ key: 'crane', matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: CRANE_TINT[priorityOf(t) + 2] });
@@ -203,8 +203,8 @@ export class ChunkView {
           const p = (progressOf(t) + 0.5) / 4;
           tmpQ.setFromAxisAngle(UP, yaw); tmpS.set(s, s * (0.06 + 0.94 * p), s);
           items.push({ key: v.key, matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: CONCRETE });
-          tmpQ.identity(); tmpS.set(1, 1, 1);
-          items.push({ key: 'site', matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: WHITE });
+          tmpS.set(1, 1, 1); // the fence turns with the shell, so its hoarding (an ad slot, docs/adverts.md) faces the road
+          items.push({ key: 'site', matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: WHITE, ad: [x, z, chunk.parcel[i]] });
           tmpQ.setFromAxisAngle(UP, Math.floor(h2 * 4) * (Math.PI / 2));
           items.push({ key: 'crane', matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: CRANE_TINT[priorityOf(t) + 2] });
         }
@@ -221,7 +221,7 @@ export class ChunkView {
    * One model over a whole footprint: the recipe is authored in tiles for the footprint, centred on it and facing
    * the road the door is on, so it is placed unscaled. Sites scale the fence to the footprint.
    */
-  private structure(items: Placement[], p: Placed, t: number, h2: number, pick: number) {
+  private structure(items: Placement[], p: Placed, t: number, h2: number, pick: number, parcel: number) {
     const kind = p.kind, level = levelOf(t), uc = underConstruction(t);
     const fp = footprintOf(kind);
     const centre = () => tmpP.set(p.ax + p.w / 2, 0, p.ay + p.h / 2);
@@ -236,7 +236,7 @@ export class ChunkView {
       const palette = FACADE_TINT[kind];
       const tint = palette ? palette[Math.floor(h2 * palette.length)].clone() : new Color(WHITE);
       centre(); yawQ(); tmpS.set(1, 1, 1);
-      items.push({ key: v.key, matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: tint.multiplyScalar(0.95 + 0.1 * h2), sign: { kind, x: p.ax, y: p.ay, r: p.r & 3 } });
+      items.push({ key: v.key, matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: tint.multiplyScalar(0.95 + 0.1 * h2), sign: { kind, x: p.ax, y: p.ay, r: p.r & 3 }, ad: [p.doorX, p.doorY, parcel] });
       if (uc) crane(v.height);
     } else if (uc) {
       const v = variant(kind, 1, pick);
@@ -245,7 +245,7 @@ export class ChunkView {
       centre(); yawQ(); tmpS.set(1, 0.06 + 0.94 * q, 1);
       items.push({ key: v.key, matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: CONCRETE });
       centre(); yawQ(); tmpS.set(fp.w, 1, fp.h);
-      items.push({ key: 'site', matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: WHITE });
+      items.push({ key: 'site', matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: WHITE, ad: [p.doorX, p.doorY, parcel] });
       crane(0);
     }
   }

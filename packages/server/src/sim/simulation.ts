@@ -774,6 +774,8 @@ export class Simulation {
    * stations are strength 1 within SERVICE_RADIUS, so with only those this is the count of distinct services in reach.
    * Smaller rungs give fractions (a police box is 0.4); happiness reads the whole part, growth and tax tolerance all of it.
    */
+  /** A tile's service cover (0-3) and leisure tier (0-2), for the wear rate of a poster there (sim/adverts.ts). */
+  areaCover(x: number, y: number): [number, number] { return [this.coverage(x, y), leisureTier(this.leisureCoverage(x, y).score)]; }
   private coverage(x: number, y: number): number {
     const best = this.coverBest;
     best.fill(0);

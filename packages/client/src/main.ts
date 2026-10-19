@@ -1,7 +1,7 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo,
+  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
@@ -46,6 +46,7 @@ import { Fireworks } from './render/fireworks';
 import { LinesPanel } from './lines';
 import { ChartsPanel } from './charts';
 import { PolicyPanel } from './policies';
+import { AdPanel } from './adverts';
 import { PerfHud } from './render/perfhud';
 import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered, serverConfig } from './worlds';
 import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, type DemoInfo } from './tour';
@@ -253,6 +254,7 @@ net.on('welcome', (m) => {
   ui.setMoney(me.money, me.ledger, me.fin);
   ui.setLocks(me.tech);
   policies.show(me);
+  adPanel.show(me, onboarding.activeGoal === 'adverts');
   finance.show(me);
   ui.hideLogin();
   if (startShot) { rig.setShot(startShot); startShot = null; } // the opening shot, once
@@ -280,7 +282,7 @@ net.on('players', (m) => {
   lights.invalidate();
   world.applyPlayers(m.players);
   onlineCount = m.players.filter((p) => p.online).length;
-  const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger, me.fin); ui.setLocks(me.tech); ui.showTech(me); policies.show(me); finance.show(me); devPanel?.sync(!!me.devUnlimited); }
+  const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger, me.fin); ui.setLocks(me.tech); ui.showTech(me); policies.show(me); adPanel.show(me, onboarding.activeGoal === 'adverts'); finance.show(me); devPanel?.sync(!!me.devUnlimited); }
   world.parcelsDirty = true; refreshPanel(); mapMode.parcelsChanged();
 });
 net.on('citizens', (m) => citizens.update(m.c, performance.now()));
@@ -347,7 +349,25 @@ net.on('toast', (m) => ui.toast(m.kind, m.msg));
 // onboarding goals, advisor hints and the tech chip's pulse (onboarding.ts)
 /** the first-settlers camera moment (moment.ts, docs/first-five.md); never over a demo tour */
 const moment = new CameraMoment(rig, () => { following = false; });
+// adverts (adverts.ts, render/adverts.ts, docs/adverts.md): the ads chip and the Campaigns panel, posters on the rented frames
+const adPanel = new AdPanel(document.getElementById('adverts')!, document.getElementById('adsBtn')!, {
+  net, world, view: buildings.adverts, liveTick, nameAt: (x, y) => buildings.nameAt(...world.doorOf(x, y)) ?? null, toast: (k, msg) => ui.toast(k, msg),
+  centre: () => [Math.floor(rig.target.x), Math.floor(rig.target.z)],
+  openTech: () => { ui.toggleTech(true); ui.showTech(world.myPlayer); policies.toggle(false); },
+  lookAt: (x, y, height, dir) => {
+    // street level, a little to one side of the poster, looking at it
+    following = false;
+    rig.target.set(x, Math.min(height, 1.2), y);
+    rig.yaw = Math.atan2(dir[0], dir[1]) + 0.35;
+    rig.pitch = 0.32; rig.dist = 7.5;
+  },
+});
+buildings.adverts.owner = (id) => { const p = world.players.get(id); return { name: p?.name ?? id, color: p?.color ?? 0x888888 }; };
+buildings.adverts.tick = liveTick;
+net.on('ads', (m) => { buildings.adverts.setAds(m.campaigns, m.r, AD_RENTAL); adPanel.changed(); });
+document.getElementById('adsBtn')!.onclick = () => { ui.toggleTech(false); policies.toggle(false); adPanel.toggle(); adPanel.show(world.myPlayer, onboarding.activeGoal === 'adverts'); };
 const onboarding = new Onboarding({ net, world, liveTick, tool: (t) => input.setTool(t as ToolId), toast: (k, msg) => ui.toast(k, msg),
+  adverts: (near) => adPanel.showMe(near), goalChanged: (active) => adPanel.show(world.myPlayer, active === 'adverts'),
   moment: (x, y, caption) => { if (!tour && !mapMode.on) moment.play(x, y, caption); },
   focus: (x, y) => { following = false; rig.target.set(x + 0.5, 0, y + 0.5); rig.dist = Math.min(Math.max(rig.dist, 30), 60); }, openTech: () => { ui.toggleTech(true); ui.showTech(world.myPlayer); } });
 ui.onHint = (id) => onboarding.hint(id);
@@ -519,6 +539,7 @@ const input = new Input(canvas, rig, {
   },
   onSelect: (x, y, px, py) => {
     if (lines.mapClick(x, y)) return; // editing a bus line: clicked stops join it
+    if (adPanel.mapClick(x, y)) return; // picking frames for a campaign: a click rents the building's free one
     const id = citizens.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight);
     if (id) { selectCitizen(id); return; }
     const badge = issuesView.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight); // a click on an issue badge opens its building
@@ -538,6 +559,7 @@ const input = new Input(canvas, rig, {
   onKey: (code) => {
     if (mapMode.on) { if (code === 'Tab') mapMode.toggle(); else if (code === 'Escape') mapMode.escape(); return; }
     if (code === 'Tab') mapMode.toggle();
+    else if (code === 'Escape' && adPanel.isPicking) adPanel.toggle(false);
     else if (code === 'Escape' && selectedBuilding) closeBuilding();
     else if (code === 'KeyH') overlayMenu.cycle();
     else if (code === 'KeyN') setUnder(!underground.on);
@@ -1240,7 +1262,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

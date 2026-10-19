@@ -1,12 +1,14 @@
 import { BatchedMesh, Matrix4, Color, Material, Vector3, Box3, Frustum, Sphere, type Camera, type DirectionalLight } from 'three';
-import { hash2, chunkKey, chunkOf } from '@msimcity/shared';
+import { hash2, chunkKey, chunkOf, AD_SLOTS } from '@msimcity/shared';
 import { buildModels, allVariants, buildFarModels } from './models';
 import { Signs, SIGN_MAX_DIST, signLabel, type SignInfo } from './signs';
 import { sceneUniforms } from './materials';
+import { AdvertsView, type AdHostItem } from './adverts';
 
 const MAX_INSTANCES = 60000;
 
-export interface Placement { key: string; matrix: Matrix4; color: Color; sign?: SignInfo }
+/** `ad`: the door tile and parcel id of a building or site whose design has ad slots (render/adverts.ts) */
+export interface Placement { key: string; matrix: Matrix4; color: Color; sign?: SignInfo; ad?: [number, number, number] }
 
 /**
  * Detail tiers by distance from the camera (tiles, 3D, so a high camera is far from everything):
@@ -74,6 +76,8 @@ const tmpV = new Vector3();
 export class Buildings {
   mesh: BatchedMesh;
   readonly signs = new Signs();
+  /** posters on rented ad slots (render/adverts.ts): one instanced mesh for every loaded chunk */
+  readonly adverts = new AdvertsView();
   private geomIds = new Map<string, number>();
   private farIds = new Map<string, number>();
   private perChunk = new Map<string, ChunkLod>();
@@ -110,6 +114,7 @@ export class Buildings {
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
     this.mesh.add(this.signs.mesh);
+    this.mesh.add(this.adverts.mesh);
   }
 
   setChunk(key: string, items: Placement[]) {
@@ -117,7 +122,9 @@ export class Buildings {
     this.clear(key);
     const ids: number[] = [], full: number[] = [], farG: number[] = [], px: number[] = [], pz: number[] = [], thr: number[] = [];
     const signItems: ChunkLod['signItems'] = [];
+    const adItems: AdHostItem[] = [];
     for (const item of items) {
+      if (item.ad && AD_SLOTS[item.key]) adItems.push({ key: item.key, matrix: item.matrix, door: [item.ad[0], item.ad[1]], parcel: item.ad[2] });
       const gid = this.geomIds.get(item.key);
       if (gid === undefined) continue;
       let id: number;
@@ -144,6 +151,7 @@ export class Buildings {
       this.cullDirty = true;
       if (this.cams.length) this.lodChunk(key, c, true);
     }
+    if (adItems.length) this.adverts.setChunk(key, adItems);
     // With per-object culling and sorting off, three only rebuilds its multi-draw
     // list when this flag is set, and addInstance/deleteInstance do not set it.
     (this.mesh as unknown as { _visibilityChanged: boolean })._visibilityChanged = true;
@@ -152,6 +160,7 @@ export class Buildings {
   clear(key: string) {
     const c = this.perChunk.get(key);
     this.signs.clear(key);
+    this.adverts.clear(key);
     if (!c) return;
     for (const id of c.ids) this.mesh.deleteInstance(id);
     this.farCount -= c.nFar;
@@ -249,6 +258,7 @@ export class Buildings {
       this.lodDirty = false;
     }
     this.signs.flush();
+    this.adverts.flush();
   }
 
   setLod(on: boolean) { this.lod = on; this.cams = []; }

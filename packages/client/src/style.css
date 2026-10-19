@@ -309,9 +309,9 @@ body.fpv-full #tourLabels { display: none !important; }
 #fpv.full .fbody { left: 14px; right: auto; bottom: 18px; padding: 10px 14px; background: rgba(0,0,0,0.38); border-radius: 10px; font-size: 14px; max-width: 460px; }
 #fpv.full .fhint { display: block; position: absolute; right: 16px; bottom: 18px; padding: 5px 10px; border-radius: 999px; background: rgba(0,0,0,0.38); opacity: 0.85; pointer-events: none; }
 #fpv.full .ffade { display: block; position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
-body.fpv-full #tools, body.fpv-full #picker, body.fpv-full #help, body.fpv-full #status, body.fpv-full #panel, body.fpv-full #tech, body.fpv-full #policies, body.fpv-full #tip, body.fpv-full #cpanel { display: none !important; }
+body.fpv-full #tools, body.fpv-full #picker, body.fpv-full #help, body.fpv-full #status, body.fpv-full #panel, body.fpv-full #tech, body.fpv-full #policies, body.fpv-full #adverts, body.fpv-full #tip, body.fpv-full #cpanel { display: none !important; }
 /* a read-only showcase (SPECTATE on the server, main.ts): nothing to build, buy, unlock or spend */
-body.spectate #tools, body.spectate #picker, body.spectate #money, body.spectate #techBtn, body.spectate #tech, body.spectate #policiesBtn, body.spectate #policies, body.spectate #devBtn, body.spectate #devPanel { display: none !important; }
+body.spectate #tools, body.spectate #picker, body.spectate #money, body.spectate #techBtn, body.spectate #tech, body.spectate #policiesBtn, body.spectate #policies, body.spectate #adsBtn, body.spectate #adverts, body.spectate #devBtn, body.spectate #devPanel { display: none !important; }
 
 /* footprint labels: door, gate, platform, apron, stand and dock marks of a structure being placed or hovered (render/footprint.ts) */
 #markLabels { position: fixed; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
@@ -440,3 +440,49 @@ body.map-on #tools, body.map-on #panel, body.map-on #cpanel, body.map-on #tip, b
 .edustep span { color: var(--muted); }
 .edustep .edunote { color: var(--muted); font-size: 11px; }
 .legend.edu { background: linear-gradient(90deg, #e5484d, #f0dc82, #1f7bff); }
+
+/* the Campaigns panel (adverts.ts, docs/adverts.md): a side card on the right, so the street stays clickable while picking frames */
+#adverts { position: absolute; z-index: 6; right: 12px; top: 56px; width: 352px; max-height: calc(100vh - 80px); overflow-y: auto; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; font-size: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.35); }
+#adverts.hidden { display: none; }
+#adverts .ahead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+#adverts .ahead h2 { margin: 0; font-size: 16px; }
+#adverts .amuted { color: var(--muted); }
+#adverts .asect { font-weight: 600; cursor: pointer; padding: 4px 0; }
+#adverts .aform { border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 8px; }
+#adverts .arow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 5px 0; }
+#adverts .arow.col { flex-direction: column; align-items: stretch; }
+#adverts .alab { color: var(--muted); width: 52px; flex: none; }
+#adverts .arow.col .alab { width: auto; }
+#adverts .aclaim { display: block; padding: 2px 0; cursor: pointer; }
+#adverts .achip { padding: 3px 7px; border: 1px solid var(--line); border-radius: 12px; background: transparent; color: var(--fg); font: inherit; font-size: 11px; cursor: pointer; }
+#adverts .achip.on { background: rgba(98,210,162,0.22); border-color: rgba(98,210,162,0.6); }
+#adverts .achip.ic { width: 24px; padding: 3px 0; text-align: center; }
+#adverts .achip.warn { color: #ff8a8a; }
+#adverts .aswatch { width: 20px; height: 20px; border-radius: 50%; border: 3px solid; cursor: pointer; padding: 0; }
+#adverts .aswatch.on { outline: 2px solid var(--fg); outline-offset: 1px; }
+#adverts select { background: rgba(255,255,255,0.06); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 3px; font: inherit; max-width: 250px; }
+#adverts .aprev { display: flex; gap: 8px; align-items: flex-end; margin: 8px 0; }
+#adverts .adposter { position: relative; overflow: hidden; border-radius: 2px; box-shadow: 0 0 0 2px #2b2e36, 0 2px 6px rgba(0,0,0,0.4); display: flex; align-items: center; gap: 4px; padding: 4px 6px; box-sizing: border-box; font-weight: 700; line-height: 1.1; font-size: 11px; }
+#adverts .adposter span { position: relative; z-index: 1; flex: 1; text-align: center; }
+#adverts .adposter.l2 span { font-family: Georgia, serif; }
+#adverts .adposter .adicon { position: relative; z-index: 1; font-size: 18px; }
+#adverts .adposter .adband { position: absolute; left: -10%; right: -10%; top: 58%; height: 20%; transform: rotate(-9deg); }
+#adverts .adposter .adframe { position: absolute; inset: 4%; border: 2px solid; }
+#adverts .adposter .adfoot { position: absolute; left: 0; right: 0; bottom: 0; height: 13%; }
+#adverts .acrow .adposter { font-size: 7px; padding: 2px 3px; }
+#adverts .acrow .adposter .adicon { font-size: 10px; }
+#adverts .abtn { width: 100%; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: rgba(98,210,162,0.18); color: var(--fg); font: inherit; cursor: pointer; }
+#adverts .abtn:disabled { opacity: 0.45; cursor: default; }
+#adverts .acamp { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 8px 0; background: rgba(255,255,255,0.03); }
+#adverts .acamp.picking { border-color: rgba(255,214,64,0.8); box-shadow: 0 0 0 1px rgba(255,214,64,0.3) inset; }
+#adverts .acrow { display: flex; gap: 8px; align-items: center; }
+#adverts .actext { display: flex; flex-direction: column; gap: 2px; }
+#adverts .acstats { display: flex; gap: 10px; margin: 6px 0 4px; flex-wrap: wrap; }
+#adverts .awear { display: flex; gap: 2px; margin-bottom: 6px; }
+#adverts .awear i { width: 10px; height: 6px; border-radius: 1px; background: linear-gradient(90deg, #62d2a2 var(--w), rgba(255,107,107,0.6) var(--w)); }
+#adverts .abtns { display: flex; gap: 4px; flex-wrap: wrap; }
+#adverts .ahint { margin-top: 6px; color: #ffd84d; }
+#adverts .bad { color: #ff8a8a; font-style: normal; }
+#adverts .areach { margin: 10px 0 2px; padding: 7px 8px; border-radius: 6px; background: rgba(94,200,242,0.08); border: 1px solid rgba(94,200,242,0.25); line-height: 1.4; }
+body.adpick canvas { cursor: copy; }

@@ -10,6 +10,7 @@ import { LIFE, stageFor } from './sim/life';
 import type { GoalState } from './goals';
 import type { RankState } from './ranks';
 import type { FireSave } from './sim/fires';
+import type { AdvertsSave } from './sim/adverts';
 
 export interface Chunk {
   cx: number; cy: number;
@@ -257,6 +258,9 @@ export class World {
   /** fires (sim/fires.ts): what to save, set by the Fires module; and what a loaded snapshot carried, taken once by it */
   firesSave: (() => FireSave) | null = null;
   firesLoaded: FireSave | null = null;
+  /** adverts (sim/adverts.ts): what to save and what the goals and ranks read, set by the Adverts module; and what a loaded snapshot carried */
+  adverts: { save(): AdvertsSave; counts(owner: string): { campaigns: number; rentals: number; posted: boolean } } | null = null;
+  advertsLoaded: AdvertsSave | null = null;
   /** merged lots since start (zones.ts): sites opened, lots absorbed, people moved, sites completed, people evicted at completion, structures broken back into lots */
   mergeStats = { opened: 0, absorbed: 0, residents: 0, workers: 0, completed: 0, evicted: 0, brokenUp: 0 };
 
