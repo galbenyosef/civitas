@@ -3,6 +3,7 @@ import type { StopInfo, BusInfo, LineInfo, LineStats, LinePreview, TransitLine, 
 import type { RailLineDef, RailRoute } from './rail';
 import type { GatewayInfo } from './gateways';
 import type { GoalsDTO } from './goals';
+import type { RankDTO, RankUp, Milestone } from './ranks';
 import type { RingsDTO } from './history';
 import type { FleetInfo, MobileRows } from './fleet';
 import type { BoatHarbour } from './boats';
@@ -589,6 +590,8 @@ export type ServerMsg =
   | { t: 'linePreview'; preview: LinePreview }
   /** your onboarding goals (shared/src/goals.ts), to you only, whenever they change; `completed` names a goal just finished and its reward */
   | { t: 'goals'; goals: GoalsDTO; completed?: { id: string; reward: string } }
+  /** your settlement rank (shared/src/ranks.ts), to you only, whenever it changes; `up`: a rank just reached (the celebration), `fresh`: milestones new since the last one */
+  | { t: 'rank'; rank: RankDTO; up?: RankUp; fresh?: Milestone[] }
   /** an advisor hint (shared/src/goals.ts HINTS); `msg` replaces the stock wording when the server has numbers to put in it */
   /** `at`: a tile the hint is about (the first-settlers moment flies the camera there, docs/first-five.md) */
   | { t: 'hint'; id: string; msg?: string; at?: [number, number] }

@@ -19,6 +19,7 @@ import type { Rail } from './sim/rail';
 import type { Metro } from './sim/metro';
 import type { Ferry } from './sim/ferry';
 import { Onboarding } from './goals';
+import { Ranks } from './ranks';
 import { historyOf, type History } from './history';
 import { MapSummaries } from './worldmap';
 import { setPolicy } from './policies';
@@ -33,6 +34,8 @@ interface Client {
   builderHint: number; builtSeen: number; builtMoved: number;
   /** the last goals message sent (goals.ts), so only changes go out */
   goalsSig?: string;
+  /** the last rank message sent (ranks.ts) */
+  rankSig?: string;
   /** the charts panel is open (history.ts): it gets each hourly sample */
   hist?: boolean;
   /** issue bubbles (flushIssues): the last problems list sent; the overlay channel asked for, a hash of what each chunk last got, chunks still to look at */
@@ -106,6 +109,8 @@ export class Net {
   accepting = true;
   /** onboarding goals and advisor hints (goals.ts); none in test cities and demos */
   private onboarding: Onboarding | null;
+  /** settlement ranks and the milestone feed (ranks.ts); none in test cities and demos */
+  readonly ranks: Ranks | null;
   /** spectate: player records made by a visitor's hello, removed when the last socket with that player closes */
   private visitors = new Set<string>();
   /** the world map's ground, per sector (worldmap.ts, docs/world-map.md) */
@@ -113,6 +118,7 @@ export class Net {
 
   constructor(private w: World, private sim: Simulation, source: ConnSource, private cfg: GameConfig) {
     this.onboarding = this.cfg.sandbox || this.cfg.spectate ? null : new Onboarding(w, sim.traffic);
+    this.ranks = this.cfg.sandbox || this.cfg.spectate ? null : new Ranks(w);
     this.map = new MapSummaries(w);
     source.onConnection((conn) => {
       if (!this.accepting) { conn.close(1013, 'starting'); return; }
@@ -250,6 +256,7 @@ export class Net {
     if (this.ferry) this.send(c, { t: 'ferryLines', lines: this.ferry.dtos() });
     if (this.harbours) this.send(c, this.harbours.msg());
     c.goalsSig = undefined; this.goals(c);
+    c.rankSig = undefined; this.rankTo(c);
     c.probSig = undefined; this.problemsTo(c);
   }
 
@@ -268,6 +275,14 @@ export class Net {
     const r = this.onboarding.check(c.player);
     if (r.sig === c.goalsSig && !r.msg.completed) return;
     c.goalsSig = r.sig;
+    this.send(c, r.msg);
+  }
+  /** The player's settlement rank and milestones when they changed (ranks.ts); a rank reached pays and celebrates. */
+  private rankTo(c: Client) {
+    if (!this.ranks || !c.player) return;
+    const r = this.ranks.check(c.player);
+    if (r.sig === c.rankSig && !r.msg.up && !r.msg.fresh) return;
+    c.rankSig = r.sig;
     this.send(c, r.msg);
   }
   /** An advisor hint (goals.ts), unless dismissed or heard today; in test cities a toast as before. */
@@ -403,6 +418,8 @@ export class Net {
       if (isBuildable(this.w.getTile(xx, yy))) land++;
     }
     if (land === 0) return this.toast(c, 'That is all water');
+    const held = this.cfg.sandbox ? null : this.ranks?.landRefusal(p, { x, y, w, h }); // a frontier's charter grows with rank (ranks.ts)
+    if (held) return this.toast(c, held);
     const owned: LandRect[] = [];
     for (const q of this.w.parcels.values()) if (q.owner === p.id) owned.push(q);
     const verdict = this.cfg.sandbox ? { ok: true as const } : checkPurchase({ x, y, w, h }, p.id, { // a sandbox has no border or islanding rules
@@ -1086,7 +1103,7 @@ export class Net {
       }
     }
     // onboarding goals, measured a few times a game hour
-    if (this.onboarding && w.tick % GOALS_EVERY === 0) for (const c of this.clients) this.goals(c);
+    if (this.onboarding && w.tick % GOALS_EVERY === 0) for (const c of this.clients) { this.goals(c); this.rankTo(c); }
     // congestion, lot occupancy and kerb cars, per chunk that changed
     if (w.tick % TRAFFIC_EVERY === 0 && (this.sim.traffic.dirty.size || w.parking.dirty.size || w.kerb.dirty.size)) {
       const chunks = new Set<string>([...w.parking.dirty, ...w.kerb.dirty]);

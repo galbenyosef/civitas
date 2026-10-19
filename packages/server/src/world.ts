@@ -8,6 +8,7 @@ import {
 } from '@msimcity/shared';
 import { LIFE, stageFor } from './sim/life';
 import type { GoalState } from './goals';
+import type { RankState } from './ranks';
 
 export interface Chunk {
   cx: number; cy: number;
@@ -70,6 +71,8 @@ export interface Player {
   adminDays?: number;
   /** in administration since that game day (sim/finance.ts): building stops, the regional grant is withdrawn; saved */
   admin?: { since: number };
+  /** settlement rank and milestone feed (ranks.ts); saved with the player, absent in older saves (derived on first use) */
+  ranks?: RankState;
 }
 
 /** Anything that moves along a path; drivers also live in a traffic lane. */

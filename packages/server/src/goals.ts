@@ -16,6 +16,8 @@ export interface GoalState {
   hintAt?: Partial<Record<HintId, number>>;
   /** the first-settlers moment has happened (docs/first-five.md; absent in older saves) */
   settlers?: boolean;
+  /** road tiles already on the player's land when the record began (a frontier charter's country road): "Lay a street" counts the ones after */
+  roadBase?: number;
 }
 
 /** A server hint is sent again (unless dismissed) at most this often, tips less often than alerts; the client spaces whatever arrives. */
@@ -51,6 +53,7 @@ export class Onboarding {
     const s: GoalState = { done: [] };
     p.onboarding = s;
     const t = this.tally(p);
+    if (t.roads) s.roadBase = t.roads;
     for (const g of GOALS) if (this.met(g, this.measure(g, p, t))) s.done.push(g.id);
     return s;
   }
@@ -101,7 +104,7 @@ export class Onboarding {
     const housed = p.progress.housed;
     switch (g.id) {
       case 'plot': return [t.land];
-      case 'road': return [t.roads];
+      case 'road': return [Math.max(0, t.roads - (p.onboarding?.roadBase ?? 0))];
       case 'camp': return [t.camps || (housed >= 8 ? 1 : 0)]; // or eight people housed another way: the chain never blocks on the camp
       case 'homes': return [t.resLots];
       case 'yard': return [t.yards];
@@ -207,4 +210,4 @@ export class Onboarding {
 }
 
 /** Taxes and fees less wages, upkeep and overdraft interest, for one day of a ledger. */
-const running = (r: LedgerDTO['today']) => (r.tax ?? 0) + (r.fees ?? 0) + (r.wages ?? 0) + (r.upkeep ?? 0) + (r.interest ?? 0);
+export const running = (r: LedgerDTO['today']) => (r.tax ?? 0) + (r.fees ?? 0) + (r.wages ?? 0) + (r.upkeep ?? 0) + (r.interest ?? 0);
