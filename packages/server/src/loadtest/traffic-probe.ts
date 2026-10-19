@@ -108,12 +108,12 @@ export async function main(argv: string[]) {
     // what the sweeps came to
     const gsw = tp.guardSweep;
     tp.guardSweep = function (this: unknown, ...a: unknown[]) {
-      const t = this as unknown as { gPeds: number[]; gCars: unknown[]; tmp2: [number, number]; headingOf(m: Mover, h: [number, number]): boolean };
+      const t = this as unknown as { gNp: number; gNc: number };
       const m = a[0] as Mover, allowed = a[1] as number;
       const o = cur * GS.length;
       gs[o]++;
       const r = gsw.apply(this, a) as number;
-      const peds = t.gPeds.length / 3, cars = t.gCars.length;
+      const peds = t.gNp / 3, cars = t.gNc;
       if (peds === 0 && cars === 0) { if (m.lane < 0 || m.pi < 1 || m.pi * 2 + 1 >= m.path.length) gs[o + 1]++; else gs[o + 2]++; }
       if (peds) gs[o + 3]++;
       if (cars) gs[o + 4]++;
