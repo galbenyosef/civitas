@@ -51,14 +51,6 @@ export const TRAFFIC_TUNING = {
   rerouteCooldown: 50,
   /** A* node budget of a held-up driver's re-route search (a late driver's is delayNodes). */
   rerouteNodes: 4000,
-  /**
-   * 1: a re-route search stops as soon as nothing it could still find would be taken, that is once its cheapest open
-   * node already costs as much as the current route's rest times the gain asked for (docs/search-perf.md). It takes the
-   * same re-routes as a full search.
-   */
-  rerouteBound: 0,
-  /** 1: reading a tile's congestion never drops a decayed entry (endTick treats one as gone and the sweep drops it), so the router's reads change nothing. */
-  congPureReads: 0,
 
   // ---- two-wheelers (delivery bikes and mopeds, docs/mobile-jobs.md) -------------------------------------------------
   /**

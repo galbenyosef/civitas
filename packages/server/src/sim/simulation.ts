@@ -2499,14 +2499,13 @@ export class Simulation {
     const cost = force
       ? (x: number, y: number) => ((x === cx && y === cy && m.pi + 1 < n - 1) || (x === ax && y === ay) ? AVOID : this.traffic.cost(x, y))
       : (x: number, y: number) => (x === ax && y === ay ? AVOID : this.traffic.cost(x, y));
-    const gain = late ? TT.delayGain : 0.85;
-    // with rerouteBound the search stops once nothing it could still find would be taken (the margin keeps rounding from
-    // ever stopping it short of one that would)
-    const bound = !TT.rerouteBound ? Infinity : force ? AVOID : Math.min(AVOID, this.traffic.pathCost(m.path, m.pi + 1) * gain);
+    // a new way is taken only when it costs less than `worse`, so the search stops once it cannot find one that does
+    // (docs/search-perf.md: three in four searches found the way the driver was already on; the margin keeps rounding
+    // from ever stopping one short of a way that would be taken)
+    const worse = force ? AVOID : Math.min(AVOID, this.traffic.pathCost(m.path, m.pi + 1) * (late ? TT.delayGain : 0.85));
     // a driver running late searches wider: the way round a jam is often a long way round
-    const alt = findRoute(w, bx, by, gx, gy, cost, 0.4, late ? TT.delayNodes : TT.rerouteNodes, dirBetween(ax, ay, bx, by), bound * (1 + 1e-9)); // heading into B already (no turning on a flyover)
-    if (!alt || alt.path.length < 2 || alt.cost >= AVOID) return;
-    if (!force && alt.cost >= (TT.rerouteBound ? bound : this.traffic.pathCost(m.path, m.pi + 1) * gain)) return;
+    const alt = findRoute(w, bx, by, gx, gy, cost, 0.4, late ? TT.delayNodes : TT.rerouteNodes, dirBetween(ax, ay, bx, by), worse * (1 + 1e-9)); // heading into B already (no turning on a flyover)
+    if (!alt || alt.path.length < 2 || alt.cost >= worse) return;
     m.path = [ax, ay, ...alt.path]; m.pi = 1;
     leg.path = m.path;
     this.traffic.count(force ? 'stuckReroutes' : 'reroutes');
