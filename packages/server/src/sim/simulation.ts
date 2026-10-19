@@ -1191,6 +1191,9 @@ export class Simulation {
       ...lifeDefaults(id, w.tick, age, health),
       ...edu,
       leisure: LEISURE.start + LEISURE.startSpread * hash2(id, 219), // newcomers arrive neither bored nor fresh from a holiday
+      // set later in some lives: here so every citizen keeps one shape, and the traffic step's reads of them stay fast
+      skill: undefined, drain: undefined, grad: undefined, appr: undefined, mig: undefined, gx: undefined, gy: undefined,
+      call: undefined, halt: undefined, dwell: undefined,
     };
   }
 
@@ -2779,7 +2782,9 @@ export class Simulation {
       id, x: from[0] + 0.5, y: from[1] + 0.5, path: [], pi: 0, vkind, phase: 'out', from, to, until: 0,
       parkedAt: null, parkKerb: false, owner, legs: [{ path: route.path, drive: true, arrive: vkind === VehicleKind.Patrol ? 'none' : 'park', dest: to }], leg: null,
       call: false, weave: false, // set on a fire engine's call (sim/fires.ts); here so every vehicle has one shape
+      fee: undefined, // and the rest of what some vehicles get later (harbour freight; buses and fleet vehicles: sim/transit.ts, sim/mobile.ts)
       ...w.moverDefaults(id),
+      halt: undefined, dwell: undefined,
     };
     v.priority = priority;
     if (vkind === VehicleKind.Freight) v.gapMul *= 1.4;

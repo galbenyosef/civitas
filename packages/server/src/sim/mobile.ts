@@ -215,7 +215,9 @@ export class Mobile {
     const v: Vehicle = {
       id, x: from[0] + 0.5, y: from[1] + 0.5, path: [from[0], from[1]], pi: 0, vkind: FLEET_VKIND + kind, phase: 'out', from: base, to: from, until: 0,
       parkedAt: null, parkKerb: false, owner: this.w.parcelAt(base[0], base[1])?.owner ?? null, legs: [], leg: null,
+      call: false, weave: false, fee: undefined, // as every vehicle (Simulation.spawnVehicle): one shape
       ...this.w.moverDefaults(c.id), // the driver's own style
+      halt: undefined, dwell: undefined,
     };
     v.halt = -1;
     v.cls = kind === FleetKind.Bicycle || kind === FleetKind.Moped ? BIKE_CLASS : kind === FleetKind.CourierVan ? VehicleClass.Van : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? VehicleClass.Truck : kind === FleetKind.SchoolBus ? VehicleClass.Bus : VehicleClass.Sedan;

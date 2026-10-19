@@ -1042,7 +1042,9 @@ export class BusService implements ModeService {
     const v: Vehicle = {
       id, x: depot[0] + 0.5, y: depot[1] + 0.5, path: [], pi: 0, vkind: VehicleKind.Bus, phase: 'out', from: depot, to: depot, until: 0,
       parkedAt: null, parkKerb: false, owner: line.owner, legs: [], leg: null,
+      call: false, weave: false, fee: undefined, // as every vehicle (Simulation.spawnVehicle): one shape
       ...this.w.moverDefaults(id),
+      halt: undefined, dwell: undefined,
     };
     v.cls = VehicleClass.Bus; v.speedMul = 1; v.gapMul = 1.15; v.halt = -1;
     const b: Bus = { v, line: line.id, depot, phase: 'toLine', call: 0, base: 0, atCall: false, arrivedAt: 0, dwellUntil: 0, leftAt: this.w.tick, expectAt: this.w.tick, delay: 0, route: r };
