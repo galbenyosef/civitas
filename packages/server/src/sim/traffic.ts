@@ -777,7 +777,13 @@ export class Traffic {
     return !this.boxConflict(m, bx, by, dir, dir);
   }
   private boxBusyExcept(tx: number, ty: number, m: Mover): boolean {
-    for (let i = 0, n = this.inBox(tx, ty); i < n; i++) if (this.boxM[i] !== m) return true;
+    // inBox, stopping at the first mover found other than m
+    for (let d = 0; d < 4; d++) {
+      const q = this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
+      if (q) for (const o of q) if ((TT.boxByCommit ? o.committed : o.prog > this.stopLine(o)) && o !== m) return true;
+      const l = this.laneQ(tx, ty, d);
+      if (l) for (const o of l) if (o.prog < this.clearAt(o) && o !== m) return true;
+    }
     return false;
   }
 
