@@ -17,15 +17,16 @@ Card c46399ac (docs/audit-2026-10.md section 8, card 3). Code: `server/src/sim/f
    - **cover**: `coveredRisk` (0.6) in reach of a staffed fire engine (smoke alarms, inspections).
 
    At most `maxPerOwner` (2) fires burn at once in one owner's parcels and `maxWorld` (12) in the world.
-2. **The engine turns out.** The nearest staffed fire building (by road-free distance) whose reach covers the fire, with
+2. **The engine turns out.** The nearest staffed fire building (in tiles, not by road) whose reach covers the fire, with
    an engine at home, sends it: reach is `FIRE.reach` (14 tiles, square, as service cover) or the station's own cover when
    that is wider. A post keeps one engine, a station two, the bigger rungs more (twice their call-out rate). The engine is
    the existing priority vehicle (blue lights, through red signals and round a roundabout without giving way) and pulls
-   up at the door rather than looking for a space. Two things are new for every vehicle on blue lights, call-outs
-   included: it pulls out of its station into the forecourt and waits there for a gap instead of staying in the garage
-   until the road has room (`sim/traffic.ts` enter), and **once traffic has stopped it for 8 ticks it drives on down the
-   middle of the road** at 60% of a car's speed, out of the lanes, until it arrives (`Simulation.weave`). Without that,
-   an engine in the 1×1 Commons at the evening peak waited up to four game hours to leave the garage. A fire next door
+   up at the door rather than looking for a space. Two things are new for an engine on a fire call (`Mover.call`; the
+   routine call-outs and ambulances drive as before): it pulls out of its station into the forecourt and waits there for
+   a gap instead of staying in the garage until the road has room (`sim/traffic.ts` enter), and **once traffic has
+   stopped it for 8 ticks it drives on down the middle of the road** at 60% of a car's speed, out of the lanes, until it
+   arrives (`Simulation.weave`). Without that, an engine in the 1×1 Commons at the evening peak waited up to four game
+   hours to leave the garage. A fire next door
    (three tiles or less, too short a route to drive) gets the crew on foot five game minutes later. An engine lost on the
    way (despawned in a jam) is replaced from the next station in reach, three tries at most; a station that comes on
    shift later is asked every 25 ticks.
@@ -75,8 +76,9 @@ services. Fire posts come with Emergency services (civ1: 20 housed, $400; the go
   behind (a burnt-out lot is an empty zoned lot), so fires do not add to the badge flood.
 - **The building's panel**: a Fire row ("On fire: the fire crew are on their way", "burnt out", "Fire damage: 1 level
   lost").
-- **Toasts** for the owner when a fire starts (who is coming, or that nobody is) and when it is out (what was lost and
-  the bill). The warning fire's start is the advisor hint instead.
+- **Toasts** for the owner when a fire starts (who is coming, or that nobody is) and, when it cost a level or the
+  building or was the warning fire, when it is out (what was lost and the bill); a fire put out with nothing lost ends
+  quietly (the badge clears, the bill is in the ledger). The warning fire's start is the advisor hint instead.
 
 ## Wire and save
 

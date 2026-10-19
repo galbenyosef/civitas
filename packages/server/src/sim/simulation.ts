@@ -2771,6 +2771,7 @@ export class Simulation {
     const v: Vehicle = {
       id, x: from[0] + 0.5, y: from[1] + 0.5, path: [], pi: 0, vkind, phase: 'out', from, to, until: 0,
       parkedAt: null, parkKerb: false, owner, legs: [{ path: route.path, drive: true, arrive: vkind === VehicleKind.Patrol ? 'none' : 'park', dest: to }], leg: null,
+      call: false, weave: false, // set on a fire engine's call (sim/fires.ts); here so every vehicle has one shape
       ...w.moverDefaults(id),
     };
     v.priority = priority;
@@ -2792,22 +2793,15 @@ export class Simulation {
       if (!v.leg) { w.vehicles.delete(v.id); continue; }
       const leg = v.leg;
       let done = false;
-      if (leg.drive) {
-        if (v.weave) { if (!this.weave(v)) continue; done = true; } else {
-        if (v.lane < 0) {
-          if (this.traffic.enter(v) === 'blocked') {
-            if (v.call && ++v.stuck > WEAVE_AFTER) { v.weave = true; continue; } // enter() zeroes wait; stuck counts the engine's wait at the door
-            if (++v.wait > GARAGE_WAIT_MAX) { this.traffic.count('garageGiveUp'); this.despawn(v); }
-            continue;
-          }
-          continue;
-        }
+      const call = v.call ? this.callStep(v) : 0; // a fire engine on a call (sim/fires.ts): 1 waiting or weaving, 2 arrived weaving
+      if (call === 1) continue;
+      if (call === 2) done = true;
+      else if (leg.drive) {
+        if (v.lane < 0) { if (this.traffic.enter(v) === 'blocked') { if (++v.wait > GARAGE_WAIT_MAX) { this.traffic.count('garageGiveUp'); this.despawn(v); } continue; } continue; }
         const r = this.traffic.step(v);
-        if (v.call && r !== 'arrived' && v.wait > WEAVE_AFTER) { this.traffic.leave(v); v.weave = true; continue; }
         if (r === 'stuck') { this.onStuck(v, leg); continue; }
         if (r === 'moving') { this.maybeReroute(v, leg, this.dueForcedReroute(v)); continue; }
         done = true;
-        }
       } else {
         // vehicles never walk; a non-drive leg means the route could not be driven
         done = true; v.x = leg.path[leg.path.length - 2] + 0.5; v.y = leg.path[leg.path.length - 1] + 0.5;
@@ -2824,8 +2818,19 @@ export class Simulation {
    * A fire engine on a call that traffic has stopped (sim/fires.ts) drives on down the middle of the road with its lights
    * on, out of the lanes: nobody has to make room in the simulation, and drawn it passes the queue on the crown of the
    * road. It keeps to its route at WEAVE_SPEED of a car's speed, through junctions and signals, until it arrives. Returns
-   * true on arrival.
+   * true on arrival. callStep, before the ordinary drive step: 0 drive on as any vehicle, 1 done for this tick, 2 arrived.
    */
+  private callStep(v: Vehicle): 0 | 1 | 2 {
+    if (!v.leg?.drive) return 0;
+    if (v.weave) return this.weave(v) ? 2 : 1;
+    if (v.lane < 0) {
+      // pulling out: enter() zeroes wait, so stuck counts the engine's wait at its door
+      if (this.traffic.enter(v) === 'blocked' && ++v.stuck > WEAVE_AFTER) v.weave = true;
+      return 1;
+    }
+    if (v.wait > WEAVE_AFTER) { this.traffic.leave(v); v.weave = true; return 1; } // stopped in traffic since the last step
+    return 0;
+  }
   private weave(v: Vehicle): boolean {
     const p = v.path, n = p.length / 2;
     if (v.pi < 1) v.pi = 1;

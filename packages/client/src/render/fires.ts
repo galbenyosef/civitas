@@ -210,18 +210,19 @@ export class FiresView {
       const roof = roofAnchor(this.world, f.x, f.y, 0);
       const ground: [number, number, number] = [roof[0], 0, roof[2]];
       const hx = f.w / 2, hz = f.h / 2;
-      const nFl = 5 + Math.floor(hash2(f.x * 3 + 1, f.y * 5 + 2) * (FLAMES_MAX - 4));
+      const fx = f.x + 7919 * Math.floor(f.s * 997); // the fire's own seed in every hash: the drill house burns differently each time
+      const nFl = 5 + Math.floor(hash2(fx * 3 + 1, f.y * 5 + 2) * (FLAMES_MAX - 4));
       for (let i = 0; i < nFl; i++) {
-        const a = hash2(f.x * 31 + i * 7, f.y * 17 + i * 3), b = hash2(f.y * 13 + i * 11, f.x * 7 + i * 5), c = hash2(i * 19 + f.x, i * 23 + f.y);
+        const a = hash2(fx * 31 + i * 7, f.y * 17 + i * 3), b = hash2(f.y * 13 + i * 11, fx * 7 + i * 5), c = hash2(i * 19 + fx, i * 23 + f.y);
         // tongues cluster toward the middle of the roof, a few out at the edges
         const ox = (a - 0.5) * (a - 0.5) * Math.sign(a - 0.5) * 2.6 * hx, oz = (b - 0.5) * (b - 0.5) * Math.sign(b - 0.5) * 2.6 * hz;
         this.put(this.flames, fi, roof, [ox, oz, hx * 0.5, hz * 0.5], [c, 0.55 + 0.9 * hash2(c * 1000, i), 5.5 + 5 * a, fi]);
       }
       this.put(this.glows, fi, roof, [0, 0, hx * 0.5, hz * 0.5], [f.s, 1, 1, fi]);
-      const nSm = 9 + Math.floor(hash2(f.x * 7 + 3, f.y * 11 + 1) * (PUFFS_MAX - 8));
+      const nSm = 9 + Math.floor(hash2(fx * 7 + 3, f.y * 11 + 1) * (PUFFS_MAX - 8));
       for (let i = 0; i < nSm; i++) {
-        const a = hash2(f.x * 41 + i * 13, f.y * 29 + i), b = hash2(f.y * 37 + i * 3, f.x * 43 + i * 9);
-        this.put(this.smoke, fi, roof, [(a - 0.5) * hx * 0.8, (b - 0.5) * hz * 0.8, hx * 0.5, hz * 0.5], [hash2(i * 53 + f.x, f.y * 3 + i), 0.55 + 0.6 * b, 3.2 + 3.6 * a, fi]);
+        const a = hash2(fx * 41 + i * 13, f.y * 29 + i), b = hash2(f.y * 37 + i * 3, fx * 43 + i * 9);
+        this.put(this.smoke, fi, roof, [(a - 0.5) * hx * 0.8, (b - 0.5) * hz * 0.8, hx * 0.5, hz * 0.5], [hash2(i * 53 + fx, f.y * 3 + i), 0.55 + 0.6 * b, 3.2 + 3.6 * a, fi]);
       }
       this.put(this.scorch, fi, ground, [0, 0, hx, hz], [f.s, 1, 1, fi]);
     });

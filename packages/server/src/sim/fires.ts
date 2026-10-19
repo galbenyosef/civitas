@@ -109,7 +109,11 @@ export class Fires {
   }
 
   /** Whether a fire is burning or being put out at a door tile. */
-  burningAt(x: number, y: number): boolean { const f = this.fires.get(tileKey(x, y)); return !!f && f.ph !== FirePhase.Out; }
+  burningAt(x: number, y: number): boolean {
+    if (!this.fires.size) return false; // the usual case: Issues asks for every building it looks at
+    const f = this.fires.get(tileKey(x, y));
+    return !!f && f.ph !== FirePhase.Out;
+  }
   /** Every tile of each building burning or being put out (Simulation.held: growth leaves them alone). */
   held(into: Set<number>) {
     for (const f of this.fires.values()) {
@@ -131,7 +135,7 @@ export class Fires {
       this.roll();
       this.runDrills();
     }
-    for (const f of [...this.fires.values()]) this.step(f, now);
+    if (this.fires.size) for (const f of [...this.fires.values()]) this.step(f, now);
     this.ms += performance.now() - t0; this.ticks++;
   }
 
@@ -390,7 +394,8 @@ export class Fires {
       f.lost = b.level - to;
       if (to < b.level) w.setTile(b.x, b.y, withConstruction(withLevel(w.getTile(b.x, b.y), to), false));
     }
-    if (!f.drill && f.owner !== 'sys') {
+    // a fire put out with nothing lost tells nobody (the badge clears, the bill is in the ledger): the toasts stay few
+    if (!f.drill && f.owner !== 'sys' && (burnt || f.lost || f.warning)) {
       const bill = cost > 0 ? `, $${cost.toLocaleString('en-GB')} of damage` : '';
       this.notices.push({ owner: f.owner, msg: burnt
         ? `The ${what} at (${f.x}, ${f.y}) burnt down${bill}: no engine came. A fire post covers 14 tiles; the lot will be rebuilt`
