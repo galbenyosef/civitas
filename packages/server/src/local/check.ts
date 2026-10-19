@@ -1,3 +1,4 @@
+import { Zone, TICKS_PER_HOUR } from '@msimcity/shared';
 /**
  * Local-mode seam check (docs/local-mode.md, phases A and B): bundles local/core.ts for the browser (esbuild, platform
  * browser) and fails on any Node import or bare `process` use, then imports that bundle and drives a game over a
@@ -194,7 +195,11 @@ port1.close(); port2.close();
 
   const seedBefore = host.game.world.seed;
   const ng = await ask('newGame', { seed: 777 });
-  ok(ng.ok && host.game.world.seed === 777 && host.game.world.seed !== seedBefore && host.game.world.players.has('sys'), 'host: new game is a fresh world with the Commons');
+  const fw = host.game.world;
+  ok(ng.ok && fw.seed === 777 && fw.seed !== seedBefore && fw.start === 'frontier' && !fw.players.has('sys') && !!fw.charter && fw.builtOf(Zone.Hub).length === 1 && fw.tick === 6 * TICKS_PER_HOUR,
+    'host: new game is a frontier by default (no Commons, a gate, a charter to give, dawn)');
+  const ngc = await ask('newGame', { seed: 778, start: 'commons' });
+  ok(ngc.ok && host.game.world.seed === 778 && host.game.world.players.has('sys') && host.game.world.start === 'commons', 'host: new game beside the Commons on request');
   const ld = await ask('load', { slot: 'mine' });
   ok(ld.ok && H.worldHash(host.game.world) === mineHash, 'host: load brings a named save back');
   const ren = await ask('rename', { slot: 'mine', label: 'Mine, renamed' }), renAuto = await ask('rename', { slot: 'auto-1', label: 'x' });

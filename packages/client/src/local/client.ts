@@ -97,7 +97,7 @@ export class LocalGame {
   rename(slot: string, label: string) { return this.request('rename', { slot, label }); }
   /** the running city: day, citizens, pause/speed state (answered once the game is up) */
   async info() { return (await this.request('info')) as unknown as LocalState & { day: number; citizens: number; persistent: boolean }; }
-  newGame(opts: { seed?: number; sandbox?: boolean } = {}) { return this.request('newGame', opts); }
+  newGame(opts: { seed?: number; sandbox?: boolean; start?: 'frontier' | 'commons' } = {}) { return this.request('newGame', opts); }
 
   /** the running city (or a saved slot) as a file: world.json gzipped, which a server opens as its data/world.json once gunzipped */
   async exportSave(opts: { slot?: string; gzip?: boolean; mayor?: string } = {}) {

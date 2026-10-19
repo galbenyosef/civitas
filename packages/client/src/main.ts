@@ -233,6 +233,7 @@ net.on('welcome', (m) => {
   if (tour) tour.readOnly = world.spectate;
   world.applyPlayers(m.players);
   world.applyParcels(m.parcels);
+  world.start = m.start === 'frontier' ? 'frontier' : 'commons'; world.home = m.home ?? null;
   const me = world.myPlayer!;
   ui.setWho(me.name, me.color);
   ui.setMoney(me.money, me.ledger);

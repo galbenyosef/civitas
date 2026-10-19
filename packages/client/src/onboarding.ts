@@ -108,11 +108,12 @@ export class Onboarding {
       return `<div class="gpart"><span>${esc(p.label)}</span><span>${cur} / ${p.target}</span></div><div class="gbar"><i style="width:${pct}%"></i></div>`;
     }).join('');
     const reward = rewardText(def, techName);
+    const fr = this.d.world.start === 'frontier' ? def.frontier : undefined; // a frontier's words (docs/first-five.md section 0)
     this.card.innerHTML = `
       <div class="ghead"><span class="gnum">Goal ${n + 1} of ${total}</span><button class="gx" id="gHide" title="Hide (the goals chip at the top brings it back)">–</button></div>
       <div class="gtitle">${esc(def.title)}</div>
-      <div class="ghow">${esc(def.how)}</div>
-      <div class="gwhy">${esc(def.why)}</div>
+      <div class="ghow">${esc(fr?.how ?? def.how)}</div>
+      <div class="gwhy">${esc(fr?.why ?? def.why)}</div>
       ${bars}
       <div class="gfoot">${reward ? `<span class="greward">Reward: <b>${esc(reward)}</b></span>` : '<span></span>'}<button class="chip on" id="gShow">show me</button></div>
       ${next.length ? `<div class="gnext">Then: ${next.map((x) => esc(x.title)).join(' · ')}</div>` : ''}
@@ -126,13 +127,16 @@ export class Onboarding {
   }
 
   /** Pick the goal's tool (flashing its button), open its panel, and look somewhere sensible. */
-  private showMe(def: Pick<GoalDef, 'show'>) {
-    const s = def.show;
-    if (s.tool) { this.d.tool(s.tool); this.flash(s.tool); }
+  private showMe(def: Pick<GoalDef, 'show' | 'frontier'>) {
+    const s = def.show, w = this.d.world;
+    const tool = (w.start === 'frontier' && def.frontier?.tool) || s.tool;
+    if (tool) { this.d.tool(tool); this.flash(tool); }
     if (s.panel) this.openPanel(s.panel);
     if (s.focus) {
       const plot = s.focus === 'plot' ? this.myPlot() : null;
-      if (plot) this.d.focus(plot[0], plot[1]); else this.d.focus(COMMONS_EDGE[0], COMMONS_EDGE[1]);
+      const home = w.home ?? COMMONS_EDGE; // a frontier's road end, or the open land beside the Commons
+      if (w.start === 'frontier' && w.home) this.d.focus(w.home[0], w.home[1]); // the road end is where it all starts
+      else if (plot) this.d.focus(plot[0], plot[1]); else this.d.focus(home[0], home[1]);
     }
   }
   private openPanel(p: 'tech' | 'ledger' | 'lines') {

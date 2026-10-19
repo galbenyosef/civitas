@@ -1,6 +1,6 @@
 import { TICK_MS } from '@msimcity/shared';
 import {
-  World, seedCommons, createGame, PortSource, snapshotOf, worldFromSnapshot, readableVersion, SNAPSHOT_VERSION,
+  World, seedCommons, seedFrontier, createGame, PortSource, snapshotOf, worldFromSnapshot, readableVersion, SNAPSHOT_VERSION,
   type Game, type Conn, type ConnSource, type Control, type PortLike, type Snapshot,
 } from '../../../server/src/local/core';
 
@@ -163,12 +163,13 @@ export class LocalHost {
   }
 
   /** a new world like the server's first start: the seed and the Commons (index.ts) */
-  private fresh(seed: number | undefined, sandbox: boolean) {
+  /** `start`: from zero on a frontier (the default; docs/first-five.md section 0), or beside the Commons */
+  private fresh(seed: number | undefined, sandbox: boolean, start: 'frontier' | 'commons' = 'frontier') {
     const s = seed ?? Math.floor(Math.random() * 2 ** 31);
     const world = new World(s);
-    seedCommons(world, 0);
+    if (start === 'frontier') seedFrontier(world); else seedCommons(world, 0);
     this.use(world, sandbox);
-    console.log(`local: new world with seed ${s}${sandbox ? ' (sandbox)' : ''}`);
+    console.log(`local: new world with seed ${s} (${start})${sandbox ? ' (sandbox)' : ''}`);
   }
 
   /** run this world from now on; any game before it is dropped and its clients told to reconnect */
@@ -346,7 +347,7 @@ export class LocalHost {
           return ok({ day: r.world.day, citizens: r.world.citizens.size });
         }
         case 'newGame':
-          await this.switchTo(() => this.fresh(typeof m.seed === 'number' ? m.seed : undefined, !!m.sandbox));
+          await this.switchTo(() => this.fresh(typeof m.seed === 'number' ? m.seed : undefined, !!m.sandbox, m.start === 'commons' ? 'commons' : 'frontier'));
           return ok({ seed: this.game.world.seed });
         default: return fail(`unknown control ${m.ctl}`);
       }

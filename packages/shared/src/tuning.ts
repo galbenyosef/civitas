@@ -224,4 +224,6 @@ export const START_TUNING = {
    * usual rule holds: beds fill while the world has vacant jobs.
    */
   followerBeds: 24,
+  /** While the same holds and the world's residential demand is 0, those homes' lots grow as if it were this (growth()'s roll: 12 is a 10% chance a pass). */
+  youngDemand: 12,
 };

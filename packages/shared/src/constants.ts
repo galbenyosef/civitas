@@ -11,6 +11,9 @@ export const gameMin = (n: number) => Math.round(n * TICKS_PER_MINUTE);
 export const DAYS_PER_WEEK = 7;
 /** Starting treasury for a new player. */
 export const START_MONEY = 20000;
+/** A frontier start (docs/first-five.md section 0): the first player's treasury, and the free land charter round the road end (tiles per side). */
+export const FRONTIER_MONEY = 5000;
+export const FRONTIER_CHARTER = 32;
 /** Price per tile when buying unclaimed land. */
 export const LAND_PRICE_PER_TILE = 10;
 /** Largest parcel edge a single purchase may claim. */

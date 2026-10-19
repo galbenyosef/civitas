@@ -10,7 +10,7 @@ import { World } from './world';
 import { createGame, tuneEconomy } from './game';
 import { WsSource } from './transport-ws';
 import { loadWorld, saveWorld } from './store';
-import { seedCommons } from './seed';
+import { seedCommons, seedFrontier } from './seed';
 import { seedCity } from './loadtest/cities';
 import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, stopsChildrenOn } from './testcities';
 import { fillCity } from './fill';
@@ -77,7 +77,9 @@ if (world) {
 } else {
   const seed = Number(process.env.SEED ?? (CITY ? 1 : Math.floor(Math.random() * 2 ** 31)));
   world = new World(seed);
-  if (CITY) { seedCity(world, { districts: CITY, built: 3 }); needsFill = true; } else seedCommons(world, seedBuilt);
+  if (CITY) { seedCity(world, { districts: CITY, built: 3 }); needsFill = true; }
+  else if (process.env.START === 'frontier') seedFrontier(world); // from zero (docs/first-five.md section 0): one road in, a gate, a charter
+  else seedCommons(world, seedBuilt);
   console.log(`created new world with seed ${seed}`);
 }
 // ---- http (serves the built client when present; the game's WebSockets share its port) -----------

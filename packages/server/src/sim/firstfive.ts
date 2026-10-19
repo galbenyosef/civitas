@@ -210,6 +210,18 @@ export class FirstFive {
   }
 
   /**
+   * Called by growth() when the world's residential demand is 0: a lot on the land of a new player with fewer than
+   * START_TUNING.followerBeds people grows as if demand were START_TUNING.youngDemand. On a frontier the town is the
+   * world and `jobs − population + 6` is 0 from the moment the camp's eight outnumber the handyman's two: the stuck
+   * remote start of docs/start-from-zero.md.
+   */
+  youngTown(lot: Building): boolean {
+    const owner = this.w.parcelAt(lot.x, lot.y)?.owner;
+    const p = owner ? this.w.players.get(owner) : undefined;
+    return !!p && p.progress.housed < START_TUNING.followerBeds;
+  }
+
+  /**
    * Called by spawn() when the world has no vacant job: a home on the land of a new player with fewer than
    * START_TUNING.followerBeds people and someone in work still takes a newcomer (a settler's family follows a wage).
    */

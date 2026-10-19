@@ -94,6 +94,9 @@ export class SavesDialog {
     const nameInput = h('input', { class: 'txt', maxlength: 40, placeholder: 'Name this city', value: `${this.mayor()}, day ${info.day}`, 'aria-label': 'Save name' });
     const seedInput = h('input', { class: 'txt', maxlength: 20, placeholder: 'Seed (optional: a number or any word)', 'aria-label': 'Seed' });
     const sandbox = h('input', { type: 'checkbox' });
+    // where to start (docs/first-five.md section 0): from zero on a frontier (the default), or beside the Commons
+    const startFrontier = h('input', { type: 'radio', name: 'start', value: 'frontier', checked: true }) as HTMLInputElement;
+    const startCommons = h('input', { type: 'radio', name: 'start', value: 'commons' }) as HTMLInputElement;
     const now = h('section', {},
       h('h3', {}, 'This city'),
       h('p', { class: 'dim' }, `Day ${info.day}, ${info.citizens.toLocaleString()} citizens${info.sandbox ? ', sandbox' : ''}. It also saves itself every 30 seconds.`),
@@ -119,10 +122,12 @@ export class SavesDialog {
       list.append(d);
     }
     const fresh = h('details', { class: 'fresh' }, h('summary', {}, 'New game…'),
-      h('p', { class: 'dim' }, 'Starts an empty city with the Commons. The map comes from the seed: the same seed is the same land.'),
+      h('p', { class: 'dim' }, 'The map comes from the seed: the same seed is the same land.'),
       h('div', { class: 'row' }, seedInput),
+      h('label', { class: 'chk' }, startFrontier, ' From zero: an empty valley, one road in, a free charter and $5,000. Pitch camp and build a town'),
+      h('label', { class: 'chk' }, startCommons, ' Beside the Commons: a ready-made district to grow against, $20,000'),
       h('label', { class: 'chk' }, sandbox, ' Sandbox: every technology, unlimited funds, no goals'),
-      h('div', { class: 'row' }, h('button', { class: 'btn pri', onclick: () => void this.newGame(seedOf(seedInput.value), sandbox.checked, info, saves) }, 'Start new game')));
+      h('div', { class: 'row' }, h('button', { class: 'btn pri', onclick: () => void this.newGame(seedOf(seedInput.value), sandbox.checked, info, saves, startCommons.checked ? 'commons' : 'frontier') }, 'Start new game')));
     this.body.replaceChildren(now, list, fresh, await this.storage());
   }
 
@@ -175,8 +180,8 @@ export class SavesDialog {
     this.body.replaceChildren(box);
   }
 
-  private newGame(seed: number | undefined, sandbox: boolean, info: { day: number; citizens: number }, saves: SaveMeta[]) {
-    this.replaceWith('Start a new game?', info.day, info.citizens, saves, () => this.game.newGame({ seed, sandbox }));
+  private newGame(seed: number | undefined, sandbox: boolean, info: { day: number; citizens: number }, saves: SaveMeta[], start: 'frontier' | 'commons' = 'frontier') {
+    this.replaceWith('Start a new game?', info.day, info.citizens, saves, () => this.game.newGame({ seed, sandbox, start }));
   }
 
   /** where the saves live: size, whether the browser promises to keep them, and the app install */

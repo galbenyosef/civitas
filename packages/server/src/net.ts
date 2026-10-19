@@ -1,6 +1,6 @@
 import type { Conn, ConnSource } from './transport';
 import {
-  CHUNK_SIZE, START_MONEY, LAND_PRICE_PER_TILE, MAX_PARCEL_EDGE, ROAD_COST, PUBLIC_ROAD_COST, ZONE_COST,
+  CHUNK_SIZE, START_MONEY, FRONTIER_MONEY, LAND_PRICE_PER_TILE, MAX_PARCEL_EDGE, ROAD_COST, PUBLIC_ROAD_COST, ZONE_COST,
   BULLDOZE_COST, MAX_SUBS, MAX_TAX, DEFAULT_TAX, Zone, CitizenState, CIVIC_COST, workOf, KIND_NAMES, TRAFFIC_EVERY,
   isRoad, isBuildable, isGrowable, zoneOf, levelOf, terrainOf, packTile, chunkKey, chunkOf, parseKey, packCitizenFlags, localIndex, isStructureAux,
   u16ToB64, i32ToB64, u8ToB64, hasFeature, techFor, TECH_BY_ID, ALL_TECH_IDS, checkPurchase, ZONE_TOOLS, CIVIC_TOOLS, MANIFEST,
@@ -211,7 +211,9 @@ export class Net {
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
     if (id === 'sys') return this.toast(c, 'That name is reserved');
     if (this.cfg.spectate && !this.w.players.has(id)) this.visitors.add(id);
-    c.player = this.w.getOrCreatePlayer(id, name, START_MONEY);
+    const newcomer = !this.w.players.has(id);
+    c.player = this.w.getOrCreatePlayer(id, name, this.w.start === 'frontier' ? FRONTIER_MONEY : START_MONEY);
+    if (newcomer && this.w.start === 'frontier') this.charter(c.player);
     if (this.cfg.sandbox && !this.cfg.spectate) { // a test city is a sandbox: every technology and an endless treasury for whoever joins
       c.player.tech = [...new Set([...c.player.tech, ...ALL_TECH_IDS])];
       c.player.devUnlimited = true;
@@ -221,6 +223,7 @@ export class Net {
     this.w.playersDirty = true;
     this.send(c, {
       t: 'welcome', you: c.player.id, seed: this.w.seed, day: this.w.day, ...(this.cfg.sandbox ? { sandbox: true } : {}), ...(this.cfg.spectate ? { spectate: true } : {}),
+      ...(this.w.start === 'frontier' ? { start: 'frontier' as const, ...(this.w.home ? { home: this.w.home } : {}) } : {}),
       players: this.playerDTOs(true),
       parcels: [...this.w.parcels.values()].map((p) => this.w.parcelDTO(p)),
     });
@@ -389,6 +392,20 @@ export class Net {
     this.w.dirtyParcels.add(parcel.id);
     this.toast(c, `Bought ${w}×${h} tiles for $${cost}`, 'info');
     if (owned.length === 0 && !this.roadNear(x, y, w, h)) this.toast(c, "No road reaches this land yet, and lots grow only beside a road the builders can reach. Extend your land to the nearest road (new land must border yours) and lay a road along it; roads on unclaimed land need Public works", 'info');
+  }
+
+  /**
+   * A frontier's free charter (seed.ts seedFrontier, docs/first-five.md section 0): the land round the road end goes to
+   * the first player to join, free. Later players buy land as anywhere.
+   */
+  private charter(p: Player) {
+    const ch = this.w.charter;
+    if (!ch || this.w.parcelIdAt(ch.x, ch.y) !== 0) return;
+    const parcel = { id: this.w.nextId++, owner: p.id, name: `${p.name}'s charter`, x: ch.x, y: ch.y, w: ch.w, h: ch.h, taxRate: DEFAULT_TAX, stats: emptyStats() };
+    this.w.parcels.set(parcel.id, parcel);
+    for (let yy = ch.y; yy < ch.y + ch.h; yy++) for (let xx = ch.x; xx < ch.x + ch.w; xx++) this.w.setParcelId(xx, yy, parcel.id);
+    this.w.recountRoads(parcel.id);
+    this.w.dirtyParcels.add(parcel.id);
   }
 
   /** `dev`: the client has ?dev and this is not a production server, so technology locks are skipped (for testing). */

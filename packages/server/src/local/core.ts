@@ -4,7 +4,7 @@
  * bundles this file for the browser to keep it that way.
  */
 export { World } from '../world';
-export { seedCommons } from '../seed';
+export { seedCommons, seedFrontier } from '../seed';
 export { createGame, tuneEconomy, type Game, type GameConfig } from '../game';
 export { PortSource, isControl, type Conn, type ConnSource, type Control, type PortLike } from '../transport';
 export { snapshotOf, worldFromSnapshot, readableVersion, SNAPSHOT_VERSION, type Snapshot } from '../snapshot';

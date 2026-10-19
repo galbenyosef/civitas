@@ -37,6 +37,7 @@ import { Skills, Place } from './skills';
 import { plantGardens, deepBackOk, GARDEN_KIND } from './blocks';
 import { Schools, ERRAND_SCHOOL } from './schools';
 import { FirstFive } from './firstfive';
+import { START_TUNING } from '@msimcity/shared';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -845,7 +846,7 @@ export class Simulation {
       if (b.level > 0 && b.occupants < capacityOf(b.id, b.level) * 0.7) continue;
       const canUp = b.level < topLevelOf(b.id);
       if (!canUp && !GROW_FORMS[b.zone].length) continue;
-      let p = Math.min(0.6, (b.zone === Zone.Residential ? rDemand : cDemand) / 30) * 0.25;
+      let p = Math.min(0.6, (b.zone === Zone.Residential ? (rDemand > 0 || !this.start.youngTown(b) ? rDemand : START_TUNING.youngDemand) : cDemand) / 30) * 0.25; // a new town's first homes grow without the world's job surplus (sim/firstfive.ts)
       let cov = 1;
       if (b.zone === Zone.Residential) {
         cov = this.coverage(b.x, b.y);

@@ -8,6 +8,9 @@ export class ClientWorld {
   parcels = new Map<number, ParcelDTO>();
   players = new Map<string, PlayerDTO>();
   me = '';
+  /** a frontier start and its road end (welcome.start, welcome.home; docs/first-five.md section 0) */
+  start: 'commons' | 'frontier' = 'commons';
+  home: [number, number] | null = null;
   /** a sandbox (test city or demo, from the welcome): anyone may edit any parcel and buy land anywhere */
   sandbox = false;
   parcelsDirty = false;

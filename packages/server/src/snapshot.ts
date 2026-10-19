@@ -33,6 +33,8 @@ export interface Snapshot {
   history?: HistoryJSON;
   /** a scenario's sea gates (World.seaGates, docs/boats.md 2.3); optional, absent in a procedural world */
   seaGates?: SeaGate[];
+  /** a frontier start (World.start, home, charter; docs/first-five.md section 0); optional, absent means the Commons */
+  start?: 'frontier'; home?: [number, number]; charter?: { x: number; y: number; w: number; h: number };
 }
 
 /**
@@ -60,6 +62,7 @@ export function snapshotOf(w: World): Snapshot {
     stopNames: [...w.stopNames].map(([k, name]) => { const [x, y] = parseKey(k); return [x, y, name] as [number, number, string]; }),
     history: historyOf(w).toJSON(),
     ...(w.seaGates.length ? { seaGates: w.seaGates.map((g) => ({ ...g })) } : {}),
+    ...(w.start === 'frontier' ? { start: 'frontier' as const, ...(w.home ? { home: w.home } : {}), ...(w.charter ? { charter: { ...w.charter } } : {}) } : {}),
   };
 }
 
@@ -101,6 +104,12 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   historyOf(w).load(snap.history);
   for (const g of snap.seaGates ?? []) if (g && Number.isInteger(g.x) && Number.isInteger(g.y) && typeof g.name === 'string') w.seaGates.push({ x: g.x, y: g.y, name: g.name, ...(g.low ? { low: true } : {}) });
   w.nextLineId = Math.max(snap.nextLineId ?? 1, 1 + Math.max(0, ...w.transitLines.keys()));
+  if (snap.start === 'frontier') {
+    w.start = 'frontier';
+    if (Array.isArray(snap.home) && Number.isInteger(snap.home[0]) && Number.isInteger(snap.home[1])) w.home = [snap.home[0], snap.home[1]];
+    const ch = snap.charter;
+    if (ch && [ch.x, ch.y, ch.w, ch.h].every(Number.isInteger)) w.charter = { x: ch.x, y: ch.y, w: ch.w, h: ch.h };
+  }
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links

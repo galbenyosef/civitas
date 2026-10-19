@@ -247,6 +247,11 @@ export class World {
    * persisted (an optional snapshot field). Empty in a procedural world, where open water gets its own offing.
    */
   seaGates: SeaGate[] = [];
+  /** how this world began (seed.ts): beside the Commons, or a frontier (docs/first-five.md section 0); saved */
+  start: 'commons' | 'frontier' = 'commons';
+  /** a frontier's road end, where a new player first looks, and the free charter the first player gets; saved */
+  home?: [number, number];
+  charter?: { x: number; y: number; w: number; h: number };
   dirtyParcels = new Set<number>();
   removedParcels = new Set<number>();
   playersDirty = false;

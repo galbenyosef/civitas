@@ -504,7 +504,7 @@ export type ClientMsg =
   | { t: 'inspectBoat'; id: number };
 
 export type ServerMsg =
-  | { t: 'welcome'; you: string; seed: number; day: number; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
+  | { t: 'welcome'; you: string; seed: number; day: number; /** a frontier start (docs/first-five.md section 0) and its road end, where the goals' "show me" looks */ start?: 'frontier'; home?: [number, number]; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
   | { t: 'chunk'; chunk: ChunkDTO }
   /** flat quads: x, y, packedTile, parcelId */
   | { t: 'tiles'; u: number[] }

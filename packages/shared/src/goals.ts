@@ -23,6 +23,8 @@ export interface GoalDef {
   reward: { cash?: number; tech?: string };
   /** the "show me" button: a tool to pick, a panel to open, where to look */
   show: { tool?: string; panel?: 'tech' | 'ledger' | 'lines'; focus?: GoalFocus };
+  /** on a frontier (docs/first-five.md section 0; welcome.start): other words, and another tool to light */
+  frontier?: { how?: string; why?: string; tool?: string };
 }
 
 /**
@@ -37,17 +39,20 @@ export const GOALS: GoalDef[] = [
     parts: [{ label: 'tiles of land', target: 64 }], reward: {}, show: { tool: 'buy', focus: 'commons' } },
   { id: 'road', title: 'Lay a street', how: 'Road (3): drag streets through your plot and join them to the Commons\' road.',
     why: 'Every lot needs a road beside it; every third row is a good rhythm.',
-    parts: [{ label: 'road tiles on your land', target: 12 }], reward: { cash: 100 }, show: { tool: 'road', focus: 'plot' } },
+    parts: [{ label: 'road tiles on your land', target: 12 }], reward: { cash: 100 }, show: { tool: 'road', focus: 'plot' },
+    frontier: { how: 'Road (3): drag a street on from the end of the country road into your land, and a side street or two.', why: 'Every lot needs a road beside it; the country road already joins your land to the gate everyone arrives through.' } },
   // the pioneer camp (docs/first-five.md): it opens the moment it is pitched and its eight settlers come up the road at once
   { id: 'camp', title: 'Pitch camp', how: 'Pioneer camp (under Residential): click a tile beside your street. It opens at once, no builders needed.',
     why: 'Eight settlers come up the road within the hour: your first residents, and the crew for your builders\' yard.',
-    parts: [{ label: 'pioneer camp', target: 1 }], reward: { cash: 150 }, show: { tool: 'camp', focus: 'plot' } },
+    parts: [{ label: 'pioneer camp', target: 1 }], reward: { cash: 150 }, show: { tool: 'camp', focus: 'plot' },
+    frontier: { why: 'Eight settlers come in through the gate within the hour: your first residents, and the crew for your handyman.' } },
   { id: 'homes', title: 'Zone homes', how: 'Residential (4): paint lots along your streets. Zoning goes round roads.',
     why: 'Each lot opens a building site. Homes bring residents, and residents pay property tax to you.',
     parts: [{ label: 'residential lots beside a road', target: 24 }], reward: { cash: 200 }, show: { tool: 'res', focus: 'plot' } },
   { id: 'yard', title: 'Hire your own builders', how: "Builders' yard (Y): place one beside your street, near the camp ($300; your first opens at once).",
     why: 'Your settlers take its jobs and set off for the nearest sites the moment it opens; a first house takes them minutes.',
-    parts: [{ label: "builders' yard", target: 1 }], reward: { cash: 300 }, show: { tool: 'yard', focus: 'plot' } },
+    parts: [{ label: "builders' yard", target: 1 }], reward: { cash: 300 }, show: { tool: 'yard', focus: 'plot' },
+    frontier: { how: "Handyman's workshop (Builders, the first size, $120): place it beside your street, near the camp. It opens at once.", why: 'Two of your settlers take its jobs and set off for the nearest sites the moment it opens; a first house takes them minutes.', tool: 'handyman' } },
   { id: 'res12', title: 'First homes', how: 'Watch the first houses finish and families move in: builders walk site to site and work their shift.',
     why: 'Twelve residents in proper homes (the camp aside) open Commercial zoning on the tech tree.',
     parts: [{ label: 'residents in homes', target: 12 }], reward: { tech: 'zon1' }, show: { focus: 'plot' } },
