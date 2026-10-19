@@ -2,7 +2,8 @@
 
 Rich, 2026-10-19: "How about if buildings / areas had allocated advertising areas (nothing extreme) that we would see our
 marketing campaigns appear on, however, they are at risk of vandalism, graffiti etc. I am conscious of the refresh
-performance loop though." Design 2026-10-19. **Nothing is built.** It stands on `docs/motivation.md` (values and
+performance loop though." and "let's not forget tv adverts that we might have in fpv view and or on major city
+landmarks such as Times Square and/or Piccadilly Circus" (section 9). Design 2026-10-19. **Nothing is built.** It stands on `docs/motivation.md` (values and
 beliefs): an advert is a way to plant a belief.
 
 Code this touches: `shared/src/adverts.ts` (new: slot sizes, themes, claims, templates, `AD` tunables),
@@ -24,6 +25,10 @@ Posters **wear**: they fade, peel, get tagged, get torn. A worn poster works les
 message. Rival players can fly-post over yours. Keeping a campaign clean costs money, and it costs more in neglected
 neighbourhoods.
 
+Two kinds of screen sit beside the posters (section 9): **TV adverts**, bought as airtime from a TV studio and seen at
+home (and on the living-room TV in the first-person view), and **big screens** on a few landmark junctions such as
+Piccadilly Circus, where several campaigns take turns on lit, animated panels.
+
 Citizens belong to no one, and nor does an audience: an advert reaches whoever walks past, on anyone's land. Ads are
 how players compete for the same people.
 
@@ -44,6 +49,7 @@ A new op in the building recipe (`docs/buildings.md`), placed by facade cell lik
 | `hoarding` | building sites (`Site`), long ground-floor walls | 0.9 × 0.4 | 6 |
 | `billboard` | on a frame above a low shop or works, at a junction | 1.0 × 0.5 | 10 |
 | `banner` | stadium, arena, college and civic fronts (landmarks excluded) | 0.3 × 1.2 | 8 |
+| `screen` | big-screen landmarks only (section 9): lit, animated, shared by turns | 0.6 × 0.4 to 2.0 × 1.0 | auctioned |
 
 `validate.ts` treats a slot like a signboard for the windows check: it may not cover a window, it must sit on a wall
 with a facade, and it must face a road side. Designs get slots by hand where they belong; families can also take
@@ -239,7 +245,55 @@ to people living within 6 tiles ("a mural on the corner"), and a Roots belief bu
 it. Neglect, now and then, gives something back. Murals are drawn from a small fixed set in the atlas strip (question
 4).
 
-## 9. Balance and performance
+## 9. Screens: TV adverts and the big lights
+
+Posters are cheap, local and targeted by route. Screens are the other end: broad, bright, expensive, and with no
+graffiti (a screen fails in its own way).
+
+### TV adverts
+
+- **Where the airtime comes from.** A new office-family kind, the **TV studio** (a culture tech, question 6), is the
+  city's broadcaster. Its parcel owner sells airtime and takes the money, as a slot's parcel owner takes poster rent.
+  With no studio, there's no TV advertising. Two studios on different players' land compete on price.
+- **What a player buys.** A **spot**: one campaign, a number of evening airings per game day, for a number of days.
+  A studio has `AD.tvSpots` (6) spots a day, sold to the highest bid each day, so prime time is scarce.
+- **Who sees it.** Once a game day, households that were home in the evening (new: an `eveningHome` bit, set when a citizen is at
+  home at 21:00 and read by the next life step) and own a TV (`hash2(hh, 321) < AD.tvShare`, 85%) are reached by each
+  airing spot, at `AD.tvStrength` (about a third of a poster's), with the same `values[theme]`, susceptibility,
+  saturation and contrarian rules as section 4. There's no route and no condition. TV reaches everyone a little,
+  including the retired and the people who never pass your posters. It can't pick a district; posters can.
+- **The first-person view.** `render/interiors.ts` already gives home rooms a TV (`Screen`, palette `'tv'`), with a
+  new shot every few seconds. When the followed citizen is at home in the evening and a spot is airing, the TV cuts
+  to an **ad break**: the campaign's cell from the ad atlas (section 5) as the screen's texture for a few shots, then
+  back to the programme. The room is built only while the FPV is inside it, so this costs nothing otherwise. The
+  citizen's thought line can follow it ("Saw an advert for Kingsway College").
+- **Studio quirks.** A studio's spots have a **slot name** ("before the news", "in the match"): one in the match during
+  a stadium event night (`shared/src/leisure.ts`) reaches double, mostly the Money and Adventure crowd. A studio
+  that sells too many spots in a day makes viewers switch off: reach per spot falls past `AD.tvFatigue`.
+
+### Big screens
+
+- **Landmark kinds.** A few junction landmarks carry `screen` slots: **Piccadilly Lights** at Piccadilly Circus for the
+  London demo (51.5100, -0.1347, with the Shaftesbury Memorial Fountain and its statue, between `londonMap.ts`'s
+  Piccadilly and Regent Street, near the `stop-159-piccadilly` bus stop), and later **Times Square** for a New York
+  scenario, which doesn't exist yet. For other cities, a generic **big screens corner** kind (a curved lit facade on a
+  corner block) unlocks late in the culture or commerce track.
+- **Shared by turns.** A screen has `AD.screenTurns` (6) turns. The panels cycle through the renting campaigns every
+  `AD.screenSecs` (8 real seconds), driven by the world clock in the shader, so every viewer sees the same rotation
+  and nothing goes over the wire. Turns are sold by daily auction among players, so the best screen in town is
+  something players fight over.
+- **Reach.** Screens sit on the busiest junctions, so section 4's daily path pass counts them for everyone passing,
+  with `AD.strength.screen` the highest of any slot, and visitors (people arriving by rail, coach and air) count too.
+- **No graffiti, but failures.** Screens don't wear. Now and then (`AD.glitchChance`) a panel fails for a game day: a
+  frozen frame, a stuck colour band, or the famous blue error screen. The turn's campaign gets no reach that day and
+  the renter is refunded. A small, funny moment, and a reason not to put everything on one screen.
+- **Rendering.** The screen quads go in the same instanced mesh as posters, with an `aFlags` bit for "screen": the
+  shader steps through a list of atlas cells by time, adds scanlines and a soft glow, and lights fully at night
+  (`glow` 1). Big screens are seen from far away, so they stay in the mid tier (no fade before `FAR_AT`); there are
+  only a handful in a city, so this costs nothing. At street level in the FPV they're the brightest thing in the
+  shot, and they throw their colour on the fog at night as the shop boards do.
+
+## 10. Balance and performance
 
 - **Tick cost.** Nothing per tick. Reach runs inside `lifeStep` over a cached path. Area rates run with the daily
   parcel stats. Events are rare. Target: under 2% more sim ms per tick on the 6×6 district test, measured with
@@ -254,7 +308,7 @@ it. Neglect, now and then, gives something back. Murals are drawn from a small f
   shared server and nothing unbounded to draw into the atlas.
 - **Old worlds**: no rentals; empty slots come from the designs. New snapshot fields are optional. No format bump.
 
-## 10. Phased plan
+## 11. Phased plan
 
 | # | Subtask | Files | Depends on | Size |
 | --- | --- | --- | --- | --- |
@@ -263,15 +317,18 @@ it. Neglect, now and then, gives something back. Murals are drawn from a small f
 | A3 | **Rendering.** `render/adverts.ts`: instanced quads, the ad atlas, near-tier fade, far tint, the wear shader with tags and tears | client render/adverts.ts, render/buildings.ts (LOD hook), materials.ts | A1, A2 | M |
 | A4 | **Reach.** `AdIndex`, the daily pass in `lifeStep`, bus stop panels, the nudge into beliefs, saturation, drift, the reached / swayed / acted counters | sim/adverts.ts, sim/motivation.ts, simulation.ts | A2, motivation M4 | M |
 | A5 | **Wear and rivals.** Area rates, events, tearing down, contracts, the poster crew van (`FleetKind` 10), fly-posting and removal, murals | sim/adverts.ts, fleet.ts, sim/mobile.ts, render | A3, A4 | L |
+| A6 | **Screens.** The TV studio kind and tech, airtime auctions, evening reach, the ad break on the FPV TV (`interiors.ts` `Screen`); `screen` slots, the Piccadilly Lights landmark for London, the generic big screens corner, the turn rotation and glitches in the shader | buildings (office, landmarks-london), tech.ts, sim/adverts.ts, render/adverts.ts, render/interiors.ts, demo/london.ts | A4 (A3 for the shader) | L |
 
 A1 and the motivation work (M1-M4) can go in parallel. A3 can start as soon as A2's wire shape is fixed.
 
 **Showcase** (`docs/demo.md`): A1 adds no kinds, but every slot size should stand in the Showcase on a placed design,
-and the tour gets one stop: a high street with three rented slots at three wear levels and a fly-post. Add
+and the tour gets two stops: a high street with three rented slots at three wear levels and a fly-post, and the big
+screens corner at night. The TV studio, the big screens corner and Piccadilly Lights are catalogue kinds, so
+`demo:check` already asks for their placements. Add
 `SHOWCASE_FEATURES` entries `advert-reach` (a seeded campaign reaches a showcase commuter within `FEATURE_DAYS`) and
 `advert-wear` (a run report line: events by kind after `--run 2`).
 
-## 11. Questions for Rich
+## 12. Questions for Rich
 
 1. **Who gets the rent for a slot?**
    - **A. The owner of the parcel it stands on** (recommended): frontage becomes valuable, and stewards who don't
@@ -291,3 +348,11 @@ and the tour gets one stop: a high street with three rented slots at three wear 
    - **A. No: a rate and a look per area** (recommended). Cheap, and neglect still shows.
    - B. Yes: teenagers out of school sometimes go out tagging, as walkers you can follow. Lovely, but a new behaviour
      to simulate and a sensitive one to get right.
+6. **Where does TV come from?**
+   - **A. A TV studio building whose parcel owner sells airtime** (recommended): another thing for players to own and
+     compete over.
+   - B. The city sells airtime, with no building.
+7. **Which big-screen landmarks?**
+   - **A. Piccadilly Lights in the London demo now, a generic big screens corner for every city, Times Square when
+     there is a New York scenario** (recommended).
+   - B. Only the generic corner, no real landmarks.
