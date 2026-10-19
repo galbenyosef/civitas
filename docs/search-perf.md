@@ -14,6 +14,11 @@ gets about 13% faster (1.15×). Extra threads add about 1% on top of that. See [
 A\* in a London tick went from 5.9 to 2.1 ms, and the whole tick from 40.7 to 36.9 ms (−9%). See
 [the TypeScript speed-ups](#2026-10-19-later-the-typescript-speed-ups).
 
+**Update, the evening:** the traffic step and `moveVehicles` went from 17.9 to 8.8 ms a London tick, and the whole tick
+from 36.5 to 20.9 ms, with the same game tick for tick. A world loaded from a save had run 3.8 times slower than the
+same world before saving, because every loaded citizen had a V8 hidden class of its own. See
+[the traffic step](#2026-10-19-evening-the-traffic-step).
+
 **Rosetta is not the problem.** The x64 Node under Rosetta and a native arm64 Node run the whole London tick at the
 same speed: 53.1 against 54.3 ms. Only tight kernels like the search loop show a gap (1.8×).
 
@@ -456,6 +461,216 @@ The bare runs were 40.57, 40.69, 42.08 ms on main and 36.03, 36.92, 36.95 ms on 
   check that it changes no answers.
 - A Rust `findRoute` now has less to win: the A\* is 2.1 ms of a 39 ms profiled tick (5%).
 
+## 2026-10-19 (evening): the traffic step
+
+The traffic step and `moveVehicles`, on branch `traffic-speedups` (from main at `6d70504`). The method is the same as
+above: native arm64 Node, nice 0, one run at a time, and every timed run started with the 1-minute load below 8. Other
+agents shared the machine, so the before and after runs are interleaved. Every change keeps the game exactly as it was.
+
+**Short answer:** in a London tick, the traffic step and `moveVehicles` went from 17.9 to 8.8 ms (−51%; −53% at
+08:00–09:00 and −47% at 17:00–18:00). The whole tick went from 36.5 to 20.9 ms (−43%). The largest single gain is not in the
+traffic code. Every citizen and vehicle now keeps one V8 hidden class. A world loaded from a save had given every
+citizen a hidden class of its own, so a loaded London ran 3.8 times slower than the same London before saving (a 3×3
+test city five times slower).
+
+### The probe
+
+`searchprof.ts` has three more modes (`loadtest/traffic-probe.ts`). Each fills London as the other modes do and then
+runs the day after:
+
+- `tcount` wraps 63 `Traffic` methods and `moveVehicles`, and gives calls and self time per window. It also gives what
+  each body-guard sweep came to: nothing near, walkers or cars gathered, cut short. The wrappers cost far more than the
+  small methods they time, so for those methods read the calls, not the times.
+- `tprof` takes inspector CPU profiles of 08:00–09:00 and 17:00–18:00 (no wrappers) and gives the tick and flush times.
+- `hash` takes a fingerprint of the game after the fill and after every tick. It covers every citizen's and vehicle's
+  position, lane, progress, path node, wait, stuck clock, re-route tick and trail length, the citizens' states, jobs and
+  money, the congestion map, the traffic counters and totals, and every player's money. Two builds that print the same
+  2,401 fingerprints played the same game.
+- `--client` connects one client after the fill: a `hello`, then a subscription to every chunk. `--client-at H` connects
+  it at hour H instead. Every frame the client is sent is counted and hashed.
+- `--reload` saves the filled world and loads it again (`snapshot.ts`) before the day, as a server restart does, and
+  prints a hash of the snapshot's content with its keys sorted.
+
+`loadtest/shapes.ts` counts the movers' hidden classes after a fill, after a save and load, and a day after that. It needs
+`node --allow-natives-syntax --loader tsx`. `loadtest/hypot-check.ts` checks `hypot` against `Math.hypot`.
+
+### Where the time went
+
+`tcount`, London, the day after the fill, with calls and self ms a tick. These are wrapped self times, so the small
+methods read high. Main is on the left of each arrow and the branch on the right. The calls are the same on both,
+except for the caches the guard now asks less often:
+
+| method | calls 08–09 | self ms 08–09 | calls 17–18 | self ms 17–18 |
+| --- | --- | --- | --- | --- |
+| `guardSweep` | 1,319 | 6.99 → 2.26 | 1,541 | 9.85 → 3.25 |
+| `Traffic.step` | 3,012 | 5.08 → 2.56 | 3,902 | 6.67 → 3.29 |
+| `enter` | 3,760 | 2.37 → 1.24 | 10,090 | 6.11 → 2.85 |
+| `carBodyAt` (walkers) | 1,175 | 2.16 → 0.49 | 1,905 | 4.31 → 0.97 |
+| `beginTick` (the car grid) | 1 | 2.29 → 0.58 | 1 | 3.00 → 0.82 |
+| `junctionAux` | 16,284 → 8,275 | 2.26 → 0.58 | 29,976 → 14,378 | 3.72 → 0.95 |
+| `isCrossingAt` / `degreeOf` | 6,605 / 5,220 | 1.59 / 1.22 → 0.41 / 0.33 | 11,125 / 8,794 | 2.43 / 2.03 → 0.69 / 0.54 |
+| `congestionAt` | 5,077 | 1.95 → 0.89 | 5,824 | 2.45 → 1.12 |
+| `headingOf` | 3,214 | 1.32 → 0.88 | 4,651 | 1.98 → 1.13 |
+| `boxConflict` / `canEnter` | 1,353 / 2,742 | 1.26 / 1.21 → 0.67 / 1.03 | 2,372 / 4,753 | 2.23 / 2.12 → 1.21 / 1.68 |
+| `moveVehicles` itself | 1 | 1.81 → 1.51 | 1 | 3.09 → 2.43 |
+| all wrapped traffic methods | | 44.4 → 21.5 | | 69.7 → 33.0 |
+
+The body guard ran 1,102 sweeps a tick over the day. 370 found nothing near, 689 gathered cars,
+173 gathered walkers, and 134 were cut short. Most `enter` calls are cars waiting in a garage to pull out:
+10,090 a tick at 17:00–18:00, each of them blocked and trying again every tick.
+
+The CPU profile of the evening rush on main, by self time: `guardSweep` 8.3%, `Traffic.step` 6.7%, `inBox` 4.5%,
+`enter` 2.8%, `carBodyAt` 2.4%, `beginTick` 2.3%, and `junctionAux`, `apart`, `isCrossingAt`, `congestionAt` and
+`headingOf` at 1.3–2.0% each.
+
+### What changed
+
+Each change below was checked as it went in: a 2×2 test city gave the same fingerprint on every tick of half a day. The
+London checks are in [Same game](#same-game).
+
+1. **One hidden class per kind of mover.** Some citizens get `skill`, `drain`, `grad`, `appr`, `mig`, `gx` or `gy` later
+   in life, and buses and fleet vehicles get `halt` and `dwell`. In V8, every object that gains a field takes a new hidden
+   class, and London's movers had eleven. A property read that has met more than four classes is megamorphic: 3.6 ns
+   against 0.4 ns in a micro-benchmark. The traffic step reads movers' fields hundreds of thousands of times a tick.
+   `citizenLater()` (world.ts) makes those fields up front, as undefined, in `makeCitizen` and on load. The three vehicle
+   literals (`spawnVehicle`, the buses' `spawn` and the fleet's `launch`) now all have `call`, `weave`, `fee`, `halt`
+   and `dwell`. Every test of these fields compares with undefined or tests truthiness, and none uses `in`, so the game
+   is the same. A save's JSON drops undefined fields, so a snapshot has the same content. Only the order of a few keys
+   changes.
+2. **Loaded citizens.** `worldFromSnapshot` built each citizen as `{ ...lifeDefaults(...), ...saved }`. An object
+   literal that starts with a spread clones the hidden class of the object it spreads, so every loaded citizen got a
+   class of its own: 10,728 classes for the 10,728 citizens of a 3×3 city. A third of them were in dictionary mode
+   1,500 ticks later. The literal now starts with `id:`, and the loaded citizens share one class.
+3. **`hypot`.** `Math.hypot` is a builtin call, about 27 ns in Node 20. `hypot()` in traffic.ts takes the same steps as
+   V8's (builtins/math.tq: scale by the larger, then a Kahan sum, which for two numbers comes to this) in about 2 ns.
+   It matches `Math.hypot` bit for bit on 20 million pairs and on the edge cases (`hypot-check.ts`). `Math.sqrt(x*x+y*y)`
+   would not: it differs in the last bit for 38% of pairs. `walkOn`'s step uses it too.
+4. **`%` on lane keys.** Lane keys (`tkey * 4 + dir`) are past 2^31, so `key % 4` is a float remainder: 18 ns against
+   1 ns written with `Math.floor`. `laneDir`, `laneTile`, `tileX` and `tileY` give the same answers, and so does
+   `untkey` in world.ts.
+5. **Dense per-chunk arrays instead of Maps keyed by tile.** Tile keys are past 2^31 too, so every `Map.get` boxed a
+   heap number. A `RoadChunk` per chunk now holds:
+   - each lane's queue (the same arrays as `cells`, which stays for going through every lane in its order)
+   - the degree, junction-aux and crossing caches, and the junction control
+   - the congestion entries (the same objects as `cong`, which keeps their order for `sweep` and the dirty set)
+   - the congestion's per-tile counts for `endTick`, in the order first driven on, which was the `present` Map's order
+   - the pedestrians on each carriageway, in two slots by tick, instead of two Maps swapped each tick
+
+   `inBox` and `boxBusyExcept` read a tile's eight lanes from one chunk when the tile is not on a chunk edge. `kerbAt`
+   reads the cost chunk's copy of `World.kerb`, with its own last-chunk cache. `World.getChunk` keeps the last chunk
+   found and keys `chunkByNum` by a small integer.
+6. **The car grid and the walkers.** They are now per-chunk tile lists (`TileLists`): a new fill number empties them, and
+   `near` returns the 3×3 lists round a tile, from one chunk away from its edges. The lists only ever answer "is any of
+   these in the way", so the order inside them does not matter. Even so, the car grid is still filled from `cells` in
+   the same order.
+7. **Allocations.** `inBox` fills scratch arrays instead of yielding an object per car from a generator.
+   `boxBusyExcept` stops at the first mover, as the generator did. `obbOverlap` builds no axis arrays. `guardSweep`
+   gathers into scratch with counts (no `length = 0`, which is a runtime call), in three parts: `gatherPeds`,
+   `gatherCars` and `sweepClear`. The cheap tests (distance, ahead) come before `apart`, `filtering` and `headingOf`,
+   which have no side effects. `carBodyAt` checks distance before the flyover tests.
+8. **The network flush.** The agents are bucketed by a numeric chunk key, not a key string. While nobody is subscribed to
+   any chunk, they are not bucketed at all. `lastSent` is still kept up to date, so the first frame anyone is sent later
+   is the same. A stamp on each `lastSent` entry replaces the `seen` Set.
+
+Not done: anything that changes which car goes first, struct-of-arrays movers, and an incremental car grid (see
+[Next](#next-1)). The flush's agent list (`Simulation.agents`, a generator that yields a new object per agent) is now
+its largest cost, and the doc only reports it.
+
+### Same game
+
+- **London, tick for tick.** The `hash` fingerprints after the fill and after each of the day's 2,400 ticks are the
+  same on main and the branch, checked at three points along the way (3f1eafe, 31e84ef, ecbfadb) and at the end
+  (10bbbfb). Fill `a517a324`, end `8e0571f9`; both builds end with 31,905 citizens, 30,466 employed, 8,798 vehicles and
+  the same traffic counters.
+- **London saved and loaded again** (`--reload`). The snapshots are the same: 45,040,019 bytes each, with the same
+  content hash when their keys are sorted (`3810d47d`). Only the order of a few citizen keys differs. The day after
+  the load is the same tick for tick (`80ee1ed8` to `cc4f778f`).
+- **The wire.** A client joined London at 12:00 (`--client-at 12`). Main and the branch sent it the same 13,160 frames,
+  150,141,531 bytes in all, with the same hash (`a72a8293`). The 2×2 city gives the same result, both with the client
+  there from the start and with it joining at 12:00.
+- **ab.ts** on the Commons gives the same JSON on main and the branch, apart from the timings, for five setups: the
+  defaults; `--hour 17 --ticks 2400 --set bus=2`; `ring=1,signalActuated=1`;
+  `laneByLength=1,boxByCommit=0,crossingLag=0,pedBehind=1,boxClear=2`; and `old=1`.
+- **`hypot-check.ts`**: 20,000,225 pairs, all the same as `Math.hypot`.
+
+### Traffic step and whole tick
+
+The **traffic phase** (`searchprof.ts --mode phases`: every `Traffic` step, enter, leave, beginTick, endTick and sweep,
+plus `moveVehicles`' own time). Median of two runs each, interleaved, loads 5.2–7.3 at their starts:
+
+| per tick | main mean / p95 | branch mean / p95 | |
+| --- | --- | --- | --- |
+| 08:00–09:00 | 18.60 / 23.01 ms | 8.78 / 11.34 ms | −53% |
+| 17:00–18:00 | 29.03 / 33.56 ms | 15.42 / 17.87 ms | −47% |
+| whole day | 17.86 / 28.98 ms | 8.83 / 15.13 ms | −51% |
+| – of which `Traffic` methods, day | 16.76 ms | 7.85 ms | |
+| – `moveVehicles` itself, day | 1.10 ms | 0.98 ms | |
+| `moveCitizens` itself, day | 8.24 ms | 4.34 ms | the walkers, the same hidden classes |
+| network flush (no clients), day | 5.90 ms | 3.60 ms | |
+| route searches, day | 2.51 ms | 2.16 ms | |
+
+The **whole tick** (`--mode bare`, no wrappers). Median of three runs each, interleaved base and branch from 20:14 to
+20:38, loads 4.6–9.3:
+
+| per tick | main mean / p95 | branch mean / p95 | |
+| --- | --- | --- | --- |
+| 08:00–09:00 | 38.52 / 49.27 ms | 21.83 / 30.36 ms | −43% |
+| 17:00–18:00 | 55.73 / 70.02 ms | 32.83 / 41.53 ms | −41% |
+| whole day | 36.51 / 59.45 ms | 20.88 / 35.67 ms | −43% |
+
+The runs were 36.17, 36.58 and 36.51 ms on main and 20.88, 21.06 and 20.83 ms on the branch. A first main run at 18:40
+took 50.0 ms while the machine was busier, and it is left out.
+
+**A world loaded from a save** (`--mode hash --reload`, one run each; the fingerprinting adds a little to both):
+
+| London, the day after a save and load | main | branch |
+| --- | --- | --- |
+| whole day mean / p95 | 139.09 / 210.90 ms | 20.62 / 34.09 ms |
+| 08:00–09:00 / 17:00–18:00 | 145.58 / 165.26 ms | 23.60 / 28.55 ms |
+
+On main, a London that has been saved and loaded runs 3.8 times slower than the same London before saving: 139 against
+36.5 ms. That is about what prod shows, 124 ms with 53k citizens. It has not been measured on prod.
+
+`shapes.ts`, on the 3×3 test city:
+
+| | main | branch |
+| --- | --- | --- |
+| hidden classes after the fill | 4 (London: 11) | 2 |
+| after a save and load | 10,728 for 10,728 citizens | 1 |
+| 1,500 ticks later | 7,398, and 3,279 objects in dictionary mode | 3, none in dictionary mode |
+| that day's tick | 24.9 ms (4.9 ms before saving) | 3.35 ms |
+
+### The network flush with a client
+
+| flush, ms a tick | main 08–09 / 17–18 / day | branch 08–09 / 17–18 / day |
+| --- | --- | --- |
+| no client (`tprof`) | 6.86 / 9.78 / 6.31 | 3.58 / 5.63 / 3.56 |
+| one client on every chunk from 12:00 (`hash --client-at 12`) | 6.32 / 9.39 / 6.15 | 4.58 / 6.99 / 4.53 |
+
+On main, the flush cost the same with a client or without one (the two runs differ by less than run-to-run noise). It
+always built the agent buckets and `chunkKey` strings. On the branch, while nobody is subscribed, the buckets are not
+built, and a client costs about 1 ms a tick for its buckets and the JSON. Most of what is left is `Simulation.agents`:
+a generator that yields a new object for each of about 15,000 agents, followed by `lastSent`'s compare and update. That
+part has to run with or without clients, or the first frame a later client gets would change.
+
+### Next
+
+- **Prod.** Check prod's tick after this branch. Main's loaded-world slowdown (above) suggests a large share of its
+  124 ms is hidden classes, not the simulation. `shapes.ts` against a copy of prod's save would show it.
+- **The flush's agent list** is now the largest single cost in the evening profile (`Simulation.agents` 7.6% self,
+  flush 4.6%). The generator could yield one reused object, or take a visitor. Both consumers (`flush`, `subscribe`)
+  read the fields at once, so the wire would be the same.
+- **Garage pull-outs.** In the evening, 10,000 cars a tick ask `enter` whether they may pull out, and are told no. Only
+  a rule change (try again every few ticks) would cut that much, and it would change the game.
+- **An incremental car grid** (kept up to date on enter and leave) would save at most what `beginTick` costs now: 0.5–0.8
+  ms a tick, wrapped. The grid holds where each car stood at the start of the tick, and most cars that are not queued
+  move every tick, so they would be re-bucketed every tick anyway.
+- **Struct-of-arrays movers: not now.** The traffic step is 8.8 ms of a 20.9 ms tick (−51%). Field reads on movers are
+  now monomorphic, which was most of what typed arrays would have bought. What is left of the step is the rules
+  themselves (`canEnter`, the guard's sweeps, path geometry). Movers in typed arrays would also touch every system that
+  reads a citizen or a vehicle, and the step order (who enters a box first) would have to be kept exactly. Look at it
+  again if traffic grows back past about 40% of the tick.
+
 ## Files
 
 - `packages/server/src/loadtest/searchprof.ts`, `search-phases.ts`: the probe (phases, bare, record, CPU profile).
@@ -466,3 +681,7 @@ The bare runs were 40.57, 40.69, 42.08 ms on main and 36.03, 36.92, 36.95 ms on 
 - `packages/server/src/loadtest/count-hook.mjs`: also exposes the unwrapped search functions, and node counts with
   `SEARCH_HOOK_EXPANDED=1`.
 - `tools/search-rs/`: the Rust spike (`cargo run --release -- CORPUS_DIR`).
+- `packages/server/src/loadtest/traffic-probe.ts`: `searchprof.ts --mode tcount | tprof | hash`, with `--client`,
+  `--client-at H` and `--reload` (the traffic step's methods, rush-hour CPU profiles, the per-tick fingerprint).
+- `packages/server/src/loadtest/shapes.ts`: the movers' hidden classes after a fill, a save and load, and a day on.
+- `packages/server/src/loadtest/hypot-check.ts`: traffic.ts `hypot` against `Math.hypot`.
