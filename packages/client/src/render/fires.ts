@@ -47,9 +47,9 @@ void main() {
   float rip = 0.12 * sin(q.y * 11.0 - uTime * (7.0 + 3.0 * vSeed) + vSeed * 30.0) * q.y;
   float width = pow(max(0.0, 1.0 - q.y), 0.75) * (0.95 - 0.35 * q.y) + 0.04;
   float d = abs(q.x + rip) / width;
-  float body = smoothstep(1.0, 0.55, d) * smoothstep(0.0, 0.08, q.y) * smoothstep(1.0, 0.7, q.y);
+  float body = (1.0 - smoothstep(0.55, 1.0, d)) * smoothstep(0.0, 0.08, q.y) * (1.0 - smoothstep(0.7, 1.0, q.y));
   if (body < 0.01) discard;
-  float core = smoothstep(0.65, 0.0, d) * smoothstep(0.75, 0.1, q.y);
+  float core = (1.0 - smoothstep(0.0, 0.65, d)) * (1.0 - smoothstep(0.1, 0.75, q.y));
   vec3 col = mix(vec3(0.85, 0.16, 0.03), vec3(1.0, 0.62, 0.12), smoothstep(0.0, 0.6, 1.0 - d));
   col = mix(col, vec3(1.0, 0.93, 0.65), core * (0.6 + 0.4 * vHot));
   float glow = 1.15 + 0.6 * uNight;
@@ -62,7 +62,7 @@ varying vec2 vUv; varying float vA; varying float vSeed; varying float vHot;
 void main() {
   if (vA <= 0.0) discard;
   float r = length(vUv * 2.0 - 1.0);
-  float a = smoothstep(1.0, 0.0, r);
+  float a = (1.0 - smoothstep(0.0, 1.0, r));
   a = a * a * (0.25 + 0.75 * uNight) * vHot;
   if (a < 0.01) discard;
   gl_FragColor = vec4(vec3(1.0, 0.45, 0.12) * a, a);
@@ -116,11 +116,11 @@ void main() {
   float ang = atan(q.y, q.x);
   float lobes = 0.82 + 0.1 * sin(ang * 3.0 + vSeed * 20.0) + 0.08 * sin(ang * 5.0 - vSeed * 11.0);
   float r = length(q) / lobes;
-  float a = smoothstep(1.0, 0.3, r) * vA * 0.62;
+  float a = (1.0 - smoothstep(0.3, 1.0, r)) * vA * 0.62;
   if (a < 0.004) discard;
   // dark soot while it burns, pale steam once the hoses are on it (tone 0..1)
   vec3 col = mix(vec3(0.13, 0.12, 0.12), vec3(0.78, 0.78, 0.8), vTone) * (1.0 - 0.55 * uNight);
-  col += vec3(0.25, 0.08, 0.0) * (1.0 - vTone) * smoothstep(0.6, 0.0, r) * uNight; // lit from below at night
+  col += vec3(0.25, 0.08, 0.0) * (1.0 - vTone) * (1.0 - smoothstep(0.0, 0.6, r)) * uNight; // lit from below at night
   gl_FragColor = vec4(col, a);
 }`;
 
@@ -141,7 +141,7 @@ void main() {
   float ang = atan(q.y, q.x);
   float edge = 0.75 + 0.12 * sin(ang * 4.0 + vSeed * 31.0) + 0.08 * sin(ang * 9.0 - vSeed * 17.0) + 0.05 * sin(ang * 15.0 + vSeed * 7.0);
   float r = length(q) / edge;
-  float a = smoothstep(1.0, 0.45, r) * vA;
+  float a = (1.0 - smoothstep(0.45, 1.0, r)) * vA;
   if (a < 0.01) discard;
   gl_FragColor = vec4(vec3(0.04, 0.035, 0.03), a * 0.8);
 }`;

@@ -87,7 +87,7 @@ export class ProblemsPanel {
       g.push([p[i], p[i + 1]]);
     }
     let html = `<div class="phead"><span>Problems</span><button class="gx" data-act="close" title="Close">×</button></div>`;
-    if (!groups.size) html += `<div class="pnone">Nothing is stuck on your land. Badges float over any building or lot that gets stuck: no road, no builders, unstaffed, parking full, no customers, very unhappy.</div>`;
+    if (!groups.size) html += `<div class="pnone">Nothing is stuck on your land. Badges float over any building or lot that gets stuck: on fire, no road, no builders, unstaffed, parking full, no customers, very unhappy.</div>`;
     for (const code of ISSUE_CODES) {
       const g = groups.get(code);
       if (!g) continue;
