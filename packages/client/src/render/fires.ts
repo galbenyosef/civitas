@@ -1,6 +1,6 @@
 import {
   Group, Mesh, InstancedBufferGeometry, InstancedBufferAttribute, PlaneGeometry, ShaderMaterial, AdditiveBlending, NormalBlending,
-  DynamicDrawUsage,
+  DynamicDrawUsage, DoubleSide,
 } from 'three';
 import { FIRE, FirePhase, FireOutcome, TICKS_PER_HOUR, hash2, fireProgress, type FireDTO } from '@msimcity/shared';
 import type { ClientWorld } from '../world';
@@ -28,7 +28,8 @@ void main() {
   // each tongue flickers at its own rate and phase, leans its own way and breathes in height: nothing in lockstep
   float t = uTime * rate + seed * 61.0;
   float breathe = 0.78 + 0.22 * sin(t) * sin(t * 0.47 + 2.0);
-  float h = hs * (0.25 + 0.95 * inten) * breathe * max(aO.z, aO.w) * 2.0;
+  float foot = 0.5 + 2.0 * max(aO.z, aO.w); // 1 over a lot, more over a bigger building
+  float h = hs * (0.25 + 0.95 * inten) * breathe * foot * 0.9;
   float w = h * (0.42 + 0.18 * fract(seed * 7.3));
   vec3 base = aP + vec3(aO.x, -0.05, aO.y);
   vec3 right = normalize(vec3(viewMatrix[0][0], 0.0, viewMatrix[2][0]));
@@ -74,7 +75,7 @@ varying vec2 vUv; varying float vA; varying float vSeed; varying float vHot;
 void main() {
   float seed = aS.x, inten = aI.x;
   float flick = 0.85 + 0.15 * sin(uTime * (9.0 + 4.0 * seed) + seed * 20.0) * sin(uTime * 3.1 + seed * 5.0);
-  float s = (0.9 + 1.6 * inten) * max(aO.z, aO.w) * 2.6 * flick;
+  float s = (0.9 + 1.6 * inten) * (0.5 + 2.0 * max(aO.z, aO.w)) * 1.3 * flick;
   vec3 c = aP + vec3(0.0, 0.2, 0.0);
   vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
   vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
@@ -92,11 +93,12 @@ void main() {
   float life = fract(uTime / period + seed * 13.7);
   float drift = uWind + (fract(seed * 3.1) - 0.5) * 0.7 + aI.z;
   vec3 dir = vec3(cos(drift), 0.0, sin(drift));
-  float rise = life * (2.2 + 2.4 * fract(seed * 5.3)) * (0.5 + 0.8 * inten + 0.3 * aI.w);
-  float lean = pow(life, 1.4) * (1.6 + 2.0 * fract(seed * 9.1));
+  float foot = 0.5 + 2.0 * max(aO.z, aO.w); // 1 over a lot, more over a bigger building
+  float rise = life * (0.9 + 1.3 * fract(seed * 5.3)) * (0.6 + 0.6 * inten + 0.3 * aI.w) * foot;
+  float lean = pow(life, 1.4) * (0.5 + 0.9 * fract(seed * 9.1)) * foot;
   float wob = sin(uTime * (0.9 + fract(seed * 4.7)) + seed * 17.0) * 0.18 * life;
   vec3 c = aP + vec3(aO.x, 0.1, aO.y) + vec3(0.0, rise, 0.0) + dir * lean + vec3(-dir.z, 0.0, dir.x) * wob;
-  float s = size * (0.35 + 1.5 * life) * max(aO.z, aO.w) * 2.0 * (0.6 + 0.6 * inten);
+  float s = size * 0.5 * (0.3 + 1.1 * life) * foot * (0.7 + 0.5 * inten);
   float ang = seed * 6.283 + uTime * (fract(seed * 2.9) - 0.5) * 0.4;
   vec2 rp = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * position.xy;
   vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
@@ -116,7 +118,7 @@ void main() {
   float ang = atan(q.y, q.x);
   float lobes = 0.82 + 0.1 * sin(ang * 3.0 + vSeed * 20.0) + 0.08 * sin(ang * 5.0 - vSeed * 11.0);
   float r = length(q) / lobes;
-  float a = (1.0 - smoothstep(0.3, 1.0, r)) * vA * 0.62;
+  float a = (1.0 - smoothstep(0.3, 1.0, r)) * vA * 0.8;
   if (a < 0.004) discard;
   // dark soot while it burns, pale steam once the hoses are on it (tone 0..1)
   vec3 col = mix(vec3(0.13, 0.12, 0.12), vec3(0.78, 0.78, 0.8), vTone) * (1.0 - 0.55 * uNight);
@@ -130,7 +132,7 @@ varying vec2 vUv; varying float vA; varying float vSeed;
 void main() {
   float seed = aS.x, ang = seed * 6.283;
   vec2 rp = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * (position.xy * vec2(aO.z, aO.w) * 2.0 * (1.15 + 0.35 * fract(seed * 3.7)));
-  vec3 p = vec3(aP.x + rp.x, 0.025 + 0.004 * fract(seed * 11.0), aP.z + rp.y);
+  vec3 p = vec3(aP.x + rp.x, 0.04 + 0.004 * fract(seed * 11.0), aP.z + rp.y);
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
   vUv = uv; vA = aI.x; vSeed = seed;
 }`;
@@ -159,7 +161,7 @@ function pool(max: number, vert: string, frag: string, additive: boolean, order:
   geo.setAttribute('aI', new InstancedBufferAttribute(I, 4).setUsage(DynamicDrawUsage));
   geo.instanceCount = 0;
   const mat = new ShaderMaterial({
-    vertexShader: vert, fragmentShader: frag, transparent: true, depthWrite: false,
+    vertexShader: vert, fragmentShader: frag, transparent: true, depthWrite: false, side: DoubleSide, // the scorch is laid flat from a plane's x and y
     blending: additive ? AdditiveBlending : NormalBlending,
     uniforms: { uTime: sceneUniforms.uTime, uNight: sceneUniforms.uNight, uWind: { value: WIND } },
   });

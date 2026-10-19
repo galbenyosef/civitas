@@ -109,7 +109,21 @@ out and nobody is left in them. A save with a fire burning loads with it burning
 gets its warning fire 3-9 h after the threshold, saved with nothing lost with the post mothballed and staffed, and no
 other fire in the grace day. A 2×2 Commons over two days has a few fires, and the same ones from the same seed.
 
-## Measurements
+## Measurements (2026-10-19)
 
-See the card's report: the probe's counts, bot B's first fire on a fresh world, and the tick A/B on the 2×2 test city
-against main (section below).
+- **Probe** (`loadtest/fires.ts`, seeds 1, 2, 3): 22/22 each. 72 covered fires at all hours: every home kept its level
+  (the 12% minimum bill only), engines arrived in 29-31 game minutes on average, 57 at worst; 33 uncovered fires all
+  burnt out with nobody left inside; the warning fire lit 4.6 and 6.6 h after the threshold and lost nothing, with the
+  post mothballed and staffed; no other fire in the grace day; a 2×2 Commons had 2-10 fires in two days, the same ones
+  on a second run.
+- **Bot B** (the first-five gauntlet bot, `play.mts` with a fire log, SIM_STEPS=10, joining at 05:00): on a fresh
+  Commons world its first fire (the warning) lit at day 0.83, 14 game hours after joining and 4 after it housed 12; the
+  Commons' fire station sent its engine, there in 52 game minutes, 12% burnt, $2. On a fresh frontier it lit at day
+  1.75 with no engine in reach (B had Emergency services but had not placed a station on $843); the bucket chain had it
+  out at 15%, $2. One fire each in the three days; neither lost a level.
+- **Tick cost** (2×2 test city, seed 1, `seedCity` built 3, 1.25 days' fill with fires off as index.ts fills, then
+  2,400 measured ticks of `Game.step`; main 849a63b against the branch, interleaved at nice 15, four pairs): 4.141 ms
+  against 4.133 ms median, **-0.2%** (pairs +0.1, +0.2, -3.1, +0.6%); `Fires.tick` itself 0.006 ms. Three fires lit in
+  the measured day (two burnt out, one saved). An earlier build that let every vehicle on blue lights weave (call-outs
+  and ambulances too) measured +6%; weaving is now for fire calls only, and the call step sits outside the ordinary
+  drive step so vehicles keep one shape.
