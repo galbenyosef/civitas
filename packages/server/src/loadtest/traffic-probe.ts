@@ -135,13 +135,15 @@ export async function main(argv: string[]) {
   if (fillHash) console.log(`fill fingerprint ${fillHash}`);
 
   const wall0 = performance.now();
+  let profiling = false;
   for (let i = 0; i < n; i++) {
     cur = i;
     if (joinAt >= 0 && hourOf(i) === joinAt && (i === 0 || hourOf(i - 1) !== joinAt)) join();
     if (session && (i === 0 || hourOf(i) !== hourOf(i - 1))) {
       const h = hourOf(i);
-      if (h === 8 || h === 17) await post('Profiler.start');
-      if (h === 9 || h === 18) {
+      if (h === 8 || h === 17) { await post('Profiler.start'); profiling = true; }
+      if ((h === 9 || h === 18) && profiling) {
+        profiling = false;
         const res = await post<{ profile: unknown }>('Profiler.stop');
         const f = `${prof}-${String(h - 1).padStart(2, '0')}.cpuprofile`;
         writeFileSync(f, JSON.stringify(res.profile));
