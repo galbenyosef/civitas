@@ -1165,7 +1165,7 @@ function frame(now: number) {
   applyTrafficUpdates();
   overlayMap.update(world.overlayDirty, (k) => world.overlay.get(k));
   issuesView.group.visible = fpv.mode !== 'full' && underground.level < 0.5; // not in first person or the underground view (the map has its own scene)
-  issuesView.frame(now);
+  issuesView.frame(now, rig.camera);
   firesView.group.visible = underground.level < 0.5;
   firesView.frame(liveTickF());
   citizens.frame(now, dt);

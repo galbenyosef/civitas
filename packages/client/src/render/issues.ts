@@ -1,8 +1,8 @@
 import {
   Group, Mesh, InstancedBufferGeometry, InstancedBufferAttribute, PlaneGeometry, ShaderMaterial, CanvasTexture, LinearFilter,
-  RingGeometry, MeshBasicMaterial, DoubleSide, Vector3, DynamicDrawUsage, type Camera,
+  RingGeometry, MeshBasicMaterial, DoubleSide, Vector3, DynamicDrawUsage, Frustum, Matrix4, type Camera,
 } from 'three';
-import { CHUNK_SIZE, Issue, hash2, levelOf, underConstruction, zoneOf, isRoad, kindIdOf, parseKey } from '@msimcity/shared';
+import { CHUNK_SIZE, ISSUE_CODES, Issue, hash2, levelOf, underConstruction, zoneOf, isRoad, kindIdOf, parseKey } from '@msimcity/shared';
 import type { ClientWorld } from '../world';
 import { variant } from './models';
 import { SIGN_MAX_DIST } from './signs';
@@ -12,6 +12,13 @@ const CELL = 128, CODES = 7;
 const MAX_ICONS = 4096;
 /** icons start to fade this far from the camera (past the name boards, render/signs.ts), each a hashed few tiles either way, over FADE_LEN */
 export const ICON_FADE_START = SIGN_MAX_DIST * 2.4, ICON_FADE_JITTER = 14, ICON_FADE_LEN = 26;
+/**
+ * A starter town flags dozens of homes at once; a screen of badges says nothing. Badges of one code within GROUP_TILES of
+ * each other show as one (a little larger the more it stands for), and at most ON_SCREEN show in view at a time: taken
+ * a code at a time in the problems panel's order (most severe first), the nearest of each, round and round. A fire, and a
+ * badge "show me" is pulsing, always show. The rest are in the problems list.
+ */
+export const GROUP_TILES = 4, ON_SCREEN = 5;
 
 /** Ring colour per code: distinct hues that stay apart for colour-blind eyes, and every glyph has its own shape anyway. */
 export const ISSUE_COLOUR: Record<number, string> = {
@@ -121,6 +128,9 @@ export function issueGlyphUrl(code: number): string {
   return cv.toDataURL();
 }
 
+/** one badge while the instances are rebuilt: n is how many of its code it stands for, d its (favoured) camera distance */
+interface Badge { x: number; y: number; code: number; seed: number; n: number; flash: boolean; d: number; at?: [number, number, number] }
+
 const VERT = /* glsl */ `
 attribute vec3 aP;
 attribute vec4 aD;
@@ -138,7 +148,7 @@ void main() {
   vec3 c = aP + vec3(0.0, bob, 0.0);
   float d = distance(cameraPosition, c);
   float pulse = flash > 0.0 ? 1.0 + 0.35 * (0.5 + 0.5 * sin(uTime * 9.0)) : 1.0;
-  float s = (1.0 + 0.22 * seed) * clamp(d / 24.0, 1.0, 3.4) * pulse;
+  float s = (1.0 + 0.22 * seed) * (1.0 + 0.25 * aD.w) * clamp(d / 24.0, 1.0, 3.4) * pulse;
   vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
   vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
   vec3 p = c + (right * position.x + up * (position.y + 0.5)) * s; // the point of the badge sits on the roof
@@ -162,9 +172,10 @@ void main() {
 }`;
 
 /**
- * Issue bubbles (docs/audit-2026-10.md section 4.4): a badge over every building or lot the server flags (message
- * `issues`, ClientWorld.issues), floating over its roof. One instanced billboard pass, one draw call: a canvas atlas of
- * the six glyphs, each instance its own bob and size from hash2 (the organic rule), fading past the name boards'
+ * Issue bubbles (docs/audit-2026-10.md section 4.4): a badge over the buildings and lots the server flags (message
+ * `issues`, ClientWorld.issues), floating over its roof, one per group of neighbours with the same problem and at most
+ * ON_SCREEN in view (picked again as the camera moves). One instanced billboard pass, one draw call: a canvas atlas of
+ * the seven glyphs, each instance its own bob and size from hash2 (the organic rule), fading past the name boards'
  * distance by its own hashed amount. The caller hides it in the world map, the underground view and first person.
  */
 export class IssuesView {
@@ -181,6 +192,12 @@ export class IssuesView {
   private ring: Mesh;
   private ringUntil = 0; private ringAt = 0; private ringSize = 1;
   private v = new Vector3();
+  private frustum = new Frustum(); private m4 = new Matrix4();
+  private camera: Camera | null = null;
+  /** where the camera was at the last rebuild, to rebuild when it moves (the picks follow the view) */
+  private camAt = new Vector3(Infinity, 0, 0); private camDir = new Vector3(); private dir = new Vector3();
+  /** door tiles ("x,y") shown at the last rebuild: a little favoured next time, so badges do not swap as the view drifts */
+  private shown = new Set<string>();
 
   constructor(private world: ClientWorld) {
     const cv = document.createElement('canvas');
@@ -215,9 +232,19 @@ export class IssuesView {
 
   get count() { return this.geo.instanceCount; }
 
-  /** Once a frame: rebuild the instances when the codes changed (or every couple of seconds, as heights follow the tiles), animate a flash. */
-  frame(now: number) {
-    if (this.world.issuesVersion !== this.builtVersion || now - this.builtAt > 2000) this.rebuild(now);
+  /**
+   * Once a frame: rebuild the instances when the codes changed, when the camera has moved or turned (the badges in view are
+   * picked again, at most every quarter second), or every couple of seconds as heights follow the tiles; animate a flash.
+   */
+  frame(now: number, camera?: Camera) {
+    if (camera) this.camera = camera;
+    let moved = false;
+    if (this.camera && now - this.builtAt > 250) {
+      const cp = (this.camera as unknown as { position: Vector3 }).position;
+      this.camera.getWorldDirection(this.dir);
+      moved = cp.distanceTo(this.camAt) > 1.5 || this.dir.dot(this.camDir) < 0.996;
+    }
+    if (this.world.issuesVersion !== this.builtVersion || moved || now - this.builtAt > 2000) this.rebuild(now);
     if (this.flashes.size) {
       let changed = false;
       for (const [k, until] of this.flashes) if (now > until) { this.flashes.delete(k); changed = true; }
@@ -234,19 +261,73 @@ export class IssuesView {
     const w = this.world;
     this.builtAt = now; this.builtVersion = w.issuesVersion;
     this.tiles.length = 0;
-    let n = 0;
+    const cam = this.camera;
+    if (cam) {
+      this.camAt.copy((cam as unknown as { position: Vector3 }).position); cam.getWorldDirection(this.camDir);
+      cam.updateMatrixWorld();
+      this.frustum.setFromProjectionMatrix(this.m4.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+    }
+    // every badge, then one per group: the first in a stable hashed order holds its code's cells round it
+    const all: Badge[] = [];
     for (const [key, bytes] of w.issues) {
       const [cx, cy] = parseKey(key);
-      for (let i = 0; i < bytes.length && n < MAX_ICONS; i++) {
+      for (let i = 0; i < bytes.length; i++) {
         const code = bytes[i];
         if (!code) continue;
         const x = cx * CHUNK_SIZE + (i % CHUNK_SIZE), y = cy * CHUNK_SIZE + Math.floor(i / CHUNK_SIZE);
-        const at = this.anchor(x, y);
-        this.pos[n * 3] = at[0]; this.pos[n * 3 + 1] = at[1] + (code === Issue.Fire ? 1.0 : 0); this.pos[n * 3 + 2] = at[2]; // on fire: above the flames (render/fires.ts)
-        this.data[n * 4] = code; this.data[n * 4 + 1] = hash2(x * 5 + 1, y * 3 + 7); this.data[n * 4 + 2] = this.flashes.has(`${x},${y}`) ? 1 : 0; this.data[n * 4 + 3] = 0;
-        this.tiles.push(x, y);
-        n++;
+        all.push({ x, y, code, seed: hash2(x * 5 + 1, y * 3 + 7), n: 1, flash: this.flashes.has(`${x},${y}`), d: 0 });
       }
+    }
+    all.sort((a, b) => a.seed - b.seed);
+    const held = new Map<string, Badge>(), groups: Badge[] = [];
+    for (const b of all) {
+      if (b.code === Issue.Fire || b.flash) { groups.push(b); continue; }
+      const gx = Math.floor(b.x / GROUP_TILES), gy = Math.floor(b.y / GROUP_TILES);
+      let into: Badge | undefined;
+      for (let j = -1; j <= 1 && !into; j++) for (let i = -1; i <= 1 && !into; i++) {
+        const o = held.get(`${b.code},${gx + i},${gy + j}`);
+        if (o && Math.abs(o.x - b.x) <= GROUP_TILES && Math.abs(o.y - b.y) <= GROUP_TILES) into = o;
+      }
+      if (into) { into.n++; continue; }
+      const k = `${b.code},${gx},${gy}`;
+      if (!held.has(k)) held.set(k, b);
+      groups.push(b);
+    }
+    // the ones in view, a code at a time (most severe first), the nearest of each; fires and flashes on top of the count
+    const camPos = cam ? (cam as unknown as { position: Vector3 }).position : null;
+    const pick: Badge[] = [], queues = new Map<number, Badge[]>();
+    for (const b of groups) {
+      const at = this.anchor(b.x, b.y);
+      b.at = at;
+      if (b.code === Issue.Fire || b.flash || !camPos) { pick.push(b); continue; }
+      this.v.set(at[0], at[1], at[2]);
+      b.d = camPos.distanceTo(this.v) * (this.shown.has(`${b.x},${b.y}`) ? 0.8 : 1);
+      if (b.d > ICON_FADE_START + ICON_FADE_JITTER + ICON_FADE_LEN || !this.frustum.containsPoint(this.v)) continue;
+      let q = queues.get(b.code);
+      if (!q) queues.set(b.code, q = []);
+      q.push(b);
+    }
+    for (const q of queues.values()) q.sort((a, b) => a.d - b.d);
+    for (let round = 0, left = ON_SCREEN; left > 0; round++) {
+      let any = false;
+      for (const code of ISSUE_CODES) {
+        const b = queues.get(code)?.[round];
+        if (!b || left <= 0) continue;
+        pick.push(b); left--; any = true;
+      }
+      if (!any) break;
+    }
+    this.shown.clear();
+    let n = 0;
+    for (const b of pick) {
+      if (n >= MAX_ICONS) break;
+      const at = b.at!;
+      this.shown.add(`${b.x},${b.y}`);
+      this.pos[n * 3] = at[0]; this.pos[n * 3 + 1] = at[1] + (b.code === Issue.Fire ? 1.0 : 0); this.pos[n * 3 + 2] = at[2]; // on fire: above the flames (render/fires.ts)
+      // a group's badge a touch larger the more it stands for (data.w), each its own hashed bob and size as ever
+      this.data[n * 4] = b.code; this.data[n * 4 + 1] = b.seed; this.data[n * 4 + 2] = b.flash ? 1 : 0; this.data[n * 4 + 3] = Math.min(1, (b.n - 1) / 6);
+      this.tiles.push(b.x, b.y);
+      n++;
     }
     this.geo.instanceCount = n;
     (this.geo.getAttribute('aP') as InstancedBufferAttribute).needsUpdate = true;
@@ -263,7 +344,7 @@ export class IssuesView {
     for (let i = 0; i < this.geo.instanceCount; i++) {
       const d = camPos.distanceTo(this.v.set(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]));
       if (d > ICON_FADE_START + ICON_FADE_JITTER + ICON_FADE_LEN * 0.5) continue;
-      const s = (1.0 + 0.22 * this.data[i * 4 + 1]) * Math.min(3.4, Math.max(1.0, d / 24));
+      const s = (1.0 + 0.22 * this.data[i * 4 + 1]) * (1 + 0.25 * this.data[i * 4 + 3]) * Math.min(3.4, Math.max(1.0, d / 24));
       this.v.y += s * 0.55; // the disc's middle, above the point
       this.v.project(camera);
       if (this.v.z > 1) continue;
