@@ -59,6 +59,7 @@ breathing by the half-hour.
 | **The instant crew**: a player's first yard already opened at once (Gauntlet 3); now it also hires adults out of work within 64 tiles on the spot, nearest first (the camp is next door), camp settlers leave a job more than 12 tiles away for it, and for its first game day whoever it hires sets out for a shift *now* rather than at 07:00 tomorrow. From day two it is a yard like any other. | `firstfive.ts` `starterYard`, `hired`; `net.ts` build | The old "its builders start with their next shift" was the dead ten minutes. Now the player's own settlers walk out of the camp with tools, which is the cause-and-effect a new player needs to see once to understand the whole game. |
 | **A first house at 20 work** (residential level 1; levels 2 and 3 stay at 120 and 180, every other kind unchanged); `growth()` takes the catalogue's work for every kind instead of `WORK_PER_LEVEL × level`. | `shared/src/buildings/residential.ts`, `scripts/check-buildings.ts` (the rule), `sim/simulation.ts` growth | A builder builds a cottage in 24 game minutes instead of 72. Four builders on a site: a house every minute of real time. The crane-to-house moment comes while the player is still looking. |
 | **The goal chain** is 14: plot, street, **camp**, homes, yard, **first homes** (12 residents in houses, the camp aside), shops, Masonry, 50, cover, park, books, 250, bus line. Copy rewritten for the new order. A player who never pitches a camp passes "Pitch camp" once eight people live on their land another way, so the chain never blocks. Old saves past the camp are marked done without a reward. | `shared/src/goals.ts`, `server/src/goals.ts` | Five goals fall in the first 90 seconds, each answered on screen within seconds of the click; the sixth is the one worth waiting a minute for. |
+| **Followers**: while fewer than 24 people live on a new player's land and someone there has a job, its homes take newcomers without waiting for a vacant job anywhere in the world (`spawn()` otherwise rolls 5% when `vacantJobs` is 0). | `firstfive.ts` `followers`, `simulation.ts` spawn, `START_TUNING.followerBeds` | A settler's family follows a wage. Without it a noon join, when the Commons' jobs are all taken, left six finished houses empty for three minutes; the rule is bounded to the first two dozen beds and leaves the jobs-lead-growth loop alone after that. |
 | **The camp is a transit camp**: a settler at home moves into a finished home with room nearby with a 35% chance a day (a partner living with them comes along, the household kept); newcomers fill the tents behind them; the life step's own move-out never picks the tents; bulldozing the camp rehomes its people nearby first. | `firstfive.ts` `campStep`, `campCleared`, `bedNear`; `simulation.ts` lifeStep, lifeFamily | Tents beside apartment blocks for ever would read as a bug. People moving out of the tents into the houses they built is the story closing on its own, and the camp keeps earning its $150 as the cheapest beds in town. |
 
 Toasts and copy: "Camp pitched: eight settlers are coming up the road and arrive within the hour" (or "through the
@@ -104,7 +105,24 @@ pitches the camp, but places its yard only when the builders hint tells it to (t
 is the tree at d90f05f (the previous agent's runs with the same bot); minutes are real minutes at 1× after joining.
 Residents counts everyone on the player's land, the camp included; "in homes" is the First homes goal.
 
-MEASURED_TABLE
+| | before F 05:00 | before F 12:00 | before F 20:00 | **after F 05:00** | **after F 12:00** | **after F 20:00** | before B 05:00 | after B 05:00 |
+|---|---|---|---|---|---|---|---|---|
+| first resident (min) | 2.8 | 7.8 | 4.8 | **0.8** | **0.8** | **0.8** | 3.1 | 0.8 |
+| 12 residents (min) | 10.5 | 9.1 | 6.5 | **2.4** | **AF12_RES12** | **5.5** | - (run ended at 30) | 10.5 |
+| 12 in homes, the goal (min) | 10.3 | 9.1 | 6.6 | 3.6 | AF12_HOMES | 5.9 | - | 10.6 |
+| longest stretch with nothing new in the first 30 (min) | 4.7 | 5.7 | 3.3 | **2.0** | **AF12_GAP** | **1.7** | 1.7 | 7.3 |
+| Masonry ready (min) | 9.1 | 7.1 | 4.1 | 2.1 | AF12_MAS | 2.1 | 3.1 | 9.4 |
+| yard placed (min) | 0.9 | 0.9 | 0.9 | 1.3 | 1.3 | 1.3 | - | 8.3 |
+| A growing town (50) (min) | 18.3 | 17.1 | 21.6 | 7.9 | AF12_R50 | 8.8 | - | 14.6 |
+| Balance the books (min) | 22.1 | 19.8 | 25.1 | 14.1 | AF12_BOOKS | 17.1 | - | 22.1 |
+| the settlers moment | - | - | - | yes | yes | yes | - | yes |
+
+The acceptance test (first resident within 3, 12 within 8, no stretch over 4 in the first 30) passes at all three hours
+for the player who follows the card. The noon join is the slowest because the Commons' jobs are all taken by midday,
+which is what the followers rule answers (its run is the one marked; the other two ran before it). B pitches the camp
+(its first eight arrive at 0.8) but places no yard until its one-day fallback at 8.3, because the builders hint stays
+quiet while "Hire your own builders" is the active goal: B is a player who has the card up and does not read it, and
+its 7.3-minute stretch is the wait for its own yard. Before, B's first resident took 3.1 minutes and F's up to 7.8.
 
 Bots B and F to day 15 (two hours), after against the onboarding section's figures:
 

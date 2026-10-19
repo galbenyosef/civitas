@@ -450,3 +450,11 @@ signals and Public transport bought. Minutes at normal speed after joining.
   signals or buses on their own land. Worth a look with the gateways/junctions work.
 - The newcomers notice still comes from `sim/simulation.ts` (gateways agent); net.ts recognises it by its first words to
   turn it into a hint. A notice id from the simulation would be sturdier.
+
+## After Audit #1: the first five minutes
+
+The open item above ("the first resident still arrives about 12 min in") is closed by docs/first-five.md: a pioneer
+camp whose eight settlers come up the road within the game hour, a starter yard that hires them on the spot and sends
+them out now, a first house at 20 units of work, a first-settlers camera moment, and a 14-goal chain. With the same bot
+the first resident comes at 0.8 minutes at any join hour and twelve live in proper homes by minute 3-7; the measured
+tables are there.
