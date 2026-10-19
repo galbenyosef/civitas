@@ -21,7 +21,7 @@ mode's 4× makes every number a quarter and pause holds any of them.
 
 | When | What they do | What they see within seconds |
 | --- | --- | --- |
-| 0:00 | The join card; the camera at the road end, the gate on the horizon. | **Goal 1 of 13, Lay a street**: "Road (3): drag a street on from the end of the country road into your land." (Claim your plot is gone: the charter is theirs.) |
+| 0:00 | The join card; the camera at the road end, the gate on the horizon. | **Goal 2 of 14, Lay a street** (the charter has done "Claim your plot"): "Road (3): drag a street on from the end of the country road into your land." (Claim your plot is gone: the charter is theirs.) |
 | 0:15-0:40 | Drag a street east from the road end, a side street or two. | Road tiles paint; "Nicely done! Lay a street"; the card flips to **Pitch camp**, "show me" lights the camp tool. |
 | 0:40 | Click a tile beside the street. | The camp stands at once: tents, a caravan, a fire pit, festoon lights. Toast: *"Camp pitched: eight settlers are on their way through the gate and arrive within the hour."* The card flips to **Zone homes**. |
 | 0:50-1:30 | (meanwhile) | Headlights at the gate: the first car with a roof box turns off the motorway and comes the whole length of the country road, then two people with suitcases, then another car. The camera leaves the player's hands for seven seconds to meet the first of them at the camp: **"Your first settlers are here: Ada Walker and 7 more are pitching camp."** |
@@ -58,7 +58,32 @@ frontier (a later player buys land as today).
 
 ### Measured on the frontier
 
-FRONTIER_TABLE
+The frontier bot (`scratchpad/firstfive/play.mts` with `FRONTIER=1`: no land to buy, its first blocks hang off the road
+end, the handyman instead of a yard) on a fresh frontier (`START=frontier`, seed 424242), SIM_STEPS=10, following the
+card, joining at the dawn start (06:00) and, on a server left running, at 12:00 and 20:00. Minutes are real minutes at 1×
+after joining; at 4× in local mode every figure is a quarter.
+
+| | dawn start (06:00) | dawn start, after the merge of main (E5) | 12:00 | 20:00 |
+|---|---|---|---|---|
+| first resident (min) | 0.5 | 0.5 | 0.4 | 0.4 |
+| 12 residents (min) | 2.5 | 2.2 | 2.1 | 2.4 |
+| 12 in homes, the goal (min) | 2.7 | 2.5 | - | - |
+| longest stretch with nothing new in the first 30 (min) | 2.3 | 2.7 | 2.9 | 1.3 |
+| shops open (goal, min) | 6.8 | 8.2 | | |
+| 50 residents (min) | 10.2 | about 8 (53 at 7.9) | | |
+| Masonry ready (min) | 2.8 (300 units) | 13.2 (1,500 units) | 2.8 (300) | 12.4 (1,500) |
+| treasury low point in 30 min | about $750 | $750 (day 1) | | |
+
+The acceptance test passes at every hour on the blank sheet, and the overnight lull never shows: the frontier starts at
+dawn, and a server join at 20:00 has the crew's first-day rest rule. What the runs showed and this pass changed: the
+first handyman opened unreachable until the bot joined its own blocks (a layout bug of the bot, but the same thing a
+player can do; the issue bubbles of Audit #2 now flag it); Masonry at 300 units came at minute 3, so the construction
+thresholds are 1,500 / 4,000 / 7,000; and with "A growing town" behind the Masonry purchase, a $5,000 player at $900
+in hand waited twenty minutes for the chain to move, so the two goals swapped. What the runs show that is not this
+card's: on $5,000 the treasury sits at $750-$1,300 from minute 2 to minute 20 while tax climbs from $30 to $250 a day;
+the rank grants of Audit #4 are the designed answer, and the money floor of Audit #5 now stands behind it. Two small
+things to tidy: the country road inside the charter already counts 11 of the street goal's 12 tiles, and the card
+reads "Goal 2 of 14" because the charter completes "Claim your plot" before it is seen.
 
 ## 1. The idea in one paragraph
 
@@ -195,7 +220,7 @@ The after curve spends earlier (every tier-1 node is affordable by minute 8) and
 $700 higher and comes at day 2 instead of day 7; two-hour population is the same within noise. B (the sensible player
 who waits for the builders hint) was run to 30 minutes only: see the table above.
 
-Tick cost: TICK_COST.
+Tick cost: `loadtest/ab.ts --hour 8 --ticks 3000 --seed 1` on the same seeded city gives identical counts on main (389df42) and on this branch, at 1.015 and 0.994 ms a tick: unchanged.
 
 ## 7. Still to do
 
