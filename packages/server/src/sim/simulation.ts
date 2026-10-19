@@ -990,7 +990,7 @@ export class Simulation {
       const cap = capacityOf(b.id, b.level);
       const queued = this.gateways.pendingAt(b.x, b.y); // newcomers already on their way through a gateway
       if (b.occupants + queued >= cap || (b.occupants + queued >= cap - 1 && (b.holdUntil ?? 0) > w.tick)) continue; // the last bed is held for a family
-      if (this.vacantJobs <= 0 && Math.random() > 0.05) continue;
+      if (this.vacantJobs <= 0 && Math.random() > 0.05 && !this.start.followers(b)) continue; // a new town's first beds fill behind a wage (sim/firstfive.ts)
       // a merged block or tower fills like the lots it replaced: one chance per dozen beds (a 1×1 home holds at most 12)
       const tries = cap > 12 ? Math.ceil(cap / 12) : 1;
       for (let i = 0; i < tries; i++) {

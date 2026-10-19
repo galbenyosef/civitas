@@ -210,6 +210,16 @@ export class FirstFive {
   }
 
   /**
+   * Called by spawn() when the world has no vacant job: a home on the land of a new player with fewer than
+   * START_TUNING.followerBeds people and someone in work still takes a newcomer (a settler's family follows a wage).
+   */
+  followers(home: Building): boolean {
+    const owner = this.w.parcelAt(home.x, home.y)?.owner;
+    const p = owner ? this.w.players.get(owner) : undefined;
+    return !!p && p.progress.housed < START_TUNING.followerBeds && p.progress.jobs > 0;
+  }
+
+  /**
    * Called when a newcomer moves in (in place, or at the end of the trip from a gate or road end): the first on an
    * owner's land since the server started. `housed` cannot be the test: a traveller counts from the moment they set
    * off. goals.ts drops it for a player who has had the moment, or who already has a town.

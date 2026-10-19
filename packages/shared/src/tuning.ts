@@ -218,4 +218,10 @@ export const START_TUNING = {
   starterCrewSwitchDist: 12,
   /** A camp resident's chance per game day of moving into a finished home with room nearby (the camp is a transit camp). */
   campMoveOutPerDay: 0.35,
+  /**
+   * Followers: while fewer than this many people live on a new player's land and someone there has a job, its homes
+   * take newcomers without waiting for a job vacancy anywhere (a settler's family follows a wage). Beyond it the
+   * usual rule holds: beds fill while the world has vacant jobs.
+   */
+  followerBeds: 24,
 };
