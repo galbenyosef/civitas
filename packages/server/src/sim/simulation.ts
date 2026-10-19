@@ -23,7 +23,7 @@ import {
   LEISURE, leisureTier, leisureNeed, noteLeisureVisit, leisureDay,
 } from './life';
 import { findPath, findBest, findRoute, pathBetween, pathStillValid } from '../pathfinding';
-import { Traffic, crossMask, dirBetween } from './traffic';
+import { Traffic, crossMask, dirBetween, hypot } from './traffic';
 import { indicatorOf } from './indicators';
 import { Transit, BusService, isMechanic } from './transit';
 import { Carpool, CARPOOL, householdShare, coworkerShare, friendShare, type Candidate } from './carpool';
@@ -2401,7 +2401,7 @@ export class Simulation {
       if (crossing) this.traffic.noteCrossing(crossing, crossMask(xd));
       if (c.x === pts[(c.pp - 1) * 2] && c.y === pts[(c.pp - 1) * 2 + 1] && this.traffic.barrierAhead(c.x, c.y, tx, ty)) { c.wait++; return true; } // a level crossing's barriers are down
       const dx = tx - c.x, dy = ty - c.y;
-      const d = Math.hypot(dx, dy);
+      const d = hypot(dx, dy);
       if (TT.bodyGuard && d > 0) {
         // never step into a car's body (stepping out of one is always allowed); after guardWaitMax, walk on anyway
         const s = Math.min(1, remaining / d), nx = c.x + dx * s, ny = c.y + dy * s;
