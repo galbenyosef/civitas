@@ -164,6 +164,8 @@ export class Issues {
     for (const p of w.players.values()) built += p.progress.built;
     this.busy = this.builtSum >= 0 && built > this.builtSum;
     this.builtSum = built;
+    // a period nobody built anywhere (builders rest at night) does not count against an owner, as it does not for a site's idle
+    if (!this.busy) for (const [o, t] of this.served) this.served.set(o, t + P);
     // slices for the coming period, by a hash of the tile so a building keeps its slot from period to period
     if (this.slices.length !== P) this.slices = Array.from({ length: P }, () => []);
     for (const s of this.slices) s.length = 0;
