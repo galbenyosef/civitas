@@ -59,8 +59,9 @@ export class Issues {
   private homes = new Map<number, { n: number; sum: number; low: Citizen }>();
   /** residents' mean happiness per owner (very unhappy is measured against the town), worked out on the period's first need */
   private towns: Map<string, number> | null = null;
-  /** the tick a site of each owner's was last seen worked (no builders: nobody is building for them) */
+  /** the tick a site of each owner's was last seen worked, and the owners with a builders' yard standing (no builders: nobody is building for them) */
   private served = new Map<string, number>();
+  private yards = new Set<string>();
   private staff = new Map<number, number>();
   /** builders made progress somewhere during the last period (sites wait out the night without counting) */
   private busy = false;
@@ -169,7 +170,11 @@ export class Issues {
     // slices for the coming period, by a hash of the tile so a building keeps its slot from period to period
     if (this.slices.length !== P) this.slices = Array.from({ length: P }, () => []);
     for (const s of this.slices) s.length = 0;
-    for (const b of w.buildings.values()) this.slices[Math.floor(hash2(b.x * 7 + 3, b.y * 11 + 5) * P) % P].push(b);
+    this.yards.clear();
+    for (const b of w.buildings.values()) {
+      this.slices[Math.floor(hash2(b.x * 7 + 3, b.y * 11 + 5) * P) % P].push(b);
+      if (b.zone === Zone.Yard && b.level > 0) { const o = w.parcelAt(b.x, b.y)?.owner; if (o) this.yards.add(o); }
+    }
     // tiles whose building went (bulldozed, merged away): clear their code and memory
     for (const [k] of this.state) {
       const [x, y] = untkey(k);
@@ -193,14 +198,15 @@ export class Issues {
     // any site worked since its last look (an upgrade too) means builders are at work for its owner
     if (site && site.work < st.work && st.work !== Infinity) { const o = w.parcelAt(b.x, b.y)?.owner; if (o) this.served.set(o, now); }
     // 2 no builders: nobody worked the site of a new building for an hour of builder time (a waiting upgrade is not stuck), and
-    // nobody worked any of its owner's sites in that hour either; a site queued behind its owner's own crew only after two days
+    // nobody worked any of its owner's sites in that hour either, and they have no builders' yard of their own; a site queued
+    // behind its owner's own crew (or sent elsewhere by it) only after two days
     if (site && b.level === 0) {
       if (site.assigned > 0 || site.work < st.work || site.priority <= -2) st.idle = 0;
       else if (this.busy) st.idle += this.period;
       st.work = site.work;
       if (!code && st.idle >= IT.noBuildersHours * TPH && site.priority > -2) {
-        const served = this.served.get(w.parcelAt(b.x, b.y)?.owner ?? '') ?? -Infinity;
-        if (now - served >= IT.noBuildersHours * TPH || st.idle >= IT.noBuildersStuckHours * TPH) code = Issue.NoBuilders;
+        const o = w.parcelAt(b.x, b.y)?.owner ?? '', served = this.served.get(o) ?? -Infinity;
+        if ((now - served >= IT.noBuildersHours * TPH && !this.yards.has(o)) || st.idle >= IT.noBuildersStuckHours * TPH) code = Issue.NoBuilders;
       }
     } else { st.idle = 0; st.work = site ? site.work : Infinity; }
     if (standing) {

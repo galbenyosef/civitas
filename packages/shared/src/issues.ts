@@ -19,7 +19,7 @@ export interface IssueText {
 }
 export const ISSUE_TEXT: Record<number, IssueText> = {
   [Issue.NoRoad]: { title: 'No road', explain: 'Nothing grows or opens without a road beside it. Lay a road along the lot, or zone the lot next to one.' },
-  [Issue.NoBuilders]: { title: 'No builders', explain: 'Builders are at work elsewhere but none has come to any of your sites for an hour (or to this one for two days). Place a builders\' yard of your own, check a road links it, or raise this site\'s priority.' },
+  [Issue.NoBuilders]: { title: 'No builders', explain: 'Builders are at work elsewhere but none has come to your sites for an hour and you have no builders\' yard, or none has come to this one for two days. Place a builders\' yard (another, if yours is busy), check a road links it, or raise this site\'s priority.' },
   [Issue.Unstaffed]: { title: 'Unstaffed', explain: 'Fewer than half the staff it needs are at work. It needs homes nearby (people to hire) and a road to reach it.' },
   [Issue.ParkingFull]: { title: 'Parking full', explain: 'Drivers find it full and park at the kerb, slowing the street. Put a parking lot within ten tiles, or Deep foundations for parking underneath.' },
   [Issue.NoCustomers]: { title: 'No customers', explain: 'Nobody came all of yesterday. Customers need homes in reach by road; check the street links up.' },

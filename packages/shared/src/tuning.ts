@@ -264,8 +264,9 @@ export const ISSUE_TUNING = {
   problemsHours: 0.5,
   /** no builders: a site no builder has come to while builders were at work somewhere, for this long (sites wait out the night) ... */
   noBuildersHours: 1,
-  /** ... while no site of its owner's has been worked for that long either: nobody is building for them. A site in the queue
-   *  behind its owner's own crew is not stuck (a new town zones dozens of lots for two builders) unless it waits this long */
+  /** ... while no site of its owner's has been worked for that long either and they have no builders' yard: nobody is building
+   *  for them. A site in the queue behind its owner's own crew is not stuck (a new town zones dozens of lots for two builders)
+   *  unless it waits this long */
   noBuildersStuckHours: 48,
   /** unstaffed: staff on shift or on the way under this share of what the roster expects at the hour ... */
   unstaffedShare: 0.5,
