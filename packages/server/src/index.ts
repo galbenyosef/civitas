@@ -88,6 +88,7 @@ const http = createServer((req, res) => void serve(req, res));
  *  dev actions on a non-production server; a test city or demo is a sandbox (all tech, endless funds, no onboarding). */
 const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD, spectate: SPECTATE }, SIM_STEPS);
 const { sim, airports, rail, net, tickWin } = game;
+game.fires.enabled = process.env.FIRES !== '0'; // FIRES=0: nothing catches light (sim/fires.ts; an A/B control)
 if (DEMO && needsFill) { // the second half of seeding needs the simulation: bus stops, track and every line
   const problems = seedDemoNetwork(world, sim, rail, DEMO);
   if (problems.length) { console.error(`demo ${DEMO}: the scenario's network does not build:\n  ${problems.join('\n  ')}`); process.exit(1); }

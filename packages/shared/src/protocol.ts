@@ -7,6 +7,7 @@ import type { RingsDTO } from './history';
 import type { FleetInfo, MobileRows } from './fleet';
 import type { BoatHarbour } from './boats';
 import type { SeaGate } from './waterways';
+import type { FireDTO } from './fires';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
 export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | KindToolId;
 
@@ -63,10 +64,10 @@ export interface PlayerDTO {
   fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', builders: "Builders' fees",
-  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', other: 'Other',
+  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', other: 'Other',
 };
 /**
  * Money that can run out (docs/start-from-zero.md B3): the overdraft line, the count of midnights below zero, and
@@ -200,6 +201,8 @@ export interface BuildingInfo {
   mothballed?: boolean;
   /** the viewer owns it and may mothball or reopen it */
   mothballable?: boolean;
+  /** on fire, being put out, or the aftermath of one (server sim/fires.ts), in words */
+  fire?: string;
   visitors?: number;
   visitorCapacity?: number;
   /** builders' yard: sites its crews are on right now */
@@ -602,6 +605,8 @@ export type ServerMsg =
   // ---- issue bubbles and overlays (shared/src/issues.ts, server/src/sim/issues.ts) ----
   /** per chunk: base64 Uint8Array(CHUNK_SIZE^2) of issue codes (Issue, at a building's door tile); '' when the chunk has none. On subscribe and when the chunk's codes change */
   | { t: 'issues'; cx: number; cy: number; d: string }
+  /** every fire burning, being put out or in its aftermath (server sim/fires.ts, shared/src/fires.ts), whenever the list changes */
+  | { t: 'fires'; f: FireDTO[] }
   /** your own parcels' problems, flat triples x, y, code: on hello, then when they change (at most every ISSUE_TUNING.problemsHours) */
   | { t: 'problems'; p: number[] }
   /** per chunk: the overlay you asked for, base64 Uint8Array(CHUNK_SIZE^2) (overlayByte; 0 no data), sent when it changes */

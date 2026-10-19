@@ -109,7 +109,7 @@ export interface GoalsDTO {
  * it. The server sends the ones only it can see (builders, the books, the jam, boredom, newcomers), the client raises the
  * rest (night, a refused build on an empty treasury); either way the client shows at most one per HINT_GAP ticks.
  */
-export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night';
+export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night' | 'fire';
 /** `panel` 'admin': the overdraft and administration panel (client finance.ts) */
 export interface HintDef { kind: 'tip' | 'alert'; msg: string; tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin' }
 export const HINTS: Record<HintId, HintDef> = {
@@ -125,6 +125,7 @@ export const HINTS: Record<HintId, HintDef> = {
   jam: { kind: 'alert', tool: 'res', panel: 'tech', msg: 'Traffic has been jammed all day: traffic signals (T), a bus line, or jobs closer to the homes all help.' },
   bored: { kind: 'tip', tool: 'citypark', msg: 'Residents are bored, with nowhere to go: a park costs $120 and needs no technology.' },
   newcomers: { kind: 'tip', tool: 'motorway', panel: 'tech', msg: 'Newcomers are moving straight into your homes. Parking lots (T, $150) also brings the motorway connection: newcomers then drive in through it, and visitors and freight use it too.' },
+  fire: { kind: 'alert', tool: 'firepost', panel: 'tech', msg: 'A fire has broken out. A staffed fire post or station sends its engine to fires within 14 tiles and keeps the damage down; without one a building burns down and you pay for it. Emergency services (T) brings the fire post.' },
   night: { kind: 'tip', msg: "It's night in the city. The light chip at the top right holds the view at mid-afternoon; click it again to follow the clock." },
 };
 export const isHintId = (id: string): id is HintId => id in HINTS;

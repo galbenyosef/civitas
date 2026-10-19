@@ -4,10 +4,12 @@
  */
 
 /** What is wrong with a building or lot: one 3-bit code per tile (the door tile of a structure); 0 is nothing. When several hold,
- * the first of no road, no builders, unstaffed, no customers, parking full, very unhappy is shown (server/src/sim/issues.ts). */
-export const Issue = { None: 0, NoRoad: 1, NoBuilders: 2, Unstaffed: 3, ParkingFull: 4, NoCustomers: 5, Unhappy: 6 } as const;
+ * the first of on fire, no road, no builders, unstaffed, no customers, parking full, very unhappy is shown (server/src/sim/issues.ts).
+ * On fire is set the moment a fire starts and cleared when it is out (server/src/sim/fires.ts), not on the issues' round. */
+export const Issue = { None: 0, NoRoad: 1, NoBuilders: 2, Unstaffed: 3, ParkingFull: 4, NoCustomers: 5, Unhappy: 6, Fire: 7 } as const;
 export type IssueCode = (typeof Issue)[keyof typeof Issue];
-export const ISSUE_CODES = [1, 2, 3, 4, 5, 6] as const;
+/** in the problems panel's order: a fire first, it is the one that will not wait */
+export const ISSUE_CODES = [7, 1, 2, 3, 4, 5, 6] as const;
 
 export interface IssueText {
   /** the panel's group heading and the tooltip's line */
@@ -21,6 +23,7 @@ export const ISSUE_TEXT: Record<number, IssueText> = {
   [Issue.Unstaffed]: { title: 'Unstaffed', explain: 'Fewer than half the staff it needs are at work. It needs homes nearby (people to hire) and a road to reach it.' },
   [Issue.ParkingFull]: { title: 'Parking full', explain: 'Drivers find it full and park at the kerb, slowing the street. Put a parking lot within ten tiles, or Deep foundations for parking underneath.' },
   [Issue.NoCustomers]: { title: 'No customers', explain: 'Nobody came all of yesterday. Customers need homes in reach by road; check the street links up.' },
+  [Issue.Fire]: { title: 'On fire', explain: 'A fire is burning. The nearest staffed fire post or station within 14 tiles sends an engine; with none in reach it burns down. A fire post (Emergency services) is cheap.' },
   [Issue.Unhappy]: { title: 'Very unhappy', explain: 'The people living here are miserable: high taxes, long commutes, no services or nothing to do. Hover a resident to see why.' },
 };
 

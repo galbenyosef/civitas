@@ -639,8 +639,9 @@ export class Traffic {
     m.pi = 1; m.prog = 0; m.wait = 0; m.stuck = 0; m.committed = false;
     m.inDir = d;
     if (TT.meterCongestion < 1 && !this.isRoadAt(m.path[0], m.path[1]) && this.congestionAt(m.path[2], m.path[3]) >= TT.meterCongestion) return 'blocked';
-    if (TT.spawnClear >= 2 && m.path.length >= 6 && !this.isRoadAt(m.path[0], m.path[1])) {
-      // out of a building: stay in the garage until the road tile would take you, so nobody waits in the forecourt
+    if (TT.spawnClear >= 2 && m.path.length >= 6 && !this.isRoadAt(m.path[0], m.path[1]) && !m.priority) {
+      // out of a building: stay in the garage until the road tile would take you, so nobody waits in the forecourt (a fire
+      // engine on a call does pull out and waits there, lights flashing, for the traffic to let it in: sim/fires.ts)
       const nd = dirBetween(m.path[2], m.path[3], m.path[4], m.path[5]);
       if (!this.canEnter(m, m.path[2], m.path[3], d, nd)) return 'blocked';
     }

@@ -24,6 +24,7 @@ import { MapSummaries } from './worldmap';
 import { setPolicy } from './policies';
 import { mothballable, adminRefusal, type Finance } from './sim/finance';
 import type { Issues } from './sim/issues';
+import type { Fires } from './sim/fires';
 import { Overlays } from './overlays';
 import { ISSUE_TUNING, OVERLAY_COUNT } from '@msimcity/shared';
 
@@ -95,6 +96,8 @@ export class Net {
   harbours: Harbours | null = null;
   /** the overdraft, administration and the recovery plan (sim/finance.ts); set by game.ts */
   finance: Finance | null = null;
+  /** house fires (sim/fires.ts): the 'fires' message, building tooltips and the owners' notices; set by game.ts */
+  fires: Fires | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
   tickStats: { avg: number; p95: number; max: number } | null = null;
   /** game ticks per TICK_MS of wall time, sent with the stats message when it is not 1 so the client's clock follows a paused or
@@ -249,6 +252,7 @@ export class Net {
     if (this.metro) { this.send(c, { t: 'metroLines', lines: this.metro.dtos() }); if (this.metro.loads.length) this.send(c, { t: 'metroLoads', l: this.metro.loads }); }
     if (this.ferry) this.send(c, { t: 'ferryLines', lines: this.ferry.dtos() });
     if (this.harbours) this.send(c, this.harbours.msg());
+    if (this.fires) this.send(c, { t: 'fires', f: this.fires.dtos() });
     c.goalsSig = undefined; this.goals(c);
     c.probSig = undefined; this.problemsTo(c);
   }
@@ -847,6 +851,8 @@ export class Net {
     if (info && isHarbourId(b!.id) && this.harbours) info.harbour = this.harbours.describe(b!);
     if (info && this.w.mothballed.has(`${dx},${dy}`)) info.mothballed = true;
     if (info && mothballable(b!) && this.w.parcelAt(dx, dy)?.owner === c.player?.id) info.mothballable = true;
+    const fire = info && this.fires?.describe(dx, dy);
+    if (info && fire) info.fire = fire;
     this.send(c, { t: 'building', x, y, info });
   }
 
@@ -1048,6 +1054,8 @@ export class Net {
     if (this.ferry?.changed) { this.ferry.changed = false; this.broadcast({ t: 'ferryLines', lines: this.ferry.dtos() }); }
     // harbours and their lanes (sim/harbours.ts): a new list whenever any harbour, its staffing or the water changed
     if (this.harbours?.changed) { this.harbours.changed = false; this.broadcast(this.harbours.msg()); }
+    // fires burning, being put out and in their aftermath (sim/fires.ts): the whole short list whenever it changed
+    if (this.fires?.changed) { this.fires.changed = false; this.broadcast({ t: 'fires', f: this.fires.dtos() }); }
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed
     if (w.tick % 10 === 0) {
@@ -1082,6 +1090,12 @@ export class Net {
     // the overdraft and administration (sim/finance.ts): advisor hints and toasts for the owner, at midnight
     if (this.finance?.notices.length) {
       for (const n of this.finance.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) {
+        if (n.hint) this.hint(c, n.hint, n.msg); else this.toast(c, n.msg, 'info');
+      }
+    }
+    // fires (sim/fires.ts): the warning fire is an advisor hint, the rest toasts
+    if (this.fires?.notices.length) {
+      for (const n of this.fires.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) {
         if (n.hint) this.hint(c, n.hint, n.msg); else this.toast(c, n.msg, 'info');
       }
     }

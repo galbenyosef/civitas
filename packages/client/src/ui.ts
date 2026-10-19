@@ -510,6 +510,7 @@ export class UI {
       if (info.activeSites !== undefined) html += row('Sites being worked', info.activeSites);
     }
     if (info.mothballed) html += row('Mothballed', '<span class="bad">no staff, no upkeep, no cover</span>');
+    if (info.fire) html += row('Fire', `<span class="bad">${info.fire}</span>`);
     if (info.airport) html += airportHtml(info.airport, row);
     if (info.rail) html += railStationHtml(info.rail, row);
     if (info.metro) html += metroStationHtml(info.metro, row);
