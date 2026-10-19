@@ -195,6 +195,36 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
 #tech .pol { color: var(--accent); font-size: 11px; margin: -2px 0 6px; line-height: 1.35; }
 @media (max-width: 900px) { #policies .pols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
+/* money that can run out (finance.ts): the chip by the treasury and the administration panel with the recovery plan */
+#adminBtn { white-space: nowrap; }
+#adminBtn.od { border-color: rgba(242,194,48,0.6); color: #f2c230; }
+#adminBtn.admin { border-color: rgba(255,107,107,0.7); background: rgba(255,107,107,0.16); color: #ff8a8a; font-weight: 600; animation: adminPulse 2.4s ease-in-out infinite; }
+@keyframes adminPulse { 50% { box-shadow: 0 0 0 3px rgba(255,107,107,0.18); } }
+#admin { position: absolute; z-index: 6; left: 50%; top: 56px; transform: translateX(-50%); width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 80px); overflow-y: auto; padding: 14px 16px;
+  background: var(--panel); border: 1px solid rgba(255,107,107,0.35); border-radius: 12px; backdrop-filter: blur(10px); }
+#admin.hidden { display: none; }
+#admin .thead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+#admin .thead h2 { margin: 0; font-size: 16px; white-space: nowrap; }
+#admin .thead .sub { color: var(--muted); flex: 1; line-height: 1.4; }
+#admin .fstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
+#admin .fst { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,0.03); display: flex; flex-direction: column; gap: 2px; }
+#admin .fst span { color: var(--muted); font-size: 11px; }
+#admin .fst b { font-size: 15px; font-variant-numeric: tabular-nums; }
+#admin .fst small { color: var(--muted); font-weight: 400; font-size: 11px; }
+#admin .fst.neg b { color: var(--danger); }
+#admin .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+#admin .fact { padding: 10px 12px; border: 1px solid rgba(242,194,48,0.45); border-radius: 8px; background: rgba(255,255,255,0.03); font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+#admin .fact.none { border-color: var(--line); opacity: 0.75; }
+#admin .nhead { display: flex; justify-content: space-between; gap: 8px; }
+#admin .gain { color: var(--accent); text-align: right; }
+#admin .blurb { color: var(--muted); line-height: 1.4; flex: 1; }
+#admin button.pswitch { width: 100%; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: rgba(242,194,48,0.16); color: var(--fg); font: inherit; cursor: pointer; }
+#admin button.pswitch.alt { background: rgba(255,255,255,0.05); }
+#admin button.pswitch:disabled { opacity: 0.4; cursor: default; background: transparent; }
+#admin .frestart { display: flex; gap: 12px; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+#admin .frestart button { width: auto; flex: none; padding: 6px 12px; }
+#panel .moth { margin-top: 8px; width: 100%; }
+
 /* building panel: summary rows (shared with the tooltip) and the people lists */
 #panel .chead { display: flex; justify-content: flex-end; margin-bottom: 4px; }
 #panel .row { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; color: var(--muted); }

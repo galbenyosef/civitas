@@ -206,5 +206,5 @@ export class Onboarding {
   }
 }
 
-/** Taxes and fees less wages and upkeep, for one day of a ledger. */
-const running = (r: LedgerDTO['today']) => (r.tax ?? 0) + (r.fees ?? 0) + (r.wages ?? 0) + (r.upkeep ?? 0);
+/** Taxes and fees less wages, upkeep and overdraft interest, for one day of a ledger. */
+const running = (r: LedgerDTO['today']) => (r.tax ?? 0) + (r.fees ?? 0) + (r.wages ?? 0) + (r.upkeep ?? 0) + (r.interest ?? 0);

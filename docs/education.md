@@ -10,7 +10,9 @@ results and move up a stage. **E8 (the Showcase and London, section 14)** is bui
 and the four London universities are landmarks. **E7 (the city views, section 15)** is built: history series, the Charts panel's Education tab, parcel
 attainment, the education overlay, the citizen's timeline, the school tooltip and the student look. **E6 (policies, the Policies panel and school buses, section 16)** is built too. **E4 (jobs, wages and migration, section 17)** is built:
 workplaces have skilled places, wages follow education, newcomers come for open skilled jobs and graduates with no
-matching work leave.
+matching work leave. **E5 (higher and adult education, section 18)** is built, so every phase is: families move in with
+children, students come from outside town for the university and live in halls, adults take FE courses and evening
+classes, young workers train as apprentices, and a research institute lifts the offices near it.
 
 Code this touches: `shared/src/education.ts` (new: levels, stages, tables), `shared/src/buildings/education.ts` (new:
 the kinds), `server/src/sim/schools.ts` (new: admissions, attendance, graduation), hooks in
@@ -473,7 +475,7 @@ is no crime model (police coverage only), so there is no link until there is one
 | E2 | **Built.** **Institutions catalogue.** `buildings/education.ts` kinds 101-108 with two UK designs each; un-reserve the `education` group; the edu1-edu5 tech track and counters; `SHORT` label by kind; viewer | sonnet | buildings/*, groups.ts, tech.ts, compiled.ts (regenerate, never hand-merge), ui.ts | none (attribute names from this doc) | L |
 | E3 | **Built.** **Schools sim.** `sim/schools.ts`: admissions batches, the pupil timetable on the commute machinery, attendance, weekly rollover, graduation and drop-out, escorts via carpool, the `school` inspect block, `lifeEvents` | opus | sim/schools.ts, simulation.ts (Home branch, `endShift`, `newDay`, describe), carpool.ts | E1, E2 | L |
 | E4 | **Built.** **Jobs, wages, migration.** Skill gate in `findJob`, `jobMisses` by level, `Building.qualified`, wage multipliers, `EDU.match` tilt, brain drain, happiness parts; tuning runs | opus | simulation.ts (`findJob`, `hire`, `payWage`, `lifeFamily`), life.ts, gateways.ts | E1 (runs beside E3) | M |
-| E5 | **Higher and adult education.** University intake via gateways, halls of residence, families moving in, FE courses, evening classes (`errand` 2), apprenticeships, research ambition | opus | gateways.ts, simulation.ts (`spawn`, `arriveVia`, `ambition`), sim/schools.ts | E3, E4 | L |
+| E5 | **Built.** **Higher and adult education.** University intake via gateways, halls of residence, families moving in, FE courses, evening classes (`errand` 2), apprenticeships, research ambition | opus | gateways.ts, simulation.ts (`spawn`, `arriveVia`, `ambition`), sim/schools.ts | E3, E4 | L |
 | E6 | **Built.** **Policies and the tree UI.** `policies.ts`, `Player.policies`, `setPolicy` intent, Policies panel, Education track in the tech panel; school buses as FleetKind 9 (the server part goes to opus) | sonnet (+ opus for `mobile.ts`) | policies.ts, net.ts, ui.ts, fleet.ts, sim/mobile.ts | E2; the effects need E3 | M |
 | E7 | **Built.** **City views.** History series and the Education tab funnel; `ParcelStats` fields; heat overlay; citizen timeline; school tooltip; student look in people.ts | sonnet | history.ts, charts.ts, main.ts, chunkView.ts, ui.ts, render/people.ts | E3 | M |
 | E8 | **Built.** **Showcase and London.** Placements and tour stops, registry entries, London universities 111-114 and `lnd2` | sonnet | demo/showcase.ts, demo/london.ts, landmarks-london-3.ts, tech.ts | E2 (E3 for the seeded tests) | M |
@@ -897,11 +899,11 @@ the school bus (`FleetKind` 9). Verified by `npx tsx packages/server/src/loadtes
 
 | Policy | Live in E6 | Left to a later phase |
 | --- | --- | --- |
-| Free school meals | `Schools.result`: `+EDU.mealsBonus` pass chance for pupils of the owner's schools. `Schools.midnight`: each school day $0.4 per pupil at school (nursery to sixth form), and each pupil's health +0.3 | the parents' "free school meals" mood (+2): **E4** calls `schools.onMeals(pupil)` from `happinessParts` and adds `POLICY.mealsMood` |
+| Free school meals | `Schools.result`: `+EDU.mealsBonus` pass chance for pupils of the owner's schools. `Schools.midnight`: each school day $0.4 per pupil at school (nursery to sixth form), and each pupil's health +0.3 | the parents' "free school meals" mood (+2), **built in E5** (section 18): **E4** calls `schools.onMeals(pupil)` from `happinessParts` and adds `POLICY.mealsMood` |
 | School buses | `sim/schoolbus.ts` (below); $15 per bus that runs | primary schools and the afternoon round |
-| Adult learning | the switch, its fee, `live: false` (the panel says "Effect still to come"; a `?dev` client can enact it) | **E5**: FE courses and evening classes read `w.ownerHasPolicy(school.x, school.y, 'learning')`, charge `POLICY.learnerPerDay` per learner to the school's owner, and flip `live` to true in `policies.ts` |
-| Apprenticeships | the switch, its fee, `live: false` | **E5**: `w.ownerHasPolicy(workplace.x, workplace.y, 'apprentice')`, up to `POLICY.apprenticeShare` of the staff train, the owner pays `POLICY.apprenticeWageShare` of the wage, then `live: true` |
-| Tuition fees | university parcel owner: +$2 per student a day with it on, a $1 grant paid per student with it off (`fees` in the ledger, daily, Degree and Postgrad); with it on a stable `POLICY.feeDeter` (30%, by citizen id hash) of would-be students are turned away in `goOn` and `enrolAt` | "more graduates leave town": **E4** multiplies the brain-drain leaving chance by `schools.drainMul(c)` (`POLICY.feeDrainMul` 1.5 with fees on at the owner of c's home, else 1) |
+| Adult learning | the switch, its fee, `live: false` (the panel says "Effect still to come"; a `?dev` client can enact it) | **Built in E5** (section 18): FE courses and evening classes read `w.ownerHasPolicy(school.x, school.y, 'learning')`, charge `POLICY.learnerPerDay` per learner to the school's owner, and flip `live` to true in `policies.ts` |
+| Apprenticeships | the switch, its fee, `live: false` | **Built in E5** (section 18): `w.ownerHasPolicy(workplace.x, workplace.y, 'apprentice')`, up to `POLICY.apprenticeShare` of the staff train, the owner pays `POLICY.apprenticeWageShare` of the wage, then `live: true` |
+| Tuition fees | university parcel owner: +$2 per student a day with it on, a $1 grant paid per student with it off (`fees` in the ledger, daily, Degree and Postgrad); with it on a stable `POLICY.feeDeter` (30%, by citizen id hash) of would-be students are turned away in `goOn` and `enrolAt` | "more graduates leave town", **built in E5** (section 18): **E4** multiplies the brain-drain leaving chance by `schools.drainMul(c)` (`POLICY.feeDrainMul` 1.5 with fees on at the owner of c's home, else 1) |
 
 `Schools` keeps `owner`, `meals` and `fees` on each school record, refreshed by the census (hourly). Hooks for E4: `schools.onMeals(c)`
 and `schools.drainMul(c)`. Hooks for E5: `World.ownerHasPolicy` and the constants in `POLICY`.
@@ -1023,7 +1025,7 @@ exactly as main did before E4 (same seeded results on `ab.ts`).
   - "over-qualified" -2.
   - "graduated" +5.
   - The health target is +2 for a degree or more (`healthBonus`).
-  - "Good school nearby" and "no school place" are left to the school-place work.
+  - "Good school nearby" and "no school place" are left to the school-place work (built in E5, section 18).
 - **`fill()`**: places filled and skilled places filled, by group (shops, industry, offices, other). `stats` holds
   `matched`, `newcomers`, `brainDrain`, `skilledHires`, `unskilledHires` and `overQualifiedHires`.
 
@@ -1086,3 +1088,175 @@ paired differences on minus off):
 - **Tick cost:** the matrix ran four at a time on a machine at load 17. Its +0.04 and +0.08 ms per tick were checked
   sequentially, interleaved, at 17:00 on seeds 1 and 5, three runs each. The medians were the same: seed 1 on 0.791,
   off 0.796; seed 5 on 0.788, off 0.799. The cost is within noise, well under the 5% target.
+
+## 18. Built: E5, higher and adult education, families moving in
+
+Built 2026-10-19 on branch `edu-e5`. Two new files hold the logic, `server/src/sim/families.ts` (`Simulation.families`)
+and `server/src/sim/learning.ts` (`Simulation.learning`); every enrolment still goes through `Schools.enrolAt` and
+`Schools.leave`. `EDU=0` turns all of it off with E3 and E4; `FAMILIES=0` turns off the families alone. With families off
+the branch plays exactly as main on the Commons (`ab.ts`: the same citizens, speeds, give-ups and trips on seed 1 at
+08:00 and 17:00).
+
+### Families moving in (`sim/families.ts`)
+
+- **Who.** `Families.join(c, home, travelling)` runs once the first grown-up of an arrival is in town:
+  `Simulation.arriveVia` (a gateway) and `spawnCitizen` (in place). With chance `EDU.familyShare` (0.2, by a hash of
+  c's id, so no random numbers are drawn) c brings a partner and 1-3 children (`EDU.familyKids` 45/40/15%), as many as
+  the home's free beds allow (newcomers already queued for it keep theirs). A home with no bed for a partner and a child
+  gets c alone (`stats.noRoom`).
+- **Ages.** The children are 0-15, evenly spread. The grown-ups are `EDU.familyParentGap` (21) to 27 years older than
+  the eldest: c is made older to fit (a later birthday never lowers what their education allows) and the partner is
+  within four years of c. The partner is a newcomer like c (`Skills.newcomer`: the open-skilled-places tilt).
+- **The trip.** From a gateway the family comes with c: in c's own car (the inbound drive of `migrate` now carries a
+  carpool token, so `takeLift` works as for any household lift, three seats), or walking beside c on the same path. With
+  c in a taxi, or with no seat left, the others are at the door already. Children and students moving in no longer
+  look for a job on arrival (`migrantHome`).
+- **Not during a fast fill** (`World.filling`): the demos seed their families before the fill (`seedDemoFamilies`), and
+  a town filled with families would start with a fifth fewer workers than its jobs were laid out for.
+- **Demand.** Children take beds and no jobs, so residential demand counts the grown-ups:
+  `jobs - (population - children) + 6` (`Simulation.growth`, `Simulation.children` from `recomputeStats`). Commercial
+  demand still counts everyone.
+- **Parents' moods** (`Families.homeParts`, an input of `happinessParts`): "good school nearby" +3 when every child at
+  home aged 4-17 has a place, "no school place" -4 when one has none, and E6's "free school meals" +2
+  (`POLICY.mealsMood`) when one of them is on free school meals (`Schools.onMeals`).
+
+### Students from outside, halls of residence (`sim/learning.ts`)
+
+- **The intake.** At 06:00 each university (any school with stage `Degree` and places, London's four landmarks
+  included) asks for students for its free places: at most `EDU.intakePerDay` (6%) of its places a day, up to its
+  staffed places (`admitting`), or `1 - POLICY.feeDeter` of them with tuition fees on. Each gets a bed first: the
+  nearest hall of residence within `EDU.hallsReach` (30) with one free, else a home with room within
+  `EDU.studentHomeReach` (25) of the campus. Then a newcomer is queued at a gateway with a tag
+  (`Gateways.request(home, jitter, tag)`, released over the next twelve hours; `arriveVia` passes the tag to
+  `Learning.student`). With no gateway, or during a fast fill, they move straight in.
+- **On arrival** they are 18-20 with A-levels (`EDU.intakeAge`, `intakeSpan`) and enrol on a degree through `enrolAt`;
+  a student turned away there (fees: E6's hashed 30%) does not come (`stats.turnedAway`). They travel in like any
+  newcomer and look for no job.
+- **Halls** (kind 108, `beds` 80) stay civic, family code 14, so the kind keeps its place in the education group: its
+  `occupants` are its two staff and its residents are `Building.lodgers`. `World.bedIn(b, n)` counts a resident in or
+  out of either (`removeCitizen`, `moveHome`, the snapshot loader, which rebuilds `lodgers` from the citizens).
+  `spawn()` never fills a hall (it is not residential), a partner never moves in (`cohabit`), and a hall resident has
+  no family life there (`lifeFamily`). A hall's residents count in its parcel's population and in its building panel.
+  At 03:00 a resident at home who no longer studies (graduated, failed, dropped out), or whose hall has gone, moves to
+  the nearest home with room within `LIFE.moveOutRadius`, or leaves town.
+
+### Adult learning (the `learning` policy, now `live`)
+
+Read at the owner of the FE college (`World.ownerHasPolicy(x, y, 'learning')`). The 03:00 batch:
+
+- **FE courses** (`Study.FeCourse`): an adult out of work for `EDU.feIdleDays` (2) days below Level 3 enrols with chance
+  `EDU.feTakeUp` (0.5) a day at the nearest college within its catchment with a day place (shared with its 16-18s).
+- **Evening classes** (`Study.Evening`): a worker below GCSEs whose working day runs from 05:00 and ends by 17:15
+  enrols with chance `EDU.eveningTakeUp` (0.2) a day on the college's evening places. `Schools` now counts them apart
+  (`School.evening`, `admitting(s, Study.Evening)` = `eveningPlaces × staffing`; `schoolTakes` lets an FE college take
+  `Evening`), and the inspect block gains `evening`, `eveningPlaces` and `eveningAdmitting`. At 17:30 on a school day
+  each learner gets their own minute between 17:45 and 18:15 (`EDU.eveningGo`, `eveningSpread`, by hash per day); at
+  home, well and not due at work within three hours, they make a venue trip to the college with `errand`
+  `ERRAND_CLASS` (2), stay until 20:30 and a few minutes (`EDU.eveningEnd`), and the evening counts as attended when
+  they leave (`att++`). Not home yet: they look again every ten minutes until 19:00, then it is missed. The panel says
+  "on the way to an evening class", "at an evening class". A learner who loses their job leaves the class.
+- **Finishing.** An adult course ends when `att` reaches its `days` (4 for FE, 6 evenings): `Schools.finish(c)` rolls
+  the pass at the college (`pass × quality`). `Schools.result` now raises an adult course one level only, to the
+  stage's cap (FE to Level 3, evening to GCSEs). The Saturday results also end a course whose days held reached its
+  days. A worker who moved up takes a skilled place at their own workplace if one is free (`Skills.promote`).
+- **Cost.** The college's owner pays `POLICY.learnerPerDay` ($1) a learner a day. With the policy off, the courses close
+  at the next 03:00 (`Left`).
+
+### Apprenticeships (the `apprentice` policy, now `live`)
+
+Read at the owner of the workplace. At 03:00 a worker under `EDU.apprMaxAge` (25) below Level 3 at an industrial or yard
+workplace whose owner has the policy starts with chance `EDU.apprTakeUp` (0.3) a day, while the workplace has fewer than
+`ceil(capacity × POLICY.apprenticeShare)` (10%) apprentices. `Citizen.appr` counts the shifts (it is saved with the
+citizen, absent for everyone else). `payWage` calls `Learning.shift`: the owner pays `POLICY.apprenticeWageShare` (20%)
+of the wage, and after 8 shifts (`STAGES[Study.Apprentice]`) the apprentice holds Level 3 in the trades track, logged
+as an `apprenticeship` (`Study.Apprentice` 9 is a log stage and a `STAGES` row only, never a `Citizen.study`), and may
+take a skilled place where they work. Leaving the job, a workplace that does not train, or the policy off ends it
+(`Left`). The citizen panel shows the apprenticeship as a step with a progress bar (`CitizenEducation.apprentice`).
+
+### Research ambition and the E6 hooks
+
+- A research institute (stage 7, no places) with staff lets merged offices within `EDU.researchReach` (20, Manhattan)
+  grow one level above their neighbourhood's ambition (`Learning.lift(b)`, added in `growth` and `planMerge`; the
+  institute list is refreshed hourly).
+- Brain drain: in `lifeFamily` a graduate's leaving chance is multiplied by `Schools.drainMul(c)` (tuition fees on at
+  the owner of their home: ×1.5) as well as `Skills.drainMul`.
+
+### The probe
+
+`npx tsx packages/server/src/loadtest/learning.ts [--districts 2] [--days 14] [--seed 1] [--policies learning,apprentice,meals] [--fees 1]`:
+the schools probe's city with no one seeded, plus a motorway connection, so every child and student comes with the
+newcomers. Jobs outnumber people there, so nobody stays out of work: once the FE college has staff the probe lays off
+twenty workers below Level 3 (as if two days ago) for the FE courses. 30 of 30 checks with the policies on, 18 of 18
+with `--policies none`, 30 of 30 with fees, 6 of 6 with `EDU=0` (beds, lodgers and staff match the citizens, no child
+works, parents are 18+ years older, halls never over their beds, learners below their course's level, apprentices
+within 10% of a workplace's places, research lifts exactly the offices in reach, saves keep lodgers and apprentices).
+Seed 1, 14 days (2026-10-19):
+
+| | policies on | `--policies none` | fees on |
+| --- | --- | --- | --- |
+| citizens | 5,494 | 5,514 | 5,558 |
+| families moved in | 620 of 4,507 arrivals (13.8%; 230 more had no bed) | 624 (13.4%) | 620 (13.1%) |
+| children now | 1,119 (20.4%): 0-4 344, 5-9 311, 10-14 319, 15-17 145 | 1,125 (20.4%) | 1,122 (20.2%) |
+| from the gate | 1,072 rode in the family car, 569 at the door | 1,135 / 531 | 1,072 / 579 |
+| students from outside | 115 asked, 89 came (80 to the halls, full) | 63 asked, 50 came | 135 asked, 86 came, 42 turned away |
+| FE courses | 5 begun (of 20 laid off), 3 passed, 1 failed | 0 | 6 |
+| evening classes | 34 enrolled; 102 trips, 86 evenings attended, 17 missed; up to 13 in class | 0 | 28 |
+| apprentices | 30 begun, 1 finished Level 3, 25 training | 0 | 18 begun, 2 finished |
+| owner paid | learners $206, apprentices' wages $555 | 0 | $123, $371 |
+| parents' moods | good school 423, no place 632, free meals 562 | 502 / 591 / - | 453 / 624 / 602 |
+| brain drain | 340 | 382 | 426 |
+
+The family share lands at 13-14% of arrivals because a fifth are drawn and the small homes often lack the beds. An
+apprenticeship takes 10-12 game days: industrial workers miss shifts (illness, late starts), so 8 paid shifts come at
+about one a day and a half, the "1.5 game weeks" of section 5.
+
+E3's `schools.ts` (19 of 19), E1/E4's `education.ts` (30 of 30), E6's `policies.ts` (34 of 34), `history:check`,
+`buildings:check` and `demo:check` pass. With families the 1×1 Commons of `education.ts` has fewer workers for its jobs
+(shops 76% filled, industry 39%, offices 36%, against E4's 80/52/40), as children take beds; nobody is unemployed.
+
+### Demos (`demo:check --fill --run 1`, main 967d3e8 against `edu-e5`)
+
+| | showcase main | showcase E5 | London main | London E5 |
+| --- | --- | --- | --- | --- |
+| citizens | 16,530 | 16,525 | 31,950 | 32,138 |
+| under 18 | 301 | 356 | 797 | 1,202 |
+| employed / jobs filled (offices) | 16,079 / 98% | 15,958 / 97% | 30,897 / 43% | 30,684 / 42% |
+| university students | 52 | 131 (80 from outside, in the halls) | 88 | 111 (35 from outside, in homes near the campuses) |
+| families moving in after the fill | | 35 (92 more had no bed) | | 286 (331 more had no bed) |
+| tick, last game day (avg / p95) | 19.7 / 29.9 ms | 20.5 / 32.1 ms | 46.7 / 79.3 ms | 47.2 / 75.6 ms |
+
+The demos' owners have no adult-learning or apprenticeship policy on, so those stay at zero there.
+
+### Tick cost and traffic (`loadtest/ab.ts --ticks 3000`, the 1×1 Commons, no schools)
+
+Serial and interleaved, main 967d3e8 against `edu-e5`, seed 1, median of 3 (of 5 for the second 17:00 set):
+
+| | main | E5 | E5, `FAMILIES=0` |
+| --- | --- | --- | --- |
+| 08:00, sim ms per tick | 0.900 | 0.936 (+4%) | 0.881 |
+| 17:00 | 0.889 | 1.002 (+13%) | 0.857 |
+| 17:00, second set of five | 0.864 | 0.961 (+11%) | 0.817 |
+
+E5's machinery costs nothing measurable: with families off the branch matches main, trip for trip. The cost is the
+children (about 18% of the Commons' people with families on) living their lives with the existing child code: outings
+with a parent, lifts, walks beside them. Timing each step of `Simulation.tick` puts the extra in `moveVehicles` and the
+traffic step (+19%), not in the citizens' own updates (+2%) or anything E5 added. That is over the 5% target of section
+8 at 17:00. Traffic gets lighter, because a home with children sends fewer commuters out:
+
+| seed | 08:00 give-ups main / E5 | cars mean / peak | speed | 17:00 give-ups | cars mean / peak |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 491 / 441 | 103.7/204 → 95.4/182 | 29.0 → 30.7% | 589 / 586 | 105.7/175 → 105.0/191 |
+| 2 | 485 / 438 | 105.0/202 → 95.4/165 | 29.5 → 31.5% | 619 / 562 | 109.2/183 → 103.3/173 |
+| 3 | 498 / 445 | 99.6/176 → 99.6/178 | 30.7 → 31.0% | 567 / 544 | 105.1/203 → 106.9/179 |
+| 4 | 533 / 397 | 105.5/192 → 93.6/165 | 28.9 → 31.8% | 581 / 471 | 109.3/177 → 97.9/162 |
+
+Trips in the window fall by 10-19% (fewer workers per home); the citizens are within 8% of main on every seed.
+
+**On record for later tuning: what families cost.** Accepted for E5 (2026-10-19): with families on, the Commons runs
++4% sim ms per tick at 08:00 and +11-13% at 17:00, over section 8's 5% target. The cause is not E5's code (with
+`FAMILIES=0` the branch matches main trip for trip) but the population it brings: about 18% children, who run the child
+behaviour that already existed (going out with a parent, `bringCompany`; riding along in the family car, `rideToVenue`
+and the carpool lifts; walking beside a grown-up). Timing each step of `Simulation.tick` puts the extra in
+`moveVehicles` and the traffic step (+19%); the citizens' own updates rise 2%. The evening window costs most because that
+is when parents take children out. Levers, if it needs tuning: `LIFE.childJoins` (setting it to 0 took about 5% off at
+17:00 in one interleaved check), `EDU.familyShare`, `EDU.familyKids`, or the carpool's passenger handling.

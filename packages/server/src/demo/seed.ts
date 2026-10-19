@@ -252,9 +252,9 @@ export const DEMO_FAMILIES = { max: 450, share: 0.8, ages: [3, 18] as const, bab
 
 /**
  * Families for a demo that has schools (docs/education.md section 9, docs/demo.md "Schools in the demos"): a showcase
- * school is no use empty, and newcomers arrive as adults (the families of E5 are not built, and the couples who settle
- * have no school-age children for years). Before the fill, homes within the catchment of a placed primary school take two adults and one to three children, 15% of them under three, the rest aged 3 to 17
- * (the shape E5's family newcomers will have), up to `DEMO_FAMILIES.max` families (one for every four beds, each by
+ * school is no use empty, and E5's families (sim/families.ts) do not move in while a demo fast-fills (the couples who
+ * settle have no school-age children for years). Before the fill, homes within the catchment of a placed primary school take two adults and one to three children, 15% of them under three, the rest aged 3 to 17
+ * (about the shape of E5's family newcomers), up to `DEMO_FAMILIES.max` families (one for every four beds, each by
  * chance, from a seeded stream, so the same town gets the same families). The adults find work at once. A demo with no school gets nothing, so the other demos play
  * as before. Returns the families and children made.
  */

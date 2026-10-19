@@ -12,6 +12,7 @@ import {
   TICKS_PER_DAY, TICKS_PER_HOUR, CitizenState as S, Terrain, EduLevel, Study, POLICY, POLICIES, POLICY_BY_ID, TECH, hash2,
   KIND_NAMES, capacityOf, familyOf, subFor, packTile, terrainOf, isRoad, planStructure, tileKey, SCHOOL_SPECS, DEFAULT_TAX, FleetKind, SCHOOLBUS,
   type ServerMsg,
+  ECONOMY_TUNING,
 } from '@msimcity/shared';
 import { World, emptyStats, type Building, type Citizen } from '../world';
 import { Simulation } from '../sim/simulation';
@@ -167,9 +168,9 @@ log(`Policies probe: ${districts}×${districts} districts, seed ${seed}, ${place
   conn.say({ t: 'setPolicy', id: 'meals' }); // no `on`: off, which it already is
   ok(!p.policies?.length, 'a message without `on` turns nothing on');
   p.tech = ['civ1', 'edu1', 'edu2'];
-  p.money = POLICY_BY_ID.get('meals')!.setup - 1;
+  p.money = POLICY_BY_ID.get('meals')!.setup - 1 - ECONOMY_TUNING.overdraftLimit; // the overdraft line counts (sim/finance.ts)
   conn.say({ t: 'setPolicy', id: 'meals', on: true });
-  ok(!p.policies?.length && p.money === POLICY_BY_ID.get('meals')!.setup - 1 && /Need \$120/.test(last()), `edu2 but short of the $120 fee: refused, nothing charged (${last()})`);
+  ok(!p.policies?.length && p.money === POLICY_BY_ID.get('meals')!.setup - 1 - ECONOMY_TUNING.overdraftLimit && /Need \$120/.test(last()), `edu2 but short of the $120 fee with the overdraft: refused, nothing charged (${last()})`);
   conn.say({ t: 'setPolicy', id: 'learning', on: true });
   p.money = 1000;
   conn.say({ t: 'setPolicy', id: 'learning', on: true });

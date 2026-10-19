@@ -7,6 +7,7 @@ import { TICKS_PER_DAY, TICKS_PER_HOUR, TICK_MS, chunkKey, chunkOf, isRoad, pack
 import { emptyStats } from '../world';
 import { World } from '../world';
 import { Simulation } from '../sim/simulation';
+import { Issues } from '../sim/issues';
 import { Net } from '../net';
 import { seedCity, DISTRICT, type CityLayout } from './cities';
 import { layBusNetwork } from './ab';
@@ -95,6 +96,7 @@ export async function main(argv: string[]) {
   for (const id of w.parcels.keys()) w.recountRoads(id);
   if (a.gateways) log(`[loadtest] motorway connections: ${placeMotorways(w).join(', ') || 'none placed'}`);
   const sim = new Simulation(w);
+  const issues = new Issues(w, sim); // issue bubbles (sim/issues.ts), as game.ts runs them: part of the sim time below
   busNets.forEach((net, di) => net.lines.forEach((stops, i) => {
     const r = sim.transit.saveLine('sys', { number: di * 2 + i + 1, colour: i ? 0x2f8fd6 : 0xd94f4f, stops, loop: i === 0, vehicles: a.bus });
     if (typeof r === 'string') throw new Error(`district ${di} line ${i + 1}: ${r}`);
@@ -124,7 +126,7 @@ export async function main(argv: string[]) {
   let prevPop = 0, flat = 0, hours = 0, fillTicks = 0;
   w.filling = true; // newcomers move straight in while the city fills (sim/gateways.ts), as in a test city
   for (; fillTicks < maxFill; fillTicks++) {
-    sim.tick();
+    sim.tick(); issues.tick();
     net.flush();
     if (w.tick % TPH !== 0) continue;
     hours++;
@@ -156,11 +158,12 @@ export async function main(argv: string[]) {
     await new Promise<void>((r) => session!.post('Profiler.enable', () => session!.post('Profiler.start', () => r())));
   }
   const tm = performance.now();
+  issues.ms = 0; issues.ticks = 0;
   for (let i = 0; i < N; i++) {
     const before = g.__pfCalls ? g.__pfCalls.findRoute : 0, beforeB = g.__pfCalls ? g.__pfCalls.findPath + g.__pfCalls.findBest : 0;
     const va = viewWs.agentBytes, ca = cityWs.agentBytes, da = distWs.agentBytes, co = cityWs.otherBytes, dO = distWs.otherBytes;
     const t0 = performance.now();
-    sim.tick();
+    sim.tick(); issues.tick();
     const t1 = performance.now();
     net.flush();
     const t2 = performance.now();
@@ -179,6 +182,7 @@ export async function main(argv: string[]) {
     if (i % 100 === 0) heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed);
   }
   const measureMs = performance.now() - tm;
+  log(`[loadtest] issue bubbles: ${(issues.ms / Math.max(1, issues.ticks)).toFixed(3)} ms per tick on average (${issues.ticks} ticks)`);
   if (session) {
     const prof = await new Promise<unknown>((r, j) => session!.post('Profiler.stop', (err, res) => (err ? j(err) : r(res.profile))));
     mkdirSync(dirname(resolve(a.profile!)), { recursive: true });

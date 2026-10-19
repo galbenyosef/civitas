@@ -154,7 +154,7 @@ export class Rail extends Timetabled {
     });
     if (!plan.ok) return { ok: false, msg: plan.reason ?? 'Track cannot go there' };
     if (!plan.tiles!.length) return { ok: true, msg: 'That track is already there' };
-    if (p.money < plan.cost!) return { ok: false, msg: `Need $${plan.cost} for that track` };
+    if (this.w.spendable(p) < plan.cost!) return { ok: false, msg: this.w.shortOf(p, plan.cost!, 'for that track') };
     const tl = plan.tiles!;
     for (let i = 0; i < tl.length; i += 3) {
       const x = tl[i], y = tl[i + 1], t = this.w.getTile(x, y);

@@ -1,4 +1,13 @@
-import { MeshLambertMaterial, Texture } from 'three';
+import { MeshLambertMaterial, Texture, DataTexture, RedFormat, UnsignedByteType, NearestFilter, RepeatWrapping } from 'three';
+
+/** Side of the data overlay's map (render/overlayMap.ts): one texel per tile, wrapped, so the streamed window (well under this) never needs re-centring. */
+export const OVL_SIZE = 1024;
+/** The data overlay's bytes (shared/src/issues.ts overlayByte, 0 no data) for the loaded chunks, texel (x mod OVL_SIZE, y mod OVL_SIZE). */
+export const overlayTexture = (() => {
+  const t = new DataTexture(new Uint8Array(OVL_SIZE * OVL_SIZE), OVL_SIZE, OVL_SIZE, RedFormat, UnsignedByteType);
+  t.magFilter = t.minFilter = NearestFilter; t.wrapS = t.wrapT = RepeatWrapping; t.generateMipmaps = false; t.needsUpdate = true;
+  return t;
+})();
 
 /**
  * Uniforms shared by every scene material. uNight is 0 by day and 1 at night,
@@ -16,6 +25,9 @@ export const sceneUniforms = {
   uUnder: { value: 0 },
   /** 1: windows below a pixel draw their class's average (WINDOWS, far windows); 0 always draws every pane (for comparing) */
   uFarWin: { value: 1 },
+  /** the data overlay (client/src/overlays.ts): 0 off, 1 a sequential ramp, 2 a diverging one; ground and buildings read uOvlMap */
+  uOvl: { value: 0 },
+  uOvlMap: { value: overlayTexture as Texture },
 };
 export const nightUniform = sceneUniforms.uNight;
 
@@ -512,9 +524,9 @@ export function buildingMaterial() {
   vOrigin = (modelMatrix * o).xz;
 }`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>' + FRAG_PARS + 'uniform float uUnder;')
+      .replace('#include <common>', '#include <common>' + FRAG_PARS + 'uniform float uUnder;' + OVL_PARS)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + WINDOWS)
-      .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + GHOST);
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + BUILDING_OVL + GHOST);
   };
   m.customProgramCacheKey = () => 'msc-windows';
   return m;
@@ -584,6 +596,47 @@ if (vRoad > 0.5 && uNight > 0.001) {
   totalEmissiveRadiance += lamp * min(1.0, uNight * 1.5) * diffuseColor.rgb * 2.0;
 }`;
 
+/**
+ * The data overlays (shared/src/issues.ts): colour-blind safe ramps, in output (sRGB) space since they are painted after
+ * tone mapping. Sequential: a viridis fit (dark violet, teal, yellow); diverging: orange, pale, blue.
+ */
+const OVL_PARS = /* glsl */ `
+uniform float uOvl;
+uniform sampler2D uOvlMap;
+vec3 mscViridis(float t) {
+  const vec3 c0 = vec3(0.2777273272234177, 0.005407344544966578, 0.3340998053353061);
+  const vec3 c1 = vec3(0.1050930431085774, 1.404613529898575, 1.384590162594685);
+  const vec3 c2 = vec3(-0.3308618287255563, 0.214847559468213, 0.09509516302823659);
+  const vec3 c3 = vec3(-4.634230498983486, -5.799100973351585, -19.33244095627987);
+  const vec3 c4 = vec3(6.228269936347081, 14.17993336680509, 56.69055260068105);
+  const vec3 c5 = vec3(4.776384997670288, -13.74514537774601, -65.35303263337234);
+  const vec3 c6 = vec3(-5.435455855934631, 4.645852612178535, 26.3124352495832);
+  return c0 + t * (c1 + t * (c2 + t * (c3 + t * (c4 + t * (c5 + t * c6)))));
+}
+vec3 mscDiverge(float t) {
+  vec3 lo = vec3(0.90, 0.46, 0.05), mid = vec3(0.93, 0.92, 0.86), hi = vec3(0.13, 0.40, 0.80);
+  return t < 0.5 ? mix(lo, mid, t * 2.0) : mix(mid, hi, (t - 0.5) * 2.0);
+}
+/** the overlay byte of a tile (0 no data, else 1-255), from the wrapped map */
+float mscOvlAt(vec2 tile) { return texture2D(uOvlMap, (mod(tile, ${OVL_SIZE}.0) + 0.5) / ${OVL_SIZE}.0).r * 255.0; }
+vec3 mscOvlRamp(float b) { float v = clamp((b - 1.0) / 254.0, 0.0, 1.0); return uOvl < 1.5 ? mscViridis(v) : mscDiverge(v); }`;
+
+/** Data overlay on the ground: land tiles with data take the ramp over the lit result (reads the same day and night); the rest go grey. */
+const GROUND_OVL = /* glsl */ `
+if (uOvl > 0.5 && vRoad < 16.0) {
+  float b = mscOvlAt(floor(vWorldP.xz));
+  float l = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+  gl_FragColor.rgb = b > 0.5 ? mix(vec3(l), mscOvlRamp(b), 0.8) : mix(gl_FragColor.rgb, vec3(l), 0.7) * 0.85;
+}`;
+
+/** The same on buildings, by the tile their instance stands on, keeping some of the lit shading so shapes still read. */
+const BUILDING_OVL = /* glsl */ `
+if (uOvl > 0.5) {
+  float b = mscOvlAt(floor(vOrigin));
+  float l = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+  gl_FragColor.rgb = b > 0.5 ? mscOvlRamp(b) * (0.55 + 0.7 * clamp(l, 0.0, 0.8)) : vec3(0.35 + 0.5 * l);
+}`;
+
 /** Congestion overlay: painted over the lit result so it reads the same by day and night. */
 const HEAT = /* glsl */ `
 if (uHeat > 0.5 && vRoad >= 16.0) {
@@ -602,9 +655,9 @@ export function groundMaterial(atlas: Texture) {
       .replace('#include <begin_vertex>', '#include <begin_vertex>\n vRoad = aRoad; vHeat = aHeat;')
       .replace('#include <project_vertex>', '#include <project_vertex>\n vWorldP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>' + GROUND_FRAG_PARS)
+      .replace('#include <common>', '#include <common>' + GROUND_FRAG_PARS + OVL_PARS)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + LAMPS)
-      .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + HEAT + GROUND_UNDER);
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + HEAT + GROUND_OVL + GROUND_UNDER);
   };
   m.customProgramCacheKey = () => 'msc-ground';
   return m;

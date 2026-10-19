@@ -58,13 +58,42 @@ export interface PlayerDTO {
   devUnlimited?: boolean;
   /** money in and out by game day (World.credit); sent at most once a game hour, absent in between (keep the last one) */
   ledger?: LedgerDTO;
+  /** the overdraft and administration (server sim/finance.ts); present while the treasury is below zero, the player is in
+   *  administration or has services mothballed, absent otherwise (and from older servers) */
+  fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', builders: "Builders' fees",
-  build: 'Construction', land: 'Land', tech: 'Technology', other: 'Other',
+  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', other: 'Other',
 };
+/**
+ * Money that can run out (docs/start-from-zero.md B3): the overdraft line, the count of midnights below zero, and
+ * administration with its recovery plan. The figures are the server's estimates, worked out at most once a game hour.
+ */
+export interface FinanceDTO {
+  /** how far below zero spending may go (ECONOMY_TUNING.overdraftLimit on the server) */
+  limit: number;
+  /** midnights in a row the treasury was below zero; administration begins at `after` */
+  days: number; after: number;
+  /** interest a day on the balance now (a share of it, charged at midnight) */
+  interest: number;
+  /** the game day administration began; absent: not in administration */
+  admin?: number;
+  /** what each recovery action would do (the `recover` message) */
+  plan: RecoveryPlanDTO;
+}
+export interface RecoveryPlanDTO {
+  /** raise tax to `taxRate` on `taxParcels` parcels now below it: about `taxPerDay` more a day at yesterday's takings */
+  taxRate: number; taxParcels: number; taxPerDay: number;
+  /** sell land back: parcels of yours with nothing on them, their tiles and what they fetch now */
+  sellParcels: number; sellTiles: number; sellCash: number;
+  /** mothball services: how many of yours are open and what they cost a day (upkeep and your share of wages); how many are mothballed */
+  mothball: number; mothballPerDay: number; mothballed: number;
+}
+/** The recovery plan's actions (sim/finance.ts); `keys` ("x,y" of a building's door) mothballs or reopens those buildings only. */
+export type RecoverAction = 'tax' | 'sell' | 'mothball' | 'unmothball';
 /** A player's money movements per category for the current game day so far and the whole of the day before. */
 export interface LedgerDTO { day: number; today: Partial<Record<LedgerCat, number>>; yesterday: Partial<Record<LedgerCat, number>> }
 export interface ChunkDTO {
@@ -167,6 +196,10 @@ export interface BuildingInfo {
   workers?: { total: number; onShift: number; commuting: number; offDuty: number; drivers: number; shifts: [string, number][] };
   wage?: number;
   upkeep?: number;
+  /** a service or builders' yard its owner has mothballed (sim/finance.ts): no staff, no upkeep, no coverage */
+  mothballed?: boolean;
+  /** the viewer owns it and may mothball or reopen it */
+  mothballable?: boolean;
   visitors?: number;
   visitorCapacity?: number;
   /** builders' yard: sites its crews are on right now */
@@ -228,6 +261,8 @@ export interface SchoolInfo {
   passed: number; failed: number; droppedOut: number;
   /** children of this stage nearest here with no place anywhere in reach, at the last admissions */
   waiting: number;
+  /** an FE college: learners on evening classes, its evening places and those its teachers let it fill (E5) */
+  evening?: number; eveningPlaces?: number; eveningAdmitting?: number;
 }
 
 /** An airport terminal's runway and timetable, for its tooltip. Ticks are absolute game ticks. */
@@ -438,6 +473,8 @@ export interface CitizenEducation {
   };
   /** finished stages, oldest first (at most EDU.logMax); week = game week it ended; result: EDU_RESULT_NAMES */
   history: { stage: number; place: string; week: number; result: number }[];
+  /** an apprentice (E5): share of the apprenticeship done at their workplace, 0-1 */
+  apprentice?: number;
   /** went to nursery, dropped out of a stage */
   nursery?: boolean;
   droppedOut?: boolean;
@@ -484,8 +521,12 @@ export type ClientMsg =
   | { t: 'unlock'; id: string }
   /** switch an education policy (policies.ts) on or off for the schools on your parcels */
   | { t: 'setPolicy'; id: string; on: boolean }
-  /** dev servers only (ignored in production): unlimited funds toggle, a cash grant, or every technology */
-  | { t: 'dev'; action: 'unlimited' | 'money' | 'tech'; on?: boolean }
+  /** the recovery plan (sim/finance.ts, docs/start-from-zero.md B3): raise tax, sell empty land back, mothball or reopen
+   *  services; `keys` ("x,y" doors) limits mothball/unmothball to those buildings, otherwise every service of yours */
+  | { t: 'recover'; action: RecoverAction; keys?: string[] }
+  /** dev servers only (ignored in production): unlimited funds toggle, a cash grant (`amount`, default $100,000; negative takes
+   *  money away, for economy runs from a lower start), or every technology */
+  | { t: 'dev'; action: 'unlimited' | 'money' | 'tech'; on?: boolean; amount?: number }
   | { t: 'ping'; n: number }
   /** a train's tooltip (sim/rail.ts); `full` adds who and what is on board (the selected train's panel) */
   | { t: 'inspectTrain'; line: number; train: number; full?: boolean }
@@ -501,7 +542,10 @@ export type ClientMsg =
   /** the charts panel (docs/charts.md): open (answered with 'history', then an hourly 'histSample' follows) or closed */
   | { t: 'hist'; open: boolean }
   /** a boat's panel (docs/boats.md section 7): what the server knows beyond the schedule; answered with 'boat' */
-  | { t: 'inspectBoat'; id: number };
+  | { t: 'inspectBoat'; id: number }
+  // ---- issue bubbles and overlays (shared/src/issues.ts, server/src/sim/issues.ts) ----
+  /** the data overlay to send for the subscribed chunks (Overlay: 1 coverage, 2 leisure, 3 happiness, 4 jobs/homes; 0 none) */
+  | { t: 'overlay'; ch: number };
 
 export type ServerMsg =
   | { t: 'welcome'; you: string; seed: number; day: number; /** a frontier start (docs/first-five.md section 0) and its road end, where the goals' "show me" looks */ start?: 'frontier'; home?: [number, number]; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
@@ -554,7 +598,14 @@ export type ServerMsg =
   | { t: 'histSample'; hour: number; w: number[]; p: number[] }
   /** every harbour with its lanes, and the sea gates (docs/boats.md 6.5): on hello and whenever anything changes, always a new list */
   | { t: 'harbours'; list: HarbourDTO[]; gates: SeaGate[] }
-  | { t: 'boat'; id: number; info: BoatInfo | null };
+  | { t: 'boat'; id: number; info: BoatInfo | null }
+  // ---- issue bubbles and overlays (shared/src/issues.ts, server/src/sim/issues.ts) ----
+  /** per chunk: base64 Uint8Array(CHUNK_SIZE^2) of issue codes (Issue, at a building's door tile); '' when the chunk has none. On subscribe and when the chunk's codes change */
+  | { t: 'issues'; cx: number; cy: number; d: string }
+  /** your own parcels' problems, flat triples x, y, code: on hello, then when they change (at most every ISSUE_TUNING.problemsHours) */
+  | { t: 'problems'; p: number[] }
+  /** per chunk: the overlay you asked for, base64 Uint8Array(CHUNK_SIZE^2) (overlayByte; 0 no data), sent when it changes */
+  | { t: 'overlay'; ch: number; cx: number; cy: number; d: string };
 
 /**
  * A harbour on the wire (server sim/harbours.ts): what the boat schedule reads (boats.ts BoatHarbour: id, kind, the

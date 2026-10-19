@@ -43,3 +43,4 @@ export * from './boats';
 export * from './ferry';
 export * from './education';
 export * from './policies';
+export * from './issues';

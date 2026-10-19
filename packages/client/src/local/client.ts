@@ -93,6 +93,12 @@ export class LocalGame {
   }
   async listSaves() { return (await this.request('listSaves')).saves as SaveMeta[]; }
   load(slot: string) { return this.request('load', { slot }); }
+  /** the administration panel's way out (client finance.ts): load the newest autosave; the page reloads into it */
+  async restartFromAutosave() {
+    const auto = (await this.listSaves()).filter((s) => /^auto-/.test(s.slot)).sort((a, b) => b.savedAt - a.savedAt);
+    if (!auto.length) throw new Error('No autosave to start again from');
+    await this.load(auto[0].slot);
+  }
   deleteSave(slot: string) { return this.request('deleteSave', { slot }); }
   rename(slot: string, label: string) { return this.request('rename', { slot, label }); }
   /** the running city: day, citizens, pause/speed state (answered once the game is up) */

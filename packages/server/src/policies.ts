@@ -13,7 +13,7 @@ export function setPolicy(w: World, p: Player, id: string, on: boolean): { ok: b
   if (has === on) return { ok: true, msg: `${def.name} is already ${on ? 'on' : 'off'}` };
   if (on) {
     if (!hasFeature(p.tech, def.feature)) return { ok: false, msg: `${def.name} needs ${techFor(def.feature)?.name ?? TECH_BY_ID.get(def.feature)?.name ?? 'more technology'} first` };
-    if (p.money < def.setup) return { ok: false, msg: `Need $${def.setup} to enact ${def.name}` };
+    if (w.spendable(p) < def.setup) return { ok: false, msg: w.shortOf(p, def.setup, `to enact ${def.name}`) };
     w.credit(p.id, -def.setup, 'other');
     p.policies = [...(p.policies ?? []), def.id];
   } else {

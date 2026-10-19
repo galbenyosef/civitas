@@ -8,7 +8,7 @@ import {
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
   isBridgeAux, planBridge, joinsBridgeSide, BRIDGE_STYLE_NAMES, type BridgePlan,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
-  isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND,
+  isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -22,6 +22,10 @@ import { Onboarding } from './goals';
 import { historyOf, type History } from './history';
 import { MapSummaries } from './worldmap';
 import { setPolicy } from './policies';
+import { mothballable, adminRefusal, type Finance } from './sim/finance';
+import type { Issues } from './sim/issues';
+import { Overlays } from './overlays';
+import { ISSUE_TUNING, OVERLAY_COUNT } from '@msimcity/shared';
 
 interface Client {
   conn: Conn; player: Player | null; subs: Set<string>; lastHint: number;
@@ -31,6 +35,8 @@ interface Client {
   goalsSig?: string;
   /** the charts panel is open (history.ts): it gets each hourly sample */
   hist?: boolean;
+  /** issue bubbles (flushIssues): the last problems list sent; the overlay channel asked for, a hash of what each chunk last got, chunks still to look at */
+  probSig?: string; ovl?: number; ovlSent?: Map<string, number>; ovlQueue?: string[];
 }
 
 /** tool id -> kind id, from the building catalogue: zoning tools for growable kinds, placement tools for civic ones.
@@ -40,7 +46,7 @@ const TOOL_CIVIC: Record<string, number> = CIVIC_TOOLS;
 const HINT_EVERY = 1200;
 /** Lots of yours waiting with no builder on them before the hourly check says why (builderHints), and how often it may. */
 const WAITING_HINT = 8;
-const BUILDER_HINT_EVERY = TICKS_PER_HOUR * 24;
+const BUILDER_HINT_EVERY = TICKS_PER_HOUR * 24 * 3; // the issue bubbles show waiting sites all the time now (sim/issues.ts)
 /** Onboarding goals are measured this often (a quarter of a game hour). */
 const GOALS_EVERY = TICKS_PER_HOUR / 4;
 /** How this game is run, set by its host (index.ts for the server; a local-mode worker later, docs/local-mode.md). */
@@ -57,7 +63,7 @@ export interface GameConfig {
  * What a spectator may still ask: looking, never changing. A whitelist, so an intent added to ClientMsg later is refused in
  * spectate mode until it is listed here. (hello and ping are answered before this, as for everyone.)
  */
-const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map', 'inspectBoat']);
+const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map', 'inspectBoat', 'overlay']);
 const SPECTATE_REFUSAL = 'Read-only showcase: you can look around, but nothing can be changed here';
 const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) => k.tool!.id));
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
@@ -87,6 +93,8 @@ export class Net {
   ferry: Ferry | null = null;
   /** harbours (sim/harbours.ts): the 'harbours' message, harbour tooltips, boat panels, a cargo port's sea check; set by game.ts */
   harbours: Harbours | null = null;
+  /** the overdraft, administration and the recovery plan (sim/finance.ts); set by game.ts */
+  finance: Finance | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
   tickStats: { avg: number; p95: number; max: number } | null = null;
   /** game ticks per TICK_MS of wall time, sent with the stats message when it is not 1 so the client's clock follows a paused or
@@ -143,9 +151,12 @@ export class Net {
     if (m.t === 'ping') return this.send(c, { t: 'pong', n: m.n });
     if (!c.player) return;
     if (this.cfg.spectate && !READ_ONLY.has(m.t)) return this.toast(c, SPECTATE_REFUSAL);
+    // administration (sim/finance.ts): building, buying, zoning, roads, research and lines stop; bulldozing, parcel
+    // settings and the recovery plan still work
+    if (c.player.admin) { const no = adminRefusal(m); if (no) return this.toast(c, no); }
     switch (m.t) {
       case 'sub': return this.subscribe(c, m.chunks);
-      case 'unsub': for (const [cx, cy] of m.chunks) c.subs.delete(chunkKey(cx, cy)); return;
+      case 'unsub': for (const [cx, cy] of m.chunks) { c.subs.delete(chunkKey(cx, cy)); c.ovlSent?.delete(chunkKey(cx, cy)); } return;
       case 'buy': return this.buy(c, m.x, m.y, m.w, m.h);
       case 'build': return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
       case 'parcel': return this.editParcel(c, m.id, m.taxRate, m.name, m.color);
@@ -159,7 +170,8 @@ export class Net {
       }
       case 'unlock': return this.unlock(c, String(m.id));
       case 'setPolicy': { const r = setPolicy(this.w, c.player, String(m.id), m.on === true); return this.toast(c, r.msg, r.ok ? 'info' : undefined); }
-      case 'dev': return this.dev(c, m.action, m.on);
+      case 'recover': return this.recover(c, m.action, m.keys);
+      case 'dev': return this.dev(c, m.action, m.on, m.amount);
       case 'sites': return this.siteList(c, m.id);
       case 'priority': return this.setPriority(c, m.x, m.y, m.priority);
       case 'inspectTrain': return this.send(c, { t: 'train', line: Number(m.line), train: Number(m.train), info: this.rail?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.metro?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.ferry?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? null });
@@ -168,6 +180,7 @@ export class Net {
       case 'hist': return this.histOpen(c, m.open === true);
       case 'goals': case 'hint': this.onboarding?.command(c.player, m); return this.goals(c);
       case 'inspectBoat': return this.send(c, { t: 'boat', id: Number(m.id), info: this.harbours?.inspectBoat(Number(m.id)) ?? null });
+      case 'overlay': return this.setOverlay(c, Number(m.ch));
     }
   }
 
@@ -187,7 +200,7 @@ export class Net {
   }
 
   /** Testing aids, only on a non-production server: unlimited funds, a cash grant, every technology. */
-  private dev(c: Client, action: string, on?: boolean) {
+  private dev(c: Client, action: string, on?: boolean, amount?: number) {
     if (!this.cfg.devTools) return this.toast(c, 'Dev tools are off on this server');
     const p = c.player!;
     if (action === 'unlimited') {
@@ -196,7 +209,11 @@ export class Net {
       this.w.playersDirty = true;
       return this.toast(c, p.devUnlimited ? 'Unlimited funds on' : 'Unlimited funds off', 'info');
     }
-    if (action === 'money') { this.w.credit(p.id, 100_000, 'other'); return this.toast(c, 'Granted $100,000', 'info'); }
+    if (action === 'money') {
+      const n = typeof amount === 'number' && Number.isFinite(amount) ? Math.round(amount) : 100_000;
+      this.w.credit(p.id, n, 'other');
+      return this.toast(c, `${n >= 0 ? 'Granted' : 'Took away'} $${Math.abs(n).toLocaleString('en-GB')}`, 'info');
+    }
     if (action === 'tech') {
       p.tech = [...new Set([...p.tech, ...ALL_TECH_IDS])];
       this.w.techVersion++;
@@ -233,6 +250,7 @@ export class Net {
     if (this.ferry) this.send(c, { t: 'ferryLines', lines: this.ferry.dtos() });
     if (this.harbours) this.send(c, this.harbours.msg());
     c.goalsSig = undefined; this.goals(c);
+    c.probSig = undefined; this.problemsTo(c);
   }
 
   /** Spectate: a visitor's player record (made by their hello) goes when their last socket closes, so a public showcase's saves do not
@@ -329,6 +347,7 @@ export class Net {
       const traffic = this.trafficBytes(cx, cy);
       const kerb = this.kerbBytes(cx, cy);
       if (traffic || kerb) this.send(c, { t: 'traffic', cx, cy, d: u8ToB64(traffic ?? new Uint8Array(0)), ...(kerb ? { k: u8ToB64(kerb) } : {}) });
+      this.issuesOnSub(c, key);
       // everyone already moving in this chunk, since later frames only carry changes
       const out: number[] = [];
       for (const a of this.sim.agents()) {
@@ -347,12 +366,20 @@ export class Net {
     if (t.locked) return this.toast(c, `${t.name}: ${t.locked}`); // unlock rule still to be decided (tech.ts): sandboxes and dev only
     for (const r of t.requires) if (!p.tech.includes(r)) return this.toast(c, `${t.name} needs ${TECH_BY_ID.get(r)?.name ?? r} first`);
     if (p.progress[t.condition.counter] < t.condition.min) return this.toast(c, `${t.name} is not available yet`);
-    if (p.money < t.cost) return this.toast(c, `Need $${t.cost} to unlock ${t.name}`);
+    if (this.w.spendable(p) < t.cost) return this.toast(c, this.w.shortOf(p, t.cost, `to unlock ${t.name}`));
     this.w.credit(p.id, -t.cost, 'tech');
     p.tech.push(id);
     this.w.techVersion++;
     this.w.playersDirty = true;
     this.toast(c, `Unlocked ${t.name}`, 'info');
+  }
+
+  /** The recovery plan (sim/finance.ts): raise tax, sell empty land back, mothball or reopen services. */
+  private recover(c: Client, action: RecoverAction, keys?: string[]) {
+    if (!this.finance) return;
+    if (action !== 'tax' && action !== 'sell' && action !== 'mothball' && action !== 'unmothball') return;
+    const r = this.finance.recover(c.player!, action, Array.isArray(keys) ? keys.map(String) : undefined);
+    this.toast(c, r.msg, r.ok ? 'info' : 'error');
   }
 
   /** The feature a tool needs, checked against the player's technology; null when allowed. */
@@ -369,7 +396,7 @@ export class Net {
     x = Math.floor(x); y = Math.floor(y); w = Math.floor(w); h = Math.floor(h);
     if (!(w >= 1 && h >= 1 && w <= MAX_PARCEL_EDGE && h <= MAX_PARCEL_EDGE)) return this.toast(c, `Parcels are 1–${MAX_PARCEL_EDGE} tiles per side`);
     const cost = w * h * LAND_PRICE_PER_TILE;
-    if (p.money < cost) return this.toast(c, `Need $${cost} for that land`);
+    if (this.w.spendable(p) < cost) return this.toast(c, this.w.shortOf(p, cost, 'for that land'));
     let land = 0;
     for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
       if (this.w.parcelIdAt(xx, yy) !== 0) return this.toast(c, 'That land overlaps an existing parcel');
@@ -467,7 +494,7 @@ export class Net {
       }
       if (tool in TOOL_CIVIC && isMultiTile(TOOL_CIVIC[tool])) {
         // one structure per click: the clicked tile is its door
-        if (zoned = this.placeStructure(c, TOOL_CIVIC[tool], x, y, p.money - spent, rot)) spent += CIVIC_COST[TOOL_CIVIC[tool]];
+        if (zoned = this.placeStructure(c, TOOL_CIVIC[tool], x, y, this.w.spendable(p) - spent, rot)) spent += CIVIC_COST[TOOL_CIVIC[tool]];
         break;
       }
       if (tool === 'road') {
@@ -547,7 +574,7 @@ export class Net {
           apply = () => { this.sim.start.campCleared(x, y); this.w.setTile(x, y, packTile(terrainOf(t), false, 0, 0)); }; // a camp's people find beds nearby first (sim/firstfive.ts)
         }
       } else return;
-      if (p.money - spent < cost) { this.toast(c, 'Not enough money'); break; }
+      if (this.w.spendable(p) - spent < cost) { this.toast(c, this.w.shortOf(p, spent ? null : cost)); break; }
       spent += cost;
       const wasRoad = isRoad(t);
       apply();
@@ -558,15 +585,15 @@ export class Net {
       const z = TOOL_ZONE[tool];
       let inner = 0;
       for (const [x, y] of interiorLots(this.w, zonedAt, z, p.id)) {
-        if (p.money - spent < ZONE_COST) break;
+        if (this.w.spendable(p) - spent < ZONE_COST) break;
         spent += ZONE_COST; inner++;
         this.w.setTile(x, y, packTile(terrainOf(this.w.getTile(x, y)), false, familyOf(z), 0), subFor(z));
       }
       if (inner) this.toast(c, `Also zoned ${inner} lot${inner === 1 ? '' : 's'} in the middle of the block: the buildings beside ${inner === 1 ? 'it grow back into it' : 'them grow back into them'}`, 'info');
     }
     for (const run of wet) {
-      if (p.money - spent < 0) break;
-      const r = this.bridge(c, run, tiles, dev, p.money - spent);
+      if (this.w.spendable(p) - spent < 0) break;
+      const r = this.bridge(c, run, tiles, dev, this.w.spendable(p) - spent);
       if (!r) continue;
       spent += r.cost!;
       for (let i = 0; i < r.tiles!.length; i += 3) { const q = this.w.parcelIdAt(r.tiles![i], r.tiles![i + 1]); if (q) recount.add(q); }
@@ -615,7 +642,7 @@ export class Net {
     });
     if (!plan.ok) { this.toast(c, plan.reason ?? 'A bridge cannot go there'); return null; }
     if (!plan.tiles!.length) return null;
-    if (budget < plan.cost!) { this.toast(c, `Need $${plan.cost} for that bridge`); return null; }
+    if (budget < plan.cost!) { this.toast(c, this.w.shortOf(p, plan.cost!, 'for that bridge')); return null; }
     this.w.placeBridge(plan.tiles!);
     this.w.bump(p.id, 'roads', plan.tiles!.length / 3);
     this.toast(c, `${BRIDGE_STYLE_NAMES[plan.style!][0].toUpperCase()}${BRIDGE_STYLE_NAMES[plan.style!].slice(1)} built for $${plan.cost}: ${run.length} tile${run.length === 1 ? '' : 's'} over the water`, 'info');
@@ -638,7 +665,7 @@ export class Net {
       },
     }, rot);
     if (!verdict.ok) { this.toast(c, verdict.reason); return false; }
-    if (budget < CIVIC_COST[kind]) { this.toast(c, 'Not enough money'); return false; }
+    if (budget < CIVIC_COST[kind]) { this.toast(c, this.w.shortOf(p, CIVIC_COST[kind], `for the ${KIND_NAMES[kind]}`)); return false; }
     const sea = this.harbours?.placeProblem(verdict.placed); // a cargo port on a lake that never reaches the sea
     if (sea) { this.toast(c, sea); return false; }
     // a metro hall lays its platform under the door (sim/metro.ts), along the street its front faces
@@ -673,7 +700,7 @@ export class Net {
       land: (x, y) => { const q = this.w.parcelAt(x, y); return q ? (this.mayEdit(p, q.owner) ? null : 'Not your land') : 'Buy this land first'; },
     });
     if (!plan.ok) return this.toast(c, plan.reason ?? 'A runway cannot go there');
-    if (p.money < plan.cost!) return this.toast(c, `Need $${plan.cost} for that runway`);
+    if (this.w.spendable(p) < plan.cost!) return this.toast(c, this.w.shortOf(p, plan.cost!, 'for that runway'));
     const tl = plan.tiles!;
     for (let i = 0; i < tl.length; i += 3) {
       const x = tl[i], y = tl[i + 1], t = this.w.getTile(x, y);
@@ -701,7 +728,7 @@ export class Net {
     };
     const plan = tool === 'roundabout' ? planRoundabout(x, y, env) : planFlyover(x, y, env);
     if (!plan.ok) return this.toast(c, plan.reason ?? `A ${tool} cannot go there`);
-    if (p.money < plan.cost!) return this.toast(c, `Need $${plan.cost} for that ${tool}`);
+    if (this.w.spendable(p) < plan.cost!) return this.toast(c, this.w.shortOf(p, plan.cost!, `for that ${tool}`));
     const swap = tool === 'flyover' && isJunctionAux(this.w.auxAt(x, y));
     this.w.placeJunction(plan.tiles!);
     const touched = new Set<number>();
@@ -818,6 +845,8 @@ export class Net {
     if (info && isMetroStationKind(b!.id) && this.metro) info.metro = this.metro.describeStation(dx, dy);
     if (info && isFerryPierKind(b!.id) && this.ferry) info.ferry = this.ferry.describeStation(dx, dy);
     if (info && isHarbourId(b!.id) && this.harbours) info.harbour = this.harbours.describe(b!);
+    if (info && this.w.mothballed.has(`${dx},${dy}`)) info.mothballed = true;
+    if (info && mothballable(b!) && this.w.parcelAt(dx, dy)?.owner === c.player?.id) info.mothballable = true;
     this.send(c, { t: 'building', x, y, info });
   }
 
@@ -1050,6 +1079,12 @@ export class Net {
         if (n.msg.startsWith('Newcomers are moving')) this.hint(c, 'newcomers', n.msg); else this.toast(c, n.msg, 'info');
       }
     }
+    // the overdraft and administration (sim/finance.ts): advisor hints and toasts for the owner, at midnight
+    if (this.finance?.notices.length) {
+      for (const n of this.finance.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) {
+        if (n.hint) this.hint(c, n.hint, n.msg); else this.toast(c, n.msg, 'info');
+      }
+    }
     // onboarding goals, measured a few times a game hour
     if (this.onboarding && w.tick % GOALS_EVERY === 0) for (const c of this.clients) this.goals(c);
     // congestion, lot occupancy and kerb cars, per chunk that changed
@@ -1068,6 +1103,7 @@ export class Net {
         for (const [key, p] of payload) if (c.subs.has(key)) { const [cx, cy] = parseKey(key); this.send(c, { t: 'traffic', cx, cy, ...p }); }
       }
     }
+    this.flushIssues();
     // citizens and vehicles: only what changed, bucketed by chunk; a Home-state quad removes an agent
     const buckets = new Map<string, number[]>();
     const seen = new Set<number>();
@@ -1111,7 +1147,96 @@ export class Net {
   }
 
   get connections() { return this.clients.size; }
+
+  // ---- issue bubbles, the problems list and the overlays (sim/issues.ts, overlays.ts, shared/src/issues.ts) ----------
+
+  /** set by game.ts; without it (load tests, older hosts) none of this runs */
+  issues: Issues | null = null;
+  private overlays: Overlays | null = null;
+  private problemsAt = -Infinity; private problemsVer = -1;
+  /** overlay bytes worked out this period, shared by every client asking for the same chunk and channel */
+  private ovlCache = new Map<string, { d: string; sig: number }>(); private ovlPeriod = -1;
+
+  private issueMsg(key: string) {
+    const [cx, cy] = parseKey(key), b = this.issues!.chunkBytes(key);
+    return JSON.stringify({ t: 'issues', cx, cy, d: b ? u8ToB64(b) : '' } satisfies ServerMsg);
+  }
+  /** A chunk just subscribed: its icons, and the overlay when one is on. */
+  private issuesOnSub(c: Client, key: string) {
+    if (!this.issues) return;
+    if (this.issues.chunks.has(key) && c.conn.open) c.conn.send(this.issueMsg(key));
+    if (c.ovl) (c.ovlQueue ??= []).push(key);
+  }
+  /** Your own parcels' problems, when they differ from what you last got. */
+  private problemsTo(c: Client, by = this.issues?.byOwner()) {
+    if (!c.player || !by) return;
+    const p = by.get(c.player.id) ?? [];
+    const sig = p.join(',');
+    if (sig === c.probSig) return;
+    c.probSig = sig;
+    this.send(c, { t: 'problems', p });
+  }
+  /** The overlay channel a client wants (0 none): every subscribed chunk is looked at again. */
+  private setOverlay(c: Client, ch: number) {
+    if (!this.issues) return;
+    c.ovl = Number.isInteger(ch) && ch > 0 && ch < OVERLAY_COUNT ? ch : 0;
+    c.ovlSent = new Map();
+    c.ovlQueue = c.ovl ? [...c.subs] : [];
+  }
+  /** After every tick: changed icon planes, problem lists that changed (at most once per problemsHours), overlay chunks a few at a time. */
+  private flushIssues() {
+    const w = this.w, is = this.issues;
+    if (!is) return;
+    if (w.tick % TRAFFIC_EVERY === 0 && is.dirty.size) {
+      const out = new Map<string, string>();
+      for (const key of is.dirty) out.set(key, this.issueMsg(key));
+      is.dirty.clear();
+      for (const c of this.clients) if (c.player && c.conn.open) for (const [key, msg] of out) if (c.subs.has(key)) c.conn.send(msg);
+    }
+    const P = Math.max(1, Math.round(ISSUE_TUNING.problemsHours * TICKS_PER_HOUR));
+    if (is.version !== this.problemsVer && w.tick - this.problemsAt >= P) {
+      this.problemsVer = is.version; this.problemsAt = w.tick;
+      const by = is.byOwner();
+      for (const c of this.clients) this.problemsTo(c, by);
+    }
+    let anyOvl = false;
+    for (const c of this.clients) if (c.ovl) { anyOvl = true; break; }
+    if (!anyOvl) return;
+    const period = Math.floor(w.tick / P);
+    if (period !== this.ovlPeriod) {
+      this.ovlPeriod = period; this.ovlCache.clear();
+      for (const c of this.clients) if (c.ovl) c.ovlQueue = [...c.subs];
+    }
+    this.overlays ??= new Overlays(w, this.sim, is);
+    let budget = OVERLAY_CHUNKS_PER_TICK;
+    for (const c of this.clients) {
+      const q = c.ovlQueue;
+      if (!c.ovl || !q || !c.player || !c.conn.open) continue;
+      while (q.length && budget > 0) {
+        const key = q.shift()!;
+        if (!c.subs.has(key)) continue;
+        const ck = `${c.ovl}:${key}`;
+        let hit = this.ovlCache.get(ck);
+        if (!hit) {
+          budget--;
+          const [cx, cy] = parseKey(key);
+          const b = this.overlays.bytes(c.ovl, cx, cy);
+          hit = b ? { d: u8ToB64(b), sig: fnv(b) } : { d: '', sig: 0 };
+          this.ovlCache.set(ck, hit);
+        }
+        if (c.ovlSent?.get(key) === hit.sig) continue;
+        c.ovlSent?.set(key, hit.sig);
+        const [cx, cy] = parseKey(key);
+        this.send(c, { t: 'overlay', ch: c.ovl, cx, cy, d: hit.d });
+      }
+    }
+  }
 }
+
+/** overlay chunks worked out per tick across all clients (each is a few thousand array writes) */
+const OVERLAY_CHUNKS_PER_TICK = 24;
+/** FNV-1a over a chunk's bytes: whether a client already has them */
+function fnv(b: Uint8Array) { let h = 0x811c9dc5; for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 0x01000193); } return h >>> 0 || 1; }
 
 // kept for shard routing work later
 void isGrowable; void localIndex;
