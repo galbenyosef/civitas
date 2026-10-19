@@ -588,6 +588,18 @@ its largest cost, and the doc only reports it.
 - **The wire.** A client joined London at 12:00 (`--client-at 12`). Main and the branch sent it the same 13,160 frames,
   150,141,531 bytes in all, with the same hash (`a72a8293`). The 2×2 city gives the same result, both with the client
   there from the start and with it joining at 12:00.
+- **Saves.** A save of the filled London has the same content on both builds: 45,040,019 bytes each, every value equal,
+  and everything other than the citizens byte for byte the same. The files are not byte-identical, though. In 1,604 of
+  the 30,840 citizens the late fields come in a different order (main writes them in the order that citizen happened to
+  get them, for example `mig` before `skill`). A loaded world saved again also has the same content on both builds
+  (44,312,174 bytes), but every citizen's keys start with `id` on the branch. Byte-identical files and one hidden class
+  cannot both be had: main's key order records each citizen's history. If identical files matter, `snapshotOf` could
+  write citizens' keys in a fixed order, which would change main's files once. On the 2×2 city the fresh saves happen
+  to be byte-identical.
+- **Old saves load.** Four saves written by main were loaded on both builds and played for a quarter of a day, with the
+  same fingerprints on every tick: the dev world and the UAT world (format 8, about 1,880 citizens; 3.75 → 0.61 ms and
+  4.75 → 0.92 ms a tick), the showcase demo (format 8, 17,283 citizens; 19.8 → 17.2 ms) and the civic demo (format 7,
+  10,491 citizens; 8.7 → 7.6 ms). Main's London save loaded on the branch plays the same as on main (above).
 - **ab.ts** on the Commons gives the same JSON on main and the branch, apart from the timings, for five setups: the
   defaults; `--hour 17 --ticks 2400 --set bus=2`; `ring=1,signalActuated=1`;
   `laneByLength=1,boxByCommit=0,crossingLag=0,pedBehind=1,boxClear=2`; and `old=1`.
@@ -627,6 +639,21 @@ took 50.0 ms while the machine was busier, and it is left out.
 | --- | --- | --- |
 | whole day mean / p95 | 139.09 / 210.90 ms | 20.62 / 34.09 ms |
 | 08:00–09:00 / 17:00–18:00 | 145.58 / 165.26 ms | 23.60 / 28.55 ms |
+
+**From one save** (`--load`): main wrote a save of the filled London. Each build then loaded that same file and played
+a day from it (`--mode tprof --load`, no wrappers). Median of three runs each, interleaved from 21:11 to 21:28, loads
+3.4–6.5 at their starts. This is the number that predicts prod, which always runs from a save:
+
+| London loaded from main's save | main mean / p95 | branch mean / p95 | |
+| --- | --- | --- | --- |
+| 08:00–09:00 | 137.67 / 192.93 ms | 21.36 / 28.81 ms | 6.4× |
+| 17:00–18:00 | 150.44 / 217.72 ms | 25.74 / 35.44 ms | 5.8× |
+| whole day | 127.62 / 188.97 ms | 18.87 / 31.19 ms | 6.8× |
+| network flush, day | 30.24 ms | 3.45 ms | |
+
+The runs were 125.33, 127.62 and 132.25 ms on main and 18.87, 18.85 and 19.08 ms on the branch. A `hash` run of the
+same day from the same file gives the same fingerprints on both builds (`80ee1ed8` to `1bff9c75`, 32,197 citizens at
+the end).
 
 On main, a London that has been saved and loaded runs 3.8 times slower than the same London before saving: 139 against
 36.5 ms. That is about what prod shows, 124 ms with 53k citizens. It has not been measured on prod.
@@ -682,6 +709,7 @@ part has to run with or without clients, or the first frame a later client gets 
   `SEARCH_HOOK_EXPANDED=1`.
 - `tools/search-rs/`: the Rust spike (`cargo run --release -- CORPUS_DIR`).
 - `packages/server/src/loadtest/traffic-probe.ts`: `searchprof.ts --mode tcount | tprof | hash`, with `--client`,
-  `--client-at H` and `--reload` (the traffic step's methods, rush-hour CPU profiles, the per-tick fingerprint).
+  `--client-at H`, `--reload`, `--save`, `--resave` and `--load` (the traffic step's methods, rush-hour CPU profiles,
+  the per-tick fingerprint).
 - `packages/server/src/loadtest/shapes.ts`: the movers' hidden classes after a fill, a save and load, and a day on.
 - `packages/server/src/loadtest/hypot-check.ts`: traffic.ts `hypot` against `Math.hypot`.
