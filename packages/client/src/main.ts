@@ -41,6 +41,8 @@ import { UI } from './ui';
 import { ContextMenu } from './contextmenu';
 import { Onboarding } from './onboarding';
 import { CameraMoment } from './moment';
+import { RanksUI } from './ranks';
+import { Fireworks } from './render/fireworks';
 import { LinesPanel } from './lines';
 import { ChartsPanel } from './charts';
 import { PolicyPanel } from './policies';
@@ -345,6 +347,10 @@ const onboarding = new Onboarding({ net, world, liveTick, tool: (t) => input.set
   moment: (x, y, caption) => { if (!tour && !mapMode.on) moment.play(x, y, caption); },
   focus: (x, y) => { following = false; rig.target.set(x + 0.5, 0, y + 0.5); rig.dist = Math.min(Math.max(rig.dist, 30), 60); }, openTech: () => { ui.toggleTech(true); ui.showTech(world.myPlayer); } });
 ui.onHint = (id) => onboarding.hint(id);
+// settlement ranks (ranks.ts, docs/ranks.md): the rank chip and card, the milestone feed, fireworks on a rank-up
+const fireworks = new Fireworks(); scene.add(fireworks.group);
+const ranks = new RanksUI({ net, world, liveTick, fireworks, moment: (x, y, caption, o) => { if (!tour && !mapMode.on) moment.play(x, y, caption, o); } });
+scene.add(ranks.group);
 net.on('railLines', (m) => { trains.setLines(m.lines); rail.setLines(m.lines); });
 // underground lines (docs/underground.md): their trains run in the bores, and the bores take the lines' colours
 const metroMeta = new Map<number, MetroLineDTO>(); // the metro lines as sent, for station names on a cab ride
@@ -1177,6 +1183,7 @@ function frame(now: number) {
   airfield.frame();
   parks.frame(clock.day);
   landmarks.frame((vehTick * 24) / TICKS_PER_DAY);
+  if (fireworks.active) fireworks.frame(dt);
   bridges.frame(landmarks.fixedHours ?? (vehTick * 24) / TICKS_PER_DAY); // Tower Bridge's gates, on the lift schedule the leaves keep
   fpv.update(now, dt, routeInfo?.id === selectedCitizen ? routeInfo.route ?? null : null);
   if ((following || fpv.mode === 'full') && selectedCitizen) {
@@ -1227,7 +1234,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { moment, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------
@@ -1256,6 +1263,7 @@ if (demoParam) {
   tour = new TourPanel({
     demo: demoParam, net, rig, scene, buildingHtml: (info) => ui.buildingHtml(info, 'h3'),
     chipMount: document.getElementById('techBtn')!, onFly: () => { following = false; }, setUnder: (on) => setUnder(on), setMap: (on) => mapMode.set(on, false),
+    celebrate: (x, y) => ranks.preview(x, y),
   });
   (window as any).msc.tour = tour;
 }

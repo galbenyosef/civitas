@@ -91,6 +91,8 @@ interface Deps {
   setUnder?: (on: boolean) => void;
   /** the world map (mapmode.ts), on at a stop with `view: 'map'` and off again after it; the tour flies the camera itself */
   setMap?: (on: boolean) => void;
+  /** a stop with `view: 'ranks'`: play the rank-up celebration over tile (x, y) (ranks.ts preview) */
+  celebrate?: (x: number, y: number) => void;
 }
 
 export class TourPanel {
@@ -182,6 +184,7 @@ export class TourPanel {
     const under = s.view === 'under', map = s.view === 'map';
     if (under !== this.under) { this.d.setUnder?.(under); this.under = under; }
     if (map !== this.map) { this.d.setMap?.(map); this.map = map; }
+    if (s.view === 'ranks') setTimeout(() => this.d.celebrate?.(s.focus[0], s.focus[1]), instant ? 0 : FLY_S * 1000);
     this.live = null;
     this.autoAt = performance.now() + (instant ? 0 : FLY_S * 1000) + DWELL_S * 1000;
     if (!this.open) this.setOpen(true); else this.show();

@@ -12,7 +12,7 @@ const FLY_S = 1.8, HOLD_S = 4.5, TURN = 0.35; // seconds out and back, seconds h
 const TAU = Math.PI * 2;
 
 export class CameraMoment {
-  private run: { at: number; from: View; to: View } | null = null;
+  private run: { at: number; from: View; to: View; hold: number } | null = null;
   private cap = document.createElement('div');
 
   constructor(private rig: CameraRig, private onStart: () => void = () => {}) {
@@ -35,12 +35,15 @@ export class CameraMoment {
 
   get active() { return !!this.run; }
 
-  /** Look at tile (x, y) for a few seconds with `caption`, then return. */
-  play(x: number, y: number, caption: string) {
+  /**
+   * Look at tile (x, y) for a few seconds with `caption`, then return. `opts` (a rank-up, client/src/ranks.ts): a wider
+   * view (`dist`, `pitch`) held for `hold` seconds.
+   */
+  play(x: number, y: number, caption: string, opts: { dist?: number; pitch?: number; hold?: number } = {}) {
     const r = this.rig;
     const from: View = { x: r.target.x, z: r.target.z, dist: r.dist, yaw: r.yaw, pitch: r.pitch };
-    const to: View = { x: x + 1, z: y + 1, dist: 11, yaw: r.yaw + 0.25, pitch: 0.66 };
-    this.run = { at: performance.now(), from, to };
+    const to: View = { x: x + 1, z: y + 1, dist: opts.dist ?? 11, yaw: r.yaw + 0.25, pitch: opts.pitch ?? 0.66 };
+    this.run = { at: performance.now(), from, to, hold: opts.hold ?? HOLD_S };
     this.cap.innerHTML = `${esc(caption)}<small>any key or click to carry on</small>`;
     this.cap.className = '';
     this.onStart();
@@ -57,8 +60,8 @@ export class CameraMoment {
     if (!m) return;
     const t = (performance.now() - m.at) / 1000;
     if (t < FLY_S) this.place(m.from, m.to, t / FLY_S);
-    else if (t < FLY_S + HOLD_S) this.place(m.to, { ...m.to, yaw: m.to.yaw + TURN }, (t - FLY_S) / HOLD_S, false);
-    else if (t < 2 * FLY_S + HOLD_S) { this.cap.className = 'hidden'; this.place({ ...m.to, yaw: m.to.yaw + TURN }, m.from, (t - FLY_S - HOLD_S) / FLY_S); }
+    else if (t < FLY_S + m.hold) this.place(m.to, { ...m.to, yaw: m.to.yaw + TURN }, (t - FLY_S) / m.hold, false);
+    else if (t < 2 * FLY_S + m.hold) { this.cap.className = 'hidden'; this.place({ ...m.to, yaw: m.to.yaw + TURN }, m.from, (t - FLY_S - m.hold) / FLY_S); }
     else { this.place(m.from, m.from, 1); this.stop(); }
   }
 

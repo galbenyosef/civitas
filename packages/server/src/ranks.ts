@@ -47,6 +47,9 @@ const usd = (n: number) => `$${Math.round(n).toLocaleString('en-GB')}`;
  * charter: the holder may buy beyond the charter only from the rank that opens it, and nobody else inside the City ring.
  */
 export class Ranks {
+  /** this tick's measurement per player, so every tab a player has open gets the same rank-up and milestones */
+  private last = new Map<string, { tick: number; r: { msg: ServerMsg & { t: 'rank' }; sig: string } }>();
+
   constructor(private w: World) {}
 
   /** The player's ranks, derived from their town on first use (an older save, or a new player: Camp). */
@@ -93,6 +96,13 @@ export class Ranks {
    * charter. Returns the `rank` message and a signature of what it shows, so net sends it only when it changed.
    */
   check(p: Player): { msg: ServerMsg & { t: 'rank' }; sig: string } {
+    const seen = this.last.get(p.id);
+    if (seen && seen.tick === this.w.tick) return seen.r;
+    const r = this.measureNow(p);
+    this.last.set(p.id, { tick: this.w.tick, r });
+    return r;
+  }
+  private measureNow(p: Player): { msg: ServerMsg & { t: 'rank' }; sig: string } {
     const s = this.state(p), w = this.w;
     // the books, once a finished day
     const L = w.ledgerDTO(p);

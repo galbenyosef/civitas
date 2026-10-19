@@ -94,7 +94,8 @@ export class Onboarding {
     const g = this.goals;
     if (!g) return;
     const def = g.active ? GOAL_BY_ID.get(g.active) : undefined;
-    const n = g.done.length, total = GOALS.length;
+    const skip = this.d.world.start === 'frontier' && g.done.includes('plot') ? 1 : 0; // a frontier's charter claims the plot before the card is seen
+    const n = g.done.length - skip, total = GOALS.length - skip;
     this.chip.classList.remove('hidden');
     this.chip.classList.toggle('on', !g.skipped && !this.collapsed && !!def);
     this.chip.textContent = g.skipped ? 'goals' : def ? `goals ${n}/${total}` : 'goals ✓';

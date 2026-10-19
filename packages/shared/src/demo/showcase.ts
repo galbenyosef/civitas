@@ -1,6 +1,7 @@
 import { KIND_ID, MANIFEST, type KindToolId } from '../buildings/compiled';
 import { MOTORWAY_KIND } from '../gateways';
 import { ZONE_COST, MAX_PARCEL_EDGE } from '../constants';
+import { RANKS } from '../ranks';
 import type { KindManifest } from '../buildings/schema';
 import type { Tool } from '../protocol';
 import { STOP_KINDS, TRANSIT, type TransitMode } from '../transit';
@@ -86,7 +87,8 @@ export interface DemoBridge { id: string; name: string; from: DemoXY; to: DemoXY
 export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: DemoXY; deck?: 'ew' | 'ns' }
 /** A tour stop on something that is neither a kind nor a drag (a level crossing, the river): its caption is SPOT_CAPTIONS[spot]. */
 /** `view`: the tour turns the underground view ('under') or the world map ('map', docs/world-map.md) on at this stop */
-export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' }
+/** `view` 'ranks': the stop plays a rank-up celebration over the rect (client ranks.ts preview, docs/ranks.md) */
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks' }
 /** Land parcels (by their `land` names, any section's) combined into one estate by the players' rule (parcelops.ts planCombine) */
 export interface DemoEstate { name: string; lands: readonly string[] }
 export interface DemoLine {
@@ -443,6 +445,8 @@ export const SECTIONS: DemoSection[] = [
       { id: 'level-crossing', spot: 'level-crossing', name: 'Level crossing', rect: [-20, 38, 1, 1], inspect: [-30, 35] },
       // the whole town from above, on the world map
       { id: 'world-map', spot: 'world-map', name: 'World map', rect: [-60, -60, 130, 140], view: 'map' },
+      // settlement ranks (docs/ranks.md): the stop plays a rank-up's fireworks over the middle of the town
+      { id: 'ranks', spot: 'ranks', name: 'Settlement ranks', rect: [-14, -14, 28, 28], view: 'ranks' },
     ],
     // the railway land and the quarter beyond it: together 70×26, past the 48-tile parcel edge, so an estate (not a merge)
     estates: [{ name: 'Riverside estate', lands: ['South railway', 'Riverside'] }],
@@ -597,7 +601,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'ranks' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'cab-office': {
     title: 'Cab office',
@@ -640,6 +644,12 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     what: 'Helicopters land on the helipads drawn on buildings: air ambulances at the hospitals, the police helicopter at police headquarters, executive flights on the tallest offices (the headquarters and the office tower across the river), and the royal flight at Buckingham Palace in the London demo. The timetable is worked out from the pads alone, so everyone sees the same flights.',
     how: 'Nothing to build: a hospital, police headquarters or tall office whose design has a pad brings its service. Hover a helicopter for its callsign and errand, click it for its crew, and press I or O to ride in the cockpit.',
     facts: [['Air ambulance', '2-5 flights a pad a day, some go on to a second hospital'], ['Police', '2-3 a day, an hour or more on the pad'], ['Executive', '1-3 a day, some hop between towers'], ['Royal', 'Buckingham Palace (London demo)']],
+  },
+  ranks: {
+    title: 'Settlement ranks',
+    what: `A town works its way up from ${RANKS.map((r) => r.name).join(' to ')}. Each rank has needs measured on the player's own land (residents, jobs filled, shops, a park, police and fire cover, two-storey streets, days in the black, schools or a bus line), pays a charter grant when it is reached and, on a frontier, grows the free charter by a ring of land. The rank chip in the top bar shows the next rank's progress; its card lists the needs and a milestone feed, and each rank reached is celebrated with fireworks over the town, every shell its own. This stop plays a celebration over the town: the showcase is a sandbox, so it has no ranks of its own.`,
+    how: 'Play a live world or a local game: the rank chip appears beside the treasury. Follow the goals card for the first hour; the rank card takes its place once the chain is done.',
+    facts: RANKS.slice(1).map((r): [string, string] => [r.name, `${r.needs.map((q) => `${q.target.toLocaleString('en-GB')} ${q.label}`).join(', ')}; $${r.grant.toLocaleString('en-GB')}, ${r.side}×${r.side} on a frontier`]),
   },
   'world-map': {
     title: 'The world map',
@@ -714,8 +724,9 @@ export interface TourStop {
   /** the tile to ask the server about for live stats */
   inspect?: DemoXY;
   line?: { mode: TransitMode; number: number; colour: number };
-  /** 'under': the tour turns the underground view on at this stop (a metro line, a spot under ground); 'map': the world map */
-  view?: 'under' | 'map';
+  /** 'under': the tour turns the underground view on at this stop (a metro line, a spot under ground); 'map': the world map;
+   *  'ranks': a rank-up celebration plays over the stop (docs/ranks.md) */
+  view?: 'under' | 'map' | 'ranks';
 }
 
 const kindIdOf = (s: string): number => (KIND_ID as Record<string, number>)[s] ?? 0;
@@ -1049,6 +1060,9 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
     id: spot, caption: `a ${name.toLowerCase()} at (${x}, ${y}) (a mobile-job base)`, tour: spot,
     seeded: (d) => anyTile(d, (tx, ty, t, a) => tx === x && ty === y && mobileRoleAt(spot, x, y, t, a)),
   })),
+  // ---- settlement ranks (docs/ranks.md): a sandbox has none, so the tour stop plays the celebration over the town
+  { id: 'settlement-ranks', caption: 'settlement ranks (a rank-up celebration over the town)', tour: 'ranks',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'ranks' && sp.view === 'ranks')) },
   // ---- the world map (docs/world-map.md): its tour stop, and an estate (two parcels combined) for it to show
   { id: 'world-map', caption: 'the world map over the whole town, with an estate of combined parcels', tour: 'world-map',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'world-map' && sp.view === 'map')) && ss.some((s) => s.estates?.length),

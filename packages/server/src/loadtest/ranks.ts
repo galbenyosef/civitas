@@ -144,12 +144,14 @@ const ownedBy = (w: World, r: { x: number; y: number; w: number; h: number }, id
   meet(world, p, 1, ch.x + 2, ch.y + 2); meet(world, p, 2, ch.x + 2, ch.y + 8); // a village's town
   p.progress.housed = RANKS[2].needs[0].target + 5;
   delete p.ranks; // as a save from before ranks has it
+  world.tick += 5; // (a later tick: one tick's measurement is shared by all of a player's tabs)
   const m0 = p.money;
   const a2 = client('Old');
-  ok(p.ranks?.rank === 2 && a2.last()?.rank.rank === 2, `a player with no rank record derives it from the town: ${RANKS[p.ranks?.rank ?? 0].name}`);
+  const rk = () => world.players.get('old')!.ranks; // (not p.ranks: the delete above narrowed it)
+  ok(rk()?.rank === 2 && a2.last()?.rank.rank === 2, `a player with no rank record derives it from the town: ${RANKS[rk()?.rank ?? 0].name}`);
   ok(p.money === m0 && !a2.last()?.up, 'without a grant or a celebration');
   ok(ownedBy(world, charterRing(ch, 2), 'old'), 'and its charter is given the land that rank holds');
-  ok(p.ranks?.feed[0]?.text.includes('the record begins') && !(a2.last()?.fresh?.length), 'the feed starts with the record, not a flood of old milestones');
+  ok(rk()?.feed[0]?.text.includes('the record begins') && !(a2.last()?.fresh?.length), 'the feed starts with the record, not a flood of old milestones');
   // a snapshot whose players carry no rank record (every save before this) loads and is measured
   const snap = JSON.parse(JSON.stringify(snapshotOf(world)));
   for (const q of snap.players) delete q.ranks;
