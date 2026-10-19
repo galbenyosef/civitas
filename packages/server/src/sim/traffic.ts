@@ -59,6 +59,8 @@ const CELLS = CHUNK_SIZE * CHUNK_SIZE;
  */
 interface RoadChunk {
   lanes: (Mover[] | undefined)[]; deg: Int8Array; jaux: Int16Array; xing: Int8Array;
+  /** junction control by tile (Traffic.junction), dropped round any road change */
+  junc: (Junction | undefined)[];
   /** movers that drove on each tile this tick, and those of them held up (the congestion's inputs, endTick), from tick `presAt` */
   pres: Uint16Array; stop: Uint16Array; presAt: Uint32Array;
 }
@@ -316,7 +318,6 @@ export const conflictsFor = conflicts;
 export class Traffic {
   private cells = new Map<number, Mover[]>();
   private cong = new Map<number, Cong>();
-  private junctions = new Map<number, Junction>();
   /** lanes and road geometry caches by chunk (RoadChunk), and the last one looked up */
   private roads = new Map<number, RoadChunk>();
   private lastRx = NaN; private lastRy = NaN; private lastRoad: RoadChunk | undefined;
@@ -363,7 +364,7 @@ export class Traffic {
     if (!rc) {
       rc = {
         lanes: new Array(CELLS * 4), deg: new Int8Array(CELLS).fill(-1), jaux: new Int16Array(CELLS).fill(-1), xing: new Int8Array(CELLS).fill(-1),
-        pres: new Uint16Array(CELLS), stop: new Uint16Array(CELLS), presAt: new Uint32Array(CELLS),
+        junc: new Array(CELLS), pres: new Uint16Array(CELLS), stop: new Uint16Array(CELLS), presAt: new Uint32Array(CELLS),
       };
       this.roads.set((chunkOf(x) + 0x800) * 0x1000 + chunkOf(y) + 0x800, rc);
       this.lastRoad = rc;
@@ -556,7 +557,7 @@ export class Traffic {
     for (const [dx, dy] of DIRS) { const nc = this.roadChunkIf(x + dx, y + dy); if (nc) nc.deg[localIndex(x + dx, y + dy)] = -1; }
     this.dropCostFlags(x, y); for (const [dx, dy] of DIRS) this.dropCostFlags(x + dx, y + dy);
     // signal arms look at diagonal neighbours too (wide-road twins), so re-check the 3x3 around the change
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) this.junctions.delete(tkey(x + dx, y + dy));
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const jc = this.roadChunkIf(x + dx, y + dy); if (jc) jc.junc[localIndex(x + dx, y + dy)] = undefined; }
   }
   private roadAt = (x: number, y: number) => this.isRoadAt(x, y);
   /**
@@ -567,14 +568,14 @@ export class Traffic {
    * (land bought under an existing road).
    */
   private junction(x: number, y: number): Junction {
-    const k = tkey(x, y);
-    let j = this.junctions.get(k);
+    const rc = this.roadChunk(x, y), i = localIndex(x, y);
+    let j = rc.junc[i];
     const deg = this.degreeOf(x, y), pid = this.w.parcelIdAt(x, y);
     if (!j || j.ver !== this.w.techVersion || j.deg !== deg || j.pid !== pid) {
       const signal = deg >= 3 && !this.junctionAux(x, y) && signalledArms(signalArms(this.roadAt, x, y)) && this.w.ownerHas(x, y, 'signals', hasFeature);
       j = j ?? { signal, ver: 0, deg, pid, ...signalTiming(x, y) };
       j.signal = signal; j.ver = this.w.techVersion; j.deg = deg; j.pid = pid;
-      this.junctions.set(k, j);
+      rc.junc[i] = j;
     }
     return j;
   }
