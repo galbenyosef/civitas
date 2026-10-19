@@ -6,14 +6,9 @@
  *
  *   nice -n 10 npx tsx packages/server/src/loadtest/jobsearch.ts [--demo london | --districts 8] [--days 1]
  */
-import { TICKS_PER_DAY, TICKS_PER_HOUR, DEMO_TOWN, LifeStage, isDemoId, type DemoId } from '@msimcity/shared';
-import { World } from '../world';
+import { TICKS_PER_DAY, TICKS_PER_HOUR, LifeStage, isDemoId, type DemoId } from '@msimcity/shared';
 import { Simulation } from '../sim/simulation';
-import { Airports } from '../sim/airports';
-import { Rail } from '../sim/rail';
-import { seedDemoTown, seedDemoNetwork, fillDemo, seededRandom } from '../demo/seed';
-import { fillCity } from '../testcities';
-import { seedCity } from './cities';
+import { probeCity } from './probe-city';
 
 const argv = process.argv.slice(2);
 const arg = (n: string, d: string) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
@@ -21,18 +16,7 @@ const days = Number(arg('days', '1'));
 const districts = Number(arg('districts', '0'));
 const demo: DemoId | null = districts ? null : (isDemoId(arg('demo', 'london')) ? (arg('demo', 'london') as DemoId) : 'london');
 
-Math.random = seededRandom(DEMO_TOWN.seed);
-const w = new World(DEMO_TOWN.seed);
-if (demo) { const p = seedDemoTown(w, demo); if (p.length) console.log(`seed problems:\n  ${p.join('\n  ')}`); }
-else seedCity(w, { districts, built: 3 });
-const sim = new Simulation(w);
-const airports = new Airports(w);
-airports.onArrival = (a) => sim.gateways.planeLanded(a.terminal.doorX, a.terminal.doorY, a.passengers);
-const rail = new Rail(w, sim.transit);
-sim.transit.register(rail);
-sim.freight = rail;
-rail.trucks = { spawn: (from, to, owner) => sim.spawnFreightTruck(from, to, owner) };
-if (demo) { const p = seedDemoNetwork(w, sim, rail, demo); if (p.length) console.log(`network problems:\n  ${p.join('\n  ')}`); }
+const { w, sim, airports, label, fill: fillIt } = probeCity(demo, districts);
 
 // ---- wrap simulation steps: calls, failures (a false/null result) and ms within the current tick ----------------
 const WRAP = ['findJob', 'spawn', 'migrantHome', 'goToVenue', 'pickLeisure', 'lifeStep', 'growth', 'leisureGrowth',
@@ -92,9 +76,8 @@ const printTotals = () => {
   total.clear();
 };
 
-const label = demo ?? `${districts}×${districts}`;
 const t0 = performance.now();
-const fill = demo ? await fillDemo(w, step, () => {}) : await fillCity(w, step, () => {});
+const fill = await fillIt(step);
 console.log(`${label} filled: ${fill.pop} citizens, ${(fill.ticks / TICKS_PER_DAY).toFixed(2)} days, ${((performance.now() - t0) / 1000).toFixed(0)} s wall`);
 console.log(`fill ticks: ${stats(times)}`);
 console.log(`slowest fill ticks:`);

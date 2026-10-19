@@ -1,0 +1,16 @@
+[package]
+name = "search-rs"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Spike: Civitas route and job searches in Rust, replayed against a recorded search corpus (docs/search-perf.md)"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+rayon = "1.10"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = 1
