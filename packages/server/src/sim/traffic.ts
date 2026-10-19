@@ -134,6 +134,19 @@ class TileLists {
     const i = localIndex(x, y);
     return c.fill[i] === this.fill ? c.lists[i] : undefined;
   }
+  /** The lists of the 3×3 tiles round (tx, ty) with anyone on them since the last clear, row by row, into `out`: how many. */
+  near(tx: number, ty: number, out: Mover[][]): number {
+    let n = 0;
+    const lx = tx - Math.floor(tx / CHUNK_SIZE) * CHUNK_SIZE, ly = ty - Math.floor(ty / CHUNK_SIZE) * CHUNK_SIZE;
+    if (lx >= 1 && lx <= CHUNK_SIZE - 2 && ly >= 1 && ly <= CHUNK_SIZE - 2) {
+      const c = this.chunk(tx, ty);
+      if (!c) return 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const i = (ly + dy) * CHUNK_SIZE + lx + dx; if (c.fill[i] === this.fill) out[n++] = c.lists[i]; }
+      return n;
+    }
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const l = this.get(tx + dx, ty + dy); if (l) out[n++] = l; }
+    return n;
+  }
   private chunk(x: number, y: number): TileChunk | undefined {
     const cx = chunkOf(x), cy = chunkOf(y);
     if (cx !== this.lastCx || cy !== this.lastCy) { this.last = this.chunks.get(tkey(cx, cy)); this.lastCx = cx; this.lastCy = cy; }
@@ -849,50 +862,57 @@ export class Traffic {
     if (!this.headingOf(m, h)) return allowed;
     const nhx = h[0], nhy = h[1];
     const reach = m.len / 2 + allowed + 0.35;
-    const tx = Math.floor(m.x), ty = Math.floor(m.y);
     const peds = this.gPeds, cars = this.gCars;
     peds.length = 0; cars.length = 0;
-    if (TT.bodyGuard) {
-      let mFly = -1; // flyAt(m.x, m.y), once it is needed
-      for (let g = 0; g < 2; g++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const l = (g ? this.walkPrev : this.walkCur).get(tx + dx, ty + dy);
-        if (!l) continue;
-        for (const p of l) {
-          if (!p.pts) continue; // stopped walking since it was noted
-          const ex = p.x - m.x, ey = p.y - m.y;
-          if (ex * ex + ey * ey > reach * reach) continue;
-          if (this.flyAt(p.x, p.y)) continue; // walkers on a flyover are on the deck or under it, beside the carriageways
-          if (mFly < 0) mFly = this.flyAt(m.x, m.y) ? 1 : 0;
-          if (mFly) continue;
-          // already touching (walking out of a car is always allowed): driving on is how that ends
-          if (Math.abs(ex * nhx + ey * nhy) < m.len / 2 + PED_R && Math.abs(-ex * nhy + ey * nhx) < widthOf(m) / 2 + PED_R) continue;
-          // behind the car's centre: ignored (pedBehind 0), or only a real touch counts (1: no margin, or a turning car's rear would freeze it next to people on the kerb)
-          const ahead = ex * nhx + ey * nhy > 0;
-          if (!ahead && !TT.pedBehind) continue;
-          peds.push(p.x, p.y, ahead ? GUARD_MARGIN : 0);
-        }
-      }
-    }
-    if (TT.carGuard) {
-      const now = this.gNow;
-      now.x = m.x; now.y = m.y; now.hx = nhx; now.hy = nhy; now.len = m.len;
-      const oh = this.tmp3, pool = this.gPool;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const q = this.carGrid.get(tx + dx, ty + dy);
-        if (!q) continue;
-        for (const o of q) {
-          if (o === m || o.lane < 0 || this.apart(m, o) || this.filtering(m, o)) continue;
-          const ex = o.x - m.x, ey = o.y - m.y, rr = reach + o.len / 2 + VEHICLE_WIDTH;
-          if (ex * nhx + ey * nhy <= 0 || ex * ex + ey * ey > rr * rr) continue;
-          if (!this.headingOf(o, oh)) continue;
-          const ob = pool[cars.length] ??= { x: 0, y: 0, hx: 0, hy: 0, len: 0 };
-          ob.x = o.x; ob.y = o.y; ob.hx = oh[0]; ob.hy = oh[1]; ob.len = o.len;
-          if (obbOverlap(now, ob, 0)) continue;
-          cars.push(ob);
-        }
-      }
-    }
+    if (TT.bodyGuard) this.gatherPeds(m, nhx, nhy, reach);
+    if (TT.carGuard) this.gatherCars(m, nhx, nhy, reach);
     if (!peds.length && !cars.length) return allowed;
+    return this.sweepClear(m, allowed);
+  }
+  /** guardSweep: the walkers near enough to matter, into gPeds (x, y, margin) */
+  private gatherPeds(m: Mover, nhx: number, nhy: number, reach: number) {
+    const tx = Math.floor(m.x), ty = Math.floor(m.y), peds = this.gPeds;
+    let mFly = -1; // flyAt(m.x, m.y), once it is needed
+    const L = this.nearL;
+    for (let g = 0; g < 2; g++) for (let j = 0, nl = (g ? this.walkPrev : this.walkCur).near(tx, ty, L); j < nl; j++) {
+      for (const p of L[j]) {
+        if (!p.pts) continue; // stopped walking since it was noted
+        const ex = p.x - m.x, ey = p.y - m.y;
+        if (ex * ex + ey * ey > reach * reach) continue;
+        if (this.flyAt(p.x, p.y)) continue; // walkers on a flyover are on the deck or under it, beside the carriageways
+        if (mFly < 0) mFly = this.flyAt(m.x, m.y) ? 1 : 0;
+        if (mFly) continue;
+        // already touching (walking out of a car is always allowed): driving on is how that ends
+        if (Math.abs(ex * nhx + ey * nhy) < m.len / 2 + PED_R && Math.abs(-ex * nhy + ey * nhx) < widthOf(m) / 2 + PED_R) continue;
+        // behind the car's centre: ignored (pedBehind 0), or only a real touch counts (1: no margin, or a turning car's rear would freeze it next to people on the kerb)
+        const ahead = ex * nhx + ey * nhy > 0;
+        if (!ahead && !TT.pedBehind) continue;
+        peds.push(p.x, p.y, ahead ? GUARD_MARGIN : 0);
+      }
+    }
+  }
+  /** guardSweep: the car bodies ahead near enough to matter that m does not already touch, into gCars */
+  private gatherCars(m: Mover, nhx: number, nhy: number, reach: number) {
+    const tx = Math.floor(m.x), ty = Math.floor(m.y), cars = this.gCars;
+    const now = this.gNow;
+    now.x = m.x; now.y = m.y; now.hx = nhx; now.hy = nhy; now.len = m.len;
+    const oh = this.tmp3, pool = this.gPool, L = this.nearL;
+    for (let j = 0, nl = this.carGrid.near(tx, ty, L); j < nl; j++) {
+      for (const o of L[j]) {
+        if (o === m || o.lane < 0) continue;
+        const ex = o.x - m.x, ey = o.y - m.y, rr = reach + o.len / 2 + VEHICLE_WIDTH;
+        if (ex * nhx + ey * nhy <= 0 || ex * ex + ey * ey > rr * rr) continue;
+        if (this.apart(m, o) || this.filtering(m, o) || !this.headingOf(o, oh)) continue;
+        const ob = pool[cars.length] ??= { x: 0, y: 0, hx: 0, hy: 0, len: 0 };
+        ob.x = o.x; ob.y = o.y; ob.hx = oh[0]; ob.hy = oh[1]; ob.len = o.len;
+        if (obbOverlap(now, ob, 0)) continue;
+        cars.push(ob);
+      }
+    }
+  }
+  /** guardSweep: how far m may move, at the last third of `allowed` clear of everything gathered */
+  private sweepClear(m: Mover, allowed: number): number {
+    const peds = this.gPeds, cars = this.gCars;
     const a = this.gA, b = this.gB, c = this.gC;
     const halfL = m.len / 2 + PED_R + GUARD_MARGIN, halfW = widthOf(m) / 2 + PED_R + marginOf(m);
     for (let k = 1; k <= 3; k++) {
@@ -922,15 +942,17 @@ export class Traffic {
     return allowed;
   }
   private gPeds: number[] = [];
+  /** scratch for TileLists.near */
+  private nearL: Mover[][] = [];
   /** guardSweep's scratch: m's body now and at a sweep point, the bodies gathered (gCars, from gPool), path points */
   private gNow: Obb = { x: 0, y: 0, hx: 0, hy: 0, len: 0 }; private gMe: Obb = { x: 0, y: 0, hx: 0, hy: 0, len: 0 }; private gPool: Obb[] = [];
   private gA: [number, number] = [0, 0]; private gB: [number, number] = [0, 0]; private gC: [number, number] = [0, 0]; private tmp3: [number, number] = [0, 0];
   /** Any pedestrian within r of (x,y)? (A car pulls out only when nobody is standing where it will appear, whichever way it is drawn.) */
   private pedNear(x: number, y: number, r: number): boolean {
     const tx = Math.floor(x), ty = Math.floor(y);
-    for (let g = 0; g < 2; g++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const l = (g ? this.walkPrev : this.walkCur).get(tx + dx, ty + dy);
-      if (l) for (const p of l) if (p.pts && (p.x - x) ** 2 + (p.y - y) ** 2 < r * r) return true;
+    const L = this.nearL;
+    for (let g = 0; g < 2; g++) for (let j = 0, nl = (g ? this.walkPrev : this.walkCur).near(tx, ty, L); j < nl; j++) {
+      for (const p of L[j]) if (p.pts && (p.x - x) ** 2 + (p.y - y) ** 2 < r * r) return true;
     }
     return false;
   }
@@ -1009,10 +1031,9 @@ export class Traffic {
   carBodyAt(x: number, y: number): boolean {
     const tx = Math.floor(x), ty = Math.floor(y), h = this.tmp2;
     let fly = -1; // flyAt(x, y), once it is needed
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const q = this.carGrid.get(tx + dx, ty + dy);
-      if (!q) continue;
-      for (const m of q) {
+    const L = this.nearL;
+    for (let j = 0, nl = this.carGrid.near(tx, ty, L); j < nl; j++) {
+      for (const m of L[j]) {
         if (m.lane < 0) continue;
         const ex = x - m.x, ey = y - m.y;
         if (ex * ex + ey * ey > 0.36) continue;

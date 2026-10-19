@@ -90,7 +90,8 @@ const PREVIEW_MS = 100;
 export class Net {
   private clients = new Set<Client>();
   /** last quad sent per agent, so only movement goes on the wire */
-  private lastSent = new Map<number, [number, number, number]>();
+  /** per agent: x, y and flags as last sent, and the flush that last saw it */
+  private lastSent = new Map<number, [number, number, number, number]>();
   /** the city's airports (sim/airports.ts), for terminal tooltips; set by index.ts */
   airports: Airports | null = null;
   /** railways (sim/rail.ts): the track tool, station tooltips and the 'railLines' message; set by index.ts */
@@ -1147,17 +1148,17 @@ export class Net {
     // Home-state quad removes an agent. With nobody subscribed to any chunk the buckets are not filled at all: what was
     // last sent is still kept up to date, so the first frame anyone is sent later is the same as it would have been.
     const buckets = new Map<number, number[]>();
-    const seen = new Set<number>();
     const keep = this.flushes++ % 10; // per flush, not per tick: with several ticks a flush (local mode's 2x/4x) every id still gets its turn
+    const seen = this.flushes;
     let anySubs = false;
     for (const c of this.clients) if (c.player && c.subs.size) anySubs = true;
     for (const a of this.sim.agents()) {
-      seen.add(a.id);
       const x = Math.round(a.x * 100) / 100, y = Math.round(a.y * 100) / 100;
       const flags = packCitizenFlags(a.state, a.mode, a.kind, a.cls, a.queued, a.emergency, a.stage, a.bag, a.rev, a.ind) | (a.under ? CITIZEN_UNDER : 0) | (a.extra ?? 0);
       const prev = this.lastSent.get(a.id);
+      if (prev) prev[3] = seen;
       if (prev && prev[0] === x && prev[1] === y && prev[2] === flags && a.id % 10 !== keep) continue;
-      if (prev) { prev[0] = x; prev[1] = y; prev[2] = flags; } else this.lastSent.set(a.id, [x, y, flags]);
+      if (prev) { prev[0] = x; prev[1] = y; prev[2] = flags; } else this.lastSent.set(a.id, [x, y, flags, seen]);
       if (!anySubs) continue;
       const key = agentChunk(a.x, a.y);
       let arr = buckets.get(key);
@@ -1165,7 +1166,7 @@ export class Net {
       arr.push(a.id, x, y, flags);
     }
     for (const [id, prev] of this.lastSent) {
-      if (seen.has(id)) continue;
+      if (prev[3] === seen) continue;
       this.lastSent.delete(id);
       if (!anySubs) continue;
       const key = agentChunk(prev[0], prev[1]);
