@@ -139,7 +139,13 @@ function sab<T extends Float64Array | Int32Array | Uint32Array>(Ctor: { new (b: 
   return new Ctor(new SharedArrayBuffer(Math.max(1, n) * Ctor.BYTES_PER_ELEMENT));
 }
 
-interface WorkerInit { corpus: Corpus; fields: FieldBufs; ctl: Int32Array; results: Int8Array; busy: Float64Array; id: number }
+/**
+ * The hand-out: ctl[0] the batch generation, [2] its end, [3] the next search to take, [5] stop. Each worker
+ * acknowledges a generation in its own slot of `acks` when it has finished with it, and the main thread waits for every
+ * slot. (A first version counted finished workers in one shared counter and, about once in ten passes, went on while a
+ * worker was still searching: one search then read the next tick's costs.)
+ */
+interface WorkerInit { corpus: Corpus; fields: FieldBufs; ctl: Int32Array; acks: Int32Array; results: Int8Array; busy: Float64Array; id: number }
 
 if (!isMainThread) {
   // ---- a worker: replay whatever searches of the current batch it can grab, until told to stop ----
@@ -150,15 +156,15 @@ if (!isMainThread) {
   for (;;) {
     Atomics.wait(ctl, 0, seen);
     seen = Atomics.load(ctl, 0);
-    if (ctl[5]) break;
-    const end = ctl[2], t = performance.now();
+    if (Atomics.load(ctl, 5)) break;
+    const end = Atomics.load(ctl, 2), t = performance.now();
     for (let i = Atomics.add(ctl, 3, 1); i < end; i = Atomics.add(ctl, 3, 1)) {
       d.results[i] = r.run(i) || 0;
-      if (d.results[i] && r.note) { const n = r.note; r.note = ''; const again = r.run(i); console.error(`worker ${d.id}: mismatch ${d.results[i]}: ${n}; run again at once: ${again ? r.note : 'matches'}; batch ${ctl[1]}-${end}, gen ${seen}/${Atomics.load(ctl, 0)}`); r.note = ''; }
+      if (d.results[i] && r.note) { console.error(`worker ${d.id}: mismatch ${d.results[i]}: ${r.note}`); r.note = ''; }
     }
     d.busy[d.id] += performance.now() - t;
-    Atomics.add(ctl, 4, 1);
-    Atomics.notify(ctl, 4);
+    Atomics.store(d.acks, d.id, seen);
+    Atomics.notify(d.acks, d.id);
   }
 } else if (process.argv.includes('--check-expanded') && G.__pfExpanded === undefined) {
   // re-launch under the count hook so every search counts the nodes it expands
@@ -293,14 +299,14 @@ async function main(argv: string[]) {
 
   // ---- worker threads ----
   for (const nw of workerCounts) {
-    const ctl = new Int32Array(new SharedArrayBuffer(4 * 8)), busy = new Float64Array(new SharedArrayBuffer(8 * nw));
-    const workers = Array.from({ length: nw }, (_, id) => new Worker(new URL(import.meta.url), { workerData: { corpus, fields, ctl, results, busy, id } satisfies WorkerInit }));
+    const ctl = new Int32Array(new SharedArrayBuffer(4 * 8)), acks = new Int32Array(new SharedArrayBuffer(4 * nw)), busy = new Float64Array(new SharedArrayBuffer(8 * nw));
+    const workers = Array.from({ length: nw }, (_, id) => new Worker(new URL(import.meta.url), { workerData: { corpus, fields, ctl, acks, results, busy, id } satisfies WorkerInit }));
     await new Promise((r) => setTimeout(r, 500)); // let them load
     const batch = (s0: number, s1: number) => {
-      ctl[1] = s0; ctl[2] = s1; ctl[3] = s0; ctl[4] = 0;
-      Atomics.add(ctl, 0, 1);
+      Atomics.store(ctl, 1, s0); Atomics.store(ctl, 2, s1); Atomics.store(ctl, 3, s0);
+      const gen = Atomics.add(ctl, 0, 1) + 1;
       Atomics.notify(ctl, 0);
-      for (let d = Atomics.load(ctl, 4); d < nw; d = Atomics.load(ctl, 4)) Atomics.wait(ctl, 4, d);
+      for (let id = 0; id < nw; id++) for (let a = Atomics.load(acks, id); a !== gen; a = Atomics.load(acks, id)) Atomics.wait(acks, id, a);
     };
     batch(0, 0); // every worker awake and through its first (empty) batch
     const times: { searchMs: number; bookMs: number }[] = [];
@@ -312,7 +318,7 @@ async function main(argv: string[]) {
     }
     const match = report(`${nw} worker(s)`);
     runs[`W${nw}`] = { searchMs: med(times.map((t) => t.searchMs)), bookMs: med(times.map((t) => t.bookMs)), all: times, match };
-    ctl[5] = 1; Atomics.add(ctl, 0, 1); Atomics.notify(ctl, 0);
+    Atomics.store(ctl, 5, 1); Atomics.add(ctl, 0, 1); Atomics.notify(ctl, 0);
     await Promise.all(workers.map((w) => new Promise((r) => w.once('exit', r))));
   }
   const json = arg('json', '');
