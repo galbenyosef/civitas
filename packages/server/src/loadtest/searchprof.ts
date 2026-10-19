@@ -13,6 +13,8 @@
  *  - `record`: the search corpus of the day (search-corpus.ts) written to --out DIR, for search-replay.ts and tools/search-rs
  *  - `reroutes`: A* by caller, re-route outcomes and the traffic, with `--set k=v,...` (TRAFFIC_TUNING) from the day on
  *    (reroute-probe.ts)
+ *  - `tcount`, `tprof`, `hash`: the traffic step's methods by calls and self time, CPU profiles of the rush hours, and a
+ *    fingerprint of the game every tick (traffic-probe.ts)
  *
  * Re-launches itself under `node --loader tsx --loader ./count-hook.mjs` (as run.ts does) with the same node binary, so
  * the probe can replace the exported search functions; the hook's own counters are taken off again.
@@ -27,7 +29,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const mode = argv.includes('--mode') ? argv[argv.indexOf('--mode') + 1] : 'phases';
 
 if (process.env.SEARCHPROF_CHILD) {
-  const { main } = mode === 'reroutes' ? await import('./reroute-probe') : await import('./search-phases');
+  const { main } = mode === 'reroutes' ? await import('./reroute-probe') : mode === 'tcount' || mode === 'tprof' || mode === 'hash' ? await import('./traffic-probe') : await import('./search-phases');
   await main(argv);
 } else {
   const tsx = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
