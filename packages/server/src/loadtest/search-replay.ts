@@ -275,6 +275,15 @@ async function main(argv: string[]) {
       kinds[KIND_NAMES[k]] = ms;
     }
     if (Object.keys(kinds).length) { console.log(`  by kind (ms): ${JSON.stringify(kinds, (_k, v) => (typeof v === 'number' ? Math.round(v) : v))}`); (runs['1T'] as Record<string, unknown>).byKind = kinds; }
+    // the critical path: each batch's slowest search, summed (what any number of workers still has to wait for)
+    let crit = 0, sum = 0;
+    pass((s0, s1) => {
+      let worst = 0;
+      for (let i = s0; i < s1; i++) { const t = performance.now(); main.run(i); const ms = performance.now() - t; sum += ms; if (ms > worst) worst = ms; }
+      crit += worst;
+    });
+    console.log(`  critical path ${crit.toFixed(0)} ms of ${sum.toFixed(0)} ms (each batch's slowest search)`);
+    (runs['1T'] as Record<string, unknown>).critical = { ms: crit, sumMs: sum };
   }
 
   // ---- worker threads ----

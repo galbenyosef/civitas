@@ -2,7 +2,7 @@
 //! ports of the route, walk, job and venue searches, check every answer against the game's, and time them on one
 //! thread and on a rayon pool. A spike: not wired into the game.
 //!
-//!   cargo run --release -- CORPUS_DIR [--threads 1,2,4,8] [--repeat 3] [--json FILE]
+//!   cargo run --release -- CORPUS_DIR [--threads 1,2,4,8] [--repeat 3] [--min-par N] [--grain N] [--json FILE]
 //!
 //! The replay is the one search-replay.ts does: ticks in order; per tick the base events, the overlay, the tick's
 //! searches as batches split at tile writes, then the overlay folded into the base.
@@ -266,6 +266,9 @@ fn main() {
         .expect("usage: search-rs CORPUS_DIR [--threads 1,2,4,8] [--repeat 3] [--json FILE]").clone();
     let threads: Vec<usize> = arg("threads").unwrap_or("1,2,4,8".into()).split(',').map(|s| s.parse().unwrap()).collect();
     let repeat: usize = arg("repeat").unwrap_or("3".into()).parse().unwrap();
+    // batches smaller than this run on the calling thread; the pool hands out up to `grain` searches at a time
+    let min_par: usize = arg("min-par").unwrap_or("1".into()).parse().unwrap();
+    let grain: usize = arg("grain").unwrap_or("1".into()).parse().unwrap();
     let t0 = Instant::now();
     let (mut w, c) = load(&dir);
     let n = c.searches.len();
@@ -306,6 +309,24 @@ fn main() {
     }
     println!("  by kind (ms): {}", by_kind.join(", "));
     json.push(format!("\"1T-byKind\": {{{}}}", by_kind.join(", ")));
+    // the critical path: each batch's slowest search, summed (what any number of threads still has to wait for)
+    let (mut crit, mut sum) = (0.0, 0.0);
+    {
+        let mut scratch = Scratch::new();
+        pass(&mut w, &pristine, &mut f, &c, &mut results, &mut |w, f, s0, s1, out| {
+            let mut worst: f64 = 0.0;
+            for i in s0..s1 {
+                let t = Instant::now();
+                out[i - s0] = run(w, f, &c, &mut scratch, &c.searches[i]);
+                let ms = t.elapsed().as_secs_f64() * 1e3;
+                worst = worst.max(ms);
+                sum += ms;
+            }
+            crit += worst;
+        });
+    }
+    println!("  critical path {crit:.0} ms of {sum:.0} ms (each batch's slowest search)");
+    json.push(format!("\"critical\": {{\"ms\": {crit:.2}, \"sumMs\": {sum:.2}}}"));
 
     // ---- rayon pools: each batch's searches spread over the pool one by one ----
     for &nt in &threads {
@@ -315,7 +336,11 @@ fn main() {
             results.fill(0);
             let p = pass(&mut w, &pristine, &mut f, &c, &mut results, &mut |w, f, s0, _s1, out| {
                 let cr = &c;
-                pool.install(|| out.par_iter_mut().enumerate().with_max_len(1).for_each(|(j, o)| {
+                if out.len() < min_par { // too few to be worth waking the pool
+                    SCRATCH.with(|s| for (j, o) in out.iter_mut().enumerate() { *o = run(w, f, cr, &mut s.borrow_mut(), &cr.searches[s0 + j]); });
+                    return;
+                }
+                pool.install(|| out.par_iter_mut().enumerate().with_max_len(grain).for_each(|(j, o)| {
                     SCRATCH.with(|s| *o = run(w, f, cr, &mut s.borrow_mut(), &cr.searches[s0 + j]));
                 }));
             });
