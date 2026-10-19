@@ -284,7 +284,8 @@ float adHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453
 float adNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(adHash(i), adHash(i + vec2(1.0, 0.0)), f.x), mix(adHash(i + vec2(0.0, 1.0)), adHash(i + vec2(1.0, 1.0)), f.x), f.y);
-}
+}`)
+        .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>
 // one graffiti tag (crew c, tag t of four) laid over the poster at a seeded spot; returns its colour and cover
 vec4 adTag(vec2 uv, float crew, float t, float s) {
   vec2 size = vec2(0.55 + 0.25 * fract(s * 7.3), 0.32 + 0.14 * fract(s * 3.1));
