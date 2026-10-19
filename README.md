@@ -109,6 +109,7 @@ still selects.
 | Money | click the treasury chip for the ledger (yesterday and today by category, overdraft interest included). While the treasury is below zero, in administration or with a service mothballed, a chip beside it opens the money panel: the balance, the $5,000 overdraft limit, the interest a day, midnights below zero or days in administration, and the recovery plan as buttons (raise tax, sell land back, mothball services, each with what it would raise or save; in local mode also "Start again from the last autosave"). It opens by itself when administration begins. A police, fire or health building or a builders' yard of yours has **Mothball** / **Reopen** in its panel. `client/src/finance.ts` |
 | Overlays | H cycles the overlays: traffic congestion on the roads (green → red), then service coverage, leisure, happiness and jobs against homes tinted on the ground and the buildings (colour-blind safe ramps: viridis, and blue against orange for jobs/homes), then off; the top-bar **overlay** chip opens a menu to pick one, with its legend. `client/src/overlays.ts`, `server/src/overlays.ts`. T opens the technology tree; M shows the perf readout |
 | Problems | a badge floats over any of your buildings or lots that is stuck: no road, no builders, unstaffed, parking full, no customers, very unhappy; hover it for what is wrong and what fixes it, click it to open the building. The top-bar **problems N** chip (red while there are any) lists them by kind, each with **show me**. `server/src/sim/issues.ts`, `client/src/render/issues.ts`, `client/src/problems.ts` |
+| Fires | homes and works catch fire now and then (bigger and older ones more often). The nearest staffed fire post or station within 14 tiles sends its engine on blue lights; it drives down the middle of the road past stopped traffic, and the damage is what had burnt when it arrived. With no engine in reach the building burns down. Flames, smoke and a scorch show on the building, an **On fire** badge leads the problems list, a toast names who is coming, and the bill is **Fire damage** in the ledger. Your first fire is a warning the neighbours always put out. docs/incidents.md, `server/src/sim/fires.ts`, `client/src/render/fires.ts` |
 | World map | **Tab**, the top-bar **map** chip, or zoom out past the 3D limit (zoom back in to return; `?map` opens on it): the whole world flat and north-up, land use in colour, every owner's land outlined and named, bus, rail and underground lines. Scroll, pinch, + and − zoom, drag pans, click a parcel for its area, buildings, population, jobs and book value; on your land shift-click neighbours and **Combine** (a rectangle up to 48 a side merges, the rest become an estate sharing name, colour and tax), **Split** along a dragged line, rename and colour. `client/src/mapmode.ts`, `docs/world-map.md` |
 | Bus lines | the top-bar **lines** chip: make a line from your stops (click them in order), number, colour, loop or there and back, buses per line; ribbons show the lines while it is open. `client/src/lines.ts`, `docs/transit.md` |
 | Debug | `?dev` shows draft kinds in the tool bar (a dev server accepts them, also on unclaimed land) and, on a dev server, skips technology locks, `?airport=x,y,dir[,gates[,fph]]` previews planes at a placeholder airfield on open land, `?name=…` skips the login form, `?at=x,y&dist=n&yaw=deg&pitch=deg` positions the camera (yaw 0 looks north, 90 west; pitch 90 straight down), `msc.viewString()` prints the view as a `DEFAULT_VIEW` string, `?hour=h` freezes lighting, `?fx=0..2` pins shadow quality, `window.msc` exposes client state |
@@ -393,6 +394,11 @@ changing behaviour in game time.
   under the card, at most one per two game hours, never again once "got it" is pressed: the server sends builders,
   deficit, overdraft, administration, jam, boredom and newcomers hints (messages `goals` and `hint`), the client raises night and empty-treasury
   ones. The tech chip pulses with the node's name when one becomes ready and affordable. Test cities and demos get none.
+- *Fires* (`server/src/sim/fires.ts`, `shared/src/fires.ts`, `client/src/render/fires.ts`; docs/incidents.md). Hash-seeded
+  hourly rolls per home and works weighted by density, age and cover; the nearest staffed fire building in reach sends a
+  priority engine (stopped by traffic, it drives down the crown of the road); the share burnt when it parks sets the levels
+  lost and the bill (ledger `fire`); unattended it burns out. A player's first fire is a warning that always survives, and
+  ordinary fires wait a day after it. Issue code 7 (**on fire**) is set at once and outranks the rest.
 - *Problems and overlays* (`server/src/sim/issues.ts`, `shared/src/issues.ts`, `client/src/render/issues.ts`,
   `client/src/problems.ts`, `client/src/overlays.ts`; docs/audit-2026-10.md 4.4). Every building and zoned lot is looked at
   every quarter of a game hour, a hashed slice each tick, and gets one code: **no road** (a lot no road and no frontage
@@ -432,7 +438,8 @@ buildings' doors only). On a dev server `{ t: 'dev', action: 'money', amount }` 
 money, for economy runs from a lower start. Issue codes (`issues`, a byte per tile per chunk, sent on subscribe and when a chunk's
 codes change) ride beside them; your own problems come as flat `x, y, code` triples (`problems`, at most every half game
 hour when they change), and the overlay you asked for (`{ t: 'overlay', ch }`) as a byte per tile per subscribed chunk
-(`overlay`), refreshed every half game hour with only the chunks that changed.
+(`overlay`), refreshed every half game hour with only the chunks that changed. Fires burning, being put out or in their
+aftermath go to everyone as one short list (`fires`) whenever it changes; the client animates them from the clock.
 
 **Client rendering** (`client/src/render/`).
 

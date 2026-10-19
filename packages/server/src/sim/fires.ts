@@ -21,8 +21,8 @@ interface Fire {
   ph: number;
   /** the engine on its way or at work (a vehicle id; vehicles are not saved, so a loaded fire sends another), its station's door */
   engine: number | null; station: [number, number] | null; tries: number;
-  /** share burnt when help arrived (0 until then), the tick it will be (or went) out */
-  d: number; t1: number;
+  /** share burnt when help arrived (0 until then), the tick help arrived, the tick it will be (or went) out */
+  d: number; ta: number; t1: number;
   /** attended by an engine crew (not only the bucket chain) */
   crew: boolean;
   /** a fire a step or two from the station, too close for the engine to drive: the crew run over with the hose, there at this tick */
@@ -139,7 +139,7 @@ export class Fires {
   dtos(): FireDTO[] {
     const out: FireDTO[] = [];
     for (const f of this.fires.values()) {
-      out.push({ x: f.x, y: f.y, s: f.seed, ph: f.ph, t0: f.t0, burn: f.burn, d: f.d, t1: f.t1, w: f.w, h: f.h,
+      out.push({ x: f.x, y: f.y, s: f.seed, ph: f.ph, t0: f.t0, burn: f.burn, d: f.d, ta: f.ta, t1: f.t1, w: f.w, h: f.h,
         ...((f.engine !== null || f.onFoot !== undefined) && f.ph === FirePhase.Burning ? { eng: 1 } : {}), ...(f.out !== undefined ? { out: f.out } : {}) });
     }
     return out;
@@ -165,7 +165,7 @@ export class Fires {
     const f: Fire = {
       id: this.nextId++, x: b.x, y: b.y, owner, kind: b.id, level: b.level,
       t0: now, burn: Math.round(FIRE.burnHours * TPH * (0.85 + 0.35 * hash2(b.y * 7 + 1, b.x * 13 + now % 7919))), seed,
-      ph: FirePhase.Burning, engine: null, station: null, tries: 0, d: 0, t1: 0, crew: false,
+      ph: FirePhase.Burning, engine: null, station: null, tries: 0, d: 0, ta: 0, t1: 0, crew: false,
       ...(opts.warning ? { warning: true } : {}), ...(opts.drill ? { drill: true } : {}),
       w: s ? s.w : 1, h: s ? s.h : 1,
     };
@@ -243,7 +243,7 @@ export class Fires {
   private runDrills() {
     const w = this.w, now = w.tick;
     for (const [x, y] of this.drills) {
-      const key = tileKey(x, y);
+      const key = tileKey(...w.doorOf(x, y)); // the home may have grown into a bigger building meanwhile
       if (this.fires.has(key)) continue;
       const outAt = this.drillOut.get(key) ?? -Infinity;
       if (now - outAt < FIRE.drillGapHours * TPH) continue;
@@ -335,7 +335,7 @@ export class Fires {
     if (f.ph === FirePhase.Burning) {
       if (f.onFoot !== undefined) {
         if (now >= f.onFoot) {
-          f.ph = FirePhase.Fighting; f.d = Math.max(d, FIRE.minDamage); f.crew = true; f.onFoot = undefined;
+          f.ph = FirePhase.Fighting; f.ta = now; f.d = Math.max(d, FIRE.minDamage); f.crew = true; f.onFoot = undefined;
           f.t1 = now + Math.round(FIRE.fightHours * TPH * (0.4 + f.d));
           this.stats.arrived++;
           this.touch(f);
@@ -346,7 +346,7 @@ export class Fires {
         const v = w.vehicles.get(f.engine);
         if (!v) { f.engine = null; this.dispatch(f); this.touch(f); } // lost on the way (stuck, gave up): the next station in reach
         else if (v.phase === 'dwell') {
-          f.ph = FirePhase.Fighting; f.d = Math.max(d, FIRE.minDamage); f.crew = true;
+          f.ph = FirePhase.Fighting; f.ta = now; f.d = Math.max(d, FIRE.minDamage); f.crew = true;
           f.t1 = now + Math.round(FIRE.fightHours * TPH * (0.4 + d));
           v.until = Math.max(v.until, f.t1); // the crew stay until it is out
           this.stats.arrived++;
@@ -355,7 +355,7 @@ export class Fires {
         }
       } else if (now % 25 === 0 && f.tries < MAX_TRIES) { this.dispatch(f); if (f.engine !== null || f.onFoot !== undefined) this.touch(f); } // a station staffed since (a shift came on)
       if (f.engine === null && f.warning && d >= FIRE.bucketAt) {
-        f.ph = FirePhase.Fighting; f.d = Math.max(d, FIRE.minDamage); f.t1 = now + Math.round(FIRE.fightHours * TPH * 0.5);
+        f.ph = FirePhase.Fighting; f.ta = now; f.d = Math.max(d, FIRE.minDamage); f.t1 = now + Math.round(FIRE.fightHours * TPH * 0.5);
         this.touch(f);
         return;
       }

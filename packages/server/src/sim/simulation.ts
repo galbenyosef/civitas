@@ -86,7 +86,7 @@ const FREIGHT_MAX_SCORE = 2 * MAX_LEVEL + 3, VISITOR_MAX_SCORE = 5 + MAX_LEVEL, 
 const FREIGHT_NODES = 1500, VISITOR_NODES = 2500, PATROL_NODES = 1200; // fallback road searches
 const VEHICLE_ID_BASE = 1 << 30;
 const PEOPLE_ROW_CAP = 80;           // rows per list in the building panel
-/** a fire engine on a call stopped this many ticks (in traffic or at its door) drives on down the middle of the road (Simulation.weave), at this share of the speed */
+/** a fire engine on a call (Mover.call) stopped this many ticks (in traffic or at its door) drives on down the middle of the road (Simulation.weave), at this share of the speed */
 const WEAVE_AFTER = 8, WEAVE_SPEED = 0.6;
 const GARAGE_WAIT_MAX = 150;          // ticks a car will wait for a gap to pull out before the trip is abandoned
 
@@ -2759,6 +2759,7 @@ export class Simulation {
   spawnFireEngine(from: [number, number], to: [number, number], owner: string | null): number | null {
     const v = this.spawnVehicle(VehicleKind.FireEngine, from, to, owner, true);
     if (v?.leg) v.leg.arrive = 'none';
+    if (v) v.call = true;
     return v?.id ?? null;
   }
 
@@ -2795,14 +2796,14 @@ export class Simulation {
         if (v.weave) { if (!this.weave(v)) continue; done = true; } else {
         if (v.lane < 0) {
           if (this.traffic.enter(v) === 'blocked') {
-            if (v.priority && ++v.stuck > WEAVE_AFTER) { v.weave = true; continue; } // enter() zeroes wait; stuck counts the engine's wait at the door
+            if (v.call && ++v.stuck > WEAVE_AFTER) { v.weave = true; continue; } // enter() zeroes wait; stuck counts the engine's wait at the door
             if (++v.wait > GARAGE_WAIT_MAX) { this.traffic.count('garageGiveUp'); this.despawn(v); }
             continue;
           }
           continue;
         }
         const r = this.traffic.step(v);
-        if (v.priority && r !== 'arrived' && v.wait > WEAVE_AFTER) { this.traffic.leave(v); v.weave = true; continue; }
+        if (v.call && r !== 'arrived' && v.wait > WEAVE_AFTER) { this.traffic.leave(v); v.weave = true; continue; }
         if (r === 'stuck') { this.onStuck(v, leg); continue; }
         if (r === 'moving') { this.maybeReroute(v, leg, this.dueForcedReroute(v)); continue; }
         done = true;
@@ -2867,7 +2868,7 @@ export class Simulation {
     const route = findRoute(w, at[0], at[1], dest[0], dest[1], (x, y) => this.traffic.cost(x, y));
     if (!route || route.path.length < 4) { this.despawn(v); return; }
     v.x = at[0] + 0.5; v.y = at[1] + 0.5;
-    v.priority = false;
+    v.priority = false; v.call = false;
     resetTrail(v, at[0], at[1]);
     v.legs = [{ path: route.path, drive: true, arrive: 'none' }];
     this.startLeg(v);

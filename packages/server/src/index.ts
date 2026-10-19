@@ -15,6 +15,7 @@ import { seedCity } from './loadtest/cities';
 import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, stopsChildrenOn } from './testcities';
 import { fillCity } from './fill';
 import { seedDemoTown, seedDemoNetwork, seedDemoStudents, fillDemo, seededRandom, worldHash } from './demo/seed';
+import { demoFireDrills } from '@msimcity/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 8080);
@@ -89,6 +90,7 @@ const http = createServer((req, res) => void serve(req, res));
 const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD, spectate: SPECTATE }, SIM_STEPS);
 const { sim, airports, rail, net, tickWin } = game;
 game.fires.enabled = process.env.FIRES !== '0'; // FIRES=0: nothing catches light (sim/fires.ts; an A/B control)
+if (DEMO) game.fires.drills = demoFireDrills(DEMO).map(([x, y]) => [x, y]); // the scenario's fire drill homes (docs/incidents.md)
 if (DEMO && needsFill) { // the second half of seeding needs the simulation: bus stops, track and every line
   const problems = seedDemoNetwork(world, sim, rail, DEMO);
   if (problems.length) { console.error(`demo ${DEMO}: the scenario's network does not build:\n  ${problems.join('\n  ')}`); process.exit(1); }
@@ -171,7 +173,9 @@ http.listen(PORT, HOST, async () => {
   if (needsFill && DEMO) {
     net.accepting = false;
     const t0 = performance.now();
+    const fires = game.fires.enabled; game.fires.enabled = false; // the town fills as it did before fires (and the same every time)
     const r = await fillDemo(world!, game.step, (p) => { fillProgress = p; });
+    game.fires.enabled = fires;
     const students = seedDemoStudents(world!, sim, DEMO); // the universities' first students (a campus would stand empty for days)
     Math.random = realRandom;
     startHash = worldHash(world!);
@@ -182,7 +186,9 @@ http.listen(PORT, HOST, async () => {
     if (DEMO_SNAPSHOT) try { copyFileSync(DATA, DEMO_SNAPSHOT); } catch (e) { console.error('demo snapshot failed', e); }
   } else if (needsFill) {
     net.accepting = false;
+    const fires = game.fires.enabled; game.fires.enabled = false;
     const r = await fillCity(world!, game.step, (p) => { fillProgress = p; });
+    game.fires.enabled = fires;
     ready = true;
     net.accepting = true;
     console.log(`test city ${CITY}×${CITY} filled: ${r.pop} citizens after ${(r.ticks / 2400).toFixed(2)} days in ${r.seconds.toFixed(1)} s${r.settled ? '' : ' (still growing at the cap)'}`);

@@ -88,6 +88,8 @@ export interface Mover {
   inDir: number;                        // direction the current lane was entered from (for turn geometry)
   committed: boolean;                   // past the stop line, crossing into the next tile
   priority: boolean;                    // emergency vehicles ignore signals
+  /** a fire engine on its way to a fire (sim/fires.ts): it pulls out into its forecourt to wait for a gap, and drives on down the middle of the road when traffic stops it */
+  call?: boolean;
   rerouted: number;                     // tick of the last re-route
   // walking: the leg's polyline, which point is being approached, and per-point crossing / node bookkeeping
   pts: number[] | null; pp: number; cross: number[] | null; node: number[] | null; xdir: number[] | null;
@@ -130,7 +132,7 @@ export interface Vehicle extends Mover {
   legs: Leg[]; leg: Leg | null;
   /** what the buyer pays on delivery when it is not FREIGHT_FEE (harbour freight: fish by the box, sim/harbours.ts) */
   fee?: number;
-  /** a fire engine held up in stopped traffic drives on down the middle of the road, out of the lanes (Simulation.weave) */
+  /** a fire engine on a call (Mover.call) held up in stopped traffic, driving on down the middle of the road out of the lanes (Simulation.weave) */
   weave?: boolean;
 }
 export interface Citizen extends Mover, EduFields {

@@ -174,7 +174,7 @@ export class Net {
       case 'unlock': return this.unlock(c, String(m.id));
       case 'setPolicy': { const r = setPolicy(this.w, c.player, String(m.id), m.on === true); return this.toast(c, r.msg, r.ok ? 'info' : undefined); }
       case 'recover': return this.recover(c, m.action, m.keys);
-      case 'dev': return this.dev(c, m.action, m.on, m.amount);
+      case 'dev': return this.dev(c, m.action, m.on, m.amount, m.x, m.y);
       case 'sites': return this.siteList(c, m.id);
       case 'priority': return this.setPriority(c, m.x, m.y, m.priority);
       case 'inspectTrain': return this.send(c, { t: 'train', line: Number(m.line), train: Number(m.train), info: this.rail?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.metro?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? this.ferry?.describeTrain(Number(m.line), Number(m.train), !!m.full) ?? null });
@@ -202,8 +202,8 @@ export class Net {
     }
   }
 
-  /** Testing aids, only on a non-production server: unlimited funds, a cash grant, every technology. */
-  private dev(c: Client, action: string, on?: boolean, amount?: number) {
+  /** Testing aids, only on a non-production server: unlimited funds, a cash grant, every technology, a fire. */
+  private dev(c: Client, action: string, on?: boolean, amount?: number, x?: number, y?: number) {
     if (!this.cfg.devTools) return this.toast(c, 'Dev tools are off on this server');
     const p = c.player!;
     if (action === 'unlimited') {
@@ -222,6 +222,10 @@ export class Net {
       this.w.techVersion++;
       this.w.playersDirty = true;
       return this.toast(c, 'Every technology unlocked', 'info');
+    }
+    if (action === 'fire' && this.fires && Number.isInteger(x) && Number.isInteger(y)) {
+      const [dx, dy] = this.w.doorOf(x!, y!), b = this.w.buildings.get(`${dx},${dy}`);
+      return this.toast(c, b && this.fires.ignite(b) ? `Set the ${KIND_NAMES[b.id]} at (${b.x}, ${b.y}) on fire` : 'Nothing there that can burn', 'info');
     }
   }
 

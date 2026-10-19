@@ -64,6 +64,8 @@ export interface FireDTO {
   t0: number; burn: number;
   /** share burnt when the engine (or the bucket chain) arrived; 0 while burning */
   d: number;
+  /** fighting and out: the tick help arrived (an engine crew or the bucket chain) */
+  ta: number;
   /** fighting: the tick it will be out; out: the tick it went out */
   t1: number;
   /** 1 while an engine is on its way */

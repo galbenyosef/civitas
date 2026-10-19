@@ -25,6 +25,7 @@ import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
 import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
 import { zoneOf, levelOf, Zone } from '../tile';
 import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
+import { FIRE } from '../fires';
 
 /**
  * Demo maps (docs/demo.md): a planned, lived-in town where every large object in the catalogue is placed once and
@@ -158,6 +159,9 @@ export const DEMO_OWNER = 'sys';
 // district block helpers, for the rects below (the placements are literal tiles)
 const D = (i: number) => -35 + 24 * i;
 const block = (di: number, dj: number, bi: number, bj: number): DemoRect => [D(di) + 1 + 5 * bi, D(dj) + 1 + 5 * bj, 4, 4];
+/** the showcase's fire drill home: a level-3 house five tiles from the civic district's fire post (-24, -29), and the stop's frame */
+const FIRE_DRILL: DemoXY = [-29, -31];
+const FIRE_DRILL_RECT: DemoRect = [-31, -33, 9, 6];
 /** bus line 2's stops (x = -24, beside the x = -25 road): the civic district, the western suburb, the industrial estate */
 const LINE_2_STOPS = [-33, -23, -9, -4, 1, 6, 15, 20, 25, 30];
 /** blocks of a seedCity district that are not homes (its zone pattern repeats in every district) */
@@ -319,7 +323,9 @@ export const SECTIONS: DemoSection[] = [
       { kind: 'construction-company', door: [-29, -16], rot: 0 },
     ],
     // the general and teaching hospitals' air ambulances and the police headquarters' helicopter (docs/helicopters.md)
-    spots: [{ id: 'helipads', spot: 'helipads', name: 'Helipads', rect: [-34, -27, 18, 10], inspect: [-27, -21] }],
+    spots: [{ id: 'helipads', spot: 'helipads', name: 'Helipads', rect: [-34, -27, 18, 10], inspect: [-27, -21] },
+      // the fire drill (server sim/fires.ts drills, demoFireDrills): the house five tiles from the fire post catches light again a little after each fire is out
+      { id: 'house-fire', spot: 'house-fire', name: 'House fire', rect: FIRE_DRILL_RECT, inspect: FIRE_DRILL }],
   },
   {
     id: 'rail', name: 'Rail and freight',
@@ -500,7 +506,7 @@ export const TOUR: string[] = [
   'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
   'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
-  'fire-post', 'fire', 'large-fire-station', 'fire-hq',
+  'fire-post', 'house-fire', 'fire', 'large-fire-station', 'fire-hq',
   'handyman', 'yard', 'builders-depot', 'construction-company',
   'rail-halt', 'track-passenger', 'rail-station', 'line-rail-1', 'metro-entrance', 'line-metro-1', 'metro-station',
   'park', 'lakeside-park', 'botanical-garden',
@@ -597,7 +603,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'cab-office': {
     title: 'Cab office',
@@ -652,6 +658,12 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     what: 'Where the basin opens to the sea, beyond the edge of the town. Container ships, coasters and ro-ro ferries come in over the horizon here for the cargo port, a tug meets each container ship and leads it in, and the trawlers go out this way to the fishing grounds before dawn. Boats work to a pure timetable, so everyone sees the same ships: each harbour sails lanes over the water, found round the bridges its boats cannot clear, and a ship too tall for a bridge waits for a bascule to lift.',
     how: 'Nothing to build. A scenario declares where its water meets the sea; in a world of its own, a lake of 1,500 tiles or more counts as open water reaching the sea, and its ships come in over its far horizon. A cargo port needs a way to the sea: a smaller lake gets pleasure boats, fishing and ferries only.',
     facts: [['Ships', 'container ships, coasters, ro-ro ferries, barges'], ['Fishing', 'trawlers out from about 04:00, home from noon, not on Sundays'], ['Bridges', 'each style has a clearance; tall boats book a bascule\'s lifts']],
+  },
+  'house-fire': {
+    title: 'House fire',
+    what: 'Homes and works catch fire now and then, more often the bigger and older they are. The nearest staffed fire post or station in reach sends its engine on blue lights, through red signals and, when the traffic stops, down the middle of the road; once it is there the crew put it out, and the damage is what had burnt by then. With no engine in reach the building burns down and its people leave. Either way the owner pays, under "Fire damage" in the ledger. In this demo the house beside the fire post catches light every so often, so the engine is always about to turn out.',
+    how: `Place a fire post or fire station (Emergency services) within ${FIRE.reach} tiles of your homes and keep it staffed. A town's first fire is a warning that never costs a building: the neighbours' bucket chain saves it when no engine comes.`,
+    facts: [['Engine reach', `${FIRE.reach} tiles, or the station's own cover when wider`], ['Unattended', `burns down in about ${FIRE.burnHours} hours`], ['Bill', `${Math.round(FIRE.costShare * 100)}% of the building's value times the share burnt`], ['Technology', techLine('firepost')]],
   },
   'pool-of-london': {
     title: 'The Pool of London',
@@ -1074,6 +1086,10 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   // ---- education (docs/education.md): families live within reach of the schools, so the children walk to class; halls stand beside the university
   { id: 'school-run', caption: 'children living within reach of a nursery, a primary, a secondary and a sixth-form school, who walk to class on a school day',
     tour: 'primary-school', seeded: schoolRun([Study.Nursery, Study.Primary, Study.Secondary, Study.SixthForm]) },
+  // ---- incidents (docs/incidents.md): a house that burns on a loop beside the fire post, so the engine turns out on every visit
+  { id: 'house-fire', caption: 'a house fire with a fire post\'s engine in reach (the demo\'s fire drill)', tour: 'house-fire',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'house-fire')),
+    seeded: (d) => demoFireDrillsOf(d).length > 0 },
   { id: 'student-quarter', caption: 'halls of residence within a short walk of the university', tour: 'halls', seeded: studentQuarter },
   { id: 'school-bus', caption: 'a school bus on a round (a fleet unit of kind 9)', tour: 'secondary-school', todo: 'the school buses are E6 (docs/education.md section 10): they take over from the escorts and the missed days' },
   { id: 'london-school-run', caption: 'children living within reach of a primary and a secondary school in London', tour: 'primary-islington', demo: 'london',
@@ -1178,4 +1194,16 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
     }
   }
   return out;
+}
+
+/** The homes a demo's fire drill burns (server sim/fires.ts `drills`, set by index.ts): the inspect tiles of its 'house-fire' spots. */
+export function demoFireDrills(id: DemoId): DemoXY[] {
+  return demoSections(id).flatMap((s) => (s.spots ?? []).filter((sp) => sp.spot === 'house-fire' && sp.inspect).map((sp) => sp.inspect!));
+}
+/** The fire drills of the showcase that stand on a home with a fire building within FIRE.reach (demo:check's seeded test). */
+function demoFireDrillsOf(d: SeededDemo): DemoXY[] {
+  const fire: [number, number][] = [];
+  const homes = new Set<string>();
+  d.scan((x, y, t, a) => { if (a) return; const z = zoneOf(t); if (z === Zone.Fire) fire.push([x, y]); else if (z === Zone.Residential && levelOf(t) > 0) homes.add(`${x},${y}`); });
+  return demoFireDrills('showcase').filter(([x, y]) => homes.has(`${x},${y}`) && fire.some(([fx, fy]) => Math.max(Math.abs(fx - x), Math.abs(fy - y)) <= FIRE.reach));
 }
