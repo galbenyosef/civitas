@@ -57,7 +57,11 @@ const CELLS = CHUNK_SIZE * CHUNK_SIZE;
  * the same arrays as Traffic.cells, which keeps them for going through every lane), and the degree, roundabout or flyover
  * byte and crossing caches (degreeOf, junctionAux, isCrossingAt; -1 not worked out, as after invalidate).
  */
-interface RoadChunk { lanes: (Mover[] | undefined)[]; deg: Int8Array; jaux: Int16Array; xing: Int8Array }
+interface RoadChunk {
+  lanes: (Mover[] | undefined)[]; deg: Int8Array; jaux: Int16Array; xing: Int8Array;
+  /** movers that drove on each tile this tick, and those of them held up (the congestion's inputs, endTick), from tick `presAt` */
+  pres: Uint16Array; stop: Uint16Array; presAt: Uint32Array;
+}
 interface Junction { signal: boolean; ver: number; deg: number; pid: number; offset: number; period: number; act?: Actuation }
 /** Actuated signal state: the axis on green, when that green began and when it is due to end. */
 interface Actuation { green: 'ns' | 'ew'; start: number; end: number; decided: boolean; at: number }
@@ -328,9 +332,11 @@ export class Traffic {
   private crossPrev = new Map<number, number>(); // tile key -> CROSS_* mask
   private crossCur = new Map<number, number>();
   private phase: SignalPhase = { green: 'ns', amber: false };
-  /** scratch for the tick under way */
-  present = new Map<number, number>();
-  stopped = new Map<number, number>();
+  /**
+   * scratch for the tick under way: the tiles driven on (the start tile of each step's lane), in the order first driven
+   * on, with the RoadChunk and index holding their counts (RoadChunk.pres, .stop, stamped `presAt`)
+   */
+  private presKeys: number[] = []; private presRc: RoadChunk[] = []; private presIdx: number[] = []; private presStamp = 1;
   vehicles = 0; queued = 0; private speedSum = 0;
   lastVehicles = 0; lastQueued = 0; lastSpeedPct = 1;
   /** tiles whose congestion changed since the last traffic broadcast */
@@ -355,7 +361,10 @@ export class Traffic {
   private roadChunk(x: number, y: number): RoadChunk {
     let rc = this.roadChunkIf(x, y);
     if (!rc) {
-      rc = { lanes: new Array(CELLS * 4), deg: new Int8Array(CELLS).fill(-1), jaux: new Int16Array(CELLS).fill(-1), xing: new Int8Array(CELLS).fill(-1) };
+      rc = {
+        lanes: new Array(CELLS * 4), deg: new Int8Array(CELLS).fill(-1), jaux: new Int16Array(CELLS).fill(-1), xing: new Int8Array(CELLS).fill(-1),
+        pres: new Uint16Array(CELLS), stop: new Uint16Array(CELLS), presAt: new Uint32Array(CELLS),
+      };
       this.roads.set((chunkOf(x) + 0x800) * 0x1000 + chunkOf(y) + 0x800, rc);
       this.lastRoad = rc;
     }
@@ -368,7 +377,7 @@ export class Traffic {
   }
 
   beginTick() {
-    this.present.clear(); this.stopped.clear();
+    this.presKeys.length = 0; this.presRc.length = 0; this.presIdx.length = 0; this.presStamp++;
     this.vehicles = 0; this.queued = 0; this.speedSum = 0;
     const t = this.crossPrev; this.crossPrev = this.crossCur; this.crossCur = t; this.crossCur.clear();
     const wt = this.walkPrev; this.walkPrev = this.walkCur; this.walkCur = wt; this.walkCur.clear();
@@ -382,8 +391,8 @@ export class Traffic {
   private carGrid = new TileLists();
   endTick() {
     const tick = this.w.tick;
-    for (const [k, n] of this.present) {
-      const st = this.stopped.get(k) ?? 0;
+    for (let j = 0; j < this.presKeys.length; j++) {
+      const k = this.presKeys[j], rc = this.presRc[j], n = rc.pres[this.presIdx[j]], st = rc.stop[this.presIdx[j]];
       const target = Math.min(1, (n * 0.25 + st * 0.75) / (2 * TT.laneCap));
       const c = this.cong.get(k);
       const prev = c ? c.v * Math.exp(-(tick - c.at) / DECAY_TAU) : 0;
@@ -445,6 +454,13 @@ export class Traffic {
     return this.costChunks.get(tkey(chunkOf(x), chunkOf(y)));
   }
   private costCell = 0;
+  /** Is a car parked at the kerb of (x, y)? (World.kerb, from the cost chunk's copy of it) */
+  private kerbAt(x: number, y: number): boolean {
+    const cx = chunkOf(x), cy = chunkOf(y);
+    let cc = this.lastCost;
+    if (cx !== this.lastCx || cy !== this.lastCy) { cc = this.costChunk(cx, cy); this.lastCx = cx; this.lastCy = cy; this.lastCost = cc; }
+    return cc.kerb[localIndex(x, y)] !== 0;
+  }
   /** The cost chunk's flags of (x, y), dropped with the degree and crossing caches. */
   private dropCostFlags(x: number, y: number) {
     const cc = this.costChunks.get(tkey(chunkOf(x), chunkOf(y)));
@@ -621,7 +637,7 @@ export class Traffic {
     return n;
   }
   private capacityInto(x: number, y: number) {
-    return Math.max(1, TT.laneCap - ((this.w.kerb.get(tkey(x, y)) ?? 0) > 0 ? 1 : 0));
+    return Math.max(1, TT.laneCap - (this.kerbAt(x, y) ? 1 : 0));
   }
   /**
    * Is there room for `m` in lane `key` on tile (x,y)? A fixed count of cars
@@ -640,7 +656,7 @@ export class Traffic {
       if (q) for (const o of q) if (o.cls !== BIKE_CLASS) n++;
       return n < this.capacityInto(x, y);
     }
-    const kerb = (this.w.kerb.get(tkey(x, y)) ?? 0) > 0;
+    const kerb = this.kerbAt(x, y);
     let used = m.len + MIN_GAP;
     if (q) for (const o of q) used += o.len + MIN_GAP;
     if (extra) for (const o of extra) used += o.len + MIN_GAP;
@@ -1273,7 +1289,7 @@ export class Traffic {
     const nextDir = this.nextDirOf(m);
 
     let base = DRIVE_SPEED * m.speedMul * (m.cls === VehicleClass.Truck || m.cls === VehicleClass.Bus ? 0.8 : 1);
-    if ((w.kerb.get(tkey(ax, ay)) ?? 0) > 0) base *= 0.6;
+    if (this.kerbAt(ax, ay)) base *= 0.6;
     // turns slow a car for each half; on a roundabout the ring's wide corners not at all, the turns on and off less
     if (nextDir !== dir && m.prog > 0.3) base *= this.turnSlow(bx, by);
     if (m.inDir !== dir && m.prog < 0.3) base *= this.turnSlow(ax, ay);
@@ -1358,9 +1374,10 @@ export class Traffic {
       if (md > 1e-2) { const h = this.motion.get(m); if (h) { h[0] = mx / md; h[1] = my / md; } else this.motion.set(m, [mx / md, my / md]); }
     }
 
-    const tk = tkey(ax, ay);
-    this.present.set(tk, (this.present.get(tk) ?? 0) + 1);
-    if (moved < base * 0.3) { this.stopped.set(tk, (this.stopped.get(tk) ?? 0) + 1); this.queued++; }
+    const rc = this.roadChunk(ax, ay), ri = localIndex(ax, ay);
+    if (rc.presAt[ri] !== this.presStamp) { rc.presAt[ri] = this.presStamp; rc.pres[ri] = 0; rc.stop[ri] = 0; this.presKeys.push(tkey(ax, ay)); this.presRc.push(rc); this.presIdx.push(ri); }
+    rc.pres[ri]++;
+    if (moved < base * 0.3) { rc.stop[ri]++; this.queued++; }
     this.vehicles++; this.speedSum += Math.min(1, moved / (DRIVE_SPEED * m.speedMul));
     if (moved < 0.02) { m.wait++; if (!m.dwell) m.stuck++; } else m.wait = 0; // a bus dwelling at a stop is not stuck
     if (arrived) return 'arrived';
