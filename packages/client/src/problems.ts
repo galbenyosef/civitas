@@ -19,8 +19,8 @@ export interface ProblemsDeps {
   select(x: number, y: number): void;
 }
 
-/** entries listed per group before "and N more" */
-const PER_GROUP = 40;
+/** entries listed per group (or per reason) before "and N more": a long queue of one problem reads as its heading and count */
+const PER_GROUP = 8;
 
 export class ProblemsPanel {
   readonly chip: HTMLButtonElement;

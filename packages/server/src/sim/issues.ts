@@ -190,8 +190,9 @@ export class Issues {
     if (!w.hasRoadAccess(b.x, b.y) && !this.blockOnly(b) && (b.level > 0 || uc || !this.frontageNear(b))) code = Issue.NoRoad;
     // 2 no builders: nobody worked the site of a new building for an hour of builder time (a waiting upgrade is not stuck), and
     // nobody worked any of its owner's sites in that hour either; a site queued behind its owner's own crew only after two days
+    // any site of theirs worked since the last look (an upgrade too) means builders are at work for its owner
+    if (site && site.work < st.work && st.work !== Infinity) { const o = w.parcelAt(b.x, b.y)?.owner; if (o) this.served.set(o, now); }
     if (site && b.level === 0) {
-      if (site.work < st.work && st.work !== Infinity) { const o = w.parcelAt(b.x, b.y)?.owner; if (o) this.served.set(o, now); }
       if (site.assigned > 0 || site.work < st.work || site.priority <= -2) st.idle = 0;
       else if (this.busy) st.idle += this.period;
       st.work = site.work;
@@ -199,7 +200,7 @@ export class Issues {
         const served = this.served.get(w.parcelAt(b.x, b.y)?.owner ?? '') ?? -Infinity;
         if (now - served >= IT.noBuildersHours * TPH || st.idle >= IT.noBuildersStuckHours * TPH) code = Issue.NoBuilders;
       }
-    } else { st.idle = 0; st.work = Infinity; }
+    } else { st.idle = 0; st.work = site ? site.work : Infinity; }
     if (standing) {
       // precedence: what stops it working first (nobody comes at all says more than where they park)
       if (!code && this.unstaffed(b, st, now)) code = Issue.Unstaffed;
