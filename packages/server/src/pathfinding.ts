@@ -1,5 +1,5 @@
-import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS } from '@msimcity/shared';
-import { DIRS, tkey, type World } from './world';
+import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS, CHUNK_SIZE } from '@msimcity/shared';
+import { DIRS, tkey, type Chunk, type World } from './world';
 
 /** `a`: the tile's aux byte (roundabouts and flyovers restrict the steps out of it, shared/src/junctions.ts) */
 interface Node { x: number; y: number; parent: Node | null; depth: number; a: number }
@@ -43,21 +43,23 @@ export function findPath(
   for (const [dx, dy] of DIRS) {
     if (isGoal(sx + dx, sy + dy)) return { path: [sx, sy, sx + dx, sy + dy], gx: sx + dx, gy: sy + dy };
   }
-  const visited = new Set<number>();
+  const S = slotsOf(w), st = nextStamp();
   const queue: Node[] = [];
   let head = 0;
-  const startTile = peek(w, sx, sy);
-  const root: Node = { x: sx, y: sy, parent: null, depth: 0, a: peekedAux };
-  visited.add(tkey(sx, sy));
-  if (startTile !== undefined && isRoad(startTile)) {
+  const s0 = S.slot(w, chunkOf(sx), chunkOf(sy)), li0 = localIndex(sx, sy);
+  const root: Node = { x: sx, y: sy, parent: null, depth: 0, a: s0 < 0 ? 0 : S.chunks[s0].aux[li0] };
+  if (s0 >= 0) visited[s0 * NODES + li0] = st;
+  if (s0 >= 0 && isRoad(S.chunks[s0].tiles[li0])) {
     queue.push(root);
   } else {
     for (const [dx, dy] of DIRS) {
       const nx = sx + dx, ny = sy + dy;
-      const t = peek(w, nx, ny);
-      if (t !== undefined && isRoad(t) && !sideways(peekedAux, dx)) {
-        visited.add(tkey(nx, ny) + routeLayer(peekedAux, dx) * LAYER);
-        queue.push({ x: nx, y: ny, parent: root, depth: 1, a: peekedAux });
+      const s = S.slot(w, chunkOf(nx), chunkOf(ny));
+      if (s < 0) continue;
+      const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
+      if (isRoad(t) && !sideways(a, dx)) {
+        visited[s * NODES + routeLayer(a, dx) * CELLS + li] = st;
+        queue.push({ x: nx, y: ny, parent: root, depth: 1, a });
       }
     }
   }
@@ -67,12 +69,19 @@ export function findPath(
     expanded++;
     for (const [dx, dy] of DIRS) {
       const nx = n.x + dx, ny = n.y + dy;
-      const t = peek(w, nx, ny), a = peekedAux;
-      const key = tkey(nx, ny) + routeLayer(a, dx) * LAYER;
-      if (visited.has(key) || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
+      const s = S.slot(w, chunkOf(nx), chunkOf(ny));
+      if (s < 0) {
+        // not loaded: no road, but perhaps the goal (the start, when it is not loaded either, counts as visited)
+        if ((s0 < 0 && nx === sx && ny === sy) || !stepOk(w, n, nx, ny)) continue;
+        if (isGoal(nx, ny)) return { path: unwind({ x: nx, y: ny, parent: n, depth: n.depth + 1, a: 0 }), gx: nx, gy: ny };
+        continue;
+      }
+      const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
+      const key = s * NODES + routeLayer(a, dx) * CELLS + li;
+      if (visited[key] === st || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
       if (isGoal(nx, ny)) return { path: unwind({ x: nx, y: ny, parent: n, depth: n.depth + 1, a }), gx: nx, gy: ny };
-      if (t === undefined || !isRoad(t)) continue;
-      visited.add(key);
+      if (!isRoad(t)) continue;
+      visited[key] = st;
       queue.push({ x: nx, y: ny, parent: n, depth: n.depth + 1, a });
     }
   }
@@ -182,71 +191,141 @@ export function findRoute(
   for (const [dx, dy] of DIRS) if (sx + dx === gx && sy + dy === gy) return { path: [sx, sy, gx, gy], cost: 1 };
   if (!w.hasRoadAccess(gx, gy)) return null; // the goal is reached only from a road beside it: without one, skip the search
   const goalRoad = (() => { const t = w.peekTile(gx, gy); return t !== undefined && isRoad(t); })();
+  const S = slotsOf(w), st = nextStamp();
   // open set: binary heap on f
-  const heapK: number[] = [], heapF: number[] = [];
+  let hn = 0;
   const push = (k: number, f: number) => {
-    heapK.push(k); heapF.push(f);
-    let i = heapK.length - 1;
-    while (i > 0) { const p = (i - 1) >> 1; if (heapF[p] <= heapF[i]) break; [heapK[p], heapK[i]] = [heapK[i], heapK[p]]; [heapF[p], heapF[i]] = [heapF[i], heapF[p]]; i = p; }
+    if (hn === heapK.length) growHeap();
+    heapK[hn] = k; heapF[hn] = f;
+    let i = hn++;
+    while (i > 0) {
+      const p = (i - 1) >> 1; if (heapF[p] <= heapF[i]) break;
+      const tk = heapK[p]; heapK[p] = heapK[i]; heapK[i] = tk; const tf = heapF[p]; heapF[p] = heapF[i]; heapF[i] = tf; i = p;
+    }
   };
   const pop = (): number => {
-    const k = heapK[0]; const lk = heapK.pop()!, lf = heapF.pop()!;
-    if (heapK.length) {
+    const k = heapK[0]; const lk = heapK[--hn], lf = heapF[hn];
+    if (hn) {
       heapK[0] = lk; heapF[0] = lf;
       let i = 0;
       for (;;) {
         const l = i * 2 + 1, r = l + 1; let m = i;
-        if (l < heapK.length && heapF[l] < heapF[m]) m = l;
-        if (r < heapK.length && heapF[r] < heapF[m]) m = r;
+        if (l < hn && heapF[l] < heapF[m]) m = l;
+        if (r < hn && heapF[r] < heapF[m]) m = r;
         if (m === i) break;
-        [heapK[m], heapK[i]] = [heapK[i], heapK[m]]; [heapF[m], heapF[i]] = [heapF[i], heapF[m]]; i = m;
+        const tk = heapK[m]; heapK[m] = heapK[i]; heapK[i] = tk; const tf = heapF[m]; heapF[m] = heapF[i]; heapF[i] = tf; i = m;
       }
     }
     return k;
   };
-  const g = new Map<number, number>(), parent = new Map<number, number>(), dirIn = new Map<number, number>(), closed = new Set<number>();
   const h = (x: number, y: number) => Math.abs(x - gx) + Math.abs(y - gy);
-  const startTile = peek(w, sx, sy), startAux = peekedAux;
-  const start = tkey(sx, sy) + (startDir >= 0 ? routeLayer(startAux, DIRS[startDir][0]) * LAYER : 0);
-  g.set(start, 0); dirIn.set(start, startDir);
-  if (startTile !== undefined && isRoad(startTile)) push(start, h(sx, sy));
-  else for (let d = 0; d < 4; d++) {
+  // the start's node, or START when its chunk is not loaded (it is then never expanded, only the end of the path)
+  let start = START;
+  const s0 = S.slot(w, chunkOf(sx), chunkOf(sy));
+  if (s0 >= 0) {
+    const li = localIndex(sx, sy), ch = S.chunks[s0], startTile = ch.tiles[li], startAux = ch.aux[li];
+    start = s0 * NODES + (startDir >= 0 ? routeLayer(startAux, DIRS[startDir][0]) * CELLS : 0) + li;
+    seen[start] = st; gScore[start] = 0; dirIn[start] = startDir; parent[start] = START;
+    if (isRoad(startTile)) push(start, h(sx, sy));
+  }
+  if (s0 < 0 || !isRoad(S.chunks[s0].tiles[localIndex(sx, sy)])) for (let d = 0; d < 4; d++) {
     const nx = sx + DIRS[d][0], ny = sy + DIRS[d][1];
-    const t = peek(w, nx, ny);
-    if (t === undefined || !isRoad(t) || sideways(peekedAux, DIRS[d][0])) continue;
-    const k = tkey(nx, ny) + routeLayer(peekedAux, DIRS[d][0]) * LAYER, c = cost(nx, ny);
-    g.set(k, c); parent.set(k, start); dirIn.set(k, d); push(k, c + h(nx, ny));
+    const s = S.slot(w, chunkOf(nx), chunkOf(ny));
+    if (s < 0) continue;
+    const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
+    if (!isRoad(t) || sideways(a, DIRS[d][0])) continue;
+    const k = s * NODES + routeLayer(a, DIRS[d][0]) * CELLS + li, c = cost(nx, ny);
+    seen[k] = st; gScore[k] = c; parent[k] = start; dirIn[k] = d; push(k, c + h(nx, ny));
   }
   const auxFn = (x: number, y: number) => w.auxAt(x, y);
   let expanded = 0;
-  while (heapK.length && expanded < maxNodes) {
+  while (hn && expanded < maxNodes) {
     const k = pop();
-    if (closed.has(k)) continue;
-    closed.add(k); expanded++;
-    const base = k % LAYER;
-    const [x, y] = [Math.floor(base / 65536) - 0x8000, (base % 65536) - 0x8000];
-    const gk = g.get(k)!, din = dirIn.get(k)!;
-    const here = peek(w, x, y) === undefined ? 0 : peekedAux;
+    if (closed[k] === st) continue;
+    closed[k] = st; expanded++;
+    const s = (k / NODES) | 0, li = k & (CELLS - 1), ch = S.chunks[s];
+    const x = ch.cx * CHUNK_SIZE + (li % CHUNK_SIZE), y = ch.cy * CHUNK_SIZE + ((li / CHUNK_SIZE) | 0);
+    const gk = gScore[k], din = dirIn[k];
+    const here = ch.aux[li];
+    // the neighbours' chunk: this one, or the last one looked up
+    let ls = s, lcx = ch.cx, lcy = ch.cy;
     for (let d = 0; d < 4; d++) {
       const nx = x + DIRS[d][0], ny = y + DIRS[d][1];
       if (here >= STEP_RULE_AUX && !junctionStepOk(auxFn, x, y, nx, ny, din >= 0 ? DIRS[din][0] : 0, din >= 0 ? DIRS[din][1] : 0)) continue;
-      const t = peek(w, nx, ny);
-      const nk = tkey(nx, ny) + routeLayer(peekedAux, DIRS[d][0]) * LAYER;
+      const ncx = chunkOf(nx), ncy = chunkOf(ny);
+      if (ncx !== lcx || ncy !== lcy) { ls = S.slot(w, ncx, ncy); lcx = ncx; lcy = ncy; }
       if (nx === gx && ny === gy) {
-        parent.set(nk, k);
-        const path: number[] = [];
-        for (let cur: number | undefined = nk; cur !== undefined; cur = parent.get(cur)) { const b = cur % LAYER; path.push((b % 65536) - 0x8000, Math.floor(b / 65536) - 0x8000); }
+        const path: number[] = [gy, gx];
+        let cur = k;
+        for (; cur >= 0; cur = parent[cur]) { const c = S.chunks[(cur / NODES) | 0], i = cur & (CELLS - 1); path.push(c.cy * CHUNK_SIZE + ((i / CHUNK_SIZE) | 0), c.cx * CHUNK_SIZE + (i % CHUNK_SIZE)); }
+        if (cur === START && start === START) path.push(sy, sx);
         path.reverse();
         return { path, cost: gk + (goalRoad ? cost(gx, gy) : 1) };
       }
-      if (closed.has(nk)) continue;
-      if (t === undefined || !isRoad(t) || sideways(peekedAux, DIRS[d][0])) continue;
+      if (ls < 0) continue; // not loaded: no road
+      const li2 = localIndex(nx, ny), nch = S.chunks[ls], t = nch.tiles[li2], a = nch.aux[li2];
+      const nk = ls * NODES + routeLayer(a, DIRS[d][0]) * CELLS + li2;
+      if (closed[nk] === st) continue;
+      if (!isRoad(t) || sideways(a, DIRS[d][0])) continue;
       const ng = gk + cost(nx, ny) + (din >= 0 && din !== d && k !== start ? turnCost : 0); // startDir restricts, it does not charge
-      const old = g.get(nk);
-      if (old !== undefined && old <= ng) continue;
-      g.set(nk, ng); parent.set(nk, k); dirIn.set(nk, d);
+      if (seen[nk] === st && gScore[nk] <= ng) continue;
+      seen[nk] = st; gScore[nk] = ng; parent[nk] = k; dirIn[nk] = d;
       push(nk, ng + h(nx, ny));
     }
   }
   return null;
+}
+
+// ---- the road searches' scratch (docs/search-perf.md) -------------------------------------------------------------------
+
+/**
+ * A* nodes are numbered by chunk slot: slot * NODES + layer * CELLS + the tile's index in the chunk, where layer 1 is
+ * the road beneath a flyover. Per node, scratch arrays shared by every search hold the g-score, the parent, the
+ * direction in and two stamps: `seen` (g, parent and direction are this search's) and `closed`; findPath's breadth-first
+ * search has its own `visited`. A search takes a new stamp, so nothing is cleared between searches.
+ */
+const CELLS = CHUNK_SIZE * CHUNK_SIZE, NODES = 2 * CELLS;
+/** the parent of the start node, and the start itself when its chunk is not loaded */
+const START = -1;
+let stamp = 0;
+let seen = new Uint32Array(0), closed = new Uint32Array(0), visited = new Uint32Array(0), gScore = new Float64Array(0), parent = new Int32Array(0), dirIn = new Int8Array(0);
+let heapK = new Int32Array(1024), heapF = new Float64Array(1024);
+function nextStamp(): number {
+  if (++stamp === 0xffffffff) { seen.fill(0); closed.fill(0); visited.fill(0); stamp = 1; }
+  return stamp;
+}
+function growHeap() {
+  const k = new Int32Array(heapK.length * 2), f = new Float64Array(heapF.length * 2);
+  k.set(heapK); f.set(heapF); heapK = k; heapF = f;
+}
+function growNodes(slots: number) {
+  let n = seen.length || NODES * 64;
+  while (n < slots * NODES) n *= 2;
+  if (n === seen.length) return;
+  const grow = <T extends Uint32Array | Float64Array | Int32Array | Int8Array>(a: T, b: T) => { b.set(a); return b; };
+  seen = grow(seen, new Uint32Array(n)); closed = grow(closed, new Uint32Array(n)); visited = grow(visited, new Uint32Array(n)); gScore = grow(gScore, new Float64Array(n));
+  parent = grow(parent, new Int32Array(n)); dirIn = grow(dirIn, new Int8Array(n));
+}
+/** A world's chunk slots: chunks are only ever added (World.getChunk), so a slot never changes. */
+class Slots {
+  chunks: Chunk[] = [];
+  private byKey = new Map<number, number>();
+  /** The slot of chunk (cx, cy), -1 while it is not loaded. */
+  slot(w: World, cx: number, cy: number): number {
+    const k = tkey(cx, cy);
+    let s = this.byKey.get(k);
+    if (s !== undefined) return s;
+    const c = w.getChunk(cx, cy, false);
+    if (!c) return -1;
+    s = this.chunks.length;
+    this.chunks.push(c); this.byKey.set(k, s);
+    growNodes(this.chunks.length);
+    return s;
+  }
+}
+const worldSlots = new WeakMap<World, Slots>();
+function slotsOf(w: World): Slots {
+  let s = worldSlots.get(w);
+  if (!s) worldSlots.set(w, s = new Slots());
+  return s;
 }

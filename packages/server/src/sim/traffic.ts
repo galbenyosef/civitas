@@ -2,6 +2,7 @@ import {
   DRIVE_SPEED, MIN_GAP, LANE_OFFSET, SIDEWALK_OFFSET, VEHICLE_LEN, VEHICLE_WIDTH, TRAFFIC_TUNING as TT,
   VehicleClass, BIKE_CLASS, isRoad, hasFeature, signalTiming, signalPhaseOf, signalArms, signalledArms, type SignalPhase,
   isJunctionAux, isRingAux, isFlyoverAux, islandOf, ringPos, isArmPos, RING_POS, isCrossing, isBridgeAux, isDeck, bridgeStyle, BridgeStyle, basculeBarrierAt,
+  CHUNK_SIZE, chunkOf, localIndex,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
@@ -42,6 +43,15 @@ const CROSSING_DELAY = 1.5;
 const BASCULE_UP_COST = 25;
 
 interface Cong { v: number; at: number }
+/**
+ * The router's cost of one chunk's tiles, as dense arrays (docs/search-perf.md): Traffic.cost is called for every tile
+ * every A* search looks at. `cong` is congestionAt as it was first read in tick `at` (-1: not read yet this tick; the
+ * congestion of a tile changes only in endTick, which clears it); `flags` the parts that change only with the tiles
+ * (0: not worked out, else 1 | 2 for a junction of three or more | 4 a level crossing | 8 a bascule deck), cleared by
+ * invalidate as the degree and crossing caches are; `kerb` 1 where a car is parked at the kerb, kept by World.kerb.
+ */
+interface CostChunk { cong: Float64Array; at: Float64Array; flags: Uint8Array; kerb: Uint8Array }
+const CELLS = CHUNK_SIZE * CHUNK_SIZE;
 interface Junction { signal: boolean; ver: number; deg: number; pid: number; offset: number; period: number; act?: Actuation }
 /** Actuated signal state: the axis on green, when that green began and when it is due to end. */
 interface Actuation { green: 'ns' | 'ew'; start: number; end: number; decided: boolean; at: number }
@@ -307,6 +317,7 @@ export class Traffic {
 
   constructor(private w: World) {
     w.onTileChanged = (x, y) => this.invalidate(x, y);
+    w.kerb.onSet = (k, n) => { const c = this.costChunkOfKey(k); if (c) c.kerb[this.costCell] = n > 0 ? 1 : 0; };
   }
 
   static laneKey(x: number, y: number, dir: number) { return tkey(x, y) * 4 + dir; }
@@ -339,6 +350,8 @@ export class Traffic {
       const v = prev + (target - prev) * EMA_ALPHA;
       if (c) { c.v = v; c.at = tick; } else this.cong.set(k, { v, at: tick });
       this.dirty.add(k);
+      const cc = this.costChunkOfKey(k);
+      if (cc) cc.at[this.costCell] = -1;
     }
     this.lastVehicles = this.vehicles; this.lastQueued = this.queued;
     this.lastSpeedPct = this.vehicles ? this.speedSum / this.vehicles : 1;
@@ -354,14 +367,46 @@ export class Traffic {
     return v;
   }
   cost(x: number, y: number): number {
-    const k = tkey(x, y);
-    let c = 1 + TT.congestionWeight * this.congestionAt(x, y);
-    if (this.degreeOf(x, y) >= 3) c += 0.6;
-    if ((this.w.kerb.get(k) ?? 0) > 0) c += 0.5;
+    const cx = chunkOf(x), cy = chunkOf(y);
+    let cc = this.lastCost;
+    if (cx !== this.lastCx || cy !== this.lastCy) { cc = this.costChunk(cx, cy); this.lastCx = cx; this.lastCy = cy; this.lastCost = cc; }
+    const i = localIndex(x, y), tick = this.w.tick;
+    let g: number;
+    if (cc.at[i] === tick) g = cc.cong[i];
+    else { g = cc.cong[i] = this.congestionAt(x, y); cc.at[i] = tick; }
+    let f = cc.flags[i];
+    if (!f) f = cc.flags[i] = 1 | (this.degreeOf(x, y) >= 3 ? 2 : 0) | (this.isCrossingAt(x, y) ? (this.xing.get(tkey(x, y)) === 1 ? 4 : 8) : 0);
+    let c = 1 + TT.congestionWeight * g;
+    if (f & 2) c += 0.6;
+    if (cc.kerb[i]) c += 0.5;
     // a level crossing: the expected wait for its barriers. A bascule lifts only a few times a day: nothing, but while it
     // is up, a detour (drivers held at it past the stuck limit re-route round it)
-    if (this.isCrossingAt(x, y)) c += this.xing.get(k) === 1 ? CROSSING_DELAY : this.barrierDownAt(x, y) ? BASCULE_UP_COST : 0;
+    if (f & 12) c += f & 4 ? CROSSING_DELAY : this.barrierDownAt(x, y) ? BASCULE_UP_COST : 0;
     return c;
+  }
+  private costChunks = new Map<number, CostChunk>();
+  private lastCx = NaN; private lastCy = NaN; private lastCost!: CostChunk;
+  private costChunk(cx: number, cy: number): CostChunk {
+    const nk = tkey(cx, cy);
+    let cc = this.costChunks.get(nk);
+    if (!cc) {
+      cc = { cong: new Float64Array(CELLS), at: new Float64Array(CELLS).fill(-1), flags: new Uint8Array(CELLS), kerb: new Uint8Array(CELLS) };
+      for (let ly = 0; ly < CHUNK_SIZE; ly++) for (let lx = 0; lx < CHUNK_SIZE; lx++) if ((this.w.kerb.get(tkey(cx * CHUNK_SIZE + lx, cy * CHUNK_SIZE + ly)) ?? 0) > 0) cc.kerb[ly * CHUNK_SIZE + lx] = 1;
+      this.costChunks.set(nk, cc);
+    }
+    return cc;
+  }
+  /** The cost chunk holding tile key k, if there is one yet, leaving the tile's index in it in `costCell`. */
+  private costChunkOfKey(k: number): CostChunk | undefined {
+    const x = Math.floor(k / 65536) - 0x8000, y = (k % 65536) - 0x8000;
+    this.costCell = localIndex(x, y);
+    return this.costChunks.get(tkey(chunkOf(x), chunkOf(y)));
+  }
+  private costCell = 0;
+  /** The cost chunk's flags of (x, y), dropped with the degree and crossing caches. */
+  private dropCostFlags(x: number, y: number) {
+    const cc = this.costChunks.get(tkey(chunkOf(x), chunkOf(y)));
+    if (cc) cc.flags[localIndex(x, y)] = 0;
   }
   pathCost(path: number[], from: number): number {
     let c = 0;
@@ -445,6 +490,7 @@ export class Traffic {
   private invalidate(x: number, y: number) {
     this.degree.delete(tkey(x, y)); this.jaux.delete(tkey(x, y)); this.xing.delete(tkey(x, y));
     for (const [dx, dy] of DIRS) this.degree.delete(tkey(x + dx, y + dy));
+    this.dropCostFlags(x, y); for (const [dx, dy] of DIRS) this.dropCostFlags(x + dx, y + dy);
     // signal arms look at diagonal neighbours too (wide-road twins), so re-check the 3x3 around the change
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) this.junctions.delete(tkey(x + dx, y + dy));
   }

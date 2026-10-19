@@ -1045,9 +1045,11 @@ const cellKey = (cx: number, cy: number) => (cx + 0x8000) * 65536 + (cy + 0x8000
 export class CountMap<K> extends Map<K, number> {
   /** chunk keys whose counts changed since the last broadcast */
   dirty = new Set<string>();
+  /** told of every count set (0 for a delete): Traffic keeps its router cost arrays' kerb flags with it */
+  onSet: ((k: K, v: number) => void) | null = null;
   constructor(private chunkOfKey: (k: K) => string) { super(); }
-  override set(k: K, v: number) { if (super.get(k) !== v) this.dirty.add(this.chunkOfKey(k)); return super.set(k, v); }
-  override delete(k: K) { if (super.has(k)) this.dirty.add(this.chunkOfKey(k)); return super.delete(k); }
+  override set(k: K, v: number) { if (super.get(k) !== v) this.dirty.add(this.chunkOfKey(k)); this.onSet?.(k, v); return super.set(k, v); }
+  override delete(k: K) { if (super.has(k)) this.dirty.add(this.chunkOfKey(k)); this.onSet?.(k, 0); return super.delete(k); }
 }
 /** Numeric tile key for hot maps (|x|,|y| < 32768). */
 export const tkey = (x: number, y: number) => (x + 0x8000) * 65536 + (y + 0x8000);
