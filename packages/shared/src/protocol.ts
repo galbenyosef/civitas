@@ -538,7 +538,10 @@ export type ClientMsg =
   /** the charts panel (docs/charts.md): open (answered with 'history', then an hourly 'histSample' follows) or closed */
   | { t: 'hist'; open: boolean }
   /** a boat's panel (docs/boats.md section 7): what the server knows beyond the schedule; answered with 'boat' */
-  | { t: 'inspectBoat'; id: number };
+  | { t: 'inspectBoat'; id: number }
+  // ---- issue bubbles and overlays (shared/src/issues.ts, server/src/sim/issues.ts) ----
+  /** the data overlay to send for the subscribed chunks (Overlay: 1 coverage, 2 leisure, 3 happiness, 4 jobs/homes; 0 none) */
+  | { t: 'overlay'; ch: number };
 
 export type ServerMsg =
   | { t: 'welcome'; you: string; seed: number; day: number; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
@@ -590,7 +593,14 @@ export type ServerMsg =
   | { t: 'histSample'; hour: number; w: number[]; p: number[] }
   /** every harbour with its lanes, and the sea gates (docs/boats.md 6.5): on hello and whenever anything changes, always a new list */
   | { t: 'harbours'; list: HarbourDTO[]; gates: SeaGate[] }
-  | { t: 'boat'; id: number; info: BoatInfo | null };
+  | { t: 'boat'; id: number; info: BoatInfo | null }
+  // ---- issue bubbles and overlays (shared/src/issues.ts, server/src/sim/issues.ts) ----
+  /** per chunk: base64 Uint8Array(CHUNK_SIZE^2) of issue codes (Issue, at a building's door tile); '' when the chunk has none. On subscribe and when the chunk's codes change */
+  | { t: 'issues'; cx: number; cy: number; d: string }
+  /** your own parcels' problems, flat triples x, y, code: on hello, then when they change (at most every ISSUE_TUNING.evalHours) */
+  | { t: 'problems'; p: number[] }
+  /** per chunk: the overlay you asked for, base64 Uint8Array(CHUNK_SIZE^2) (overlayByte; 0 no data), sent when it changes */
+  | { t: 'overlay'; ch: number; cx: number; cy: number; d: string };
 
 /**
  * A harbour on the wire (server sim/harbours.ts): what the boat schedule reads (boats.ts BoatHarbour: id, kind, the

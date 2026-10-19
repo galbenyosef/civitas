@@ -212,3 +212,40 @@ export const ECONOMY_TUNING = {
 export type EconomyTuning = typeof ECONOMY_TUNING;
 /** What a player may spend: the treasury and the overdraft line (the server's World.spendable; the client's previews). */
 export const spendableMoney = (money: number, unlimited?: boolean) => (unlimited ? Infinity : money + ECONOMY_TUNING.overdraftLimit);
+
+/**
+ * Issue bubbles and the problems list (server/src/sim/issues.ts, shared/src/issues.ts): when a building or lot counts
+ * as stuck, and when it stops. Times are game hours (turned into ticks with TICKS_PER_HOUR at the use site), so the day
+ * length can change without changing what the icons mean.
+ */
+export const ISSUE_TUNING = {
+  /**
+   * Every building and zoned lot is looked at once per this many game hours, a slice of them each tick (by a hash of
+   * the tile), so the cost is spread. Half an hour: an icon follows its condition within the hour even when the
+   * problems message (sent at most this often) has just gone.
+   */
+  evalHours: 0.5,
+  /** no builders: a site no builder has come to while builders were at work somewhere, for this long (sites wait out the night) */
+  noBuildersHours: 1,
+  /** unstaffed: staff on shift or on the way under this share of what the roster expects at the hour ... */
+  unstaffedShare: 0.5,
+  /** ... for this long (shift changes and jittered starts never last that long) ... */
+  unstaffedHours: 1,
+  /** ... when the roster expects at least this many at work (closed hours say nothing). It clears as soon as enough are
+   *  there, or once new hires fill unstaffedShare of the places, who then get this long to turn up for a shift */
+  unstaffedMinExpected: 1,
+  unstaffedGraceHours: 24,
+  /** full parking: drivers this building turned away who found no lot in reach and parked at the kerb, a decaying count ... */
+  parkingFullAt: 6,
+  /** ... with this half-life in game hours; the icon goes below parkingClearAt, or at once when parking in reach grows */
+  parkingHalfLifeHours: 12,
+  parkingClearAt: 2,
+  /** no customers: a shop or staffed venue standing all of yesterday with no visitor yesterday and none yet today */
+  noCustomersDays: 1,
+  /** very unhappy: residents' mean happiness under this; clears above unhappyClear (hysteresis) */
+  unhappyBelow: 35,
+  unhappyClear: 45,
+  /** 1: the Commons' own buildings get icons too outside sandboxes (its queue of sites would otherwise crowd the start) */
+  commons: 0,
+};
+export type IssueTuning = typeof ISSUE_TUNING;

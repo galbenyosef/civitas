@@ -16,6 +16,15 @@ export class ClientWorld {
   trafficDirty = new Set<string>();
   /** per chunk: cars parked at the kerb of each road tile (absent when none) */
   kerb = new Map<string, Uint8Array>();
+  /** per chunk: issue codes (shared/src/issues.ts Issue) at buildings' door tiles, absent when none; bumped on change */
+  issues = new Map<string, Uint8Array>();
+  issuesVersion = 0;
+  /** per chunk: the data overlay's bytes (shared/src/issues.ts Overlay) for channel `overlayCh`; chunks changed since the renderer looked */
+  overlay = new Map<string, Uint8Array>();
+  overlayCh = 0;
+  overlayDirty = new Set<string>();
+  /** your own parcels' problems (message 'problems'): flat triples x, y, code */
+  problems: number[] = [];
 
   /** a read-only showcase (SPECTATE on the server, from the welcome): nothing may be changed, a sandbox included */
   spectate = false;
@@ -35,7 +44,38 @@ export class ClientWorld {
     this.touch(dto.cx - 1, dto.cy); this.touch(dto.cx + 1, dto.cy); this.touch(dto.cx, dto.cy - 1); this.touch(dto.cx, dto.cy + 1);
     return c;
   }
-  dropChunk(key: string) { this.chunks.delete(key); this.traffic.delete(key); this.kerb.delete(key); }
+  dropChunk(key: string) {
+    this.chunks.delete(key); this.traffic.delete(key); this.kerb.delete(key);
+    if (this.issues.delete(key)) this.issuesVersion++;
+    if (this.overlay.delete(key)) this.overlayDirty.add(key);
+  }
+  applyIssues(cx: number, cy: number, d: string) {
+    const key = chunkKey(cx, cy);
+    if (!this.chunks.has(key)) return;
+    const bytes = d ? b64ToU8(d) : null;
+    if (bytes && bytes.length === CHUNK_SIZE * CHUNK_SIZE) this.issues.set(key, bytes); else this.issues.delete(key);
+    this.issuesVersion++;
+  }
+  /** The issue code at a tile (its structure's door), 0 when none or not loaded. */
+  issueAt(x: number, y: number): number {
+    const b = this.issues.get(chunkKey(chunkOf(x), chunkOf(y)));
+    return b ? b[localIndex(x, y)] : 0;
+  }
+  applyOverlay(ch: number, cx: number, cy: number, d: string) {
+    const key = chunkKey(cx, cy);
+    if (ch !== this.overlayCh || !this.chunks.has(key)) return; // an answer for a channel switched away from
+    const bytes = d ? b64ToU8(d) : null;
+    if (bytes && bytes.length === CHUNK_SIZE * CHUNK_SIZE) this.overlay.set(key, bytes); else this.overlay.delete(key);
+    this.overlayDirty.add(key);
+  }
+  /** Switch the overlay channel: the old bytes go (the server sends the new ones). */
+  setOverlayChannel(ch: number) {
+    if (ch === this.overlayCh) return;
+    for (const key of this.overlay.keys()) this.overlayDirty.add(key);
+    this.overlay.clear();
+    this.overlayCh = ch;
+  }
+
   applyTraffic(cx: number, cy: number, d: string, k?: string) {
     const key = chunkKey(cx, cy);
     if (!this.chunks.has(key)) return;

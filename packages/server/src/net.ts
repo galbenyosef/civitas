@@ -23,6 +23,9 @@ import { historyOf, type History } from './history';
 import { MapSummaries } from './worldmap';
 import { setPolicy } from './policies';
 import { mothballable, adminRefusal, type Finance } from './sim/finance';
+import type { Issues } from './sim/issues';
+import { Overlays } from './overlays';
+import { ISSUE_TUNING, OVERLAY_COUNT } from '@msimcity/shared';
 
 interface Client {
   conn: Conn; player: Player | null; subs: Set<string>; lastHint: number;
@@ -32,6 +35,8 @@ interface Client {
   goalsSig?: string;
   /** the charts panel is open (history.ts): it gets each hourly sample */
   hist?: boolean;
+  /** issue bubbles (flushIssues): the last problems list sent; the overlay channel asked for, a hash of what each chunk last got, chunks still to look at */
+  probSig?: string; ovl?: number; ovlSent?: Map<string, number>; ovlQueue?: string[];
 }
 
 /** tool id -> kind id, from the building catalogue: zoning tools for growable kinds, placement tools for civic ones.
@@ -41,7 +46,7 @@ const TOOL_CIVIC: Record<string, number> = CIVIC_TOOLS;
 const HINT_EVERY = 1200;
 /** Lots of yours waiting with no builder on them before the hourly check says why (builderHints), and how often it may. */
 const WAITING_HINT = 8;
-const BUILDER_HINT_EVERY = TICKS_PER_HOUR * 24;
+const BUILDER_HINT_EVERY = TICKS_PER_HOUR * 24 * 3; // the issue bubbles show waiting sites all the time now (sim/issues.ts)
 /** Onboarding goals are measured this often (a quarter of a game hour). */
 const GOALS_EVERY = TICKS_PER_HOUR / 4;
 /** How this game is run, set by its host (index.ts for the server; a local-mode worker later, docs/local-mode.md). */
@@ -58,7 +63,7 @@ export interface GameConfig {
  * What a spectator may still ask: looking, never changing. A whitelist, so an intent added to ClientMsg later is refused in
  * spectate mode until it is listed here. (hello and ping are answered before this, as for everyone.)
  */
-const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map', 'inspectBoat']);
+const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map', 'inspectBoat', 'overlay']);
 const SPECTATE_REFUSAL = 'Read-only showcase: you can look around, but nothing can be changed here';
 const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) => k.tool!.id));
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
@@ -151,7 +156,7 @@ export class Net {
     if (c.player.admin) { const no = adminRefusal(m); if (no) return this.toast(c, no); }
     switch (m.t) {
       case 'sub': return this.subscribe(c, m.chunks);
-      case 'unsub': for (const [cx, cy] of m.chunks) c.subs.delete(chunkKey(cx, cy)); return;
+      case 'unsub': for (const [cx, cy] of m.chunks) { c.subs.delete(chunkKey(cx, cy)); c.ovlSent?.delete(chunkKey(cx, cy)); } return;
       case 'buy': return this.buy(c, m.x, m.y, m.w, m.h);
       case 'build': return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
       case 'parcel': return this.editParcel(c, m.id, m.taxRate, m.name, m.color);
@@ -175,6 +180,7 @@ export class Net {
       case 'hist': return this.histOpen(c, m.open === true);
       case 'goals': case 'hint': this.onboarding?.command(c.player, m); return this.goals(c);
       case 'inspectBoat': return this.send(c, { t: 'boat', id: Number(m.id), info: this.harbours?.inspectBoat(Number(m.id)) ?? null });
+      case 'overlay': return this.setOverlay(c, Number(m.ch));
     }
   }
 
@@ -241,6 +247,7 @@ export class Net {
     if (this.ferry) this.send(c, { t: 'ferryLines', lines: this.ferry.dtos() });
     if (this.harbours) this.send(c, this.harbours.msg());
     c.goalsSig = undefined; this.goals(c);
+    c.probSig = undefined; this.problemsTo(c);
   }
 
   /** Spectate: a visitor's player record (made by their hello) goes when their last socket closes, so a public showcase's saves do not
@@ -337,6 +344,7 @@ export class Net {
       const traffic = this.trafficBytes(cx, cy);
       const kerb = this.kerbBytes(cx, cy);
       if (traffic || kerb) this.send(c, { t: 'traffic', cx, cy, d: u8ToB64(traffic ?? new Uint8Array(0)), ...(kerb ? { k: u8ToB64(kerb) } : {}) });
+      this.issuesOnSub(c, key);
       // everyone already moving in this chunk, since later frames only carry changes
       const out: number[] = [];
       for (const a of this.sim.agents()) {
@@ -1063,6 +1071,7 @@ export class Net {
         for (const [key, p] of payload) if (c.subs.has(key)) { const [cx, cy] = parseKey(key); this.send(c, { t: 'traffic', cx, cy, ...p }); }
       }
     }
+    this.flushIssues();
     // citizens and vehicles: only what changed, bucketed by chunk; a Home-state quad removes an agent
     const buckets = new Map<string, number[]>();
     const seen = new Set<number>();
@@ -1106,7 +1115,96 @@ export class Net {
   }
 
   get connections() { return this.clients.size; }
+
+  // ---- issue bubbles, the problems list and the overlays (sim/issues.ts, overlays.ts, shared/src/issues.ts) ----------
+
+  /** set by game.ts; without it (load tests, older hosts) none of this runs */
+  issues: Issues | null = null;
+  private overlays: Overlays | null = null;
+  private problemsAt = -Infinity; private problemsVer = -1;
+  /** overlay bytes worked out this period, shared by every client asking for the same chunk and channel */
+  private ovlCache = new Map<string, { d: string; sig: number }>(); private ovlPeriod = -1;
+
+  private issueMsg(key: string) {
+    const [cx, cy] = parseKey(key), b = this.issues!.chunkBytes(key);
+    return JSON.stringify({ t: 'issues', cx, cy, d: b ? u8ToB64(b) : '' } satisfies ServerMsg);
+  }
+  /** A chunk just subscribed: its icons, and the overlay when one is on. */
+  private issuesOnSub(c: Client, key: string) {
+    if (!this.issues) return;
+    if (this.issues.chunks.has(key) && c.conn.open) c.conn.send(this.issueMsg(key));
+    if (c.ovl) (c.ovlQueue ??= []).push(key);
+  }
+  /** Your own parcels' problems, when they differ from what you last got. */
+  private problemsTo(c: Client, by = this.issues?.byOwner()) {
+    if (!c.player || !by) return;
+    const p = by.get(c.player.id) ?? [];
+    const sig = p.join(',');
+    if (sig === c.probSig) return;
+    c.probSig = sig;
+    this.send(c, { t: 'problems', p });
+  }
+  /** The overlay channel a client wants (0 none): every subscribed chunk is looked at again. */
+  private setOverlay(c: Client, ch: number) {
+    if (!this.issues) return;
+    c.ovl = Number.isInteger(ch) && ch > 0 && ch < OVERLAY_COUNT ? ch : 0;
+    c.ovlSent = new Map();
+    c.ovlQueue = c.ovl ? [...c.subs] : [];
+  }
+  /** After every tick: changed icon planes, problem lists that changed (at most once per evalHours), overlay chunks a few at a time. */
+  private flushIssues() {
+    const w = this.w, is = this.issues;
+    if (!is) return;
+    if (w.tick % TRAFFIC_EVERY === 0 && is.dirty.size) {
+      const out = new Map<string, string>();
+      for (const key of is.dirty) out.set(key, this.issueMsg(key));
+      is.dirty.clear();
+      for (const c of this.clients) if (c.player && c.conn.open) for (const [key, msg] of out) if (c.subs.has(key)) c.conn.send(msg);
+    }
+    const P = Math.max(1, Math.round(ISSUE_TUNING.evalHours * TICKS_PER_HOUR));
+    if (is.version !== this.problemsVer && w.tick - this.problemsAt >= P) {
+      this.problemsVer = is.version; this.problemsAt = w.tick;
+      const by = is.byOwner();
+      for (const c of this.clients) this.problemsTo(c, by);
+    }
+    let anyOvl = false;
+    for (const c of this.clients) if (c.ovl) { anyOvl = true; break; }
+    if (!anyOvl) return;
+    const period = Math.floor(w.tick / P);
+    if (period !== this.ovlPeriod) {
+      this.ovlPeriod = period; this.ovlCache.clear();
+      for (const c of this.clients) if (c.ovl) c.ovlQueue = [...c.subs];
+    }
+    this.overlays ??= new Overlays(w, this.sim, is);
+    let budget = OVERLAY_CHUNKS_PER_TICK;
+    for (const c of this.clients) {
+      const q = c.ovlQueue;
+      if (!c.ovl || !q || !c.player || !c.conn.open) continue;
+      while (q.length && budget > 0) {
+        const key = q.shift()!;
+        if (!c.subs.has(key)) continue;
+        const ck = `${c.ovl}:${key}`;
+        let hit = this.ovlCache.get(ck);
+        if (!hit) {
+          budget--;
+          const [cx, cy] = parseKey(key);
+          const b = this.overlays.bytes(c.ovl, cx, cy);
+          hit = b ? { d: u8ToB64(b), sig: fnv(b) } : { d: '', sig: 0 };
+          this.ovlCache.set(ck, hit);
+        }
+        if (c.ovlSent?.get(key) === hit.sig) continue;
+        c.ovlSent?.set(key, hit.sig);
+        const [cx, cy] = parseKey(key);
+        this.send(c, { t: 'overlay', ch: c.ovl, cx, cy, d: hit.d });
+      }
+    }
+  }
 }
+
+/** overlay chunks worked out per tick across all clients (each is a few thousand array writes) */
+const OVERLAY_CHUNKS_PER_TICK = 24;
+/** FNV-1a over a chunk's bytes: whether a client already has them */
+function fnv(b: Uint8Array) { let h = 0x811c9dc5; for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 0x01000193); } return h >>> 0 || 1; }
 
 // kept for shard routing work later
 void isGrowable; void localIndex;

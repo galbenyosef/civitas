@@ -107,7 +107,8 @@ still selects.
 | Trains and planes | hover a train or plane to highlight it; click to select it: a panel with its line or flight, what it is doing, speed, its crew and everyone on board (a train's riders are clickable citizens; plane passengers are visitors), and **follow**. `client/src/vehicles.ts`, docs/rail.md and docs/airport.md |
 | First person | with someone selected, **FPV** in the panel or I opens a 16:9 inset (bottom right) from their eyes, **full** or O fills the window (Esc leaves); the view follows their heading and leans into corners, walkers bob, drivers sway, and it ends when they go indoors or arrive. With a train selected it rides in the driver's cab, with a plane in the cockpit. `render/fpv.ts` |
 | Money | click the treasury chip for the ledger (yesterday and today by category, overdraft interest included). While the treasury is below zero, in administration or with a service mothballed, a chip beside it opens the money panel: the balance, the $5,000 overdraft limit, the interest a day, midnights below zero or days in administration, and the recovery plan as buttons (raise tax, sell land back, mothball services, each with what it would raise or save; in local mode also "Start again from the last autosave"). It opens by itself when administration begins. A police, fire or health building or a builders' yard of yours has **Mothball** / **Reopen** in its panel. `client/src/finance.ts` |
-| Overlays | H tints roads by congestion (green → red); T opens the technology tree; M shows the perf readout |
+| Overlays | H cycles the overlays: traffic congestion on the roads (green → red), then service coverage, leisure, happiness and jobs against homes tinted on the ground and the buildings (colour-blind safe ramps: viridis, and blue against orange for jobs/homes), then off; the top-bar **overlay** chip opens a menu to pick one, with its legend. `client/src/overlays.ts`, `server/src/overlays.ts`. T opens the technology tree; M shows the perf readout |
+| Problems | a badge floats over any of your buildings or lots that is stuck: no road, no builders, unstaffed, parking full, no customers, very unhappy; hover it for what is wrong and what fixes it, click it to open the building. The top-bar **problems N** chip (red while there are any) lists them by kind, each with **show me**. `server/src/sim/issues.ts`, `client/src/render/issues.ts`, `client/src/problems.ts` |
 | World map | **Tab**, the top-bar **map** chip, or zoom out past the 3D limit (zoom back in to return; `?map` opens on it): the whole world flat and north-up, land use in colour, every owner's land outlined and named, bus, rail and underground lines. Scroll, pinch, + and − zoom, drag pans, click a parcel for its area, buildings, population, jobs and book value; on your land shift-click neighbours and **Combine** (a rectangle up to 48 a side merges, the rest become an estate sharing name, colour and tax), **Split** along a dragged line, rename and colour. `client/src/mapmode.ts`, `docs/world-map.md` |
 | Bus lines | the top-bar **lines** chip: make a line from your stops (click them in order), number, colour, loop or there and back, buses per line; ribbons show the lines while it is open. `client/src/lines.ts`, `docs/transit.md` |
 | Debug | `?dev` shows draft kinds in the tool bar (a dev server accepts them, also on unclaimed land) and, on a dev server, skips technology locks, `?airport=x,y,dir[,gates[,fph]]` previews planes at a placeholder airfield on open land, `?name=…` skips the login form, `?at=x,y&dist=n&yaw=deg&pitch=deg` positions the camera (yaw 0 looks north, 90 west; pitch 90 straight down), `msc.viewString()` prints the view as a `DEFAULT_VIEW` string, `?hour=h` freezes lighting, `?fx=0..2` pins shadow quality, `window.msc` exposes client state |
@@ -384,6 +385,21 @@ changing behaviour in game time.
   under the card, at most one per two game hours, never again once "got it" is pressed: the server sends builders,
   deficit, overdraft, administration, jam, boredom and newcomers hints (messages `goals` and `hint`), the client raises night and empty-treasury
   ones. The tech chip pulses with the node's name when one becomes ready and affordable. Test cities and demos get none.
+- *Problems and overlays* (`server/src/sim/issues.ts`, `shared/src/issues.ts`, `client/src/render/issues.ts`,
+  `client/src/problems.ts`, `client/src/overlays.ts`; docs/audit-2026-10.md 4.4). Every building and zoned lot is looked at
+  once per half game hour, a hashed slice each tick, and gets one code: **no road** (a lot no road and no frontage
+  neighbour of its zone reaches, or a building with none at its door), **no builders** (a site nobody worked for an hour
+  while builders were at work elsewhere; sites wait out the night), **unstaffed** (a civic building or staffed venue
+  with staff at work or on the way under half of what its roster expects at that hour, for an hour; it clears when
+  enough turn up or new hires fill half the places), **parking full** (drivers it turned away who found no lot within
+  ten tiles and parked at the kerb, a count halving every 12 game hours; it clears at once when parking in reach
+  grows), **no customers** (a shop or staffed venue standing all of yesterday with nobody yesterday or yet today) and
+  **very unhappy** (a home whose residents' mean happiness is under 35, until it is over 45). Thresholds are
+  `ISSUE_TUNING` in `shared/src/tuning.ts`; nothing is saved, so a restart recomputes them. The Commons' own buildings
+  get no badges outside sandboxes. A badge is an instanced billboard over the roof (one draw call, its own bob and size
+  by hash), fading out past the name boards' distance and hidden in the map, underground and first-person views. The
+  zoning "no road" toast stays; the builders hint now comes at most once in three game days, since the badges show
+  waiting sites all the time.
 
 Hover any building for its live stats: residents and where they work,
 staff on shift or commuting, shift patterns, customers, construction progress,
@@ -403,7 +419,10 @@ broadcast to everyone for now; `PlayerDTO.fin` (the overdraft, the count of midn
 recovery action would raise) rides on the players message only while it applies. The recovery plan is one client
 message, `{ t: 'recover', action: 'tax' | 'sell' | 'mothball' | 'unmothball', keys?: ["x,y", …] }` (keys: those
 buildings' doors only). On a dev server `{ t: 'dev', action: 'money', amount }` grants (or, negative, takes away)
-money, for economy runs from a lower start.
+money, for economy runs from a lower start. Issue codes (`issues`, a byte per tile per chunk, sent on subscribe and when a chunk's
+codes change) ride beside them; your own problems come as flat `x, y, code` triples (`problems`, at most every half game
+hour when they change), and the overlay you asked for (`{ t: 'overlay', ch }`) as a byte per tile per subscribed chunk
+(`overlay`), refreshed every half game hour with only the chunks that changed.
 
 **Client rendering** (`client/src/render/`).
 

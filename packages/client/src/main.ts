@@ -1,6 +1,6 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
-  CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
+  OVERLAY_TEXT, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
   terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo,
 } from '@msimcity/shared';
 import { NetClient } from './net';
@@ -47,6 +47,10 @@ import { PerfHud } from './render/perfhud';
 import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered, serverConfig } from './worlds';
 import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, type DemoInfo } from './tour';
 import { MapMode } from './mapmode';
+import { IssuesView } from './render/issues';
+import { OverlayMap } from './render/overlayMap';
+import { ProblemsPanel, issueTipHtml } from './problems';
+import { OverlayMenu } from './overlays';
 
 // ---- renderer & scene ---------------------------------------------------------------------
 const canvas = document.getElementById('c') as HTMLCanvasElement;
@@ -76,6 +80,10 @@ scene.add(buildings.mesh, parcelsView.group, citizens.group, lights.group, route
 const parked = new ParkedCars(world); scene.add(parked.group);
 const parks = new ParksView(); // trees and benches inside park tiles
 scene.add(parks.group);
+// issue bubbles over stuck buildings and lots, and the data overlays' map (render/issues.ts, render/overlayMap.ts, docs/audit-2026-10.md 4.4)
+const issuesView = new IssuesView(world);
+scene.add(issuesView.group);
+const overlayMap = new OverlayMap();
 
 const hoverMesh = new Mesh(new PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false }));
 hoverMesh.visible = false;
@@ -244,6 +252,7 @@ net.on('welcome', (m) => {
   for (const key of [...views.keys()]) dropView(key);
   subscribed.clear();
   streamChunks();
+  if (world.overlayCh) net.send({ t: 'overlay', ch: world.overlayCh }); // a new connection starts with none
 });
 net.on('chunk', (m) => {
   const key = chunkKey(m.chunk.cx, m.chunk.cy);
@@ -289,6 +298,38 @@ scene.add(lines.group);
 net.on('lines', (m) => lines.apply(m));
 net.on('lineStats', (m) => lines.applyStats(m));
 net.on('traffic', (m) => world.applyTraffic(m.cx, m.cy, m.d, m.k));
+// issue bubbles, your problems list and the data overlays (render/issues.ts, problems.ts, overlays.ts)
+net.on('issues', (m) => world.applyIssues(m.cx, m.cy, m.d));
+net.on('problems', (m) => problems.set(m.p));
+net.on('overlay', (m) => world.applyOverlay(m.ch, m.cx, m.cy, m.d));
+const problems = new ProblemsPanel({
+  world,
+  flyTo: (x, y) => flyTo(x, y),
+  flash: (x, y) => issuesView.flash(x, y),
+  select: (x, y) => selectTile(x, y, 'building'),
+});
+const overlayMenu = new OverlayMenu({
+  setTraffic: (on) => setHeat(on),
+  setChannel: (ch) => {
+    if (ch === world.overlayCh) return;
+    world.setOverlayChannel(ch);
+    sceneUniforms.uOvl.value = ch ? 1 + (OVERLAY_TEXT[ch]?.ramp ?? 0) : 0;
+    net.send({ t: 'overlay', ch });
+  },
+});
+/** "show me": a short smooth flight to a tile (the tour's easing), close enough to see the badge */
+let flight: { at: number; fx: number; fz: number; fd: number; tx: number; tz: number; td: number } | null = null;
+function flyTo(x: number, y: number) {
+  following = false;
+  flight = { at: performance.now(), fx: rig.target.x, fz: rig.target.z, fd: rig.dist, tx: x + 0.5, tz: y + 0.5, td: Math.min(Math.max(rig.dist, 22), 45) };
+}
+function flyFrame(now: number) {
+  if (!flight) return;
+  const f = Math.min(1, (now - flight.at) / 1200), e = f * f * (3 - 2 * f);
+  rig.target.set(flight.fx + (flight.tx - flight.fx) * e, 0, flight.fz + (flight.tz - flight.fz) * e);
+  rig.dist = flight.fd + (flight.td - flight.fd) * e;
+  if (f >= 1) flight = null;
+}
 net.on('stats', (m) => {
   clock.day = m.day; clock.frac = m.dayFrac; clock.at = performance.now(); clock.rate = m.rate ?? 1;
   ui.setClock(m.day, m.dayFrac);
@@ -465,6 +506,8 @@ const input = new Input(canvas, rig, {
     if (lines.mapClick(x, y)) return; // editing a bus line: clicked stops join it
     const id = citizens.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight);
     if (id) { selectCitizen(id); return; }
+    const badge = issuesView.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight); // a click on an issue badge opens its building
+    if (badge) { selectTile(badge[0], badge[1], 'building'); return; }
     // trains and planes (vehicles.ts): picked from what was drawn last frame
     const tr = trains.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight);
     if (tr) { selectVehicle({ kind: 'train', ...tr }); return; }
@@ -481,7 +524,7 @@ const input = new Input(canvas, rig, {
     if (mapMode.on) { if (code === 'Tab') mapMode.toggle(); else if (code === 'Escape') mapMode.escape(); return; }
     if (code === 'Tab') mapMode.toggle();
     else if (code === 'Escape' && selectedBuilding) closeBuilding();
-    else if (code === 'KeyH') setHeat(!ChunkView.heatOn);
+    else if (code === 'KeyH') overlayMenu.cycle();
     else if (code === 'KeyN') setUnder(!underground.on);
     else if (code === 'KeyT') { ui.toggleTech(); ui.showTech(world.myPlayer); policies.toggle(false); }
   },
@@ -509,9 +552,7 @@ function setFollow(on: boolean) { following = on; if (on) { rig.dist = Math.min(
 function setHeat(on: boolean) {
   ChunkView.setHeat(on);
   sceneUniforms.uHeat.value = on ? 1 : 0;
-  ui.setHeat(on);
-}
-document.getElementById('heat')!.onclick = () => setHeat(!ChunkView.heatOn);
+} // the chip is the overlays menu's (overlays.ts)
 // ---- education overlay: parcels tinted by their education index (render/eduHeat.ts, docs/education.md section 14) ----
 const eduHeat = new EduHeat(); scene.add(eduHeat.group);
 let eduDirty = false;
@@ -547,7 +588,6 @@ function platformAt(kind: number, h: [number, number], p: Placed | undefined, ro
 }
 document.getElementById('techBtn')!.onclick = () => { ui.toggleTech(); ui.showTech(world.myPlayer); policies.toggle(false); };
 document.getElementById('policiesBtn')!.onclick = () => { ui.toggleTech(false); policies.toggle(); policies.show(world.myPlayer); };
-ui.setHeat(false);
 /** Fold fresh traffic bytes into the chunk views and the parked-car instances. */
 function applyTrafficUpdates() {
   if (!world.trafficDirty.size) return;
@@ -931,6 +971,9 @@ function hoverAt(tile: [number, number] | null) {
   const id = tile && input.tool === 'select' && !input.buyRect ? citizens.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : 0;
   if (id) { hoverAgent(id); return; }
   if (tipAgent) { tipAgent = 0; ui.hideTip(); }
+  // an issue badge floating over a roof answers for its building (render/issues.ts)
+  const badge = tile && input.tool === 'select' && !input.buyRect ? issuesView.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null;
+  if (badge) { hoverBadge(badge); return; }
   // trains (render/trains.ts): picked from the vehicles drawn last frame, answered by the server (sim/rail.ts)
   const tr = tile && input.tool === 'select' && !input.buyRect ? trains.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null;
   if (tr) { hoverTrain(tr); return; }
@@ -1006,6 +1049,14 @@ function hoverAgent(id: number) {
   tipTimer = window.setTimeout(() => net.send({ t: 'inspectCitizen', id }), 80);
   tipRefresh = window.setInterval(() => { if (tipAgent) net.send({ t: 'inspectCitizen', id: tipAgent }); }, 1000);
 }
+/** Hover a building by its badge: as the tile would, dropping any vehicle's tooltip first. */
+function hoverBadge(tile: [number, number]) {
+  if (tipTrain) { tipTrain = null; trains.hover = null; clearInterval(tipRefresh); ui.hideTip(); }
+  if (tipPlane) { tipPlane = null; planes.hover = null; ui.hideTip(); }
+  if (tipHeli !== null) { tipHeli = null; helis.hover = null; ui.hideTip(); }
+  if (tipBoat !== null) { tipBoat = null; ui.hideTip(); }
+  hoverTile(tile);
+}
 function hoverTile(tile: [number, number] | null) {
   if (tile) tile = world.doorOf(tile[0], tile[1]); // every tile of a structure shows the structure
   if (tile && !input.buyRect && input.tool === 'select' && isAirfieldAux(world.auxAt(tile[0], tile[1]))) {
@@ -1044,6 +1095,8 @@ net.on('building', (m) => {
   if (tipAgent || !tipTile || m.x !== tipTile[0] || m.y !== tipTile[1]) return;
   if (!m.info) { ui.hideTip(); return; }
   ui.showTip(m.info);
+  const code = world.issueAt(m.x, m.y); // its problem line under the stats (problems.ts)
+  if (code) document.getElementById('tip')!.insertAdjacentHTML('beforeend', issueTipHtml(code, problems.glyph(code)));
   ui.moveTip(mouse.x, mouse.y);
 });
 net.on('road', (m) => {
@@ -1066,6 +1119,7 @@ function frame(now: number) {
   if (canvas.clientWidth !== sized.w || canvas.clientHeight !== sized.h) resize(); // the window changed, or was not laid out at the first resize
   input.update(dt);
   tour?.frame(dt); // the tour's camera flight, before the rig places the camera
+  flyFrame(now); // a problem's show-me flight
   mapMode.frameCamera(dt);
   rig.update();
   // zooming out past the 3D limit opens the map; zooming in below the map's returns to 3D
@@ -1093,6 +1147,9 @@ function frame(now: number) {
   if (eduDirty && eduHeat.on) { eduHeat.rebuild(world.parcels.values()); eduDirty = false; }
   if (world.parcelsDirty) { parcelsView.rebuild(world.parcels.values(), world.players, world.me, selectedParcel); world.parcelsDirty = false; }
   applyTrafficUpdates();
+  overlayMap.update(world.overlayDirty, (k) => world.overlay.get(k));
+  issuesView.group.visible = fpv.mode !== 'full' && underground.level < 0.5; // not in first person or the underground view (the map has its own scene)
+  issuesView.frame(now);
   citizens.frame(now, dt);
   lines.frame();
   if (routeView.active) routeView.frame(citizens.positionOf(selectedCitizen), now);
@@ -1159,12 +1216,12 @@ function frame(now: number) {
     updateStatus();
   }
   buildings.updateLod(fpv.mode === 'off' ? [rig.camera] : [rig.camera, fpv.camera], lighting.sun); // detail tiers and culling (render/buildings.ts)
-  fpv.render(renderer, scene, rig.camera, [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group]);
+  fpv.render(renderer, scene, rig.camera, [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group]);
 }
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

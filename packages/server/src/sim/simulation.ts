@@ -145,7 +145,7 @@ export class Simulation {
   /** life events since the simulation started (probes and tests read these) */
   lifeEvents = { births: 0, deaths: 0, deathsOldAge: 0, deathsIllness: 0, partners: 0, movedIn: 0, movedOut: 0, leftTown: 0, friendships: 0, doctorVisits: 0, sickDaysOff: 0, orphansLeft: 0, graduations: 0, dropOuts: 0 };
   private today = 0;
-  /** leisure visits per venue tile: today's and yesterday's count (parks grow with use; tooltips show them) */
+  /** visits per venue tile (leisure places, cafés and bars): today's and yesterday's count (parks grow with use; tooltips and the issue bubbles read them) */
   private venueVisits = new Map<string, { day: number; today: number; yesterday: number }>();
   /** leisure coverage per home tile (tkey), recomputed at most once a game hour */
   private leisureCache = new Map<number, { at: number; score: number; parks: number; nParks: number; nVenues: number }>();
@@ -173,6 +173,12 @@ export class Simulation {
   schools: Schools;
   /** jobs, wages and migration by education (sim/skills.ts, docs/education.md section 7) */
   skills: Skills;
+  /** drivers a building turned away who found no lot in reach and parked at the kerb, by building tile key; drained by sim/issues.ts */
+  kerbOut = new Map<string, number>();
+  /** Visits to a venue (leisure place, café or bar) today and yesterday (sim/issues.ts: no customers). */
+  visitsOf(key: string) { return this.visitsAt(key); }
+  /** The staffed police, fire and health buildings coverage counts (rebuilt every few ticks): the coverage overlay (server/src/overlays.ts). */
+  get staffedServices(): readonly Building[] { return this.services; }
   /** messages for a parcel owner's screen (net.ts sends them as toasts and clears the list) */
   notices: { owner: string; msg: string }[] = [];
   /** owners already told that newcomers spawn in place; cleared once a gateway brings someone in, so a town that loses its last gateway hears again */
@@ -1372,7 +1378,7 @@ export class Simulation {
   private noteVisit(key: string, type: string, leisure: boolean, stage: number) {
     (this.leisureStats[type] ??= new Array(24).fill(0))[Math.floor(this.hour) % 24]++;
     (this.leisureByStage[type] ??= [0, 0, 0])[stage]++;
-    if (!leisure) return;
+    void leisure; // cafés and bars are counted per place too: the issue bubbles' "no customers" reads them (sim/issues.ts)
     const v = this.venueVisits.get(key);
     if (!v) { this.venueVisits.set(key, { day: this.today, today: 1, yesterday: 0 }); return; }
     if (v.day !== this.today) { v.yesterday = v.day === this.today - 1 ? v.today : 0; v.today = 0; v.day = this.today; }
@@ -2236,6 +2242,7 @@ export class Simulation {
           w.parkFail.set(here, (w.parkFail.get(here) ?? 0) + 1);
           const lot = this.findLot(b.x, b.y);
           if (lot) { m.legs.unshift({ path: lot.path, drive: true, arrive: 'parkLot', dest, pool: leg.pool }); return; }
+          this.kerbOut.set(here, (this.kerbOut.get(here) ?? 0) + 1); // full and no lot in reach (sim/issues.ts: parking full)
           this.kerbPark(m, leg.path);
         } else {
           this.kerbPark(m, leg.path);
