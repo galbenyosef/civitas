@@ -33,7 +33,7 @@ import {
   metroStationAt, metroStop, planPlatform, orphanPlatform, underNet, planBore, lineSides, overrunTiles, metroBore,
   type MetroEnv, type RailLineDef, type RailRoute, type TrainState, type VehiclePose, type StationStop,
 } from '../src';
-import { DEFAULT_TAX, familyOf as famOf, u16ToB64, i32ToB64, u8ToB64, platformAlongX, type TransitLine, type LinePreview, type StopRef } from '../src';
+import { DEFAULT_TAX, ECONOMY_TUNING, familyOf as famOf, u16ToB64, i32ToB64, u8ToB64, platformAlongX, type TransitLine, type LinePreview, type StopRef } from '../src';
 import { World, emptyStats } from '../../server/src/world';
 import { Simulation } from '../../server/src/sim/simulation';
 import { Metro } from '../../server/src/sim/metro';
@@ -529,18 +529,19 @@ function partTwo() {
   {
     build(METRO_ENTRANCE, -30, -40, true); build(METRO_ENTRANCE, -10, -40, true);
     build(METRO_ENTRANCE, 118, -45, true); build(METRO_ENTRANCE, 128, -45, true); // the poor player's
+    poor.money = 50 - ECONOMY_TUNING.overdraftLimit; // $50 left to spend before the overdraft line
     const cases: { what: string; owner: string; stops: StopRef[]; want: RegExp }[] = [
       { what: 'one station', owner: 'p1', stops: [at('k1')], want: /at least two/ },
       { what: 'a platform another line calls at', owner: 'p1', stops: [{ x: -30, y: -40 }, at('k1')], want: /already calls/ },
       { what: 'another owner\'s stations', owner: 'poor', stops: [{ x: -30, y: -40 }, { x: -10, y: -40 }], want: /not on your land/ },
-      { what: 'short of money', owner: 'poor', stops: [{ x: 118, y: -45 }, { x: 128, y: -45 }], want: /costs \$[\d,]+; the treasury has \$50/ },
+      { what: 'short of money', owner: 'poor', stops: [{ x: 118, y: -45 }, { x: 128, y: -45 }], want: /Need \$[\d,]+ to bore the tunnel: with the \$[\d,]+ overdraft limit you can spend \$50$/ },
     ];
     for (const c of cases) {
       const r = sim.transit.saveLine(c.owner, { number: 9, colour: 0, loop: false, vehicles: 2, stops: c.stops });
       ok(typeof r === 'string' && c.want.test(r), `${c.what}: expected a refusal matching ${c.want}, got ${typeof r === 'string' ? r : 'a saved line'}`);
       console.log(`    ${c.what}: ${typeof r === 'string' ? r : 'SAVED'}`);
     }
-    ok(poor.money === 50, `the poor player was charged: $${poor.money}`);
+    ok(poor.money === 50 - ECONOMY_TUNING.overdraftLimit, `the poor player was charged: $${poor.money}`);
     // a line over the Central's stations under another id would run in its tunnel
     const twin = metro.route({ ...saved[0], id: 999, number: 9, name: 'Twin' });
     ok(typeof twin === 'string' && /run in the Central line's tunnel/.test(twin), `routing in another line's tunnel: ${typeof twin === 'string' ? twin : 'ROUTED'}`);
