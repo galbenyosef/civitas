@@ -82,15 +82,44 @@ interface Obb { x: number; y: number; hx: number; hy: number; len: number }
 /** Separating-axis test for two car bodies (length × VEHICLE_WIDTH rectangles), each grown by `pad`. */
 function obbOverlap(a: Obb, b: Obb, pad: number): boolean {
   const W2 = VEHICLE_WIDTH / 2 + pad;
-  const ax = [a.hx, -a.hy, b.hx, -b.hy], ay = [a.hy, a.hx, b.hy, b.hx];
-  for (let i = 0; i < 4; i++) {
-    const nx = ax[i], ny = ay[i];
-    const ra = (a.len / 2 + pad) * Math.abs(a.hx * nx + a.hy * ny) + W2 * Math.abs(-a.hy * nx + a.hx * ny);
-    const rb = (b.len / 2 + pad) * Math.abs(b.hx * nx + b.hy * ny) + W2 * Math.abs(-b.hy * nx + b.hx * ny);
-    if (Math.abs((b.x - a.x) * nx + (b.y - a.y) * ny) > ra + rb) return false;
-  }
-  return true;
+  return !obbApart(a, b, pad, W2, a.hx, a.hy) && !obbApart(a, b, pad, W2, -a.hy, a.hx) && !obbApart(a, b, pad, W2, b.hx, b.hy) && !obbApart(a, b, pad, W2, -b.hy, b.hx);
 }
+/** Does axis (nx, ny) separate the two bodies (obbOverlap)? */
+function obbApart(a: Obb, b: Obb, pad: number, W2: number, nx: number, ny: number): boolean {
+  const ra = (a.len / 2 + pad) * Math.abs(a.hx * nx + a.hy * ny) + W2 * Math.abs(-a.hy * nx + a.hx * ny);
+  const rb = (b.len / 2 + pad) * Math.abs(b.hx * nx + b.hy * ny) + W2 * Math.abs(-b.hy * nx + b.hx * ny);
+  return Math.abs((b.x - a.x) * nx + (b.y - a.y) * ny) > ra + rb;
+}
+/**
+ * Movers by the tile they are on, refilled every tick (the body guard's car grid and the walkers): per chunk a list per
+ * tile and the fill each list belongs to, so emptying is a new fill number and a lookup is a chunk and two array reads.
+ */
+class TileLists {
+  private chunks = new Map<number, TileChunk>();
+  private fill = 1;
+  private lastCx = NaN; private lastCy = NaN; private last: TileChunk | undefined;
+  clear() { this.fill++; }
+  add(x: number, y: number, m: Mover) {
+    let c = this.chunk(x, y);
+    if (!c) { c = { fill: new Uint32Array(CELLS), lists: new Array(CELLS) }; this.chunks.set(tkey(chunkOf(x), chunkOf(y)), c); this.last = c; }
+    const i = localIndex(x, y);
+    if (c.fill[i] !== this.fill) { c.fill[i] = this.fill; if (c.lists[i]) c.lists[i].length = 0; else c.lists[i] = []; }
+    c.lists[i].push(m);
+  }
+  /** the movers on tile (x, y) since the last clear, if any */
+  get(x: number, y: number): Mover[] | undefined {
+    const c = this.chunk(x, y);
+    if (!c) return undefined;
+    const i = localIndex(x, y);
+    return c.fill[i] === this.fill ? c.lists[i] : undefined;
+  }
+  private chunk(x: number, y: number): TileChunk | undefined {
+    const cx = chunkOf(x), cy = chunkOf(y);
+    if (cx !== this.lastCx || cy !== this.lastCy) { this.last = this.chunks.get(tkey(cx, cy)); this.lastCx = cx; this.lastCy = cy; }
+    return this.last;
+  }
+}
+interface TileChunk { fill: Uint32Array; lists: Mover[][] }
 /**
  * A walker's route. `cross[i]` is the tile key when the segment ending at
  * point i is on that tile's carriageway (0 otherwise); `xdir[i]` is, for the
@@ -308,8 +337,8 @@ export class Traffic {
   private tmp: [number, number] = [0, 0];
   private cnt: TrafficCounters = { junctionEntries: 0, stuckHome: 0, stuckDespawn: 0, abandonKerb: 0, abandonDespawn: 0, garageGiveUp: 0, reroutes: 0, stuckReroutes: 0, carNosed: 0, pedForced: 0, guardCar: 0, guardPed: 0, guardPedGaveUp: 0, stuckInBox: 0, pedRetreat: 0 };
   /** walkers by the tile they were on when they last moved: last tick's and this tick's (positions are read live) */
-  private walkPrev = new Map<number, Mover[]>();
-  private walkCur = new Map<number, Mover[]>();
+  private walkPrev = new TileLists();
+  private walkCur = new TileLists();
   /** Running totals since the world was loaded (read-only view). */
   get counters(): Readonly<TrafficCounters> { return this.cnt; }
   /** Bump one counter (the simulation reports give-ups and re-routes here). */
@@ -330,16 +359,11 @@ export class Traffic {
     if (TT.bodyGuard || TT.carGuard) {
       // cars by the tile they are on at the start of the tick, for the body guard (a car moves at most half a tile a tick)
       const g = this.carGrid;
-      for (const l of g.values()) l.length = 0;
-      for (const q of this.cells.values()) for (const m of q) {
-        const k = tkey(Math.floor(m.x), Math.floor(m.y));
-        let l = g.get(k);
-        if (!l) g.set(k, l = []);
-        l.push(m);
-      }
+      g.clear();
+      for (const q of this.cells.values()) for (const m of q) g.add(Math.floor(m.x), Math.floor(m.y), m);
     }
   }
-  private carGrid = new Map<number, Mover[]>();
+  private carGrid = new TileLists();
   endTick() {
     const tick = this.w.tick;
     for (const [k, n] of this.present) {
@@ -623,16 +647,23 @@ export class Traffic {
     return 0.5 + m.len / 2 / ARC(m.lane % 4, this.nextDirOf(m));
   }
 
-  /** Movers physically inside tile T's box right now, with their movement through it. */
-  private *inBox(tx: number, ty: number): Iterable<{ m: Mover; inD: number; outD: number }> {
+  /**
+   * Movers physically inside tile T's box right now, with their movement through it: the count, the movers in boxM and
+   * their movements in boxIn and boxOut (scratch: read them before the next call).
+   */
+  private inBox(tx: number, ty: number): number {
+    const M = this.boxM, I = this.boxIn, O = this.boxOut;
+    let n = 0;
     for (let d = 0; d < 4; d++) {
       // arriving lanes: from the neighbour on the opposite side, heading d
       const q = this.cells.get(Traffic.laneKey(tx - DIRS[d][0], ty - DIRS[d][1], d));
-      if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m)) yield { m, inD: d, outD: this.nextDirOf(m) };
+      if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m)) { M[n] = m; I[n] = d; O[n] = this.nextDirOf(m); n++; }
       const o = this.cells.get(Traffic.laneKey(tx, ty, d));
-      if (o) for (const m of o) if (m.prog < this.clearAt(m)) yield { m, inD: m.inDir, outD: d };
+      if (o) for (const m of o) if (m.prog < this.clearAt(m)) { M[n] = m; I[n] = m.inDir; O[n] = d; n++; }
     }
+    return n;
   }
+  private boxM: Mover[] = []; private boxIn: number[] = []; private boxOut: number[] = [];
   /**
    * Any car in the box of a tile: what a pedestrian checks before stepping
    * onto the carriageway. With a CROSS_* mask, only cars whose movement uses
@@ -640,7 +671,7 @@ export class Traffic {
    * the green road beside you does not cross your path).
    */
   boxBusy(tx: number, ty: number, mask = CROSS_NS_ROAD | CROSS_EW_ROAD): boolean {
-    for (const o of this.inBox(tx, ty)) if (movementMask(o.inD, o.outD) & mask) return true;
+    for (let i = 0, n = this.inBox(tx, ty); i < n; i++) if (movementMask(this.boxIn[i], this.boxOut[i]) & mask) return true;
     return false;
   }
   /** A pedestrian is on the carriageway of this tile this tick, over the roads in `mask` (CROSS_*). */
@@ -658,7 +689,7 @@ export class Traffic {
     return !this.boxConflict(m, bx, by, dir, dir);
   }
   private boxBusyExcept(tx: number, ty: number, m: Mover): boolean {
-    for (const o of this.inBox(tx, ty)) if (o.m !== m) return true;
+    for (let i = 0, n = this.inBox(tx, ty); i < n; i++) if (this.boxM[i] !== m) return true;
     return false;
   }
 
@@ -758,14 +789,17 @@ export class Traffic {
     const peds = this.gPeds, cars = this.gCars;
     peds.length = 0; cars.length = 0;
     if (TT.bodyGuard) {
-      for (const grid of [this.walkCur, this.walkPrev]) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const l = grid.get(tkey(tx + dx, ty + dy));
+      let mFly = -1; // flyAt(m.x, m.y), once it is needed
+      for (let g = 0; g < 2; g++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const l = (g ? this.walkPrev : this.walkCur).get(tx + dx, ty + dy);
         if (!l) continue;
         for (const p of l) {
           if (!p.pts) continue; // stopped walking since it was noted
           const ex = p.x - m.x, ey = p.y - m.y;
           if (ex * ex + ey * ey > reach * reach) continue;
-          if (this.flyAt(p.x, p.y) || this.flyAt(m.x, m.y)) continue; // walkers on a flyover are on the deck or under it, beside the carriageways
+          if (this.flyAt(p.x, p.y)) continue; // walkers on a flyover are on the deck or under it, beside the carriageways
+          if (mFly < 0) mFly = this.flyAt(m.x, m.y) ? 1 : 0;
+          if (mFly) continue;
           // already touching (walking out of a car is always allowed): driving on is how that ends
           if (Math.abs(ex * nhx + ey * nhy) < m.len / 2 + PED_R && Math.abs(-ex * nhy + ey * nhx) < widthOf(m) / 2 + PED_R) continue;
           // behind the car's centre: ignored (pedBehind 0), or only a real touch counts (1: no margin, or a turning car's rear would freeze it next to people on the kerb)
@@ -776,24 +810,26 @@ export class Traffic {
       }
     }
     if (TT.carGuard) {
-      const now = { x: m.x, y: m.y, hx: nhx, hy: nhy, len: m.len };
+      const now = this.gNow;
+      now.x = m.x; now.y = m.y; now.hx = nhx; now.hy = nhy; now.len = m.len;
+      const oh = this.tmp3, pool = this.gPool;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const q = this.carGrid.get(tkey(tx + dx, ty + dy));
+        const q = this.carGrid.get(tx + dx, ty + dy);
         if (!q) continue;
         for (const o of q) {
           if (o === m || o.lane < 0 || this.apart(m, o) || this.filtering(m, o)) continue;
           const ex = o.x - m.x, ey = o.y - m.y, rr = reach + o.len / 2 + VEHICLE_WIDTH;
           if (ex * nhx + ey * nhy <= 0 || ex * ex + ey * ey > rr * rr) continue;
-          const oh: [number, number] = [0, 0];
           if (!this.headingOf(o, oh)) continue;
-          const ob = { x: o.x, y: o.y, hx: oh[0], hy: oh[1], len: o.len };
+          const ob = pool[cars.length] ??= { x: 0, y: 0, hx: 0, hy: 0, len: 0 };
+          ob.x = o.x; ob.y = o.y; ob.hx = oh[0]; ob.hy = oh[1]; ob.len = o.len;
           if (obbOverlap(now, ob, 0)) continue;
           cars.push(ob);
         }
       }
     }
     if (!peds.length && !cars.length) return allowed;
-    const a: [number, number] = [0, 0], b: [number, number] = [0, 0], c: [number, number] = [0, 0];
+    const a = this.gA, b = this.gB, c = this.gC;
     const halfL = m.len / 2 + PED_R + GUARD_MARGIN, halfW = widthOf(m) / 2 + PED_R + marginOf(m);
     for (let k = 1; k <= 3; k++) {
       const p = this.sweepProg(m, m.prog + (allowed * k) / 3);
@@ -812,7 +848,8 @@ export class Traffic {
           hit = Math.abs(ex * ux + ey * uy) < halfL + pad && Math.abs(-ex * uy + ey * ux) < halfW + pad;
         }
         if (!hit && cars.length) {
-          const me = { x: c[0], y: c[1], hx: ux, hy: uy, len: m.len };
+          const me = this.gMe;
+          me.x = c[0]; me.y = c[1]; me.hx = ux; me.hy = uy; me.len = m.len;
           for (const ob of cars) if (obbOverlap(me, ob, GUARD_MARGIN)) { hit = true; break; }
         }
       }
@@ -821,11 +858,14 @@ export class Traffic {
     return allowed;
   }
   private gPeds: number[] = [];
+  /** guardSweep's scratch: m's body now and at a sweep point, the bodies gathered (gCars, from gPool), path points */
+  private gNow: Obb = { x: 0, y: 0, hx: 0, hy: 0, len: 0 }; private gMe: Obb = { x: 0, y: 0, hx: 0, hy: 0, len: 0 }; private gPool: Obb[] = [];
+  private gA: [number, number] = [0, 0]; private gB: [number, number] = [0, 0]; private gC: [number, number] = [0, 0]; private tmp3: [number, number] = [0, 0];
   /** Any pedestrian within r of (x,y)? (A car pulls out only when nobody is standing where it will appear, whichever way it is drawn.) */
   private pedNear(x: number, y: number, r: number): boolean {
     const tx = Math.floor(x), ty = Math.floor(y);
-    for (const grid of [this.walkCur, this.walkPrev]) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const l = grid.get(tkey(tx + dx, ty + dy));
+    for (let g = 0; g < 2; g++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const l = (g ? this.walkPrev : this.walkCur).get(tx + dx, ty + dy);
       if (l) for (const p of l) if (p.pts && (p.x - x) ** 2 + (p.y - y) ** 2 < r * r) return true;
     }
     return false;
@@ -859,9 +899,9 @@ export class Traffic {
     const halfL = m.len / 2 + PED_R + GUARD_MARGIN, halfW = widthOf(m) / 2 + PED_R + marginOf(m);
     const tx = Math.floor(c[0]), ty = Math.floor(c[1]);
     const now = this.headingOf(m, this.tmp2) ? [this.tmp2[0], this.tmp2[1]] : null;
-    for (const grid of [this.walkCur, this.walkPrev]) {
+    for (let g = 0; g < 2; g++) {
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const l = grid.get(tkey(tx + dx, ty + dy));
+        const l = (g ? this.walkPrev : this.walkCur).get(tx + dx, ty + dy);
         if (!l) continue;
         for (const p of l) {
           if (!p.pts) continue; // stopped walking since it was noted
@@ -904,13 +944,17 @@ export class Traffic {
   /** Is the point (x,y) inside (or within a pedestrian's radius of) any car body on the road? */
   carBodyAt(x: number, y: number): boolean {
     const tx = Math.floor(x), ty = Math.floor(y), h = this.tmp2;
+    let fly = -1; // flyAt(x, y), once it is needed
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const q = this.carGrid.get(tkey(tx + dx, ty + dy));
+      const q = this.carGrid.get(tx + dx, ty + dy);
       if (!q) continue;
       for (const m of q) {
-        if (m.lane < 0 || this.flyAt(m.x, m.y) || this.flyAt(x, y)) continue;
+        if (m.lane < 0) continue;
         const ex = x - m.x, ey = y - m.y;
-        if (ex * ex + ey * ey > 0.36 || !this.headingOf(m, h)) continue;
+        if (ex * ex + ey * ey > 0.36) continue;
+        if (this.flyAt(m.x, m.y)) continue;
+        if (fly < 0) fly = this.flyAt(x, y) ? 1 : 0;
+        if (fly || !this.headingOf(m, h)) continue;
         if (Math.abs(ex * h[0] + ey * h[1]) < m.len / 2 + PED_R && Math.abs(-ex * h[1] + ey * h[0]) < widthOf(m) / 2 + PED_R) return true;
         const mh = TT.guardDrawn & 2 ? this.motion.get(m) : undefined; // and as drawn, facing its last move
         if (mh && Math.abs(ex * mh[0] + ey * mh[1]) < m.len / 2 + PED_R && Math.abs(-ex * mh[1] + ey * mh[0]) < widthOf(m) / 2 + PED_R) return true;
@@ -934,13 +978,14 @@ export class Traffic {
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1], bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
     const dir = dirBetween(ax, ay, bx, by), last = m.pi + 1 >= n;
     const fly = isFlyoverAux(this.junctionAux(bx, by));
-    if (last) { for (const o of this.inBox(bx, by)) if (o.m !== m && !(fly && isEW(o.inD) !== isEW(dir)) && conflicts(dir, dir, o.inD, o.outD)) return o.m; return null; }
+    const M = this.boxM, I = this.boxIn, O = this.boxOut;
+    if (last) { for (let i = 0, k = this.inBox(bx, by); i < k; i++) if (M[i] !== m && !(fly && isEW(I[i]) !== isEW(dir)) && conflicts(dir, dir, I[i], O[i])) return M[i]; return null; }
     const outD = this.nextDirOf(m);
     const nq = this.cells.get(Traffic.laneKey(bx, by, outD));
     if (m.committed) return nq && nq.length ? nq[nq.length - 1] : null;
     if (nq && nq.length && !this.laneRoom(bx, by, Traffic.laneKey(bx, by, outD), m)) return nq[0];
     if (nq && nq.length && this.degreeOf(bx, by) >= 3) { const t = nq[nq.length - 1]; if (t.prog < this.clearAt(t) + MIN_GAP) return t; }
-    for (const o of this.inBox(bx, by)) if (o.m !== m && !(fly && isEW(o.inD) !== isEW(dir)) && conflicts(dir, outD, o.inD, o.outD)) return o.m;
+    for (let i = 0, k = this.inBox(bx, by); i < k; i++) if (M[i] !== m && !(fly && isEW(I[i]) !== isEW(dir)) && conflicts(dir, outD, I[i], O[i])) return M[i];
     if (nq && nq.length) return nq[nq.length - 1];
     return null;
   }
@@ -968,10 +1013,7 @@ export class Traffic {
   }
   /** A walker moved this tick (the body guard reads its position live). */
   noteWalker(m: Mover) {
-    const k = tkey(Math.floor(m.x), Math.floor(m.y));
-    let l = this.walkCur.get(k);
-    if (!l) this.walkCur.set(k, l = []);
-    l.push(m);
+    this.walkCur.add(Math.floor(m.x), Math.floor(m.y), m);
   }
   private tmp2: [number, number] = [0, 0];
 
@@ -1010,7 +1052,7 @@ export class Traffic {
     // cached per position: most cars are queued and do not move between the many checks of one tick
     const c = this.headings.get(m);
     if (c && c[0] === m.prog && c[1] === m.lane && c[2] === m.pi && c[5] === m.path.length) { out[0] = c[3]; out[1] = c[4]; return true; }
-    const a: [number, number] = [0, 0], b: [number, number] = [0, 0];
+    const a = this.hA, b = this.hB;
     const p0 = Math.max(0, m.prog - 0.01), p1 = Math.min(0.999, m.prog + 0.01);
     this.posAt(m, p0, a); this.posAt(m, p1, b);
     const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy);
@@ -1021,6 +1063,7 @@ export class Traffic {
     return true;
   }
   private headings = new WeakMap<Mover, number[]>();
+  private hA: [number, number] = [0, 0]; private hB: [number, number] = [0, 0];
   /** each car's direction of its last move, which is how the client orients it */
   private motion = new WeakMap<Mover, number[]>();
 
@@ -1119,20 +1162,21 @@ export class Traffic {
   /** Is a movement inD -> outD through tile B blocked by a car already in that box? */
   private boxConflict(m: Mover, bx: number, by: number, inD: number, outD: number, trapped = false): boolean {
     const ja = this.junctionAux(bx, by), fly = isFlyoverAux(ja), ring = isRingAux(ja) && TT.ringMerge > 0;
-    for (const o of this.inBox(bx, by)) {
-      if (o.m === m) continue;
-      if (fly && isEW(o.inD) !== isEW(inD)) continue; // on the deck or under it: the other road never meets this one
-      if (ring && o.outD === outD && o.m.lane === Traffic.laneKey(bx, by, outD)) continue; // ahead of me in the lane I merge into: I follow it
-      if (!conflicts(inD, outD, o.inD, o.outD)) continue;
-      if (TT.conflictRemaining && (o.inD !== inD || TT.sameApproachRelax >= 2) && o.m.lane === Traffic.laneKey(bx, by, o.outD)) {
+    for (let i = 0, n = this.inBox(bx, by); i < n; i++) {
+      const om = this.boxM[i], oIn = this.boxIn[i], oOut = this.boxOut[i];
+      if (om === m) continue;
+      if (fly && isEW(oIn) !== isEW(inD)) continue; // on the deck or under it: the other road never meets this one
+      if (ring && oOut === outD && om.lane === Traffic.laneKey(bx, by, outD)) continue; // ahead of me in the lane I merge into: I follow it
+      if (!conflicts(inD, outD, oIn, oOut)) continue;
+      if (TT.conflictRemaining && (oIn !== inD || TT.sameApproachRelax >= 2) && om.lane === Traffic.laneKey(bx, by, oOut)) {
         // already on its way out: only the rest of its path from its rear bumper on can be in my way
-        const rear = 0.5 + o.m.prog - o.m.len / 2 / ARC(o.inD, o.outD);
-        if (rear > CONFLICT_LAST[((inD * 4 + outD) * 4 + o.inD) * 4 + o.outD] + 0.04) continue;
+        const rear = 0.5 + om.prog - om.len / 2 / ARC(oIn, oOut);
+        if (rear > CONFLICT_LAST[((inD * 4 + outD) * 4 + oIn) * 4 + oOut] + 0.04) continue;
       }
       // same approach, other exit: with the relaxation, go once the leader's tail is past the box centre on its way out
-      if (TT.sameApproachRelax === 1 && o.inD === inD && o.m.lane === Traffic.laneKey(bx, by, o.outD) && o.m.prog >= o.m.len / 2 + MIN_GAP) continue;
+      if (TT.sameApproachRelax === 1 && oIn === inD && om.lane === Traffic.laneKey(bx, by, oOut) && om.prog >= om.len / 2 + MIN_GAP) continue;
       // a vehicle getting off a level crossing as the barriers come down goes past anyone standing clear of its path
-      if ((TT.passStationary || trapped) && o.m.wait >= (trapped ? 1 : 2) && this.pathClearOf(m, bx, by, inD, outD, o.m)) continue;
+      if ((TT.passStationary || trapped) && om.wait >= (trapped ? 1 : 2) && this.pathClearOf(m, bx, by, inD, outD, om)) continue;
       return true;
     }
     return false;
