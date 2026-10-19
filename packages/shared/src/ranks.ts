@@ -33,19 +33,32 @@ export interface RankDef {
 export const RANKS: RankDef[] = [
   { name: 'Camp', blurb: 'Tents round a fire pit at the end of the road, and a town to come.', needs: [], grant: 0, side: 32 },
   { name: 'Hamlet', blurb: 'A cluster of homes with a shop and somewhere to sit: people start to call it a place.',
-    needs: [{ id: 'residents', label: 'residents', target: 80 }, { id: 'shops', label: 'shops open', target: 2 }, { id: 'leisure', label: 'park or venue', target: 1 }],
+    needs: [{ id: 'residents', label: 'residents', target: 100 }, { id: 'shops', label: 'shops open', target: 2 }, { id: 'leisure', label: 'park or venue', target: 1 }],
     grant: 2000, side: 48 },
   { name: 'Village', blurb: 'Its own jobs, a police box and a fire post: a village looks after itself.',
-    needs: [{ id: 'residents', label: 'residents', target: 180 }, { id: 'jobs', label: 'jobs filled on your land', target: 60 }, { id: 'cover', label: 'police and fire cover', target: 2 }],
+    needs: [{ id: 'residents', label: 'residents', target: 320 }, { id: 'jobs', label: 'jobs filled on your land', target: 220 }, { id: 'cover', label: 'police and fire cover', target: 2 }],
     grant: 3500, side: 64 },
   { name: 'Town', blurb: 'Two-storey streets, a working economy and books that balance: a market town.',
-    needs: [{ id: 'residents', label: 'residents', target: 320 }, { id: 'jobs', label: 'jobs filled on your land', target: 120 }, { id: 'level2', label: 'two-storey buildings', target: 10 }, { id: 'black', label: 'days in the black in a row', target: 3 }],
+    needs: [{ id: 'residents', label: 'residents', target: 650 }, { id: 'jobs', label: 'jobs filled on your land', target: 500 }, { id: 'level2', label: 'two-storey buildings', target: 30 }, { id: 'black', label: 'days in the black in a row', target: 3 }],
     grant: 6000, side: 80 },
   { name: 'City', blurb: 'Schools or buses, and people coming from far off to work: a city, with the land rules of the wide world.',
-    needs: [{ id: 'residents', label: 'residents', target: 550 }, { id: 'jobs', label: 'jobs filled on your land', target: 220 }, { id: 'school', label: 'pupils at school, or a bus line', target: 1 }],
+    needs: [{ id: 'residents', label: 'residents', target: 1000 }, { id: 'jobs', label: 'jobs filled on your land', target: 800 }, { id: 'school', label: 'pupils at school, or a bus line', target: 1 }],
     grant: 10000, side: 96, open: true },
 ];
 export const TOP_RANK = RANKS.length - 1;
+
+/** What to do about a need: the rank card's "next step" line under the first one still short. */
+export const NEED_HOW: Record<RankNeedId, string> = {
+  residents: 'Zone more homes along your streets (4); a builders\' yard for every twenty lots waiting keeps them rising.',
+  jobs: 'Zone shops (5), works and offices near your homes: residents take the jobs closest to them.',
+  shops: 'Commercial (5): zone a few lots near your homes.',
+  leisure: 'Park (G): place one among your homes, $120.',
+  cover: 'A police box and a fire post (Emergency services, T): cheap, with few staff.',
+  level2: 'Masonry (T) lets lots grow to two storeys; your builders raise them as the lots fill.',
+  black: 'Finish days with taxes above wages and upkeep: the ledger (click the treasury) and the parcel tax slider.',
+  school: 'A school (Education, T) or a bus line (Public transport, T).',
+  busline: 'Place bus stops and draw a line in the Lines panel (Public transport, T).',
+};
 
 /** A frontier charter grows by at most this many tiles towards the gate (west): the gate stands 14 tiles off its west edge (server seed.ts). */
 export const CHARTER_WEST_MAX = 10;
@@ -79,6 +92,8 @@ export interface RankDTO {
   at: number[];
   /** the latest milestones, newest first */
   feed: Milestone[];
+  /** residents now and the next residents milestone (the card's next step past the top rank) */
+  mark?: [number, number];
   /** on a frontier, for the charter holder: the charter's land now and at the next rank */
   ring?: { x: number; y: number; w: number; h: number };
   next?: { x: number; y: number; w: number; h: number };

@@ -368,6 +368,17 @@ changing behaviour in game time.
 - *Onboarding* (`shared/src/goals.ts`, `server/src/goals.ts`, `client/src/onboarding.ts`). A chain of 14 goals for the
   first two hours (claim a plot, a street, pitch camp, homes, your own builders' yard, 12 residents in homes, shops, 50 residents,
   Masonry, police and fire cover, a park, a day in the black, 250 residents, a bus line), measured server-side a few times a game
+- *Settlement ranks* (`shared/src/ranks.ts`, `server/src/ranks.ts`, `client/src/ranks.ts`, `client/src/render/fireworks.ts`;
+  docs/ranks.md). A town climbs Camp → Hamlet → Village → Town → City on needs measured on its own land (residents,
+  jobs filled, shops, a park, police and fire cover, two-storey buildings, days in the black, pupils or a bus line).
+  Each rank pays a charter grant ($2,000 to $10,000) and, on a frontier, grows the free charter by a ring of land
+  (32 → 48 → 64 → 80 → 96 tiles a side; the holder buys beyond it only as a City, nobody else inside it). The rank
+  chip beside the treasury shows the next rank's progress; its card (in the goals column, taking the goals card's
+  place once the chain is done) lists the needs, the grant and a milestone feed, and each new milestone comes up in a
+  ticker under the top bar. A rank-up gets a banner, fireworks over the town (every shell its own) and the camera
+  pulling up to show the new land. Saved with the player (`Player.ranks`); older saves derive their rank on load
+  without a grant. None in sandboxes; the showcase tour's "Settlement ranks" stop plays the celebration.
+  `npx tsx packages/server/src/loadtest/ranks.ts` is the probe.
 - *Money that can run out* (`server/src/sim/finance.ts`, numbers in `ECONOMY_TUNING`; docs/early-game-audit.md "After
   Audit #5"). A player may spend down to a **$5,000 overdraft** (`overdraftLimit`); a build, purchase, unlock or policy
   that would go further is refused with a toast naming the limit and what can still be spent (`World.spendable`,

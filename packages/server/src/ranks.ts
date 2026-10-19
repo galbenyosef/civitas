@@ -27,9 +27,17 @@ export interface RankState {
 /** Milestones kept per player, and sent. */
 const FEED_KEEP = 40, FEED_SEND = 12;
 /** Marks the feed notes as they are passed: residents, jobs filled on your land, building work done, a day's taxes. */
-const POP_STEPS = [10, 25, 50, 75, 100, 125, 150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 800, 1000, 1250, 1500, 2000, 2500, 3000, 4000, 5000];
-const JOB_STEPS = [5, 10, 20, 30, 40, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000];
-const BUILT_STEPS = [500, 1000, 2000, 3000, 4000, 5000, 7500, 10000, 12500, 15000, 20000, 25000, 30000, 40000, 50000, 75000, 100000];
+/** 10, 25, 50, 75, 100, then every `a` to `to`, every `b` after that to `end` */
+const steps = (first: number[], a: number, to: number, b: number, end: number) => {
+  const out = [...first];
+  for (let n = first[first.length - 1] + a; n <= to; n += a) out.push(n);
+  for (let n = to + b; n <= end; n += b) out.push(n);
+  return out;
+};
+// fine enough that a town still growing passes one every few minutes (docs/ranks.md: no stretch over six without news)
+const POP_STEPS = steps([10, 25, 50, 75, 100], 25, 500, 50, 1500).concat([1750, 2000, 2500, 3000, 4000, 5000]);
+const JOB_STEPS = steps([5, 10, 20, 30, 40, 50], 25, 500, 50, 1200).concat([1500, 2000]);
+const BUILT_STEPS = steps([500, 1000], 1000, 10000, 2500, 30000).concat([40000, 50000, 75000, 100000]);
 const TAX_STEPS = [25, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000];
 
 /** What the needs and the feed's firsts read on a player's own land. */
@@ -134,8 +142,10 @@ export class Ranks {
     for (const m of this.milestones(p, s, t)) if (!s.seen.includes(m.key)) note(m.key, m.kind, m.text);
     if (s.feed.length > FEED_KEEP) s.feed.length = FEED_KEEP;
     if (s.seen.length > 600) s.seen = s.seen.slice(-600); // the keys are bounded by the steps above; a guard, not a rule
+    const mark = POP_STEPS.find((n) => n > p.progress.housed);
     const rank: RankDTO = {
       rank: s.rank, have: s.rank < TOP_RANK ? this.measure(s.rank + 1, p, t) : [], at: [...s.at], feed: s.feed.slice(0, FEED_SEND),
+      ...(mark ? { mark: [p.progress.housed, mark] as [number, number] } : {}),
       ...this.rings(p, s),
     };
     return { msg: { t: 'rank', rank, ...(up ? { up } : {}), ...(fresh.length ? { fresh: fresh.reverse() } : {}) }, sig: JSON.stringify(rank) };

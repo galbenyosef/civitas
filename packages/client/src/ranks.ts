@@ -1,6 +1,6 @@
 import { Group, Mesh, MeshBasicMaterial, BufferGeometry, Float32BufferAttribute, DoubleSide } from 'three';
 import {
-  RANKS, TOP_RANK, TICKS_PER_DAY, TICKS_PER_HOUR, hash2, rankRewardText,
+  RANKS, TOP_RANK, NEED_HOW, TICKS_PER_DAY, TICKS_PER_HOUR, hash2, rankRewardText,
   type RankDTO, type RankUp, type Milestone, type ServerMsg,
 } from '@msimcity/shared';
 import type { NetClient } from './net';
@@ -42,6 +42,7 @@ export class RanksUI {
   private queue: Milestone[] = [];
   private tickAt = 0;
   private ringKey = '';
+  private cardHtml = '';
 
   constructor(private d: RanksDeps) {
     injectStyle();
@@ -82,24 +83,29 @@ export class RanksUI {
     const met = next ? next.needs.filter((q, i) => (r.have[i] ?? 0) >= q.target).length : 0;
     this.chip.classList.remove('hidden');
     this.chip.classList.toggle('on', this.cardShown());
-    this.chip.innerHTML = `<i class="rcrest r${r.rank}">${ROMAN[r.rank] || '·'}</i>${esc(def.name)}${next ? `<span class="rnext"> → ${esc(next.name)} ${met}/${next.needs.length}</span>` : ''}`;
+    const chipHtml = `<i class="rcrest r${r.rank}">${ROMAN[r.rank] || '·'}</i>${esc(def.name)}${next ? `<span class="rnext"> → ${esc(next.name)} ${met}/${next.needs.length}</span>` : r.mark ? `<span class="rnext"> · ${r.mark[0].toLocaleString('en-GB')}/${r.mark[1].toLocaleString('en-GB')} residents</span>` : ''}`;
+    if (this.chip.innerHTML !== chipHtml) this.chip.innerHTML = chipHtml;
     this.chip.title = next ? `Settlement rank: ${def.name}. Next: ${next.name} (${next.needs.map((q) => q.label).join(', ')}). Click for the rank card and milestones` : `Settlement rank: ${def.name}, the top rank. Click for the milestones`;
     const show = this.cardShown();
     this.card.classList.toggle('hidden', !show);
-    if (!show) return;
+    if (!show) { this.cardHtml = ''; return; }
     const frontier = !!r.ring;
     const bars = next ? next.needs.map((q, i) => {
       const cur = Math.min(r.have[i] ?? 0, q.target), pct = Math.round((100 * cur) / q.target);
       return `<div class="gpart${cur >= q.target ? ' done' : ''}"><span>${esc(q.label)}</span><span>${cur.toLocaleString('en-GB')} / ${q.target.toLocaleString('en-GB')}</span></div><div class="gbar"><i style="width:${pct}%"></i></div>`;
     }).join('') : '';
+    const short = next?.needs.find((q, i) => (r.have[i] ?? 0) < q.target);
     const feed = r.feed.slice(0, 6).map((f) => `<li class="k-${f.kind}"><span class="fi">${KIND_ICON[f.kind]}</span><span class="ft">${esc(f.text)}</span><span class="fw">${when(f.tick)}</span></li>`).join('');
-    this.card.innerHTML = `
+    const html = `
       <div class="ghead"><span class="gnum">Settlement rank</span><button class="gx" id="rHide" title="Hide (the rank chip at the top brings it back)">–</button></div>
       <div class="rtitle"><i class="rcrest r${r.rank}">${ROMAN[r.rank] || '·'}</i>${esc(def.name)}</div>
       <div class="gwhy">${esc(def.blurb)}</div>
-      ${next ? `<div class="rnexthead">To become a <b>${esc(next.name)}</b></div>${bars}
-      <div class="gfoot"><span class="greward">Charter grant: <b>${esc(rankRewardText(r.rank + 1, frontier))}</b></span></div>` : '<div class="rnexthead">The top rank: the land rules of the wide world are yours.</div>'}
+      ${next ? `<div class="rnexthead">To become a <b>${esc(next.name)}</b></div>${bars}${short ? `<div class="rstep">Next step: ${esc(NEED_HOW[short.id])}</div>` : ''}
+      <div class="gfoot"><span class="greward">Charter grant: <b>${esc(rankRewardText(r.rank + 1, frontier))}</b></span></div>` : `<div class="rnexthead">The top rank: the land rules of the wide world are yours.</div>${r.mark ? `<div class="gpart"><span>next milestone: residents</span><span>${r.mark[0].toLocaleString('en-GB')} / ${r.mark[1].toLocaleString('en-GB')}</span></div><div class="gbar"><i style="width:${Math.round((100 * r.mark[0]) / r.mark[1])}%"></i></div>` : ''}`}
       ${feed ? `<div class="rfeedhead">Milestones</div><ul class="rfeed">${feed}</ul>` : ''}`;
+    if (html === this.cardHtml) return; // the 1 s refresh: only when something changed
+    this.cardHtml = html;
+    this.card.innerHTML = html;
     this.card.querySelector<HTMLButtonElement>('#rHide')!.onclick = () => { this.pref = 'closed'; this.save(); this.render(); };
   }
 
@@ -214,6 +220,7 @@ function injectStyle() {
 #rankCard .gpart span:last-child { color: var(--fg); } #rankCard .gpart.done span:first-child::after { content: ' ✓'; color: var(--accent); }
 #rankCard .gbar { height: 6px; margin: 3px 0 7px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
 #rankCard .gbar i { display: block; height: 100%; background: linear-gradient(90deg, #c9962a, #ffd479); transition: width 0.6s ease; }
+#rankCard .rstep { margin: 0 0 6px; color: var(--fg); line-height: 1.35; }
 #rankCard .greward { color: var(--muted); } #rankCard .greward b { color: #ffd479; font-weight: 600; }
 #rankCard .rfeedhead { margin-top: 9px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
 #rankCard .rfeed { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
