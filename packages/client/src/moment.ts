@@ -21,7 +21,7 @@ export class CameraMoment {
     document.getElementById('ui')?.appendChild(this.cap);
     const style = document.createElement('style');
     style.textContent = `
-#moment { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); padding: 10px 18px; border-radius: 12px; pointer-events: none;
+#moment { position: absolute; left: 50%; bottom: 14%; z-index: 7; transform: translateX(-50%); padding: 10px 18px; border-radius: 12px; pointer-events: none;
   background: linear-gradient(120deg, rgba(40,36,22,0.9), rgba(16,20,27,0.88)); border: 1px solid rgba(255,212,121,0.7); color: #ffe7b0;
   font-size: 17px; font-weight: 600; letter-spacing: 0.01em; box-shadow: 0 10px 30px rgba(0,0,0,0.35); animation: momentIn 0.6s ease-out; white-space: nowrap; }
 #moment small { display: block; margin-top: 2px; font-size: 11px; font-weight: 400; color: rgba(255,231,176,0.7); text-align: center; }
@@ -39,7 +39,7 @@ export class CameraMoment {
   play(x: number, y: number, caption: string) {
     const r = this.rig;
     const from: View = { x: r.target.x, z: r.target.z, dist: r.dist, yaw: r.yaw, pitch: r.pitch };
-    const to: View = { x: x + 1, z: y + 1, dist: 13, yaw: r.yaw + 0.25, pitch: 0.62 };
+    const to: View = { x: x + 1, z: y + 1, dist: 11, yaw: r.yaw + 0.25, pitch: 0.66 };
     this.run = { at: performance.now(), from, to };
     this.cap.innerHTML = `${esc(caption)}<small>any key or click to carry on</small>`;
     this.cap.className = '';
