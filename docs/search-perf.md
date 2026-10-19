@@ -5,10 +5,13 @@ native Node module (napi-rs, with rayon threads) on the server and the same crat
 with the TypeScript versions kept as the fallback and the reference. This doc measures what the searches cost in a
 London tick, replays every search of a London day in TypeScript and in a Rust port, and projects the gain.
 
-**Short answer: not now.** Searches are 14% of a London tick (A\* is 13%, job searches 0.04%). A faithful Rust port
-of the searches is 7.4 times faster than TypeScript on one thread, but the whole tick only gets about 13% faster, and
-extra threads add very little. The traffic step is three times the size of the searches. See
-[Recommendation](#recommendation).
+**Short answer: not now.** In a London tick of about 54 ms (native arm64, 31k citizens), the searches take about
+8 ms (14.6%): A\* 7.4 ms, walks 0.3 ms, venue searches 0.2 ms, job searches 0.02 ms. The traffic step takes about
+24 ms (42%). A faithful Rust port of the searches is 7.4 times faster than TypeScript on one thread, so the whole tick
+gets about 13% faster (1.15×). Extra threads add about 1% on top of that. See [Recommendation](#recommendation).
+
+**Rosetta is not the problem.** The x64 Node under Rosetta and a native arm64 Node run the whole London tick at the
+same speed: 53.1 against 54.3 ms. Only tight kernels like the search loop show a gap (1.8×).
 
 ## Method
 
@@ -88,7 +91,10 @@ is 1–2% of the search time.
   batches are spread over a rayon pool. Batches of fewer than 8 searches run on the calling thread, because waking
   the pool for them costs more than it saves.
 
-**Match rate: 100%** in both: 132,196 routes, 35,351 walks, 1,351 job searches and 9,440 venue searches. Every path,
+**Match rate: 100%** in both, for London and for the 8×8 test city (384,604 searches). The first worker-thread
+replay showed about one cost mismatch every ten passes. Its shared "workers done" counter let the main thread go on
+while a worker was still searching, so one search read the next tick's costs. With a per-worker acknowledgement of each
+batch there were no mismatches in 40 passes, and the worker figures below are from that version. London: 132,196 routes, 35,351 walks, 1,351 job searches and 9,440 venue searches. Every path,
 route cost (bit for bit), goal, building, miss box, full-workplace list and node count matches the game's, on one
 thread and at every thread count. The TypeScript node counts come from a check run under the hook.
 
@@ -169,20 +175,28 @@ Top self time from the CPU profile of an unprofiled day (inspector, 200 µs samp
 ## Replay benchmarks
 
 London's 178,338 searches of one day. Times are the batches only, median of three. Per tick is the total over 2,400.
+The worker rows are from the fixed hand-out (load 7.9 at the start, 14.0 at the end). The other rows are from the first
+replay run (load 7.75 → 7.97); its worker figures were within 6% of these. The TS main thread measured 9,434 ms in the
+second run.
 
 | run | native arm64 ms (per tick) | vs TS 1 thread | Rosetta x64 ms |
 | --- | --- | --- | --- |
 | TS, main thread | 9,127 (3.80) | 1.0× | 16,814 |
-| TS, 1 worker | 9,698 | 0.94× | 16,343 |
-| TS, 2 workers | 5,737 | 1.6× | 9,773 |
-| TS, 4 workers | 4,410 | 2.1× | 7,529 |
-| TS, 8 workers | 4,224 (1.76) | 2.2× | 9,595 |
+| TS, 1 worker | 9,400 | 0.97× | 16,343 |
+| TS, 2 workers | 5,708 | 1.6× | 9,773 |
+| TS, 4 workers | 4,297 | 2.1× | 7,529 |
+| TS, 8 workers | 3,993 (1.66) | 2.3× | 9,595 |
 | TS critical path | 3,570 | 2.6× (limit) | 6,023 |
 | Rust, one thread | 1,228 (0.51) | 7.4× | – |
 | Rust, rayon 2 | 811 | 11.3× | – |
 | Rust, rayon 4 | 703 (0.29) | 13.0× | – |
 | Rust, rayon 8 | 796 | 11.5× | – |
 | Rust critical path | 478 | 19× (limit) | – |
+
+The 8×8 test city (384,604 searches, native): TS main thread 4,803 ms, 2 / 4 / 8 workers 3,292 / 2,549 / 2,548 ms,
+critical path 1,914 ms. Rust one thread 654 ms, rayon 2 / 4 / 8 at 483 / 446 / 523 ms (every batch split, without
+`--min-par`), critical path 298 ms.
+Rust is 7.3 times faster on one thread.
 
 The *critical path* is each batch's slowest search, summed. No number of threads can finish a batch sooner than that,
 so it is the floor for any per-tick batch. With 74 searches a tick (p95 145) and a heavy tail, one 4,000-node A\*
@@ -226,10 +240,20 @@ The 0.3 ms a tick added for the calls and the cost field's upkeep is an estimate
 | ~30k, whole day | 54.3 ms | 7.9 ms (14.6%) | 47.2 ms | 1.15× (−13%) | 47.0 ms (1.16×) | 1.17× |
 | ~30k, 17:00–18:00 | 79.4 ms | 11.6 ms (14.6%) | 68.9 ms | 1.15× (−13%) | 68.6 ms (1.16×) | 1.17× |
 | ~30k, 08:00–09:00 | 60.7 ms | 10.0 ms (16.5%) | 51.7 ms | 1.18× (−15%) | 51.4 ms (1.18×) | 1.20× |
-| ~53k | D8_ROWS | | | | | |
+| **(b) measured**: 8×8 test city, ~80k (not London) | 55.8 ms | 3.9 ms (7.0%) | 52.4 ms | 1.06× | 52.2 ms | 1.08× |
+| **(c) extrapolated**: London ~53k, share held at 14.6% | 124 ms (prod) | ~18 ms | ~107 ms | ~1.16× | ~107 ms | 1.17× |
+| (c) if the share grows to 20% | 124 ms | ~25 ms | ~101 ms | ~1.23× | ~101 ms | 1.25× |
 
-TypeScript workers instead of Rust would need the same batching changes (below). At 8 workers the replay takes 46% of
-its single-thread time, which would put the game's 7.9 ms at about 3.7 ms: a gain of about 1.08×.
+There is no London at 53k on this machine. The demo grows by about 1,000 citizens a game day, so reaching 53k would
+take weeks of game time. The 53k London is prod's (swarm-108, native linux x64: 124 ms a tick on average), and it was
+not touched. Row (b) is a different city: the 8×8 `seedCity` grid filled to 78k and ended the day at 80k. Its
+searches are short (grid streets, A\* p50 11 nodes), so its share is half London's. Row (c) is arithmetic on the prod
+tick time. Prod's tick grew 2.3 times for 1.7 times the citizens, so something grows faster than linearly; if that is
+congestion, re-routes (the largest A\* caller) grow with it. The share at 53k is not measured. Recording a corpus from
+a copy of prod's save would settle it.
+
+TypeScript workers instead of Rust would need the same batching changes (below). At 8 workers the replay takes 44% of
+its single-thread time, which would put the game's 7.9 ms at about 3.5 ms: a gain of about 1.09×.
 
 ## The call boundary
 
