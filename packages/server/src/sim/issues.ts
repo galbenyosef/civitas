@@ -16,6 +16,8 @@ const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
 interface TileState {
   /** the tick it was first seen standing and open (no customers needs a whole day of it) */
   since: number;
+  /** it was already standing when first looked at (a load, or the first round): very unhappy needs no grace */
+  old: boolean;
   /** a site: work left at the last look, and builder-time ticks since anyone worked it */
   work: number; idle: number;
   /** unstaffed: the tick staffing first fell short (later than now during a new crew's grace), or -1; staff employed when it was flagged */
@@ -178,18 +180,18 @@ export class Issues {
   private look(b: Building) {
     const w = this.w, now = w.tick, k = tkey(b.x, b.y), key = tileKey(b.x, b.y);
     let st = this.state.get(k);
-    if (!st) this.state.set(k, st = { since: -1, work: Infinity, idle: 0, low: -1, hired: 0, roads: -1, park: 0, parkAt: now, parkCap: -1, code: 0, why: 0 });
+    if (!st) this.state.set(k, st = { since: -1, old: b.level > 0, work: Infinity, idle: 0, low: -1, hired: 0, roads: -1, park: 0, parkAt: now, parkCap: -1, code: 0, why: 0 });
     const site = w.sites.get(key);
     const uc = !!site || underConstruction(w.getTile(b.x, b.y));
     const standing = b.level > 0; // an upgrade being built still stands and works at its level
-    if (!standing) st.since = -1; else if (st.since < 0) st.since = now;
+    if (!standing) { st.since = -1; st.old = false; } else if (st.since < 0) st.since = now;
     let code = 0;
     // 1 no road: a building or site with no road at its door, or an empty lot that no road and no frontage neighbour reaches
     if (!w.hasRoadAccess(b.x, b.y) && !this.blockOnly(b) && (b.level > 0 || uc || !this.frontageNear(b))) code = Issue.NoRoad;
     // 2 no builders: nobody worked the site of a new building for an hour of builder time (a waiting upgrade is not stuck), and
     // nobody worked any of its owner's sites in that hour either; a site queued behind its owner's own crew only after two days
     if (site && b.level === 0) {
-      if (site.work < st.work) { const o = w.parcelAt(b.x, b.y)?.owner; if (o) this.served.set(o, now); }
+      if (site.work < st.work && st.work !== Infinity) { const o = w.parcelAt(b.x, b.y)?.owner; if (o) this.served.set(o, now); }
       if (site.assigned > 0 || site.work < st.work || site.priority <= -2) st.idle = 0;
       else if (this.busy) st.idle += this.period;
       st.work = site.work;
@@ -344,7 +346,7 @@ export class Issues {
     if (!h || !h.n) return false;
     const mean = h.sum / h.n;
     if (st.code === Issue.Unhappy) return mean <= IT.unhappyClear;
-    if (mean >= IT.unhappyBelow || now - st.since < IT.unhappyGraceHours * TPH) return false;
+    if (mean >= IT.unhappyBelow || (!st.old && now - st.since < IT.unhappyGraceHours * TPH)) return false;
     const town = this.townMood(this.w.parcelAt(b.x, b.y)?.owner ?? '');
     return town < IT.unhappyTownBelow || mean <= town - IT.unhappyMargin;
   }
