@@ -3046,7 +3046,7 @@ export class Simulation {
       yield { id: c.id, x: c.x, y: c.y, state: c.state, mode: drive ? 1 : 0, kind: familyOf(c.kind), cls: drive ? c.cls : 0, queued: drive && c.wait > 1, emergency: false, stage: c.stage, bag: c.mig === MIG.In || c.mig === MIG.Out, ind: drive ? indicatorOf(c, false) : 0, extra: studyFlag(c) };
     }
     for (const v of this.w.vehicles.values()) {
-      if (v.phase === 'dwell' || (v.lane < 0 && !v.weave)) continue;
+      if (v.phase === 'dwell' ? !v.call : v.lane < 0 && !v.weave) continue; // a fire engine at a fire (sim/fires.ts) is drawn parked at the kerb
       if (v.vkind > FLEET_VKIND) { const a = this.mobile.agentOf(v); if (a) yield a; continue; } // taxis, riders, bin lorries (sim/mobile.ts)
       const rev = v.cls === VehicleClass.Bus && this.traffic.reversing(v);
       yield { id: v.id, x: v.x, y: v.y, state: v.phase === 'back' ? S.ToHome : S.ToWork, mode: 1, kind: v.vkind, cls: v.cls, queued: v.wait > 1, emergency: v.priority, stage: 0, rev, ind: indicatorOf(v, rev) };

@@ -32,8 +32,9 @@ Card c46399ac (docs/audit-2026-10.md section 8, card 3). Code: `server/src/sim/f
    shift later is asked every 25 ticks.
 3. **The fire's course.** Unattended, the share burnt is `(t / burn) ^ growth`: slow while it smoulders, fast once it has
    spread (`growth` 2.5, `burn` a hashed 0.85-1.2 of `burnHours`, 4). When the engine parks the share is frozen (never
-   under `minDamage`, 0.12: smoke and water) and the crew take `fightHours x (0.4 + share)` to put it out; the engine stays
-   until then. Growth leaves a burning building alone (no upgrade, no merge into or out of it).
+   under `minDamage`, 0.12: smoke and water) and the crew take `fightHours x (0.4 + share)` (`fightHours` 1.5) to put it
+   out; the engine stays until then, drawn at the kerb of the road tile before the door with its lights on (`Fires.pullUp`;
+   `Simulation.agents` shows a parked engine on a call), its hose playing on the building. Growth leaves a burning building alone (no upgrade, no merge into or out of it).
 4. **Out.** Attended: the building loses `floor(level x share)` levels (a merged building never below its first level)
    and the owner pays `costShare` (0.5) of its book value (`parcelops.ts buildingValue`) times the share, filed as
    **Fire damage** (ledger category `fire`). Unattended: it burns out. A lot goes back to an empty lot of its zone, a
@@ -50,7 +51,8 @@ services. Fire posts come with Emergency services (civ1: 20 housed, $400; the go
 
 - **The warning fire.** A player's first fire comes a hashed `warnMinHours` to `+ warnSpanHours` (3-9 game hours, a
   minute or three of real time per hour) after they first house `warnHoused` (12) people. It is always survivable: when no
-  engine is in reach the neighbours' bucket chain has it under control at 15% burnt, and either way it loses no level;
+  engine is in reach the neighbours' bucket chain has it under control at 15% burnt and puts it out over a game hour
+  (buckets of water thrown at it from round the building), and either way it loses no level;
   the bill is small. It comes with the advisor hint `fire` (an alert: dismissible, it still shows after the tutorial is
   skipped) that names the fire post and Emergency services and offers the fire post tool.
 - **The grace day.** Ordinary fires start in a player's parcels `graceDays` (1) after the warning fire, and only once the
@@ -69,10 +71,13 @@ services. Fire posts come with Emergency services (civ1: 20 housed, $400; the go
   grows as it takes hold; under the hoses the flames die back and the smoke turns to pale steam; afterwards the ruin
   smoulders for `aftermathHours` (6) and the scorch fades (darkest where it burnt down). `client/src/render/fires.ts`,
   four instanced passes, one draw call each.
-- **The engine** on the road in fire red with its lights, weaving down the crown of the road past a stopped queue.
+- **The engine** on the road in fire red with its lights, weaving down the crown of the road past a stopped queue, then
+  parked at the kerb with its hose on the fire: a stream of drops arcing from the engine to the facade, each on its own
+  clock and wobble (`FireDTO.hx, hy`). The bucket chain throws in bursts from three to five points round the building,
+  each thrower on their own beat (`FireDTO.bk`).
 - **The badge and the problems list**: code 7, **On fire** (a flame glyph, `shared/src/issues.ts`), set the moment the
   fire starts and cleared when it is out, not on the issues' quarter-hour round; it outranks every other code and is the
-  first group in the problems panel. It shows only while the fire burns (an hour or so), and a fire leaves no badge
+  first group in the problems panel. It floats a tile higher than the other badges, above the flames. It shows only while the fire burns (an hour or so), and a fire leaves no badge
   behind (a burnt-out lot is an empty zoned lot), so fires do not add to the badge flood.
 - **The building's panel**: a Fire row ("On fire: the fire crew are on their way", "burnt out", "Fire damage: 1 level
   lost").

@@ -8,7 +8,7 @@ import { sceneUniforms } from './materials';
 import { roofAnchor } from './issues';
 
 const MAX_FIRES = 64;
-const FLAMES_MAX = 10, PUFFS_MAX = 18;
+const FLAMES_MAX = 10, PUFFS_MAX = 18, DROPS_MAX = 36;
 /** one wind for the town (smoke leans the same general way), each fire and each puff turned off it by its own hash */
 const WIND = 0.7;
 
@@ -126,6 +126,44 @@ void main() {
   gl_FragColor = vec4(col, a);
 }`;
 
+/**
+ * Water: drops in an arc from where it is thrown (aP) to a point on the building (aO.xyz; aO.w the arc's height). A hose
+ * (aS.w 0) is a steady stream, each drop on its own clock and wobble; a bucket chain (aS.w 1) throws in bursts, each
+ * thrower on their own rhythm. aI.x is how hard they are at it (0 when not putting a fire out).
+ */
+const SPRAY_VERT = /* glsl */ `
+attribute vec3 aP; attribute vec4 aO; attribute vec4 aS; attribute vec4 aI;
+uniform float uTime;
+varying vec2 vUv; varying float vA;
+void main() {
+  float seed = aS.x, size = aS.y, rate = aS.z, bucket = aS.w;
+  float life = fract(uTime * rate + seed * 23.0);
+  // a bucket flies in a short burst every couple of seconds; between, nothing (each thrower has their own beat)
+  float beat = fract(uTime * (0.45 + 0.2 * fract(seed * 5.0)) + fract(seed * 3.7));
+  float on = bucket > 0.5 ? step(beat, 0.45) : 1.0;
+  if (bucket > 0.5) life = beat / 0.45;
+  vec3 a = aP, b = aO.xyz;
+  vec3 c = mix(a, b, life) + vec3(0.0, aO.w * 4.0 * life * (1.0 - life), 0.0);
+  float spread = (bucket > 0.5 ? 0.22 : 0.07) * life;
+  c += vec3(sin(seed * 91.0 + uTime * 3.0), 0.0, cos(seed * 57.0 + uTime * 2.3)) * spread;
+  float s = size * (0.5 + 0.9 * life) * (bucket > 0.5 ? 1.6 : 1.0);
+  vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+  vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+  gl_Position = projectionMatrix * viewMatrix * vec4(c + (right * position.x + up * position.y) * s, 1.0);
+  vUv = uv;
+  vA = aI.x * on * smoothstep(0.0, 0.08, life) * (1.0 - smoothstep(0.85, 1.0, life));
+}`;
+const SPRAY_FRAG = /* glsl */ `
+uniform float uNight;
+varying vec2 vUv; varying float vA;
+void main() {
+  if (vA < 0.01) discard;
+  float r = length(vUv * 2.0 - 1.0);
+  float a = (1.0 - smoothstep(0.2, 1.0, r)) * vA * 0.95;
+  if (a < 0.01) discard;
+  gl_FragColor = vec4(vec3(0.6, 0.8, 1.0) * (1.1 + 0.3 * uNight) * a, a);
+}`;
+
 const SCORCH_VERT = /* glsl */ `
 attribute vec3 aP; attribute vec4 aO; attribute vec4 aS; attribute vec4 aI;
 varying vec2 vUv; varying float vA; varying float vSeed;
@@ -188,12 +226,13 @@ export class FiresView {
   private glows = pool(MAX_FIRES, GLOW_VERT, GLOW_FRAG, true, 8);
   private smoke = pool(MAX_FIRES * PUFFS_MAX, SMOKE_VERT, SMOKE_FRAG, false, 10);
   private scorch = pool(MAX_FIRES, SCORCH_VERT, SCORCH_FRAG, false, 1);
+  private spray = pool(MAX_FIRES * DROPS_MAX, SPRAY_VERT, SPRAY_FRAG, true, 11);
   /** which fire each instance belongs to, per pool */
   private owner = new Map<Pool, Int16Array>();
   private builtAt = 0;
 
   constructor(private world: ClientWorld) {
-    for (const p of [this.scorch, this.glows, this.flames, this.smoke]) {
+    for (const p of [this.scorch, this.glows, this.flames, this.smoke, this.spray]) {
       this.group.add(p.mesh);
       this.owner.set(p, new Int16Array(p.P.length / 3));
     }
@@ -207,7 +246,7 @@ export class FiresView {
   /** Lay out every instance: positions from the roofs drawn now, the variation from hashes. */
   private rebuild() {
     this.builtAt = performance.now();
-    for (const p of [this.flames, this.glows, this.smoke, this.scorch]) p.n = 0;
+    for (const p of [this.flames, this.glows, this.smoke, this.scorch, this.spray]) p.n = 0;
     this.fires.forEach((f, fi) => {
       const roof = roofAnchor(this.world, f.x, f.y, 0);
       const ground: [number, number, number] = [roof[0], 0, roof[2]];
@@ -227,8 +266,25 @@ export class FiresView {
         this.put(this.smoke, fi, roof, [(a - 0.5) * hx * 0.8, (b - 0.5) * hz * 0.8, hx * 0.5, hz * 0.5], [hash2(i * 53 + fx, f.y * 3 + i), 0.55 + 0.6 * b, 3.2 + 3.6 * a, fi]);
       }
       this.put(this.scorch, fi, ground, [0, 0, hx, hz], [f.s, 1, 1, fi]);
+      // water on it: the crew's hose from the engine at the kerb, or the neighbours' buckets from round the building
+      if (f.hx !== undefined && f.hy !== undefined) {
+        const n = 22 + Math.floor(hash2(fx * 5 + 9, f.y * 7 + 4) * (DROPS_MAX - 22));
+        for (let i = 0; i < n; i++) {
+          const a = hash2(fx * 59 + i * 7, f.y * 31 + i * 13), b = hash2(f.y * 61 + i * 11, fx * 37 + i * 3);
+          const tx = roof[0] + (a - 0.5) * hx * 0.8, tz = roof[2] + (b - 0.5) * hz * 0.8, ty = roof[1] * (0.55 + 0.4 * b);
+          this.put(this.spray, fi, [f.hx, 0.32, f.hy], [tx, ty, tz, 0.55 + 0.45 * a], [hash2(i * 17 + fx, f.y + i * 29), 0.11 + 0.06 * b, 0.8 + 0.6 * a, 0]);
+        }
+      } else if (f.bk) {
+        const throwers = 3 + Math.floor(hash2(fx * 3 + 7, f.y * 9 + 1) * 3);
+        for (let k = 0; k < throwers; k++) {
+          const ang = (k / throwers) * Math.PI * 2 + f.s * 6.283, r = Math.max(hx, hz) + 0.35;
+          const ox = roof[0] + Math.cos(ang) * r, oz = roof[2] + Math.sin(ang) * r;
+          const seedK = hash2(fx * 13 + k * 41, f.y * 19 + k);
+          for (let i = 0; i < 7; i++) this.put(this.spray, fi, [ox, 0.15, oz], [roof[0] + Math.cos(ang) * hx * 0.5, roof[1] * 0.35, roof[2] + Math.sin(ang) * hz * 0.5, 0.45], [seedK + i * 0.0013, 0.09 + 0.05 * hash2(k * 7 + i, fx), 1, 1]);
+        }
+      }
     });
-    for (const p of [this.flames, this.glows, this.smoke, this.scorch]) {
+    for (const p of [this.flames, this.glows, this.smoke, this.scorch, this.spray]) {
       p.geo.instanceCount = p.n;
       for (const k of ['aP', 'aO', 'aS']) (p.geo.getAttribute(k) as InstancedBufferAttribute).needsUpdate = true;
     }
@@ -250,29 +306,31 @@ export class FiresView {
     const T = TICKS_PER_HOUR;
     const state = this.fires.map((f) => {
       const d = fireProgress(f, tick);
-      let flame = 0, smoke = 0, tone = 0, scorch = 0, lean = (f.s - 0.5) * 0.8, lift = 0;
+      let flame = 0, smoke = 0, tone = 0, scorch = 0, lean = (f.s - 0.5) * 0.8, lift = 0, water = 0;
       if (f.ph === FirePhase.Burning) {
-        flame = 0.12 + 0.88 * Math.sqrt(d); smoke = 0.35 + 0.65 * Math.sqrt(d); tone = 0.05; scorch = 0.25 + 0.6 * d; lift = d;
+        flame = 0.3 + 0.7 * Math.sqrt(d); smoke = 0.35 + 0.65 * Math.sqrt(d); tone = 0.05; scorch = 0.25 + 0.6 * d; lift = d;
       } else if (f.ph === FirePhase.Fighting) {
         const k = Math.max(0, Math.min(1, (tick - f.ta) / Math.max(1, f.t1 - f.ta)));
-        const at = 0.12 + 0.88 * Math.sqrt(f.d);
+        const at = 0.3 + 0.7 * Math.sqrt(f.d);
         flame = at * (1 - k) * (1 - k); smoke = (0.4 + 0.6 * Math.sqrt(f.d)) * (1 - 0.5 * k); tone = 0.25 + 0.65 * k; scorch = 0.25 + 0.6 * f.d; lift = 0.5;
+        water = k < 0.92 ? 1 : (1 - k) / 0.08;
       } else {
         const k = Math.max(0, Math.min(1, (tick - f.t1) / (FIRE.aftermathHours * T)));
         const burnt = f.out === FireOutcome.Burnt;
         smoke = (burnt ? 0.45 : 0.18) * (1 - k) * (1 - k); tone = burnt ? 0.35 : 0.6; lift = 0;
         scorch = (burnt ? 0.95 : f.out === FireOutcome.Partial ? 0.6 : 0.35) * (1 - Math.max(0, k - 0.6) / 0.4);
       }
-      return [flame, smoke, tone, scorch, lean, lift];
+      return [flame, smoke, tone, scorch, lean, lift, water];
     });
     this.state = state;
     this.write(this.flames, (st, I, j) => { I[j] = st[0]; I[j + 1] = Math.min(1, st[0] * 1.2); });
     this.write(this.glows, (st, I, j) => { I[j] = st[0]; });
     this.write(this.smoke, (st, I, j) => { I[j] = st[1]; I[j + 1] = st[2]; I[j + 2] = st[4]; I[j + 3] = st[5]; });
     this.write(this.scorch, (st, I, j) => { I[j] = st[3]; });
+    this.write(this.spray, (st, I, j) => { I[j] = st[6]; });
   }
 
-  /** each fire's [flame, smoke, tone, scorch, lean, lift] this frame */
+  /** each fire's [flame, smoke, tone, scorch, lean, lift, water] this frame */
   private state: number[][] = [];
   private write(p: Pool, fn: (st: number[], I: Float32Array, j: number) => void) {
     const own = this.owner.get(p)!;

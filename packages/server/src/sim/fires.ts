@@ -28,6 +28,8 @@ interface Fire {
   crew: boolean;
   /** a fire a step or two from the station, too close for the engine to drive: the crew run over with the hose, there at this tick */
   onFoot?: number;
+  /** where the crew's hose plays from while they put it out (the engine pulled up at the kerb), for the drawing */
+  hose?: [number, number];
   /** the owner's warning fire: never worse than the bucket chain leaves it */
   warning?: boolean;
   /** a demo's fire drill (FIRE.drillGapHours): it lights again after it is out, and costs nothing */
@@ -145,7 +147,8 @@ export class Fires {
     const out: FireDTO[] = [];
     for (const f of this.fires.values()) {
       out.push({ x: f.x, y: f.y, s: f.seed, ph: f.ph, t0: f.t0, burn: f.burn, d: f.d, ta: f.ta, t1: f.t1, w: f.w, h: f.h,
-        ...((f.engine !== null || f.onFoot !== undefined) && f.ph === FirePhase.Burning ? { eng: 1 } : {}), ...(f.out !== undefined ? { out: f.out } : {}) });
+        ...((f.engine !== null || f.onFoot !== undefined) && f.ph === FirePhase.Burning ? { eng: 1 } : {}), ...(f.out !== undefined ? { out: f.out } : {}),
+        ...(f.ph === FirePhase.Fighting ? (f.hose ? { hx: f.hose[0], hy: f.hose[1] } : f.crew ? {} : { bk: 1 }) : {}) });
     }
     return out;
   }
@@ -341,6 +344,7 @@ export class Fires {
       if (f.onFoot !== undefined) {
         if (now >= f.onFoot) {
           f.ph = FirePhase.Fighting; f.ta = now; f.d = Math.max(d, FIRE.minDamage); f.crew = true; f.onFoot = undefined;
+          if (f.station) f.hose = [(f.station[0] + f.x) / 2 + 0.5, (f.station[1] + f.y) / 2 + 0.5]; // run out from the station door
           f.t1 = now + Math.round(FIRE.fightHours * TPH * (0.4 + f.d));
           this.stats.arrived++;
           this.touch(f);
@@ -352,6 +356,7 @@ export class Fires {
         if (!v) { f.engine = null; this.dispatch(f); this.touch(f); } // lost on the way (stuck, gave up): the next station in reach
         else if (v.phase === 'dwell') {
           f.ph = FirePhase.Fighting; f.ta = now; f.d = Math.max(d, FIRE.minDamage); f.crew = true;
+          f.hose = this.pullUp(v);
           f.t1 = now + Math.round(FIRE.fightHours * TPH * (0.4 + d));
           v.until = Math.max(v.until, f.t1); // the crew stay until it is out
           this.stats.arrived++;
@@ -360,7 +365,7 @@ export class Fires {
         }
       } else if (now % 25 === 0 && f.tries < MAX_TRIES) { this.dispatch(f); if (f.engine !== null || f.onFoot !== undefined) this.touch(f); } // a station staffed since (a shift came on)
       if (f.engine === null && f.warning && d >= FIRE.bucketAt) {
-        f.ph = FirePhase.Fighting; f.ta = now; f.d = Math.max(d, FIRE.minDamage); f.t1 = now + Math.round(FIRE.fightHours * TPH * 0.5);
+        f.ph = FirePhase.Fighting; f.ta = now; f.d = Math.max(d, FIRE.minDamage); f.t1 = now + Math.round(FIRE.fightHours * TPH); // buckets take a while
         this.touch(f);
         return;
       }
@@ -373,7 +378,7 @@ export class Fires {
   /** The fire is out: the damage, the bill, the notice. `b` null: the building went some other way. */
   private finish(f: Fire, now: number, b: Building | null) {
     const w = this.w;
-    f.ph = FirePhase.Out; f.t1 = now; f.engine = null; f.onFoot = undefined;
+    f.ph = FirePhase.Out; f.t1 = now; f.engine = null; f.onFoot = undefined; f.hose = undefined;
     if (f.drill) this.drillOut.set(tileKey(f.x, f.y), now);
     if (!b) { f.out = FireOutcome.Saved; f.lost = 0; this.stats.gone++; this.touch(f); return; }
     const burnt = f.d >= 1 && !f.crew && !f.warning;
@@ -406,6 +411,18 @@ export class Fires {
     this.touch(f);
   }
 
+  /**
+   * The engine has arrived: it stands at the kerb of the road tile before the door, facing the fire, lights on, and is
+   * drawn there while the crew work (Simulation.agents shows a parked engine on a call). Returns where the hose plays from.
+   */
+  private pullUp(v: { x: number; y: number; path: number[] }): [number, number] {
+    const p = v.path, n = p.length / 2;
+    if (n >= 2) {
+      const rx = p[(n - 2) * 2], ry = p[(n - 2) * 2 + 1], bx = p[(n - 1) * 2], by = p[(n - 1) * 2 + 1];
+      v.x = rx + 0.5 + 0.28 * Math.sign(bx - rx); v.y = ry + 0.5 + 0.28 * Math.sign(by - ry);
+    }
+    return [v.x, v.y];
+  }
   private touch(f: Fire) { this.changed = true; this.issues?.fireChanged(f.x, f.y); this.onChange?.(f.x, f.y); }
   /** a lot's family base kind reads as what it is (KIND_NAMES has 'residential'); a merged or placed kind its own name */
   private name(b: Building) { return BASE_NAMES[b.id] ?? KIND_NAMES[b.id] ?? 'building'; }

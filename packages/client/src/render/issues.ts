@@ -242,7 +242,7 @@ export class IssuesView {
         if (!code) continue;
         const x = cx * CHUNK_SIZE + (i % CHUNK_SIZE), y = cy * CHUNK_SIZE + Math.floor(i / CHUNK_SIZE);
         const at = this.anchor(x, y);
-        this.pos[n * 3] = at[0]; this.pos[n * 3 + 1] = at[1] + (code === Issue.Fire ? 1.6 : 0); this.pos[n * 3 + 2] = at[2]; // on fire: above the flames (render/fires.ts)
+        this.pos[n * 3] = at[0]; this.pos[n * 3 + 1] = at[1] + (code === Issue.Fire ? 1.0 : 0); this.pos[n * 3 + 2] = at[2]; // on fire: above the flames (render/fires.ts)
         this.data[n * 4] = code; this.data[n * 4 + 1] = hash2(x * 5 + 1, y * 3 + 7); this.data[n * 4 + 2] = this.flashes.has(`${x},${y}`) ? 1 : 0; this.data[n * 4 + 3] = 0;
         this.tiles.push(x, y);
         n++;

@@ -33,7 +33,7 @@ export const FIRE = {
   /** the warning fire with no engine to come: the neighbours' bucket chain has it under control at this share burnt */
   bucketAt: 0.15,
   /** hours an engine crew spends putting a fire out once there: fightHours x (0.4 + the share burnt) */
-  fightHours: 1,
+  fightHours: 1.5,
   /** however soon help comes, smoke and water do this much (the share burnt a fire put out is never less) */
   minDamage: 0.12,
   /** the owner pays this share of the building's book value (parcelops.ts buildingValue) times the share burnt */
@@ -72,6 +72,10 @@ export interface FireDTO {
   eng?: number;
   /** out: FireOutcome */
   out?: number;
+  /** being put out by a crew: where their hose plays from (the engine at the kerb), in tiles */
+  hx?: number; hy?: number;
+  /** being put out by the neighbours' bucket chain (the warning fire with no engine in reach) */
+  bk?: number;
   /** the structure's footprint (1×1 lots: 1, 1), so the flames spread over a merged building */
   w: number; h: number;
 }
