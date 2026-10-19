@@ -656,7 +656,7 @@ export class Simulation {
     for (const b of w.buildings.values()) {
       if ((!isCivicId(b.id) && !isParkingId(b.id)) || b.level === 0) continue;
       const parcel = w.parcelAt(b.x, b.y);
-      if (parcel) w.credit(parcel.owner, -upkeepOf(b.id, b.level)); // per level (parks have three); one-level kinds as before
+      if (parcel && !w.mothballed.has(tileKey(b.x, b.y))) w.credit(parcel.owner, -upkeepOf(b.id, b.level)); // per level (parks have three); one-level kinds as before; none while mothballed (sim/finance.ts)
     }
     for (const c of w.citizens.values()) {
       this.skills.day(c); // brain drain: graduates out of work or over-qualified
@@ -1144,7 +1144,7 @@ export class Simulation {
       const t = w.peekTile(x, y);
       if (t === undefined || isRoad(t) || !hasJobs(zoneOf(t))) return false; // most tiles looked at: no map lookup
       const b = w.buildings.get(tileKey(x, y));
-      if (!b || !hasJobs(b.zone)) return false;
+      if (!b || !hasJobs(b.zone) || (w.mothballed.size && w.mothballed.has(tileKey(x, y)))) return false; // a mothballed service hires nobody (sim/finance.ts)
       if (sk.placeFor(b, edu) !== Place.None) return true;
       full.add(b);
       return false;

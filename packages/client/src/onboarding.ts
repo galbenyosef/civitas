@@ -129,9 +129,10 @@ export class Onboarding {
       if (plot) this.d.focus(plot[0], plot[1]); else this.d.focus(COMMONS_EDGE[0], COMMONS_EDGE[1]);
     }
   }
-  private openPanel(p: 'tech' | 'ledger' | 'lines') {
+  private openPanel(p: 'tech' | 'ledger' | 'lines' | 'admin') {
     if (p === 'tech') this.d.openTech();
     else if (p === 'ledger') { if (!document.getElementById('ledgerBox')) document.getElementById('money')?.click(); }
+    else if (p === 'admin') { if (document.getElementById('admin')?.classList.contains('hidden')) document.getElementById('adminBtn')?.click(); }
     else document.getElementById('linesBtn')?.click();
   }
   /** The middle of the player's biggest parcel. */

@@ -450,3 +450,66 @@ signals and Public transport bought. Minutes at normal speed after joining.
   signals or buses on their own land. Worth a look with the gateways/junctions work.
 - The newcomers notice still comes from `sim/simulation.ts` (gateways agent); net.ts recognises it by its first words to
   turn it into a hint. A notice id from the simulation would be sturdier.
+
+## After Audit #5
+
+Card d7aaefba (`docs/audit-2026-10.md` section 8 card 5, `docs/start-from-zero.md` B3): money that can run out. Code in
+`server/src/sim/finance.ts` (interest, the count of midnights, administration, the recovery plan), hooks in `world.ts`
+(`spendable`, `payrollShare`, `mothballed`), `net.ts` (refusals, the `recover` intent), `game.ts` (one `finance.tick()` per
+tick) and two one-line checks in `sim/simulation.ts` (no upkeep and no hiring at a mothballed building); the client's chip
+and panel in `client/src/finance.ts`.
+
+### The rules and the numbers (`ECONOMY_TUNING`)
+
+| | value | what it does |
+| --- | --- | --- |
+| `overdraftLimit` | $5,000 | spending may take the treasury down to -$5,000; anything further is refused ("Not enough money: that would take the treasury past your $5,000 overdraft limit (you can spend $X)"). Running costs can still go past it |
+| `overdraftInterestPerDay` | 2% | of the negative balance, charged at midnight (ledger "Overdraft interest") |
+| `adminAfterDays` | 3 | midnights in a row below zero before administration (`Player.adminDays`, `Player.admin`, both saved) |
+| `recoveryTaxRate` | 20% | "Raise tax": every parcel below it is set to it (above 20% workers start to quit) |
+| `landBuyback` | 80% | "Sell land back": parcels with nothing on them but roads and empty zoned lots go back at 80% of $10 a tile; their roads are taken up |
+
+In administration every build, buy, zone, road, research, policy and new-line intent is refused ("In administration: …";
+bulldozing, parcel settings and the recovery plan still work) and the regional grant is withdrawn: the owner pays all of
+the civic payroll instead of `civicPayroll` (half). It ends at the first midnight with the treasury at zero or above.
+"Mothball services" closes the player's police, fire and health services (staff let go, no upkeep, no cover, no hiring);
+a building's panel mothballs or reopens one, builders' yards included. Hints: `overdraft` at the first midnight below zero
+(the three levers), `admin` on entry, and the `deficit` hint names the overdraft. Sandboxes and the Commons never enter
+administration. `START_MONEY` (dev servers) sets a new player's treasury for runs like these.
+
+### Bot runs
+
+Same bot as "Onboarding" (`scratchpad/onboarding/play.mts`, copied to `scratchpad/audit5/` with two changes: in
+administration it presses the three recovery actions once, and it reopens mothballed services once the treasury is over
+$3,000; with `OD=1` its spending rules count the $5,000 overdraft as money, a player who really spends everything).
+Fresh worlds, seed 424242 unless noted, SIM_STEPS=10, isolated servers on :8085-8089, 15 game days. "before" ran on the tree
+just before this card; the after runs also carry other agents' concurrent changes (the Audit #1 pioneer camp and starter
+yard), which moved the early money curve, so compare the shapes and the floor, not the dollars.
+
+| | before B | after B | before C | after C | C, START 8000 | C spends the overdraft (OD=1) | same, seed 777 | B, OD=1 |
+|---|---|---|---|---|---|---|---|---|
+| money d2 / d4 / d7 / d10 / d15 | 13,085 / 9,981 / 8,339 / 10,293 / 14,676 | 6,732 / 5,897 / 7,817 / 9,681 / 14,481 | 11,744 / 7,071 / 665 / 1,365 / 1,879 | 5,319 / 1,630 / 809 / 438 / 1,952 | 762 / 841 / 783 / 1,071 / 1,747 | 6,148 / -2,166 / -2,446 / 1,295 / 13,839 | 6,720 / 2,944 / -4,395 / 1,541 / 9,852 | 6,778 / 6,174 / 8,009 / 10,382 / 15,198 |
+| lowest money | $8,164 (d6.4) | $5,301 (d2.5) | $588 (d13.4) | $438 (d10.0) | $548 (d1.5) | -$4,371 (d5.7) | -$4,395 (d7.0) | $5,320 (d2.3) |
+| game hours below zero | 0 | 0 | 0 | 0 | 0 | 123 | 136 | 0 |
+| administration | never | never | - | never | never | once: d6 to d9 (3 days) | once: d7 to d10 (3 days) | never |
+| residents at the end | 558 | 664 | 616 | 677 | 637 | 633 | 716 | 686 |
+
+- The C bot as written never goes below zero: its rules keep $500-$1,500 in hand, so with or without a lower start it
+  floors at about $500. The meaningful test is OD=1: it borrows to the limit for tech (two $4,000 nodes on days 3 and 9),
+  zoning and a second land block, goes below zero at d3.6 (seed 424242), hears the overdraft hint at the next midnight and
+  enters administration at the third (d6.0, -$4,109). It presses the plan: tax 10% to 20% on 3 parcels (taxes $952 that
+  day, $1,929 and $2,467 the next two), sell back (nothing: every parcel had something on it), mothball the police and
+  fire stations (about $460 a day with the grant gone). The treasury is above zero at d8.04 and administration ends at the
+  d9 midnight: in 3 game days. It reopens the services at d10.8 with $3,100 and does not enter administration again
+  (it dipped below zero for a day after buying two nodes on d9, under the limit of three midnights). Seed 777: the same,
+  d7 to d10. Interest over the episodes: about $200-$250.
+- B never enters administration, with or without OD=1 (its floors are $1,200-$1,500).
+
+### Still open
+
+- "Start again from the last autosave" (local mode) loads the newer of the two rolling autosaves, which are at most 30-60 s
+  old: by the time administration comes they are overdrawn too. A save point taken when the treasury first goes below zero
+  (or the start of the day the overdraft began) would make it a real way back.
+- Selling land takes up its roads, including a road that was a through link for the player's other land; the bot never
+  had an empty parcel when it was in administration, so the lever has only been exercised offline.
+- The gate does not close to prospects in administration (B3 suggests it); only intents stop.

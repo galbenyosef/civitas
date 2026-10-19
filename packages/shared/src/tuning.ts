@@ -194,5 +194,21 @@ export const ECONOMY_TUNING = {
    * the cash cliff (docs/early-game-audit.md).
    */
   civicPayroll: 0.5,
+  /**
+   * Money that can run out (docs/start-from-zero.md B3, server/src/sim/finance.ts). A player may spend down to
+   * -overdraftLimit; anything that would go further is refused. Running costs (wages, upkeep, interest) can still take
+   * the treasury past it.
+   */
+  overdraftLimit: 5000,
+  /** Interest on a negative balance, a share of it charged once a game day at midnight (ledger category 'interest'). */
+  overdraftInterestPerDay: 0.02,
+  /** Midnights in a row below zero before administration: building stops and the regional grant is withdrawn. */
+  adminAfterDays: 3,
+  /** The recovery plan's "raise tax": every parcel below this rate is set to it (above 0.2 workers start to quit). */
+  recoveryTaxRate: 0.2,
+  /** The recovery plan's "sell land back": the share of LAND_PRICE_PER_TILE an empty parcel fetches. */
+  landBuyback: 0.8,
 };
 export type EconomyTuning = typeof ECONOMY_TUNING;
+/** What a player may spend: the treasury and the overdraft line (the server's World.spendable; the client's previews). */
+export const spendableMoney = (money: number, unlimited?: boolean) => (unlimited ? Infinity : money + ECONOMY_TUNING.overdraftLimit);

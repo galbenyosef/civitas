@@ -4,6 +4,11 @@
  * goal's parts and pays the reward, the client (client/src/onboarding.ts) draws the card, the "show me" and the hints.
  */
 
+import { ECONOMY_TUNING } from './tuning';
+
+/** The overdraft line in words, for the money hints (server/src/sim/finance.ts has the rules). */
+const OD = `$${ECONOMY_TUNING.overdraftLimit.toLocaleString('en-GB')} overdraft at ${Math.round(ECONOMY_TUNING.overdraftInterestPerDay * 100)}% interest a day`;
+
 export type GoalId =
   | 'plot' | 'road' | 'homes' | 'yard' | 'res12' | 'shops' | 'masonry' | 'res50' | 'cover' | 'leisure' | 'books' | 'res250' | 'busline';
 
@@ -22,7 +27,7 @@ export interface GoalDef {
   /** cash paid on completion, and/or a technology granted for free (when already owned, its price is paid instead) */
   reward: { cash?: number; tech?: string };
   /** the "show me" button: a tool to pick, a panel to open, where to look */
-  show: { tool?: string; panel?: 'tech' | 'ledger' | 'lines'; focus?: GoalFocus };
+  show: { tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin'; focus?: GoalFocus };
 }
 
 /**
@@ -94,12 +99,15 @@ export interface GoalsDTO {
  * it. The server sends the ones only it can see (builders, the books, the jam, boredom, newcomers), the client raises the
  * rest (night, a refused build on an empty treasury); either way the client shows at most one per HINT_GAP ticks.
  */
-export type HintId = 'builders' | 'buildersRoad' | 'deficit' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night';
-export interface HintDef { kind: 'tip' | 'alert'; msg: string; tool?: string; panel?: 'tech' | 'ledger' | 'lines' }
+export type HintId = 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night';
+/** `panel` 'admin': the overdraft and administration panel (client finance.ts) */
+export interface HintDef { kind: 'tip' | 'alert'; msg: string; tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin' }
 export const HINTS: Record<HintId, HintDef> = {
   builders: { kind: 'alert', tool: 'yard', msg: "Your lots are waiting: the Commons' builders serve the Commons first. Place a builders' yard ($300; your first opens at once) beside one of your roads." },
   buildersRoad: { kind: 'alert', msg: "Your lots are waiting and nobody has built on your land for a day: check that a road links your builders' yard to them." },
-  deficit: { kind: 'alert', panel: 'ledger', msg: 'You are spending more than you earn, two days running: staff wages and upkeep come out of your treasury. Raise the tax slider in a parcel, add homes, or hold off on services.' },
+  deficit: { kind: 'alert', panel: 'ledger', msg: `You are spending more than you earn, two days running: staff wages and upkeep come out of your treasury. Raise the tax slider in a parcel, add homes, or hold off on services. Below zero you run on the ${OD}; ${ECONOMY_TUNING.adminAfterDays} midnights in a row below zero and the city goes into administration.` },
+  overdraft: { kind: 'alert', panel: 'admin', msg: `The treasury is below zero: you are on the ${OD}. ${ECONOMY_TUNING.adminAfterDays} midnights in a row below zero and the city goes into administration. Three levers: raise tax, sell empty land back, mothball services.` },
+  admin: { kind: 'alert', panel: 'admin', msg: 'Your city is in administration: building, buying land, zoning, roads and research are stopped and the regional grant for staff wages is withdrawn until a midnight finds the treasury at zero or above. The recovery plan: raise tax, sell empty land back, mothball services.' },
   broke: { kind: 'alert', panel: 'ledger', msg: 'The treasury is nearly empty.' },
   jam: { kind: 'alert', tool: 'res', panel: 'tech', msg: 'Traffic has been jammed all day: traffic signals (T), a bus line, or jobs closer to the homes all help.' },
   bored: { kind: 'tip', tool: 'citypark', msg: 'Residents are bored, with nowhere to go: a park costs $120 and needs no technology.' },

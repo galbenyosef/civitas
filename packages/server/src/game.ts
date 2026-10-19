@@ -6,6 +6,7 @@ import { Rail } from './sim/rail';
 import { Metro } from './sim/metro';
 import { Ferry } from './sim/ferry';
 import { Harbours } from './sim/harbours';
+import { Finance } from './sim/finance';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
 import { TickWindow } from './tickstats';
@@ -31,6 +32,8 @@ export interface Game {
   ferry: Ferry;
   /** harbours (sim/harbours.ts): their lanes and the 'harbours' message, the catch, ship calls, the cargo port's gateway */
   harbours: Harbours;
+  /** the overdraft, administration and the recovery plan (sim/finance.ts): interest and the count at midnight */
+  finance: Finance;
   net: Net;
   /** tick time over the last minute (300 loops), for the stats message, /healthz and the client's perf readout */
   tickWin: TickWindow;
@@ -70,7 +73,9 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   rail.trucks = { spawn: (from, to, owner) => sim.spawnFreightTruck(from, to, owner) };
   sim.traffic.barrier = (x, y) => rail.barrierDown(x, y); // level crossings: traffic waits while a train passes
   const harbours = new Harbours(world, sim); // hooks itself into the gateways (sea route, ships berthing) and freight (port exports)
+  const finance = new Finance(world, cfg.sandbox);
   const net = new Net(world, sim, source, cfg);
+  net.finance = finance;
   net.harbours = harbours;
   net.airports = airports;
   net.rail = rail;
@@ -82,11 +87,11 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const hist = historyOf(world);
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, net, tickWin, steps,
-    step() { sim.tick(); airports.tick(); harbours.tick(); net.flush(); sampleHistory(); },
+    world, sim, airports, rail, metro, ferry, harbours, finance, net, tickWin, steps,
+    step() { sim.tick(); airports.tick(); harbours.tick(); finance.tick(); net.flush(); sampleHistory(); },
     loop() {
       const t0 = performance.now();
-      for (let i = 0; i < game.steps; i++) { sim.tick(); airports.tick(); harbours.tick(); }
+      for (let i = 0; i < game.steps; i++) { sim.tick(); airports.tick(); harbours.tick(); finance.tick(); }
       net.flush();
       sampleHistory();
       const dt = performance.now() - t0;

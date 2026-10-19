@@ -8,7 +8,7 @@ import {
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
   isBridgeAux, planBridge, joinsBridgeSide, BRIDGE_STYLE_NAMES, type BridgePlan,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
-  isMetroStationKind, CITIZEN_UNDER, isFerryPierKind,
+  isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, type RecoverAction,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -22,6 +22,7 @@ import { Onboarding } from './goals';
 import { historyOf, type History } from './history';
 import { MapSummaries } from './worldmap';
 import { setPolicy } from './policies';
+import { mothballable, adminRefusal, type Finance } from './sim/finance';
 
 interface Client {
   conn: Conn; player: Player | null; subs: Set<string>; lastHint: number;
@@ -87,6 +88,8 @@ export class Net {
   ferry: Ferry | null = null;
   /** harbours (sim/harbours.ts): the 'harbours' message, harbour tooltips, boat panels, a cargo port's sea check; set by game.ts */
   harbours: Harbours | null = null;
+  /** the overdraft, administration and the recovery plan (sim/finance.ts); set by game.ts */
+  finance: Finance | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
   tickStats: { avg: number; p95: number; max: number } | null = null;
   /** game ticks per TICK_MS of wall time, sent with the stats message when it is not 1 so the client's clock follows a paused or
@@ -143,6 +146,9 @@ export class Net {
     if (m.t === 'ping') return this.send(c, { t: 'pong', n: m.n });
     if (!c.player) return;
     if (this.cfg.spectate && !READ_ONLY.has(m.t)) return this.toast(c, SPECTATE_REFUSAL);
+    // administration (sim/finance.ts): building, buying, zoning, roads, research and lines stop; bulldozing, parcel
+    // settings and the recovery plan still work
+    if (c.player.admin) { const no = adminRefusal(m); if (no) return this.toast(c, no); }
     switch (m.t) {
       case 'sub': return this.subscribe(c, m.chunks);
       case 'unsub': for (const [cx, cy] of m.chunks) c.subs.delete(chunkKey(cx, cy)); return;
@@ -159,6 +165,7 @@ export class Net {
       }
       case 'unlock': return this.unlock(c, String(m.id));
       case 'setPolicy': { const r = setPolicy(this.w, c.player, String(m.id), m.on === true); return this.toast(c, r.msg, r.ok ? 'info' : undefined); }
+      case 'recover': return this.recover(c, m.action, m.keys);
       case 'dev': return this.dev(c, m.action, m.on);
       case 'sites': return this.siteList(c, m.id);
       case 'priority': return this.setPriority(c, m.x, m.y, m.priority);
@@ -344,12 +351,20 @@ export class Net {
     if (t.locked) return this.toast(c, `${t.name}: ${t.locked}`); // unlock rule still to be decided (tech.ts): sandboxes and dev only
     for (const r of t.requires) if (!p.tech.includes(r)) return this.toast(c, `${t.name} needs ${TECH_BY_ID.get(r)?.name ?? r} first`);
     if (p.progress[t.condition.counter] < t.condition.min) return this.toast(c, `${t.name} is not available yet`);
-    if (p.money < t.cost) return this.toast(c, `Need $${t.cost} to unlock ${t.name}`);
+    if (this.w.spendable(p) < t.cost) return this.toast(c, this.w.shortOf(p, t.cost, `to unlock ${t.name}`));
     this.w.credit(p.id, -t.cost, 'tech');
     p.tech.push(id);
     this.w.techVersion++;
     this.w.playersDirty = true;
     this.toast(c, `Unlocked ${t.name}`, 'info');
+  }
+
+  /** The recovery plan (sim/finance.ts): raise tax, sell empty land back, mothball or reopen services. */
+  private recover(c: Client, action: RecoverAction, keys?: string[]) {
+    if (!this.finance) return;
+    if (action !== 'tax' && action !== 'sell' && action !== 'mothball' && action !== 'unmothball') return;
+    const r = this.finance.recover(c.player!, action, Array.isArray(keys) ? keys.map(String) : undefined);
+    this.toast(c, r.msg, r.ok ? 'info' : 'error');
   }
 
   /** The feature a tool needs, checked against the player's technology; null when allowed. */
@@ -366,7 +381,7 @@ export class Net {
     x = Math.floor(x); y = Math.floor(y); w = Math.floor(w); h = Math.floor(h);
     if (!(w >= 1 && h >= 1 && w <= MAX_PARCEL_EDGE && h <= MAX_PARCEL_EDGE)) return this.toast(c, `Parcels are 1–${MAX_PARCEL_EDGE} tiles per side`);
     const cost = w * h * LAND_PRICE_PER_TILE;
-    if (p.money < cost) return this.toast(c, `Need $${cost} for that land`);
+    if (this.w.spendable(p) < cost) return this.toast(c, this.w.shortOf(p, cost, 'for that land'));
     let land = 0;
     for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
       if (this.w.parcelIdAt(xx, yy) !== 0) return this.toast(c, 'That land overlaps an existing parcel');
@@ -450,7 +465,7 @@ export class Net {
       }
       if (tool in TOOL_CIVIC && isMultiTile(TOOL_CIVIC[tool])) {
         // one structure per click: the clicked tile is its door
-        if (zoned = this.placeStructure(c, TOOL_CIVIC[tool], x, y, p.money - spent, rot)) spent += CIVIC_COST[TOOL_CIVIC[tool]];
+        if (zoned = this.placeStructure(c, TOOL_CIVIC[tool], x, y, this.w.spendable(p) - spent, rot)) spent += CIVIC_COST[TOOL_CIVIC[tool]];
         break;
       }
       if (tool === 'road') {
@@ -525,7 +540,7 @@ export class Net {
           apply = () => this.w.setTile(x, y, packTile(terrainOf(t), false, 0, 0));
         }
       } else return;
-      if (p.money - spent < cost) { this.toast(c, 'Not enough money'); break; }
+      if (this.w.spendable(p) - spent < cost) { this.toast(c, this.w.shortOf(p, spent ? null : cost)); break; }
       spent += cost;
       const wasRoad = isRoad(t);
       apply();
@@ -536,15 +551,15 @@ export class Net {
       const z = TOOL_ZONE[tool];
       let inner = 0;
       for (const [x, y] of interiorLots(this.w, zonedAt, z, p.id)) {
-        if (p.money - spent < ZONE_COST) break;
+        if (this.w.spendable(p) - spent < ZONE_COST) break;
         spent += ZONE_COST; inner++;
         this.w.setTile(x, y, packTile(terrainOf(this.w.getTile(x, y)), false, familyOf(z), 0), subFor(z));
       }
       if (inner) this.toast(c, `Also zoned ${inner} lot${inner === 1 ? '' : 's'} in the middle of the block: the buildings beside ${inner === 1 ? 'it grow back into it' : 'them grow back into them'}`, 'info');
     }
     for (const run of wet) {
-      if (p.money - spent < 0) break;
-      const r = this.bridge(c, run, tiles, dev, p.money - spent);
+      if (this.w.spendable(p) - spent < 0) break;
+      const r = this.bridge(c, run, tiles, dev, this.w.spendable(p) - spent);
       if (!r) continue;
       spent += r.cost!;
       for (let i = 0; i < r.tiles!.length; i += 3) { const q = this.w.parcelIdAt(r.tiles![i], r.tiles![i + 1]); if (q) recount.add(q); }
@@ -593,7 +608,7 @@ export class Net {
     });
     if (!plan.ok) { this.toast(c, plan.reason ?? 'A bridge cannot go there'); return null; }
     if (!plan.tiles!.length) return null;
-    if (budget < plan.cost!) { this.toast(c, `Need $${plan.cost} for that bridge`); return null; }
+    if (budget < plan.cost!) { this.toast(c, this.w.shortOf(p, plan.cost!, 'for that bridge')); return null; }
     this.w.placeBridge(plan.tiles!);
     this.w.bump(p.id, 'roads', plan.tiles!.length / 3);
     this.toast(c, `${BRIDGE_STYLE_NAMES[plan.style!][0].toUpperCase()}${BRIDGE_STYLE_NAMES[plan.style!].slice(1)} built for $${plan.cost}: ${run.length} tile${run.length === 1 ? '' : 's'} over the water`, 'info');
@@ -616,7 +631,7 @@ export class Net {
       },
     }, rot);
     if (!verdict.ok) { this.toast(c, verdict.reason); return false; }
-    if (budget < CIVIC_COST[kind]) { this.toast(c, 'Not enough money'); return false; }
+    if (budget < CIVIC_COST[kind]) { this.toast(c, this.w.shortOf(p, CIVIC_COST[kind], `for the ${KIND_NAMES[kind]}`)); return false; }
     const sea = this.harbours?.placeProblem(verdict.placed); // a cargo port on a lake that never reaches the sea
     if (sea) { this.toast(c, sea); return false; }
     // a metro hall lays its platform under the door (sim/metro.ts), along the street its front faces
@@ -646,7 +661,7 @@ export class Net {
       land: (x, y) => { const q = this.w.parcelAt(x, y); return q ? (this.mayEdit(p, q.owner) ? null : 'Not your land') : 'Buy this land first'; },
     });
     if (!plan.ok) return this.toast(c, plan.reason ?? 'A runway cannot go there');
-    if (p.money < plan.cost!) return this.toast(c, `Need $${plan.cost} for that runway`);
+    if (this.w.spendable(p) < plan.cost!) return this.toast(c, this.w.shortOf(p, plan.cost!, 'for that runway'));
     const tl = plan.tiles!;
     for (let i = 0; i < tl.length; i += 3) {
       const x = tl[i], y = tl[i + 1], t = this.w.getTile(x, y);
@@ -674,7 +689,7 @@ export class Net {
     };
     const plan = tool === 'roundabout' ? planRoundabout(x, y, env) : planFlyover(x, y, env);
     if (!plan.ok) return this.toast(c, plan.reason ?? `A ${tool} cannot go there`);
-    if (p.money < plan.cost!) return this.toast(c, `Need $${plan.cost} for that ${tool}`);
+    if (this.w.spendable(p) < plan.cost!) return this.toast(c, this.w.shortOf(p, plan.cost!, `for that ${tool}`));
     const swap = tool === 'flyover' && isJunctionAux(this.w.auxAt(x, y));
     this.w.placeJunction(plan.tiles!);
     const touched = new Set<number>();
@@ -791,6 +806,8 @@ export class Net {
     if (info && isMetroStationKind(b!.id) && this.metro) info.metro = this.metro.describeStation(dx, dy);
     if (info && isFerryPierKind(b!.id) && this.ferry) info.ferry = this.ferry.describeStation(dx, dy);
     if (info && isHarbourId(b!.id) && this.harbours) info.harbour = this.harbours.describe(b!);
+    if (info && this.w.mothballed.has(`${dx},${dy}`)) info.mothballed = true;
+    if (info && mothballable(b!) && this.w.parcelAt(dx, dy)?.owner === c.player?.id) info.mothballable = true;
     this.send(c, { t: 'building', x, y, info });
   }
 
@@ -1016,6 +1033,12 @@ export class Net {
     if (this.sim.notices.length) {
       for (const n of this.sim.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) {
         if (n.msg.startsWith('Newcomers are moving')) this.hint(c, 'newcomers', n.msg); else this.toast(c, n.msg, 'info');
+      }
+    }
+    // the overdraft and administration (sim/finance.ts): advisor hints and toasts for the owner, at midnight
+    if (this.finance?.notices.length) {
+      for (const n of this.finance.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) {
+        if (n.hint) this.hint(c, n.hint, n.msg); else this.toast(c, n.msg, 'info');
       }
     }
     // onboarding goals, measured a few times a game hour

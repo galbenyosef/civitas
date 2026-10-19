@@ -101,7 +101,7 @@ still selects.
 | Action | Input |
 | --- | --- |
 | Context menu | right-**click** (press and release without dragging) a person, car, train, plane, building, road, track or land for the actions that exist for it: inspect, follow, first-person view, go to home or work, build priority, parcel settings, buy this tile, demolish (asks again to confirm, shows the cost). Greyed entries say why in a tooltip. Esc closes; also on the FPV inset. `client/src/contextmenu.ts` |
-| Tools | 1 select · 2 buy land · 3 road (drag across water for a bridge) · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
+| Tools | 1 select · 2 buy land · 3 road (drag across water for a bridge) · 4 residential · pioneer camp (tool bar only, after Residential: every letter is taken) · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
 | Turn a footprint | Z turns the footprint of a building bigger than 1×1 anticlockwise, C clockwise, in quarter turns, while its tool is active (airport terminal, bus depot, rail halt and station). The choice sticks for that tool until you change it; before the first press the footprint faces a road by itself. The preview shows each tile's outline, an arrow from the door towards the road (green with a road, red without) and the building's marked parts (platform, apron, stands, vehicle gate); hovering a placed structure shows them faintly |
 | People and cars | hover anyone for who they are and what they are doing; click to select them in a side panel with a **follow** camera |
 | Trains and planes | hover a train or plane to highlight it; click to select it: a panel with its line or flight, what it is doing, speed, its crew and everyone on board (a train's riders are clickable citizens; plane passengers are visitors), and **follow**. `client/src/vehicles.ts`, docs/rail.md and docs/airport.md |
@@ -162,7 +162,16 @@ changing behaviour in game time.
   department store, office tower, heavy plant and twelve more, up to 4×4) that
   climbs to level 7, keeping everyone who lived or worked there
   (`docs/buildings.md` "Merged lots"). Growth does not build anything by itself:
-  it opens a **construction site**.
+  it opens a **construction site**. A first house is 20 units of builder work, a third of the 60 a level used to
+  take (levels 2 and 3 stay 120 and 180), so a new player's first homes rise within minutes.
+- *Pioneer camp* (`shared/src/buildings/camp.ts`, `server/src/sim/firstfive.ts`, Audit #1). A new player's first
+  settlers: a 2×2 residential sub-kind (kind id 120; tents, caravans and a fire pit, two designs picked by hash, the
+  lamps and the fire flickering at night on a phase of their own) placed by its door on a road like a structure, $150,
+  $4 a day, no technology. It opens at once with no construction site, and its 8 beds are offered to newcomers
+  straight away: they queue at the nearest gate on a one-off allowance and arrive within the hour (with no gate they
+  move in at once), bypassing growth's 25% roll and the vacant-jobs test. From then on `spawn()` serves it as a level-1
+  home; it never grows, merges or upgrades. One per player at a time (a second is refused with a toast until the
+  first is bulldozed); bulldozing it moves its people into free beds nearby, the move-out search of the life step.
 - *Block interiors.* The middle of a block has no road, so nothing grows there
   on its own. Zoning round a block zones its middle too, and a frontage building
   of the same zone and owner grows back into it as a **deep plot** (1×2, levels
@@ -173,7 +182,9 @@ changing behaviour in game time.
 - *Builders.* A builders' yard employs builders. On shift they pick a site by
   priority first and road distance second, travel there, and work it down;
   several builders finish a site faster. Placing a civic building opens a site
-  too. If the yard belongs to someone else, the site's parcel owner pays the
+  too. A player's first builders' yard opens at once and hires people out of work within 64 tiles on the spot; for
+  its first game day whoever it hires sets out for a shift straight away instead of at the next roster start
+  (`START_TUNING`, `sim/firstfive.ts`), so cranes get workers within minutes. If the yard belongs to someone else, the site's parcel owner pays the
   yard's owner a fee per unit of work. Owners can raise, lower or pause each
   site from the parcel panel; paused sites are abandoned by their crews.
 - *Occupations and shifts* (`shared/src/occupations.ts`). The workplace kind
@@ -297,7 +308,8 @@ changing behaviour in game time.
   needed, tool bar only), rail halts and stations, the bus depot (intercity coaches) and the airport terminal (plus a share
   of every plane's passengers). Each gateway's `gateway`, `gatewayModes` and `arrivalsPerHour` are catalogue attributes.
   When a home has room, a newcomer queues at the best gate (nearest, weighted by capacity), is released at a jittered
-  time within the gate's hourly capacity, appears there and travels home with a suitcase on foot, by taxi or driving
+  time within the gate's hourly capacity (a new pioneer camp's settlers queue at the nearest gate at once and are
+  released as they fall due within `START_TUNING.campWaveHours`, past the bucket), appears there and travels home with a suitcase on foot, by taxi or driving
   their own car with a roof box (hash-seeded per person), moves in and looks for work. Leavers (idle too long, broke,
   taxed out, living alone and moving on) pack up, travel to the gate that suits them and are removed there; their bed
   frees when they have gone. With no gateway in town people spawn in place and leave at once as before (the home's owner
@@ -354,17 +366,34 @@ changing behaviour in game time.
   click, the ledger: income and spending by category (taxes, fees, wages, upkeep,
   builders' fees, construction, land, technology) for yesterday and today, sent
   with the players message once a game hour (`PlayerDTO.ledger`). High taxes make workers quit and residents leave; nearby staffed
-  services raise what people will put up with.
-- *Onboarding* (`shared/src/goals.ts`, `server/src/goals.ts`, `client/src/onboarding.ts`). A chain of 13 goals for the
-  first two hours (claim a plot, a street, homes, your own builders' yard, 12 residents, shops, Masonry, 50 residents,
+  services raise what people will put up with. Money can run out (`server/src/sim/finance.ts`, numbers in `ECONOMY_TUNING`): a
+  player may spend down to a $5,000 overdraft (`overdraftLimit`; anything further is refused with a toast naming the limit), and a
+  negative balance pays 2% interest a day at midnight (`overdraftInterestPerDay`, ledger line "Overdraft interest"). Three
+  midnights in a row below zero (`Player.adminDays`) put the city into **administration** (`Player.admin`): every build, buy,
+  zone, road, research, policy and new-line intent is refused ("In administration: …"; bulldozing, parcel settings and the
+  recovery plan still work) and the regional grant is withdrawn (the owner pays all of the civic payroll). It ends at the first
+  midnight with the treasury at zero or above. The **recovery plan** is one `recover` client message per action: `tax` sets every
+  parcel below `recoveryTaxRate` (20%) to it, `sell` sells every parcel with nothing on it but roads and empty zoned lots back to
+  the region at `landBuyback` (80%) of the land price (its roads are taken up, the tiles become unclaimed), `mothball` closes
+  the player's police, fire and health services (no staff, no upkeep, no cover; `keys` with a door "x,y" mothballs or, with
+  `unmothball`, reopens one building, builders' yards included; `World.mothballed`, saved). `PlayerDTO.fin` carries the limit,
+  the count, the interest and what each action would raise while overdrawn, in administration or with anything mothballed; the
+  client shows a chip by the treasury and the administration panel (`client/src/finance.ts`), which in local mode also offers
+  "Start again from the last autosave". Sandboxes and the Commons never enter administration. `START_MONEY` (dev servers only)
+  changes a new player's treasury for offline economy runs.
+- *Onboarding* (`shared/src/goals.ts`, `server/src/goals.ts`, `client/src/onboarding.ts`). A chain of 14 goals for the
+  first two hours (claim a plot, pitch a pioneer camp, a street, homes, your own builders' yard, 12 residents, shops, Masonry, 50 residents,
   police and fire cover, a park, a day in the black, 250 residents, a bus line), measured server-side a few times a game
   hour from the player's parcels and progress counters, one active at a time with the next two previewed, each paying a
   modest reward (cash through the ledger, or Commercial zoning free). The card sits beside the tool bar with progress
   bars and a "show me" (picks the tool, flashes its button, opens the panel, looks at the plot); the `goals` chip in
   the top bar hides it, and "skip the tutorial" is saved with the player (`Player.onboarding`, absent in older saves;
-  goals a returning player has already met are marked done without a reward). Advisor hints (`HINTS`) come as a strip
+  goals a returning player has already met are marked done without a reward, and one already past "Pitch camp" is never
+  sent back to it). When the first newcomer moves in on a player's land the server sends the `settlers` hint once, with
+  `at` (the home): the camera flies there for a few seconds with "Your first settlers have arrived" and back, and any
+  key or click hands it back (`client/src/moment.ts`). Advisor hints (`HINTS`) come as a strip
   under the card, at most one per two game hours, never again once "got it" is pressed: the server sends builders,
-  deficit, jam, boredom and newcomers hints (messages `goals` and `hint`), the client raises night and empty-treasury
+  deficit, overdraft (the first midnight below zero), administration, jam, boredom and newcomers hints (messages `goals` and `hint`), the client raises night and empty-treasury
   ones. The tech chip pulses with the node's name when one becomes ready and affordable. Test cities and demos get none.
 
 Hover any building for its live stats: residents and where they work,

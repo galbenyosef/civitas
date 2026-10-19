@@ -1,4 +1,4 @@
-import { POLICIES, POLICY_BY_ID, hasFeature, hasPolicy, techFor, TECH_BY_ID, type PlayerDTO, type PolicyDef, type PolicyId } from '@msimcity/shared';
+import { POLICIES, POLICY_BY_ID, hasFeature, hasPolicy, techFor, TECH_BY_ID, spendableMoney, type PlayerDTO, type PolicyDef, type PolicyId } from '@msimcity/shared';
 
 /**
  * The Policies panel (docs/education.md section 16), laid out like the tech tree: a card for each education policy
@@ -38,12 +38,14 @@ export class PolicyPanel {
     const unlocked = hasFeature(me.tech, p.feature), on = hasPolicy(me.policies, p.id);
     const blocked = !p.live && !this.dev; // its effect is built by a later phase: shown, but not for sale
     const need = unlocked ? '' : `needs ${esc(techFor(p.feature)?.name ?? TECH_BY_ID.get(p.feature)?.name ?? 'more technology')}`;
-    const state = on ? 'have' : unlocked && !blocked && me.money >= p.setup ? 'ready' : 'locked';
+    const afford = spendableMoney(me.money, me.devUnlimited) >= p.setup, admin = me.fin?.admin !== undefined; // the overdraft counts (server sim/finance.ts)
+    const state = on ? 'have' : unlocked && !blocked && afford && !admin ? 'ready' : 'locked';
     let action: string;
     if (on) action = `<button class="pswitch off" data-id="${p.id}" data-on="0">Switch off</button>`;
     else if (!unlocked) action = `<button class="pswitch" disabled>Locked</button>`;
     else if (blocked) action = `<button class="pswitch" disabled>Effect still to come</button>`;
-    else if (me.money < p.setup) action = `<button class="pswitch" disabled>Need ${money(p.setup)}</button>`;
+    else if (admin) action = `<button class="pswitch" disabled>In administration</button>`;
+    else if (!afford) action = `<button class="pswitch" disabled>Need ${money(p.setup)}</button>`;
     else action = `<button class="pswitch" data-id="${p.id}" data-on="1">Enact for ${money(p.setup)}</button>`;
     return `<div class="node ${state}" data-policy="${p.id}">
       <div class="nhead"><b>${esc(p.name)}</b><span class="cost">${on ? 'in force' : unlocked ? 'off' : 'locked'}</span></div>

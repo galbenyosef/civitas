@@ -19,7 +19,8 @@
     "demo:check": "tsx packages/server/src/demo/check.ts",
     "local:check": "tsx packages/server/src/local/check.ts",
     "history:check": "tsx packages/server/src/history-check.ts",
-    "parcels:check": "tsx packages/server/src/parcels-check.ts"
+    "parcels:check": "tsx packages/server/src/parcels-check.ts",
+    "finance:check": "tsx packages/server/src/finance-check.ts"
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

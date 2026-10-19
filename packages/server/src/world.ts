@@ -4,7 +4,7 @@ import {
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
-  type LedgerCat, type LedgerDTO, ECONOMY_TUNING, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate, type EduFields, hasPolicy, type PolicyId,
+  type LedgerCat, type LedgerDTO, type FinanceDTO, ECONOMY_TUNING, spendableMoney, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate, type EduFields, hasPolicy, type PolicyId,
 } from '@msimcity/shared';
 import { LIFE, stageFor } from './sim/life';
 import type { GoalState } from './goals';
@@ -61,6 +61,10 @@ export interface Player {
   onboarding?: GoalState;
   /** education policies switched on (shared policies.ts); saved with the player, absent in older saves */
   policies?: string[];
+  /** midnights in a row the treasury was below zero (sim/finance.ts); saved, absent in older saves and when not overdrawn */
+  adminDays?: number;
+  /** in administration since that game day (sim/finance.ts): building stops, the regional grant is withdrawn; saved */
+  admin?: { since: number };
 }
 
 /** Anything that moves along a path; drivers also live in a traffic lane. */
@@ -250,6 +254,11 @@ export class World {
   dirtyParcels = new Set<number>();
   removedParcels = new Set<number>();
   playersDirty = false;
+  /** doors ("x,y") of services and builders' yards their owners mothballed (sim/finance.ts): no staff, no upkeep, no
+   *  coverage; saved in the snapshot. A building that goes or changes kind leaves the set (syncBuilding). */
+  mothballed = new Set<string>();
+  /** a player's overdraft and administration for the players message (sim/finance.ts sets it) */
+  financeDTO: ((p: Player) => FinanceDTO | undefined) | null = null;
 
   private sampler: (x: number, y: number) => number;
 
@@ -602,14 +611,14 @@ export class World {
     const existing = this.buildings.get(key);
     if (hasJobs(z) || (existing && hasJobs(existing.zone))) this.noteJobEdit(x, y);
     if (z === Zone.None || isRoad(packed)) {
-      if (existing) { this.evict(existing, 0); this.reindex(existing, true); this.buildings.delete(key); }
+      if (existing) { this.evict(existing, 0); this.reindex(existing, true); this.buildings.delete(key); this.mothballed.delete(key); }
       return;
     }
     if (!existing) {
       this.putBuilding({ x, y, zone: z, id, level: l, occupants: 0 });
       return;
     }
-    if (existing.zone !== z || existing.id !== id) { this.evict(existing, 0); existing.zone = z; existing.id = id; }
+    if (existing.zone !== z || existing.id !== id) { this.evict(existing, 0); existing.zone = z; existing.id = id; this.mothballed.delete(key); }
     existing.level = l;
     const cap = capacityOf(id, l);
     // while merged lots are rebuilt (Site.merge) their people stay on at the door until the new building is up
@@ -838,7 +847,7 @@ export class World {
   playerDTO(p: Player, online: boolean, ledger = false): PlayerDTO {
     return {
       id: p.id, name: p.name, color: p.color, money: Math.round(p.money * 100) / 100, online, tech: [...p.tech], policies: [...(p.policies ?? [])], progress: { ...p.progress }, devUnlimited: p.devUnlimited || undefined,
-      ledger: ledger ? this.ledgerDTO(p) : undefined,
+      ledger: ledger ? this.ledgerDTO(p) : undefined, fin: this.financeDTO?.(p),
     };
   }
   /** The player's ledger rolled forward to today, amounts to the cent. */
@@ -974,8 +983,28 @@ export class World {
     this.credit(from, -amount, cat);
     this.credit(to, amount, cat);
   }
-  /** A public service's wage bill for one shift: the owner pays ECONOMY_TUNING.civicPayroll of it, a regional grant the rest. */
-  payroll(owner: string, wage: number) { this.credit(owner, -wage * ECONOMY_TUNING.civicPayroll, 'wages'); }
+  /** A public service's wage bill for one shift: the owner pays ECONOMY_TUNING.civicPayroll of it, a regional grant the rest
+   *  (withdrawn in administration, sim/finance.ts: the owner pays it all). */
+  payroll(owner: string, wage: number) { this.credit(owner, -wage * this.payrollShare(owner), 'wages'); }
+  /** The share of public-service wages an owner pays from the treasury. */
+  payrollShare(owner: string) { return this.players.get(owner)?.admin ? 1 : ECONOMY_TUNING.civicPayroll; }
+  /** What a player may spend: the treasury plus the overdraft line (ECONOMY_TUNING.overdraftLimit). */
+  spendable(p: Player) { return spendableMoney(p.money, p.devUnlimited); }
+  /**
+   * The refusal for spending past the overdraft line, naming the limit. It starts "Need $" (or "Not enough money" without a
+   * cost): the client's broke hint keys on those words.
+   */
+  shortOf(p: Player, cost: number | null, what = '') {
+    const $ = (n: number) => `$${Math.round(n).toLocaleString('en-GB')}`;
+    const left = `with the ${$(ECONOMY_TUNING.overdraftLimit)} overdraft limit you can spend ${$(Math.max(0, Math.floor(this.spendable(p))))}`;
+    return cost === null ? `Not enough money: ${left}` : `Need ${$(cost)}${what ? ' ' + what : ''}: ${left}`;
+  }
+  /** Mothball a service or yard (its staff are let go, sim/finance.ts) or reopen it (job searches that found nothing look again). */
+  setMothballed(b: Building, on: boolean) {
+    const key = tileKey(b.x, b.y);
+    if (on) { this.mothballed.add(key); this.evict(b, 0); }
+    else if (this.mothballed.delete(key)) this.noteJobEdit(b.x, b.y);
+  }
 }
 
 export const DIRS: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];

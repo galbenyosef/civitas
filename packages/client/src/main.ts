@@ -1,11 +1,12 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
-  CHUNK_SIZE, LAND_PRICE_PER_TILE, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
+  CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
   terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
 import { mountLocalUi, localLogin, addPlayOffline, registerServiceWorker } from './local/ui';
+import { FinancePanel } from './finance';
 import { ClientWorld } from './world';
 import { CameraRig, parseShot, urlShot, type CameraShot } from './camera';
 import { ChunkView } from './render/chunkView';
@@ -234,9 +235,10 @@ net.on('welcome', (m) => {
   world.applyParcels(m.parcels);
   const me = world.myPlayer!;
   ui.setWho(me.name, me.color);
-  ui.setMoney(me.money, me.ledger);
+  ui.setMoney(me.money, me.ledger, me.fin);
   ui.setLocks(me.tech);
   policies.show(me);
+  finance.show(me);
   ui.hideLogin();
   if (startShot) { rig.setShot(startShot); startShot = null; } // the opening shot, once
   for (const key of [...views.keys()]) dropView(key);
@@ -262,7 +264,7 @@ net.on('players', (m) => {
   lights.invalidate();
   world.applyPlayers(m.players);
   onlineCount = m.players.filter((p) => p.online).length;
-  const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger); ui.setLocks(me.tech); ui.showTech(me); policies.show(me); devPanel?.sync(!!me.devUnlimited); }
+  const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger, me.fin); ui.setLocks(me.tech); ui.showTech(me); policies.show(me); finance.show(me); devPanel?.sync(!!me.devUnlimited); }
   world.parcelsDirty = true; refreshPanel(); mapMode.parcelsChanged();
 });
 net.on('citizens', (m) => citizens.update(m.c, performance.now()));
@@ -273,6 +275,13 @@ const charts = new ChartsPanel(net);
 /** the education policies (policies.ts); opening it closes the tech tree, which sits in the same place */
 const policies = new PolicyPanel(document.getElementById('policies')!, document.getElementById('policiesBtn')!, (id, on) => net.send({ t: 'setPolicy', id, on }), DEV_TOOLS);
 ui.onOpenChart = (id) => charts.show(id);
+/** money that can run out (finance.ts, server sim/finance.ts): the overdraft chip and the administration panel with the recovery plan */
+const finance = new FinancePanel({
+  el: document.getElementById('admin')!, btn: document.getElementById('adminBtn')!,
+  send: (action) => net.send({ t: 'recover', action }), day: () => clock.day,
+  restart: local ? () => local.restartFromAutosave().catch((e: Error) => ui.toast('error', e.message)) : undefined,
+});
+ui.onMothball = (x, y, on) => net.send({ t: 'recover', action: on ? 'mothball' : 'unmothball', keys: [`${x},${y}`] });
 charts.me = () => world.myPlayer;
 lines.onLivery = (pairs, colours) => citizens.setLivery(pairs, colours);
 lines.onEdit = () => input.setTool('select');
@@ -900,7 +909,8 @@ function updateStatus() {
     const r = input.buyRect, verdict = buyVerdict(r);
     s = `${r.w}×${r.h} tiles = $${(r.w * r.h * LAND_PRICE_PER_TILE).toLocaleString()}`;
     if (!verdict.ok) s += ` · ${verdict.reason}`;
-    else if (world.myPlayer && world.myPlayer.money < r.w * r.h * LAND_PRICE_PER_TILE) s += ' · not enough money';
+    else if (world.myPlayer?.fin?.admin !== undefined) s += ' · in administration';
+    else if (world.myPlayer && spendableMoney(world.myPlayer.money, world.myPlayer.devUnlimited) < r.w * r.h * LAND_PRICE_PER_TILE) s += ' · not enough money, even with the overdraft';
   }
   ui.setStatus(s);
 }
@@ -1142,7 +1152,7 @@ function frame(now: number) {
     rectMesh.scale.set(r.w, 1, r.h);
     rectMesh.position.set(r.x + r.w / 2, 0.05, r.y + r.h / 2);
     const me = world.myPlayer;
-    const okBuy = !!me && me.money >= r.w * r.h * LAND_PRICE_PER_TILE && buyVerdict(r).ok;
+    const okBuy = !!me && me.fin?.admin === undefined && spendableMoney(me.money, me.devUnlimited) >= r.w * r.h * LAND_PRICE_PER_TILE && buyVerdict(r).ok;
     const rm = rectMesh.material as MeshBasicMaterial;
     rm.color.setHex(okBuy ? 0x62d2a2 : 0xff3b30);
     rm.opacity = okBuy ? 0.35 : 0.6; // a refused rectangle must read as red, not brown, over grass

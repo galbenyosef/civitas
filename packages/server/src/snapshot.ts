@@ -33,6 +33,8 @@ export interface Snapshot {
   history?: HistoryJSON;
   /** a scenario's sea gates (World.seaGates, docs/boats.md 2.3); optional, absent in a procedural world */
   seaGates?: SeaGate[];
+  /** mothballed services and yards (World.mothballed, sim/finance.ts) as [x, y] doors; optional, absent when there are none */
+  mothballed?: [number, number][];
 }
 
 /**
@@ -60,6 +62,7 @@ export function snapshotOf(w: World): Snapshot {
     stopNames: [...w.stopNames].map(([k, name]) => { const [x, y] = parseKey(k); return [x, y, name] as [number, number, string]; }),
     history: historyOf(w).toJSON(),
     ...(w.seaGates.length ? { seaGates: w.seaGates.map((g) => ({ ...g })) } : {}),
+    ...(w.mothballed.size ? { mothballed: [...w.mothballed].map((k) => parseKey(k) as [number, number]) } : {}),
   };
 }
 
@@ -101,6 +104,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   historyOf(w).load(snap.history);
   for (const g of snap.seaGates ?? []) if (g && Number.isInteger(g.x) && Number.isInteger(g.y) && typeof g.name === 'string') w.seaGates.push({ x: g.x, y: g.y, name: g.name, ...(g.low ? { low: true } : {}) });
   w.nextLineId = Math.max(snap.nextLineId ?? 1, 1 + Math.max(0, ...w.transitLines.keys()));
+  for (const m of snap.mothballed ?? []) if (Array.isArray(m) && w.buildings.has(tileKey(m[0], m[1]))) w.mothballed.add(tileKey(m[0], m[1]));
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links

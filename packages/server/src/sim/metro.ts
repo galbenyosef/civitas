@@ -150,7 +150,7 @@ export class Metro extends Timetabled {
   }
   private shortOf(owner: string, cost: number): string | null {
     const p = this.w.players.get(owner);
-    return p && cost > 0 && p.money < cost && !p.devUnlimited ? `Boring the tunnel costs $${cost.toLocaleString('en-GB')}; the treasury has $${Math.floor(p.money).toLocaleString('en-GB')}` : null;
+    return p && cost > 0 && this.w.spendable(p) < cost ? this.w.shortOf(p, cost, 'to bore the tunnel') : null;
   }
 
   /**

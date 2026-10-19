@@ -3,7 +3,7 @@ import { TOOL_KINDS, DEV_TOOLS, type ToolId } from './input';
 import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo, type HarbourInfo } from '@msimcity/shared';
 import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
-import { MANIFEST, LEDGER_LABELS, type KindToolId, type LedgerDTO, type LedgerCat } from '@msimcity/shared';
+import { MANIFEST, LEDGER_LABELS, ECONOMY_TUNING, spendableMoney, type KindToolId, type LedgerDTO, type LedgerCat, type FinanceDTO } from '@msimcity/shared';
 import { FLEET_LABEL } from '@msimcity/shared';
 import { WEEKDAY_NAMES } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
@@ -255,10 +255,13 @@ export class UI {
   private ledger: LedgerDTO | null = null;
   private ledgerOpen = false;
   private money = 0;
+  /** the overdraft and administration (PlayerDTO.fin), for the ledger's note */
+  private fin: FinanceDTO | undefined;
   /** The treasury chip: money, yesterday's net (red when spending more than earning) and, on click, the day's ledger. */
-  setMoney(n: number, ledger?: LedgerDTO) {
+  setMoney(n: number, ledger?: LedgerDTO, fin?: FinanceDTO) {
     this.money = n;
     if (ledger) this.ledger = ledger;
+    if (arguments.length >= 3) this.fin = fin;
     const el = $('money');
     if (!el.dataset.wired) {
       el.dataset.wired = '1';
@@ -268,7 +271,7 @@ export class UI {
     const L = this.ledger;
     const net = (r: LedgerDTO['today']) => Object.values(r).reduce((a: number, v) => a + (v ?? 0), 0);
     const y = L ? net(L.yesterday) : 0, hasY = !!L && Object.keys(L.yesterday).length > 0;
-    el.innerHTML = `treasury <b>${fmt(n)}</b>${hasY ? ` <b class="${y < 0 ? 'bad' : ''}">${y >= 0 ? '+' : '−'}${fmt(Math.abs(y))}</b>/day` : ''}`;
+    el.innerHTML = `treasury <b class="${n < 0 ? 'bad' : ''}">${n < 0 ? '−' : ''}${fmt(Math.abs(n))}</b>${hasY ? ` <b class="${y < 0 ? 'bad' : ''}">${y >= 0 ? '+' : '−'}${fmt(Math.abs(y))}</b>/day` : ''}`;
     el.title = L ? `${this.ledgerText(L)}\n(click for the ledger)` : 'Your treasury (the ledger arrives on the next game hour)';
     let box = document.getElementById('ledgerBox');
     if (!this.ledgerOpen || !L) { box?.remove(); return; }
@@ -291,15 +294,20 @@ export class UI {
     const cell = (v: number | undefined) => (v ? `<td class="${v < 0 ? 'bad' : ''}">${v < 0 ? '−' : '+'}${fmt(Math.abs(v))}</td>` : '<td class="z">·</td>');
     const netY = inY + outY;
     // days of cash left at yesterday's rate, counting only the running costs (building and buying are choices)
-    const running = (['wages', 'upkeep'] as LedgerCat[]).reduce((a, k) => a + (L.yesterday[k] ?? 0), 0) + (L.yesterday.tax ?? 0) + (L.yesterday.fees ?? 0);
-    const left = running < 0 ? Math.floor(money / -running) : -1;
+    const running = (['wages', 'upkeep', 'interest'] as LedgerCat[]).reduce((a, k) => a + (L.yesterday[k] ?? 0), 0) + (L.yesterday.tax ?? 0) + (L.yesterday.fees ?? 0);
+    // the overdraft (server sim/finance.ts) is spendable too: days until the limit
+    const limit = ECONOMY_TUNING.overdraftLimit;
+    const left = running < 0 ? Math.max(0, Math.floor((money + limit) / -running)) : -1;
     return `<table><tr><th></th><th>yesterday</th><th>today</th></tr>${cats.map((k) => `<tr><th>${LEDGER_LABELS[k]}</th>${cell(L.yesterday[k])}${cell(L.today[k])}</tr>`).join('')}
       <tr class="sum"><th>Income</th>${cell(inY)}${cell(inT)}</tr><tr class="sum"><th>Spending</th>${cell(outY)}${cell(outT)}</tr>
       <tr class="sum"><th>Net</th>${cell(netY || undefined)}${cell(inT + outT || undefined)}</tr></table>
       <div class="note"><span class="chartlink" data-chart="money">Treasury and income charts ›</span></div>
+      ${money < 0 ? `<div class="note bad">Overdrawn: ${fmt(-money)} of the ${fmt(limit)} overdraft used, interest ${Math.round(ECONOMY_TUNING.overdraftInterestPerDay * 100)}% a day at midnight. ${this.fin?.admin !== undefined ? 'In administration until a midnight finds the treasury at zero or above.' : `${ECONOMY_TUNING.adminAfterDays} midnights below zero and the city goes into administration.`}</div>` : ''}
       <div class="note">${left < 0 ? 'Taxes and fees cover the running costs (wages, upkeep).'
-        : `<span class="${left < 30 ? 'bad' : ''}">Running costs exceed taxes and fees${left < 30 ? `: about ${left} day${left === 1 ? '' : 's'} of cash left at this rate` : ''}.</span> Raise the tax rate in a parcel, add homes, or hold off on services.`}</div>`;
+        : `<span class="${left < 30 ? 'bad' : ''}">Running costs exceed taxes and fees${left < 30 ? `: about ${left} day${left === 1 ? '' : 's'} to the end of the ${fmt(limit)} overdraft at this rate` : ''}.</span> Raise the tax rate in a parcel, add homes, or hold off on services.`}</div>`;
   }
+  /** main.ts: mothball or reopen the building at (x, y) (the `recover` message with its door) */
+  onMothball: ((x: number, y: number, on: boolean) => void) | null = null;
   /** onboarding.ts takes advisor hints (shared/src/goals.ts HINTS) and returns true; false: toast them as before */
   onHint: ((id: 'night') => boolean) | null = null;
   /** charts.ts: open the charts panel on a chart (population and treasury figures link to theirs) */
@@ -496,6 +504,7 @@ export class UI {
       if (info.visitorCapacity !== undefined) html += row('Customers in now', `${info.visitors} / ${info.visitorCapacity}`);
       if (info.activeSites !== undefined) html += row('Sites being worked', info.activeSites);
     }
+    if (info.mothballed) html += row('Mothballed', '<span class="bad">no staff, no upkeep, no cover</span>');
     if (info.airport) html += airportHtml(info.airport, row);
     if (info.rail) html += railStationHtml(info.rail, row);
     if (info.metro) html += metroStationHtml(info.metro, row);
@@ -561,6 +570,8 @@ export class UI {
       return `<div class="sect people-sect">${title}${rows.length ? `<span class="here-n">${here} here</span>` : ''}</div>${body}`;
     };
     let html = `<div class="chead"><button class="chip" id="bClose" title="close (Esc)">✕</button></div>` + this.buildingHtml(info, 'h2');
+    // a service or yard of yours can be mothballed (server sim/finance.ts): no staff, no upkeep, no cover until reopened
+    if (info.mothballable && this.onMothball) html += `<button class="chip moth" id="bMoth" title="${info.mothballed ? 'Hire staff again; the upkeep comes back' : 'Let the staff go: no upkeep and no cover until you reopen it'}">${info.mothballed ? 'Reopen' : 'Mothball'}</button>`;
     const fam = familyOf(info.kind);
     if (p) {
       if (info.residents) {
@@ -578,6 +589,8 @@ export class UI {
     this.buildingPanelOpen = true;
     this.panelFor = -1;
     $('bClose').onclick = () => this.cb.onCloseBuilding();
+    const moth = document.getElementById('bMoth');
+    if (moth) moth.onclick = () => this.onMothball?.(info.x, info.y, !info.mothballed);
     panel.onclick = (e) => {
       const row = (e.target as HTMLElement).closest<HTMLElement>('[data-cid]');
       if (row) this.cb.onSelectCitizen(Number(row.dataset.cid));
@@ -794,7 +807,8 @@ export class UI {
         const cur = me.progress[t.condition.counter] ?? 0;
         const pct = Math.min(100, Math.round((100 * cur) / t.condition.min));
         const earned = cur >= t.condition.min && !t.locked; // a locked node's unlock rule is still to be decided (tech.ts)
-        const canBuy = !have && prereqOk && earned && me.money >= t.cost;
+        const afford = spendableMoney(me.money, me.devUnlimited) >= t.cost, admin = me.fin?.admin !== undefined; // the overdraft counts (server sim/finance.ts)
+        const canBuy = !have && prereqOk && earned && afford && !admin;
         const state = have ? 'have' : canBuy ? 'ready' : 'locked';
         html += `<div class="node ${state}">
           <div class="nhead"><b>${esc(t.name)}</b><span class="cost">${have ? 'unlocked' : `$${t.cost}`}</span></div>
@@ -802,7 +816,7 @@ export class UI {
           ${policiesOf(t)}
           ${have ? '' : t.locked ? `<div class="cond">${esc(t.locked)}</div>` : `<div class="cond">${esc(describeCondition(t))}<span>${cur} / ${t.condition.min}</span></div><div class="bar"><i style="width:${pct}%"></i></div>`}
           ${!have && !prereqOk ? `<div class="cond">needs ${t.requires.filter((r) => !me.tech.includes(r)).map((r) => esc(TECH_BY_ID.get(r)?.name ?? r)).join(', ')}</div>` : ''}
-          ${!have ? `<button class="unlock" data-id="${t.id}" ${canBuy ? '' : 'disabled'}>${t.locked ? 'Locked' : earned && prereqOk ? (me.money >= t.cost ? 'Unlock' : 'Not enough money') : 'Not yet'}</button>` : ''}
+          ${!have ? `<button class="unlock" data-id="${t.id}" ${canBuy ? '' : 'disabled'}>${t.locked ? 'Locked' : earned && prereqOk ? (admin ? 'In administration' : afford ? 'Unlock' : 'Not enough money') : 'Not yet'}</button>` : ''}
         </div>`;
       }
       html += '</div>';

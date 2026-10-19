@@ -58,13 +58,42 @@ export interface PlayerDTO {
   devUnlimited?: boolean;
   /** money in and out by game day (World.credit); sent at most once a game hour, absent in between (keep the last one) */
   ledger?: LedgerDTO;
+  /** the overdraft and administration (server sim/finance.ts); present while the treasury is below zero, the player is in
+   *  administration or has services mothballed, absent otherwise (and from older servers) */
+  fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', builders: "Builders' fees",
-  build: 'Construction', land: 'Land', tech: 'Technology', other: 'Other',
+  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', other: 'Other',
 };
+/**
+ * Money that can run out (docs/start-from-zero.md B3): the overdraft line, the count of midnights below zero, and
+ * administration with its recovery plan. The figures are the server's estimates, worked out at most once a game hour.
+ */
+export interface FinanceDTO {
+  /** how far below zero spending may go (ECONOMY_TUNING.overdraftLimit on the server) */
+  limit: number;
+  /** midnights in a row the treasury was below zero; administration begins at `after` */
+  days: number; after: number;
+  /** interest a day on the balance now (a share of it, charged at midnight) */
+  interest: number;
+  /** the game day administration began; absent: not in administration */
+  admin?: number;
+  /** what each recovery action would do (the `recover` message) */
+  plan: RecoveryPlanDTO;
+}
+export interface RecoveryPlanDTO {
+  /** raise tax to `taxRate` on `taxParcels` parcels now below it: about `taxPerDay` more a day at yesterday's takings */
+  taxRate: number; taxParcels: number; taxPerDay: number;
+  /** sell land back: parcels of yours with nothing on them, their tiles and what they fetch now */
+  sellParcels: number; sellTiles: number; sellCash: number;
+  /** mothball services: how many of yours are open and what they cost a day (upkeep and your share of wages); how many are mothballed */
+  mothball: number; mothballPerDay: number; mothballed: number;
+}
+/** The recovery plan's actions (sim/finance.ts); `keys` ("x,y" of a building's door) mothballs or reopens those buildings only. */
+export type RecoverAction = 'tax' | 'sell' | 'mothball' | 'unmothball';
 /** A player's money movements per category for the current game day so far and the whole of the day before. */
 export interface LedgerDTO { day: number; today: Partial<Record<LedgerCat, number>>; yesterday: Partial<Record<LedgerCat, number>> }
 export interface ChunkDTO {
@@ -167,6 +196,10 @@ export interface BuildingInfo {
   workers?: { total: number; onShift: number; commuting: number; offDuty: number; drivers: number; shifts: [string, number][] };
   wage?: number;
   upkeep?: number;
+  /** a service or builders' yard its owner has mothballed (sim/finance.ts): no staff, no upkeep, no coverage */
+  mothballed?: boolean;
+  /** the viewer owns it and may mothball or reopen it */
+  mothballable?: boolean;
   visitors?: number;
   visitorCapacity?: number;
   /** builders' yard: sites its crews are on right now */
@@ -484,6 +517,9 @@ export type ClientMsg =
   | { t: 'unlock'; id: string }
   /** switch an education policy (policies.ts) on or off for the schools on your parcels */
   | { t: 'setPolicy'; id: string; on: boolean }
+  /** the recovery plan (sim/finance.ts, docs/start-from-zero.md B3): raise tax, sell empty land back, mothball or reopen
+   *  services; `keys` ("x,y" doors) limits mothball/unmothball to those buildings, otherwise every service of yours */
+  | { t: 'recover'; action: RecoverAction; keys?: string[] }
   /** dev servers only (ignored in production): unlimited funds toggle, a cash grant, or every technology */
   | { t: 'dev'; action: 'unlimited' | 'money' | 'tech'; on?: boolean }
   | { t: 'ping'; n: number }
