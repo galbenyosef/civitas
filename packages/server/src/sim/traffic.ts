@@ -502,10 +502,12 @@ export class Traffic {
   /** Is a car parked at the kerb of (x, y)? (World.kerb, from the cost chunk's copy of it) */
   private kerbAt(x: number, y: number): boolean {
     const cx = chunkOf(x), cy = chunkOf(y);
-    let cc = this.lastCost;
-    if (cx !== this.lastCx || cy !== this.lastCy) { cc = this.costChunk(cx, cy); this.lastCx = cx; this.lastCy = cy; this.lastCost = cc; }
+    let cc = this.kerbCost;
+    if (cx !== this.kerbCx || cy !== this.kerbCy) { cc = this.costChunk(cx, cy); this.kerbCx = cx; this.kerbCy = cy; this.kerbCost = cc; }
     return cc.kerb[localIndex(x, y)] !== 0;
   }
+  /** kerbAt's last cost chunk (its own, so it and the router's searches do not keep displacing each other's) */
+  private kerbCx = NaN; private kerbCy = NaN; private kerbCost!: CostChunk;
   /** The cost chunk's flags of (x, y), dropped with the degree and crossing caches. */
   private dropCostFlags(x: number, y: number) {
     const cc = this.costChunks.get(tkey(chunkOf(x), chunkOf(y)));
@@ -788,10 +790,14 @@ export class Traffic {
   }
   private boxBusyExcept(tx: number, ty: number, m: Mover): boolean {
     // inBox, stopping at the first mover found other than m
+    const lx = tx - Math.floor(tx / CHUNK_SIZE) * CHUNK_SIZE, ly = ty - Math.floor(ty / CHUNK_SIZE) * CHUNK_SIZE;
+    const inner = lx >= 1 && lx <= CHUNK_SIZE - 2 && ly >= 1 && ly <= CHUNK_SIZE - 2;
+    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx;
+    if (inner && !rc) return false;
     for (let d = 0; d < 4; d++) {
-      const q = this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
+      const q = rc ? rc.lanes[(i0 - DIRS[d][0] - DIRS[d][1] * CHUNK_SIZE) * 4 + d] : this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
       if (q) for (const o of q) if ((TT.boxByCommit ? o.committed : o.prog > this.stopLine(o)) && o !== m) return true;
-      const l = this.laneQ(tx, ty, d);
+      const l = rc ? rc.lanes[i0 * 4 + d] : this.laneQ(tx, ty, d);
       if (l) for (const o of l) if (o.prog < this.clearAt(o) && o !== m) return true;
     }
     return false;
