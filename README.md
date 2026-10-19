@@ -372,7 +372,7 @@ changing behaviour in game time.
 - *Settlement ranks* (`shared/src/ranks.ts`, `server/src/ranks.ts`, `client/src/ranks.ts`, `client/src/render/fireworks.ts`;
   docs/ranks.md). A town climbs Camp → Hamlet → Village → Town → City on needs measured on its own land (residents,
   jobs filled, shops, a park, police and fire cover, two-storey buildings, days in the black, pupils or a bus line).
-  Each rank pays a charter grant ($2,000 to $10,000) and, on a frontier, grows the free charter by a ring of land
+  Each rank pays a charter grant ($2,500 to $10,000) and, on a frontier, grows the free charter by a ring of land
   (32 → 48 → 64 → 80 → 96 tiles a side; the holder buys beyond it only as a City, nobody else inside it). The rank
   chip beside the treasury shows the next rank's progress; its card (in the goals column, taking the goals card's
   place once the chain is done) lists the needs, the grant and a milestone feed, and each new milestone comes up in a

@@ -69,7 +69,7 @@ column's first tile unzoned, because a house there cut a later block's connector
 | r1 | first ladder; the bot as copied (one handyman) | 23.2 | 67.2 | - | - | 20.3 (a town of 2 builders stalls at 190) |
 | r2 | the bot adds yards | 17.3 | 33.6 | 41.9 | 90.3 | 17.4 (after City) |
 | r3 | needs raised; residents mark past City | 13.3 | 48.6 | 74.3 | 131.3 | 21.7 |
-| r4-r6 | needs, grants and bot fixes (see NOTES) | 17-34 | 52-65 | 105-130 | 164-172 | 8.0-14.3 |
+| r4-r8 | needs, grants and bot fixes (scratchpad NOTES.md) | 17-34 | 52-65 | 105-130 | 154-172 (r6: none, a cut-off block) | 7.7-14.3 |
 | r9 | the bot's yards at $700 | 18.3 | 32.9 | 84.9 | 148.6 | 7.7 |
 | **r10** | **final: Village 340/270, growth-pause nudges** | **18.0** | **43.0** | **98.0** | **146.3** | **5.3** |
 
