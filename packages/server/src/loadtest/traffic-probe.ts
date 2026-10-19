@@ -12,7 +12,8 @@
  *    population, jobs and money), so two builds can be shown to play the same game tick for tick. `--json FILE`.
  *
  * `--client` connects one client after the fill (hello, then a subscription to every chunk), as a browser would over a
- * socket; every frame it is sent is counted and hashed (`wire` in the summary), and the network flush is timed per tick.
+ * socket (`--client-at H`: at hour H of the day instead); every frame it is sent is counted and hashed (`wire` in the
+ * summary). The network flush is timed per tick either way.
  */
 import { writeFileSync } from 'node:fs';
 import { Session } from 'node:inspector';
@@ -57,7 +58,7 @@ export async function main(argv: string[]) {
   const traffic = (game.sim as unknown as { traffic: Traffic }).traffic;
   // one client, everything it is sent hashed
   const wire = { frames: 0, bytes: 0, hash: 0x811c9dc5 >>> 0 };
-  if (argv.includes('--client')) {
+  const join = () => {
     let onMsg: ((d: string) => void) | null = null;
     const conn: Conn = {
       open: true,
@@ -68,8 +69,10 @@ export async function main(argv: string[]) {
     (connect as (c: Conn) => void)(conn);
     onMsg!(JSON.stringify({ t: 'hello', name: 'probe' }));
     onMsg!(JSON.stringify({ t: 'sub', chunks: [...w.chunks.values()].map((c) => [c.cx, c.cy]) }));
-    console.log(`client connected: ${wire.frames} frames, ${wire.bytes} bytes on joining`);
-  }
+    console.log(`client connected at tick ${w.tick}: ${wire.frames} frames, ${wire.bytes} bytes on joining`);
+  };
+  const joinAt = argv.includes('--client-at') ? Number(arg('client-at', '0')) : argv.includes('--client') ? -1 : -2;
+  if (joinAt === -1) join();
   // the network flush's time per tick
   const flushMs = new Float64Array(Math.round(days * DAY));
   let cur = 0; // the tick under way
@@ -134,6 +137,7 @@ export async function main(argv: string[]) {
   const wall0 = performance.now();
   for (let i = 0; i < n; i++) {
     cur = i;
+    if (joinAt >= 0 && hourOf(i) === joinAt && (i === 0 || hourOf(i - 1) !== joinAt)) join();
     if (session && (i === 0 || hourOf(i) !== hourOf(i - 1))) {
       const h = hourOf(i);
       if (h === 8 || h === 17) await post('Profiler.start');
@@ -154,7 +158,7 @@ export async function main(argv: string[]) {
   for (const c of w.citizens.values()) if (c.job) employed++;
   const end = { tick: w.tick, citizens: w.citizens.size, vehicles: w.vehicles.size, employed, counters: { ...traffic.counters } };
   Object.assign(out, { end, wallS, wire: { ...wire, hash: wire.hash.toString(16) } });
-  if (argv.includes('--client')) console.log(`wire: ${wire.frames} frames, ${wire.bytes} bytes, hash ${wire.hash.toString(16)}`);
+  if (joinAt > -2) console.log(`wire: ${wire.frames} frames, ${wire.bytes} bytes, hash ${wire.hash.toString(16)}`);
   console.log(`after ${days} day(s): ${end.citizens} citizens, ${end.employed} employed, ${end.vehicles} vehicles; day wall ${wallS.toFixed(1)} s`);
 
   const windows: [string, (i: number) => boolean][] = [['08-09', (i) => hourOf(i) === 8], ['17-18', (i) => hourOf(i) === 17], ['day', () => true]];

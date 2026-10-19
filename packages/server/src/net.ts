@@ -73,6 +73,10 @@ const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) =>
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
+/** A number for chunk (cx, cy), one to one for |cx|, |cy| < 2^21 (a subscription takes up to 1e6), for the agents' buckets. */
+const chunkNum = (cx: number, cy: number) => (cx + 0x200000) * 0x400000 + (cy + 0x200000);
+/** chunkNum of the chunk holding the point (x, y) */
+const agentChunk = (x: number, y: number) => chunkNum(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE));
 
 /** shortest gap between two line previews for one client (editLine) */
 const PREVIEW_MS = 100;
@@ -1139,10 +1143,14 @@ export class Net {
       }
     }
     this.flushIssues();
-    // citizens and vehicles: only what changed, bucketed by chunk; a Home-state quad removes an agent
-    const buckets = new Map<string, number[]>();
+    // citizens and vehicles: only what changed, bucketed by chunk (by a numeric chunk key, so no key strings); a
+    // Home-state quad removes an agent. With nobody subscribed to any chunk the buckets are not filled at all: what was
+    // last sent is still kept up to date, so the first frame anyone is sent later is the same as it would have been.
+    const buckets = new Map<number, number[]>();
     const seen = new Set<number>();
     const keep = this.flushes++ % 10; // per flush, not per tick: with several ticks a flush (local mode's 2x/4x) every id still gets its turn
+    let anySubs = false;
+    for (const c of this.clients) if (c.player && c.subs.size) anySubs = true;
     for (const a of this.sim.agents()) {
       seen.add(a.id);
       const x = Math.round(a.x * 100) / 100, y = Math.round(a.y * 100) / 100;
@@ -1150,7 +1158,8 @@ export class Net {
       const prev = this.lastSent.get(a.id);
       if (prev && prev[0] === x && prev[1] === y && prev[2] === flags && a.id % 10 !== keep) continue;
       if (prev) { prev[0] = x; prev[1] = y; prev[2] = flags; } else this.lastSent.set(a.id, [x, y, flags]);
-      const key = chunkKey(Math.floor(a.x / CHUNK_SIZE), Math.floor(a.y / CHUNK_SIZE));
+      if (!anySubs) continue;
+      const key = agentChunk(a.x, a.y);
       let arr = buckets.get(key);
       if (!arr) { arr = []; buckets.set(key, arr); }
       arr.push(a.id, x, y, flags);
@@ -1158,7 +1167,8 @@ export class Net {
     for (const [id, prev] of this.lastSent) {
       if (seen.has(id)) continue;
       this.lastSent.delete(id);
-      const key = chunkKey(Math.floor(prev[0] / CHUNK_SIZE), Math.floor(prev[1] / CHUNK_SIZE));
+      if (!anySubs) continue;
+      const key = agentChunk(prev[0], prev[1]);
       let arr = buckets.get(key);
       if (!arr) { arr = []; buckets.set(key, arr); }
       arr.push(id, prev[0], prev[1], packCitizenFlags(CitizenState.Home, 0, 0));
@@ -1167,7 +1177,8 @@ export class Net {
       if (!c.player || c.subs.size === 0) continue;
       const out: number[] = [];
       for (const key of c.subs) {
-        const arr = buckets.get(key);
+        const [cx, cy] = parseKey(key);
+        const arr = buckets.get(chunkNum(cx, cy));
         if (arr) for (const v of arr) out.push(v);
       }
       if (out.length) this.send(c, { t: 'citizens', c: out });
