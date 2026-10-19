@@ -70,6 +70,8 @@ interface RoadChunk {
   lanes: (Mover[] | undefined)[]; deg: Int8Array; jaux: Int16Array; xing: Int8Array;
   /** junction control by tile (Traffic.junction), dropped round any road change */
   junc: (Junction | undefined)[];
+  /** the congestion entries of Traffic.cong by tile (the same objects; cong keeps their order) */
+  cong: (Cong | undefined)[];
   /** movers that drove on each tile this tick, and those of them held up (the congestion's inputs, endTick), from tick `presAt` */
   pres: Uint16Array; stop: Uint16Array; presAt: Uint32Array;
 }
@@ -386,7 +388,7 @@ export class Traffic {
     if (!rc) {
       rc = {
         lanes: new Array(CELLS * 4), deg: new Int8Array(CELLS).fill(-1), jaux: new Int16Array(CELLS).fill(-1), xing: new Int8Array(CELLS).fill(-1),
-        junc: new Array(CELLS), pres: new Uint16Array(CELLS), stop: new Uint16Array(CELLS), presAt: new Uint32Array(CELLS),
+        junc: new Array(CELLS), cong: new Array(CELLS), pres: new Uint16Array(CELLS), stop: new Uint16Array(CELLS), presAt: new Uint32Array(CELLS),
       };
       this.roads.set((chunkOf(x) + 0x800) * 0x1000 + chunkOf(y) + 0x800, rc);
       this.lastRoad = rc;
@@ -417,10 +419,10 @@ export class Traffic {
     for (let j = 0; j < this.presKeys.length; j++) {
       const k = this.presKeys[j], rc = this.presRc[j], n = rc.pres[this.presIdx[j]], st = rc.stop[this.presIdx[j]];
       const target = Math.min(1, (n * 0.25 + st * 0.75) / (2 * TT.laneCap));
-      const c = this.cong.get(k);
+      const c = rc.cong[this.presIdx[j]];
       const prev = c ? c.v * Math.exp(-(tick - c.at) / DECAY_TAU) : 0;
       const v = prev + (target - prev) * EMA_ALPHA;
-      if (c) { c.v = v; c.at = tick; } else this.cong.set(k, { v, at: tick });
+      if (c) { c.v = v; c.at = tick; } else { const nc = { v, at: tick }; this.cong.set(k, nc); rc.cong[this.presIdx[j]] = nc; }
       this.dirty.add(k);
     }
     this.congEpoch++; // the router's cached congestion is stale now
@@ -431,10 +433,11 @@ export class Traffic {
   // ---- congestion -------------------------------------------------------------
 
   congestionAt(x: number, y: number): number {
-    const c = this.cong.get(tkey(x, y));
+    const rc = this.roadChunkIf(x, y);
+    const c = rc?.cong[localIndex(x, y)];
     if (!c) return 0;
     const v = c.v * Math.exp(-(this.w.tick - c.at) / DECAY_TAU);
-    if (v < 0.004) { this.cong.delete(tkey(x, y)); this.dirty.add(tkey(x, y)); return 0; }
+    if (v < 0.004) { this.cong.delete(tkey(x, y)); rc!.cong[localIndex(x, y)] = undefined; this.dirty.add(tkey(x, y)); return 0; }
     return v;
   }
   cost(x: number, y: number): number {
@@ -496,7 +499,11 @@ export class Traffic {
   }
   sweep() {
     const tick = this.w.tick;
-    for (const [k, c] of this.cong) if (c.v * Math.exp(-(tick - c.at) / DECAY_TAU) < 0.004) { this.cong.delete(k); this.dirty.add(k); }
+    for (const [k, c] of this.cong) if (c.v * Math.exp(-(tick - c.at) / DECAY_TAU) < 0.004) {
+      this.cong.delete(k); this.dirty.add(k);
+      const x = tileX(k), y = tileY(k);
+      this.roadChunkIf(x, y)!.cong[localIndex(x, y)] = undefined;
+    }
   }
 
   // ---- road geometry caches ------------------------------------------------------
