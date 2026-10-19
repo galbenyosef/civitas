@@ -89,6 +89,11 @@ interface RoadChunk {
   cong: (Cong | undefined)[];
   /** movers that drove on each tile this tick, and those of them held up (the congestion's inputs, endTick), from tick `presAt` */
   pres: Uint16Array; stop: Uint16Array; presAt: Uint32Array;
+  /**
+   * pedestrians on each tile's carriageway (Traffic.noteCrossing, CROSS_* masks), two slots a tile: the tick numbered
+   * presStamp in slot presStamp & 1, the one before it in the other; `xmAt` says which tick a slot holds
+   */
+  xm: Uint8Array; xmAt: Uint32Array;
 }
 interface Junction { signal: boolean; ver: number; deg: number; pid: number; offset: number; period: number; act?: Actuation }
 /** Actuated signal state: the axis on green, when that green began and when it is due to end. */
@@ -369,8 +374,7 @@ export class Traffic {
    */
   barrier: ((x: number, y: number) => boolean) | null = null;
   /** pedestrians on the carriageway, by tile: last tick's picture (read) and this tick's (written) */
-  private crossPrev = new Map<number, number>(); // tile key -> CROSS_* mask
-  private crossCur = new Map<number, number>();
+  // (RoadChunk.xm: CROSS_* masks by tile for this tick and the one before, in slots by the tick's presStamp)
   private phase: SignalPhase = { green: 'ns', amber: false };
   /**
    * scratch for the tick under way: the tiles driven on (the start tile of each step's lane), in the order first driven
@@ -404,6 +408,7 @@ export class Traffic {
       rc = {
         lanes: new Array(CELLS * 4), deg: new Int8Array(CELLS).fill(-1), jaux: new Int16Array(CELLS).fill(-1), xing: new Int8Array(CELLS).fill(-1),
         junc: new Array(CELLS), cong: new Array(CELLS), pres: new Uint16Array(CELLS), stop: new Uint16Array(CELLS), presAt: new Uint32Array(CELLS),
+        xm: new Uint8Array(CELLS * 2), xmAt: new Uint32Array(CELLS * 2),
       };
       this.roads.set((chunkOf(x) + 0x800) * 0x1000 + chunkOf(y) + 0x800, rc);
       this.lastRoad = rc;
@@ -419,7 +424,6 @@ export class Traffic {
   beginTick() {
     this.presKeys.length = 0; this.presRc.length = 0; this.presIdx.length = 0; this.presStamp++;
     this.vehicles = 0; this.queued = 0; this.speedSum = 0;
-    const t = this.crossPrev; this.crossPrev = this.crossCur; this.crossCur = t; this.crossCur.clear();
     const wt = this.walkPrev; this.walkPrev = this.walkCur; this.walkCur = wt; this.walkCur.clear();
     if (TT.bodyGuard || TT.carGuard) {
       // cars by the tile they are on at the start of the tick, for the body guard (a car moves at most half a tile a tick)
@@ -763,12 +767,18 @@ export class Traffic {
     return false;
   }
   /** A pedestrian is on the carriageway of this tile this tick, over the roads in `mask` (CROSS_*). */
-  noteCrossing(k: number, mask = CROSS_NS_ROAD | CROSS_EW_ROAD) { this.crossCur.set(k, (this.crossCur.get(k) ?? 0) | mask); }
+  noteCrossing(k: number, mask = CROSS_NS_ROAD | CROSS_EW_ROAD) {
+    const x = tileX(k), y = tileY(k), rc = this.roadChunk(x, y), s = this.presStamp, i = localIndex(x, y) * 2 + (s & 1);
+    if (rc.xmAt[i] !== s) { rc.xmAt[i] = s; rc.xm[i] = 0; }
+    rc.xm[i] |= mask;
+  }
   /** Mask of the carriageways pedestrians were on in this tile last tick (0: nobody). */
   crossingsAt(x: number, y: number) {
-    const k = tkey(x, y);
+    const rc = this.roadChunkIf(x, y);
+    if (!rc) return 0;
+    const s = this.presStamp, i = localIndex(x, y) * 2, p = i + ((s - 1) & 1), c = i + (s & 1);
     // with the lag removed, a walker who stepped out earlier this tick counts too
-    return (this.crossPrev.get(k) ?? 0) | (TT.crossingLag ? 0 : this.crossCur.get(k) ?? 0);
+    return (rc.xmAt[p] === s - 1 ? rc.xm[p] : 0) | (TT.crossingLag ? 0 : rc.xmAt[c] === s ? rc.xm[c] : 0);
   }
 
   /** May `m` drive on into its destination building's forecourt (tile bx,by), arriving heading `dir`? */
