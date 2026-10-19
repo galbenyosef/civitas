@@ -23,7 +23,7 @@
 import {
   KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, DEMOS, demoSections, showcaseProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
   isBridgeAux, bridgeStyle, BridgeStyle, basculeSeed, basculeLiftAt, isCrossing, isTunnel, isPlatform, underMask, boatTimetable, boatLifts, HARBOUR_OF,
-  SCHOOL_SPECS, Study, LifeStage, STUDY_NAMES, EduLevel, type DemoId, type SeededDemo,
+  SCHOOL_SPECS, Study, LifeStage, STUDY_NAMES, EduLevel, AD_SIZES, AD_STRIDE, adHostAt, adSlotOpen, adWear, adAge, adSeed, type DemoId, type SeededDemo, type AdSize,
 } from '@msimcity/shared';
 import { chunkPads } from '@msimcity/shared/src/helipads';
 import { World } from '../world';
@@ -35,6 +35,8 @@ import type { Ferry } from '../sim/ferry';
 import { Harbours } from '../sim/harbours';
 import type { TransitPlan } from '../sim/transit';
 import { seedDemoTown, seedDemoNetwork, seedDemoStudents, worldHash, seededRandom, fillDemo } from './seed';
+import { seedDemoAdverts } from './adverts';
+import { Adverts } from '../sim/adverts';
 import { GARDEN_KIND } from '../sim/blocks';
 import { ageOf } from '../sim/life';
 
@@ -59,11 +61,14 @@ function build(id: DemoId) {
   const ferry = sim.transit.services.get('ferry') as Ferry | undefined;
   // the harbours, as game.ts runs them: the port's gateway (its sea route, ships berthing), the port as an export point
   const harbours = new Harbours(w, sim);
-  return { w, sim, airports, rail, metro, ferry, harbours, problems: [...p1, ...p2] };
+  // the high street's site and posters (demo/adverts.ts), as index.ts puts them up after the fill
+  const adverts = new Adverts(w);
+  const p3 = seedDemoAdverts(w, adverts, id);
+  return { w, sim, airports, rail, metro, ferry, harbours, adverts, problems: [...p1, ...p2, ...p3] };
 }
 
 /** What the feature registry's `seeded` tests read of a seeded world (shared/src/demo/showcase.ts SeededDemo). */
-function seededOf(w: World, airports: Airports, sim: Simulation, harbours: Harbours): SeededDemo {
+function seededOf(w: World, airports: Airports, sim: Simulation, harbours: Harbours, adverts?: Adverts): SeededDemo {
   const kinds = new Map<number, number>();
   for (const b of w.buildings.values()) kinds.set(b.id, (kinds.get(b.id) ?? 0) + 1);
   const chunks = [...w.chunks.values()].filter((c) => c.modified);
@@ -84,7 +89,19 @@ function seededOf(w: World, airports: Airports, sim: Simulation, harbours: Harbo
     seaGates: w.seaGates,
     schools: [...w.buildings.values()].filter((b) => SCHOOL_SPECS[b.id]).map((b) => ({ kind: b.id, x: b.x, y: b.y })),
     children: [...w.citizens.values()].map((c) => ({ x: c.hx, y: c.hy, age: ageOf(c, w.tick) })).filter((c) => c.age < 18),
+    ads: adverts ? adsOf(w, adverts) : undefined,
   };
+}
+/** Open ad frames by size over every door and site, and the wear of every rented poster (docs/adverts.md). */
+function adsOf(w: World, adverts: Adverts): NonNullable<SeededDemo['ads']> {
+  const env = { tile: (x: number, y: number) => w.peekTile(x, y), aux: (x: number, y: number) => w.auxAt(x, y), sub: (x: number, y: number) => w.subAt(x, y) };
+  const slots: Partial<Record<AdSize, number>> = {};
+  const doors = [...w.buildings.values()].map((b) => [b.x, b.y]).concat([...w.sites.values()].map((s) => [s.x, s.y]));
+  for (const [x, y] of doors) {
+    const h = adHostAt(env, x, y);
+    if (h) for (let i = 0; i * AD_STRIDE < h.slots.length; i++) if (adSlotOpen(env, h, i, x, y)) { const s = AD_SIZES[h.slots[i * AD_STRIDE + 1]]; slots[s] = (slots[s] ?? 0) + 1; }
+  }
+  return { slots, wears: adverts.list().map((r) => adWear(adAge(r.age, r.rate, r.at, w.tick), adSeed(r.x, r.y, r.i, r.c))) };
 }
 
 console.log('completeness (showcase)');
@@ -125,7 +142,8 @@ for (const d of DEMOS) {
   if (inner) console.log(`  note: ${inner} grown lots of the grid town have no road beside them (seedCity's inner lots)`);
   const want = demoSections(d.id).reduce((n, s) => n + (s.lines?.length ?? 0), 0);
   if (a.w.transitLines.size !== want) fail(`${want} lines in the scenario, ${a.w.transitLines.size} saved`);
-  const seededA = seededOf(a.w, a.airports, a.sim, a.harbours);
+  const seededA = seededOf(a.w, a.airports, a.sim, a.harbours, a.adverts);
+  if (seededA.ads?.wears.length) console.log(`  ad frames open by size: ${JSON.stringify(seededA.ads.slots)}; ${seededA.ads.wears.length} posters up, wear ${seededA.ads.wears.map((x) => x.toFixed(2)).join(' ')}`);
   for (const h of seededA.harbours) {
     const why = h.refused?.length ? `: ${h.refused.join('; ')}` : '';
     console.log(`  ${HARBOUR_OF[h.kind]!.role} ${h.name} at (${h.x}, ${h.y}): ${h.lanes.map((l) => `${l.purpose}/${l.cls}${l.gate ? ` to ${l.gate}` : ''} ${l.route.sides.length}`).join(', ') || 'no lanes'}${why}`);
@@ -144,7 +162,7 @@ if (days > 0) {
   console.log(`running ${id} for ${days} game day(s)${argv.includes('--no-tube') ? ' without the Underground' : ''}`);
   const real = Math.random;
   Math.random = seededRandom(7);
-  const { w, sim, airports, rail, metro, ferry, harbours } = build(id);
+  const { w, sim, airports, rail, metro, ferry, harbours, adverts } = build(id);
   if (argv.includes('--fill')) {
     const f0 = performance.now();
     const r = await fillDemo(w, () => { sim.tick(); airports.tick(); harbours.tick(); }, () => {});
@@ -242,7 +260,7 @@ if (days > 0) {
   console.log(`  freight: ${JSON.stringify(rail.freightStats)}`);
   console.log(`  transit: ${JSON.stringify(sim.transit.stats)}`);
   // the registry's features in use over the days run (docs/demo.md "Keeping it complete")
-  const seeded = seededOf(w, airports, sim, harbours), runDays = Array.from({ length: w.day - day0 + 1 }, (_, d) => day0 + d);
+  const seeded = seededOf(w, airports, sim, harbours, adverts), runDays = Array.from({ length: w.day - day0 + 1 }, (_, d) => day0 + d);
   const count = <T extends string>(xs: T[]) => xs.reduce((m, x) => ({ ...m, [x]: (m[x] ?? 0) + 1 }), {} as Record<string, number>);
   for (const ap of seeded.airports) console.log(`  planes scheduled at airport ${ap.id} (runway ${ap.runwayLen}), days ${day0}-${w.day}, by type: ${JSON.stringify(count(runDays.flatMap((d) => timetable(ap, d).map((f) => f.type))))}`);
   console.log(`  helicopter flights by service (${seeded.pads.length} pads): ${JSON.stringify(count(runDays.flatMap((d) => heliTimetable(seeded.pads, d).map((f) => f.kind))))}`);

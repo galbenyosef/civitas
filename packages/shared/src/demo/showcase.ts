@@ -27,6 +27,7 @@ import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REF
 import { zoneOf, levelOf, Zone } from '../tile';
 import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
 import { FIRE } from '../fires';
+import { AD_SIZE, AD_SIZES, type AdSize } from '../buildings/adslot';
 
 /**
  * Demo maps (docs/demo.md): a planned, lived-in town where every large object in the catalogue is placed once and
@@ -46,7 +47,7 @@ import { FIRE } from '../fires';
  * would click (the door) and its rotation (FRONT order: 0 the door faces +y/south, 1 east, 2 north, 3 west).
  */
 
-export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education'
+export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street'
   | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-rail' | 'london-buses' | 'london-river' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
@@ -164,6 +165,28 @@ const block = (di: number, dj: number, bi: number, bj: number): DemoRect => [D(d
 /** the showcase's fire drill home: a level-3 house five tiles from the civic district's fire post (-24, -29), and the stop's frame */
 const FIRE_DRILL: DemoXY = [-29, -31];
 const FIRE_DRILL_RECT: DemoRect = [-31, -33, 9, 6];
+/**
+ * The high street (docs/adverts.md): a street west off the perimeter road at y = -15, shops on both sides with a gap here
+ * and there (an alley, a car park, a bus shelter) so the posters on their flanks face open ground, two car parks with a
+ * roadside billboard, a bus shelter with its panel and a building site behind a hoarding. The lots are picked by the
+ * design hashes (designPick): the shops either side of each gap carry a poster on the wall facing it. The server's demo
+ * seeder (server/src/demo/adverts.ts) opens the site and puts three campaigns up at three wear levels.
+ */
+export const HIGH_STREET = {
+  road: -15, x0: -59, x1: -36,
+  north: { gaps: [-57, -54, -51, -46, -44, -37, -36], parking: -59 },
+  south: { gaps: [-55, -54, -51, -46, -44, -36], parking: -55, busStop: -51 },
+  /** the lot left as a building site behind its hoarding */
+  site: [-44, -16] as DemoXY,
+  rect: [-59, -17, 24, 5] as DemoRect,
+};
+const HS = HIGH_STREET;
+/** the shop lots of one side of the high street: every x from x0 to x1 but the gaps and the car park */
+const hsLots = (y: number, gaps: number[], parking: number): DemoZone[] => {
+  const out: DemoZone[] = [];
+  for (let x = HS.x0; x <= HS.x1; x++) if (!gaps.includes(x) && x !== parking) out.push({ zone: 'commercial', rect: [x, y, 1, 1] });
+  return out;
+};
 /** bus line 2's stops (x = -24, beside the x = -25 road): the civic district, the western suburb, the industrial estate */
 const LINE_2_STOPS = [-33, -23, -9, -4, 1, 6, 15, 20, 25, 30];
 /** blocks of a seedCity district that are not homes (its zone pattern repeats in every district) */
@@ -265,6 +288,19 @@ export const SECTIONS: DemoSection[] = [
     ],
     // mobile jobs (docs/mobile-jobs.md): roles of grown lots picked by tile hash, so these doors are where the hashes put them
     spots: MOBILE_SPOTS.map(([id, x, y, name]): DemoSpot => ({ id, spot: id, name, rect: [x, y, 1, 1], inspect: [x, y] })),
+  },
+  {
+    id: 'high-street', name: 'High Street',
+    blurb: 'A shopping street with its ad frames rented: posters on the shops\' flanks, billboards over the car parks, a panel in the bus shelter and a hoarding round a building site, three campaigns at three ages.',
+    land: [{ name: 'High Street', rect: [HS.x0, HS.road - 1, HS.x1 - HS.x0 + 1, 3] }],
+    roads: [[[HS.x1, HS.road], [HS.x0, HS.road]]],
+    zones: [...hsLots(HS.road - 1, HS.north.gaps, HS.north.parking), ...hsLots(HS.road + 1, HS.south.gaps, HS.south.parking)],
+    placements: [
+      { id: 'hs-parking-north', kind: 'parking', door: [HS.north.parking, HS.road - 1] },
+      { id: 'hs-parking-south', kind: 'parking', door: [HS.south.parking, HS.road + 1] },
+      { id: 'hs-bus-stop', kind: 'bus-stop', door: [HS.south.busStop, HS.road + 1] },
+    ],
+    spots: [{ id: 'high-street', spot: 'high-street', name: 'High Street', rect: HS.rect, inspect: [-53, -16] }],
   },
   {
     id: 'transport', name: 'Buses and parking',
@@ -505,7 +541,7 @@ export const SECTIONS: DemoSection[] = [
 /** Tour order: placement, block, runway, track, junction and line ids, plus 'welcome' (the whole town). */
 export const TOUR: string[] = [
   'welcome',
-  'block-residential', 'block-commercial', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
+  'block-residential', 'block-commercial', 'high-street', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
   'cab-office', 'takeaway', 'waste-depot', 'parcel-depot',
   'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
@@ -528,7 +564,7 @@ export const TOUR: string[] = [
 ];
 
 export const DEMOS: DemoDef[] = [
-  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'civic', 'rail', 'leisure', 'education', 'airport', 'industry', 'riverside', 'harbour'],
+  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'education', 'airport', 'industry', 'riverside', 'harbour'],
     blurb: 'A lived-in town with one of every large building and every merged lot, buses, trains, an underground and river buses, an airport every plane type flies to, helicopters, a river with every style of bridge, and a harbour with every kind of boat, all running. Take the guided tour.' },
   { id: 'transport', name: 'Transport demo', slot: 91, sections: ['downtown', 'transport', 'rail', 'airport', 'industry'],
     blurb: 'Buses, parking, rail, freight and the airport, in the same town.' },
@@ -607,7 +643,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'ranks' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'ranks' | 'high-street' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'cab-office': {
     title: 'Cab office',
@@ -668,6 +704,12 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     what: 'Where the basin opens to the sea, beyond the edge of the town. Container ships, coasters and ro-ro ferries come in over the horizon here for the cargo port, a tug meets each container ship and leads it in, and the trawlers go out this way to the fishing grounds before dawn. Boats work to a pure timetable, so everyone sees the same ships: each harbour sails lanes over the water, found round the bridges its boats cannot clear, and a ship too tall for a bridge waits for a bascule to lift.',
     how: 'Nothing to build. A scenario declares where its water meets the sea; in a world of its own, a lake of 1,500 tiles or more counts as open water reaching the sea, and its ships come in over its far horizon. A cargo port needs a way to the sea: a smaller lake gets pleasure boats, fishing and ferries only.',
     facts: [['Ships', 'container ships, coasters, ro-ro ferries, barges'], ['Fishing', 'trawlers out from about 04:00, home from noon, not on Sundays'], ['Bridges', 'each style has a clearance; tall boats book a bascule\'s lifts']],
+  },
+  'high-street': {
+    title: 'Adverts on the high street',
+    what: `About one shop or venue in three has an ad frame, and so does every bus shelter and every building site's hoarding: posters on a shop's flank, a 48-sheet billboard over a car park or a flat roof, banners at a stadium's gates. Empty frames show blank paper. A player makes a campaign (a theme and a claim from the table, filled with one of their parcels' or workplaces' names, in a look of their own) and rents frames for it; rent goes to whoever owns the frontage. Posters wear: they fade, get tagged by the local crew and tear, faster in streets with people out of work and no services nearby. Here three campaigns are up at three ages: fresh, tagged and wrecked.`,
+    how: 'Unlock Advertising (zoning track), then the ads chip opens the Campaigns panel: make a campaign, then "Pick frames" (free frames glow; click a building to rent its frame) or "Rent 3 nearest". Who sees a poster and what it does to them comes in a later update.',
+    facts: [['Frames', `${AD_SIZES.map((s) => AD_SIZE[s].label).join(', ')}`], ['Rent a day', AD_SIZES.map((s) => `${AD_SIZE[s].label} $${AD_SIZE[s].rent}`).join(', ')], ['Technology', 'Advertising (zoning track)']],
   },
   'house-fire': {
     title: 'House fire',
@@ -916,6 +958,8 @@ export interface SeededDemo {
   schools: readonly { kind: number; x: number; y: number }[];
   /** every child and young person under 18: the home tile and the age in years (server/src/demo/seed.ts seedDemoFamilies) */
   children: readonly { x: number; y: number; age: number }[];
+  /** ad slots (docs/adverts.md): how many open slots of each size stand in the town, and the wear of every rented poster */
+  ads?: { slots: Partial<Record<AdSize, number>>; wears: readonly number[] };
 }
 
 /**
@@ -1105,6 +1149,13 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'house-fire')),
     seeded: (d) => demoFireDrillsOf(d).length > 0 },
   { id: 'student-quarter', caption: 'halls of residence within a short walk of the university', tour: 'halls', seeded: studentQuarter },
+  // ---- adverts (docs/adverts.md): every frame size stands somewhere in the town, and the high street has posters at three ages
+  { id: 'advert-slots', caption: 'an ad frame of every size (poster, billboard, shelter panel, hoarding, banner) open to the street', tour: 'high-street',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'high-street')),
+    seeded: (d) => !!d.ads && AD_SIZES.every((s) => (d.ads!.slots[s] ?? 0) > 0) },
+  { id: 'advert-wear', caption: 'rented posters fresh, tagged and wrecked side by side (three wear levels)', tour: 'high-street',
+    seeded: (d) => !!d.ads && d.ads.wears.some((w) => w < 0.15) && d.ads.wears.some((w) => w >= 0.35 && w < 0.8) && d.ads.wears.some((w) => w >= 0.8) },
+  { id: 'advert-reach', caption: 'a seeded campaign reaching a showcase commuter', tour: 'high-street', todo: 'reach is adverts A4 (docs/adverts.md section 4): it needs citizens\' beliefs (docs/motivation.md)' },
   { id: 'school-bus', caption: 'a school bus on a round (a fleet unit of kind 9)', tour: 'secondary-school', todo: 'the school buses are E6 (docs/education.md section 10): they take over from the escorts and the missed days' },
   { id: 'london-school-run', caption: 'children living within reach of a primary and a secondary school in London', tour: 'primary-islington', demo: 'london',
     rule: 'London has its own schools in its boroughs, and the four London universities are landmarks that stand in London, not the showcase',

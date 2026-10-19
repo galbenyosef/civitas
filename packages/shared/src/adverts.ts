@@ -1,6 +1,6 @@
 import { TICKS_PER_DAY } from './constants';
-import { LEVEL_SLOTS } from './buildings/codes';
-import { TOP_LEVEL_TABLE, DESIGN_COUNT_TABLE, AD_SLOTS } from './buildings/compiled';
+import { LEVEL_SLOTS, Zone } from './buildings/codes';
+import { TOP_LEVEL_TABLE, DESIGN_COUNT_TABLE, AD_SLOTS, KIND_ID } from './buildings/compiled';
 import { AD_SIZE, AD_SIZES, AD_STRIDE, type AdSize } from './buildings/adslot';
 import { isRoad, zoneOf, levelOf, underConstruction, kindIdOf } from './tile';
 import { isPartAux, isAnchorAux, auxOrientation, isMultiTile, placedFromAnchor, partDx, partDy, type Placed } from './structures';
@@ -212,15 +212,18 @@ export function adSlotWorld(h: AdHost, i: number): { x: number; y: number; dir: 
 }
 /**
  * Whether a slot can be seen from the street: a front slot always; a side-wall slot on a 1×1 lot only when the tile it
- * looks onto holds no building (a road, a garden, open ground), not a neighbour's wall. Shelter panels and the slots of
- * multi-tile buildings stand free.
+ * looks onto is open (a road, open ground, a car park, a park, a bus shelter), not a neighbour's wall. Shelter panels and
+ * the slots of multi-tile buildings stand free.
  */
 export function adSlotOpen(env: AdEnv, h: AdHost, i: number, doorX: number, doorY: number): boolean {
   const face = h.slots[i * AD_STRIDE], size = adSizeOf(h, i);
   if (face === 0 || h.multi || size === 'panel' || h.key === 'site') return true;
   const [dx, dy] = DIRS[(face + h.r) & 3];
-  const t = env.tile(doorX + dx, doorY + dy);
-  return t === undefined || isRoad(t) || zoneOf(t) === 0;
+  const x = doorX + dx, y = doorY + dy, t = env.tile(x, y);
+  if (t === undefined || isRoad(t)) return true;
+  const z = zoneOf(t);
+  // open ground beside it: nothing, a car park, a park, a bus shelter
+  return z === 0 || z === Zone.Parking || kindIdOf(z, env.sub(x, y)) === KIND_ID.park || kindIdOf(z, env.sub(x, y)) === KIND_ID['bus-stop'];
 }
 /** Rent per game day for a slot of this size. */
 export const adRent = (size: AdSize) => AD_SIZE[size].rent;

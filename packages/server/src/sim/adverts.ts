@@ -27,6 +27,8 @@ interface Rental {
   age: number; rate: number; at: number; placed: number;
   /** the slot's size code (AD_SIZES), for the panel's costs */
   s: number;
+  /** a demo's poster (seed): it keeps its age and costs nothing */
+  keep?: boolean;
 }
 /** What the snapshot keeps (snapshot.ts `adverts`); absent in older saves. */
 export interface AdvertsSave { campaigns: Campaign[]; rentals: Rental[]; nextId: number; posted: string[] }
@@ -255,6 +257,7 @@ export class Adverts {
         if (c) ended.set(c.owner, (ended.get(c.owner) ?? 0) + 1);
         continue;
       }
+      if (r.keep) continue;
       const rent = adRent(adSizeOf(h, r.i));
       if (spendableMoney(p.money, p.devUnlimited) < rent || p.admin) {
         this.rentals.delete(k); this.stats.unpaid++;
@@ -299,11 +302,21 @@ export class Adverts {
 
   // ---- for the showcase and the probe -------------------------------------------------------------
 
-  /** Put a poster up as if it had been there a while (demos: three wear levels side by side). No rent. */
-  seed(owner: string, campaign: number, x: number, y: number, i: number, age: number, rate?: number): boolean {
+  /** A campaign made without the checks or the cost (demos and the probe). */
+  seedCampaign(owner: string, theme: number, claim: number, look: number, text: string): number {
+    const c: Campaign = { id: this.nextId++, owner, theme, claim, look, created: this.w.day, text };
+    this.campaigns.set(c.id, c);
+    this.changed = true;
+    return c.id;
+  }
+  /**
+   * Put a poster up as if it had been there a while: `age` in wear units. With `keep` (a demo's high street: fresh,
+   * tagged and wrecked side by side) it stays that age and costs nothing; otherwise it ages and pays rent like any other.
+   */
+  seed(owner: string, campaign: number, x: number, y: number, i: number, age: number, keep = false): boolean {
     if (this.free(x, y, i) || !this.campaigns.has(campaign)) return false;
     const h = adHostAt(this.env, x, y)!;
-    this.rentals.set(rkey(x, y, i), { x, y, i, c: campaign, age, rate: rate ?? this.rateAt(x, y, h, i), at: this.w.tick, placed: this.w.tick, s: h.slots[i * AD_STRIDE + 1] });
+    this.rentals.set(rkey(x, y, i), { x, y, i, c: campaign, age, rate: keep ? 0 : this.rateAt(x, y, h, i), at: this.w.tick, placed: this.w.tick, s: h.slots[i * AD_STRIDE + 1], ...(keep ? { keep: true } : {}) });
     this.posted.add(owner);
     this.changed = true;
     return true;

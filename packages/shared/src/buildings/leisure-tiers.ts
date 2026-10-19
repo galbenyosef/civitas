@@ -372,6 +372,7 @@ export const stadium: KindDef = {
         ...repeat(12, (i): Op => ['cyl', 0.03, 0.04, 0.98, 1.8 * Math.cos((i * Math.PI) / 6), 0.02, -0.05 + 1.8 * Math.sin((i * Math.PI) / 6), 'silver', 5]),
         ...repeat(6, (i): Op => ['box', 0.16, 0.05, 0.05, 1.45 * Math.cos((i * Math.PI) / 3), 1.07, -0.05 + 1.45 * Math.sin((i * Math.PI) / 3), 'marquee', 'venue']),
         ['box', 1.0, 0.3, 0.1, 0.5, 0.02, 1.92, 'glass', true], ...flags(-1.5, 1.88, 3, 0.3, ['red', 'white'], 0.02),
+        ...adBoard('bannerW', -0.35, 1.9, 'banner', 0.08), ...adBoard('bannerE', 1.35, 1.9, 'banner', 0.08), // banners either side of the entrance (docs/adverts.md)
       ] },
     ],
   }],
