@@ -1209,6 +1209,7 @@ export class Simulation {
     while (t < now + REST_TICKS) t += DAY;
     for (let i = 0; i < 14 && !this.worksOn(c, Math.floor((t + lead) / DAY)); i++) t += DAY;
     c.nextAt = t;
+    this.start.rescheduled(c, REST_TICKS); // a starter yard's crew goes out again after a rest on its first day (sim/firstfive.ts)
   }
 
   // ---- movement & daily routine ---------------------------------------------

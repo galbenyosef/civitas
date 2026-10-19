@@ -175,7 +175,8 @@ export class FirstFive {
       .sort((a, c) => dist(a) - dist(c));
     let hired = 0, camp = 0;
     for (const c of cands) {
-      if (!this.d.canTake(c, b)) break;
+      if (b.occupants >= capacityOf(b.id, b.level)) break;
+      if (!this.d.canTake(c, b)) continue; // the skill gate turned this one away; the next may do
       const path = pathBetween(w, c.hx, c.hy, b.x, b.y);
       if (!path) continue;
       if (c.job) w.quitJob(c);
@@ -188,11 +189,24 @@ export class FirstFive {
 
   /** Called at the end of every hire: taken on by a starter yard in its first day, they set out now (a full shift from now). */
   hired(c: Citizen, b: Building) {
-    if (!this.quick.size) return;
-    const k = tkey(b.x, b.y), until = this.quick.get(k);
-    if (until === undefined) return;
-    if (until < this.w.tick) { this.quick.delete(k); return; }
-    if (c.state === S.Home && !c.mig) c.nextAt = this.w.tick; // depart() on the next tick; anyone out keeps the roster
+    if (this.quickYard(b.x, b.y) && c.state === S.Home && !c.mig) c.nextAt = this.w.tick; // depart() on the next tick; anyone out keeps the roster
+  }
+
+  /**
+   * Called after Simulation.scheduleNext: a starter yard's crew in its first day goes out again as soon as they have
+   * rested (`rest` ticks) rather than at tomorrow's 07:00, so the first evening is not a five-minute lull.
+   */
+  rescheduled(c: Citizen, rest: number) {
+    if (c.job && this.quickYard(c.wx, c.wy)) c.nextAt = Math.min(c.nextAt, this.w.tick + rest);
+  }
+
+  /** Is the yard at (x, y) a starter yard still in its first day? (Forgets it once the day is over.) */
+  private quickYard(x: number, y: number): boolean {
+    if (!this.quick.size) return false;
+    const k = tkey(x, y), until = this.quick.get(k);
+    if (until === undefined) return false;
+    if (until < this.w.tick) { this.quick.delete(k); return false; }
+    return true;
   }
 
   /**
