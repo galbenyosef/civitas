@@ -10,6 +10,10 @@ London tick, replays every search of a London day in TypeScript and in a Rust po
 24 ms (42%). A faithful Rust port of the searches is 7.4 times faster than TypeScript on one thread, so the whole tick
 gets about 13% faster (1.15×). Extra threads add about 1% on top of that. See [Recommendation](#recommendation).
 
+**Update, later the same day:** steps 1 and 2 of the recommendation are done in TypeScript, with the same answers:
+A\* in a London tick went from 5.9 to FIN_ASTAR ms, and the whole tick from 40.7 to FIN_BARE ms. See
+[the TypeScript speed-ups](#2026-10-19-later-the-typescript-speed-ups).
+
 **Rosetta is not the problem.** The x64 Node under Rosetta and a native arm64 Node run the whole London tick at the
 same speed: 53.1 against 54.3 ms. Only tight kernels like the search loop show a gap (1.8×).
 
@@ -325,12 +329,121 @@ and the car grid as arrays per chunk, and the junction and signal tables as arra
 decides who enters a box first, so a parallel version needs a deterministic conflict rule. Profile `guardSweep`,
 `inBox` and `beginTick`'s car grid rebuild first; the TS gains there may be large and cheap.
 
+## 2026-10-19 (later): the TypeScript speed-ups
+
+Steps 1 and 2 of the recommendation, on branch `route-speedups` (from main at `badf4e7`). Same machine and method as
+above: native arm64 Node, nice 0, each run started with the 1-minute load below 8 (loads 3.8–9.1 at the starts), one
+run at a time, medians of three. Main has moved on since the study: today's London fill ends at 30,838 citizens (not
+30,951) and its profiled tick is 43 ms (not 58), so the "before" figures below were measured again on main as it is now.
+
+### Same answers, faster
+
+- **`Traffic.cost`** keeps a dense array set per chunk (`CostChunk`): the congestion as first read in the current
+  epoch (a new epoch each tick and after `endTick`, the only place congestion changes), flags for the parts that change
+  only with the tiles (a junction of three or more, a level crossing, a bascule deck; cleared by `invalidate` together
+  with the degree and crossing caches), and a kerb flag that `World.kerb` keeps up to date (`CountMap.onSet`). A cost is
+  now one chunk lookup (usually the last one again) and a few typed-array reads, with the same additions in the same
+  order. The congestion is still read through `congestionAt` the first time in an epoch, so its lazy tidying of decayed
+  entries happens exactly as before.
+- **`findRoute`** numbers its nodes by chunk slot (slot × 2,048 + layer × 1,024 + tile), and keeps the g-score,
+  parent, direction in and two stamps (seen, closed) in typed arrays shared by every search; a search takes a new stamp,
+  so nothing is cleared. The open set is the same binary heap in typed arrays (same comparisons, so the same tie-breaks).
+  Neighbours read the tile and aux from the chunk the node is in, or the last one looked up.
+- **`findPath`** (walks, venue and job searches) uses a stamp array for its visited set. `findBest` is unchanged (its
+  goal set can hold tiles in chunks that are not loaded, and it costs 0.01 ms a tick).
+
+Checks: every answer of both corpora is the same (path, cost bit for bit, goal, building, miss box and nodes expanded,
+the node counts from a `--check-expanded` run): London 178,338 / 178,338, 8×8 384,604 / 384,604. A London day recorded
+on the branch is byte-for-byte the corpus recorded on main (all ten files: 178,899 searches, 17,387,999 cost reads), so
+`Traffic.cost` gave the same costs at the same ticks. `ab.ts` (defaults, and `--hour 17 --ticks 2400 --set bus=2`)
+gives the same JSON as main apart from the timings, and every London run ends the day at 31,990 citizens, 30,580
+employed and 9,172 vehicles, as on main.
+
+Replay (searches only, one thread, median of three):
+
+| corpus | main | branch | speed-up | critical path main → branch |
+| --- | --- | --- | --- | --- |
+| London, all 178,338 searches | 9,121 ms | 3,506 ms | 2.6× | 3,440 → 1,229 ms |
+| – routes (A\*) | 8,429 ms | 3,025 ms | 2.8× | |
+| – walks | 538 ms | 387 ms | 1.4× | |
+| – venue / job searches | 95 / 26 ms | 67 / 19 ms | 1.4× | |
+| 8×8, all 384,604 searches | 4,843 ms | 1,919 ms | 2.5× | 1,966 → 643 ms |
+
+Live London (`searchprof.ts --mode phases`, the day after the fill), before step 2:
+
+| per tick, whole day | main | branch | |
+| --- | --- | --- | --- |
+| A\* (`findRoute`) mean / p95 | 5.92 / 13.31 ms | 2.58 / 5.30 ms | −56% |
+| walks / venue searches | 0.277 / 0.137 ms | 0.203 / 0.125 ms | |
+| all route searches | 6.35 ms | 2.92 ms | −54% |
+| A\* per call: mean, p99, max | 0.107, 2.89, 13.8 ms | 0.047, 1.14, 3.0 ms | |
+| A\* 08:00–09:00 / 17:00–18:00 | 8.14 / 9.45 ms | 3.38 / 4.12 ms | |
+| profiled tick | 42.97 ms | 40.26 ms | |
+| unprofiled tick (bare), median of 40.57–42.08 / 36.93–38.13 | 40.69 ms | 37.99 ms | −6.6% |
+
+The live A\* time fell by more than the replay's because the replay already read a dense cost field. The A\* nodes
+expanded are the same (117 a call, p99 3,326).
+
+### Cheaper re-routes
+
+`searchprof.ts --mode reroutes` (`reroute-probe.ts`) fills London as the other modes do, switches on `--set k=v,...`
+only for the day after, and records A\* by caller, what each re-route search came to, and the traffic as the HUD shows
+it. Every run starts that day from the same city. On main (same game as the branch above):
+
+- Re-routes are the held-up drivers (`wait` ≥ 10 at the 25-tick cadence, at most 40 searches a tick, 50 ticks apart for
+  one driver); `delayReroute` and the stuck re-route are off. 39,478 searches a day: **2,880 taken (7%), 36,519 not
+  better by enough (93%), 79 found nothing**. Of the ones not taken, **29,645 (75% of all searches) found exactly the
+  way the driver was already on.** Re-routes were 2.83 s of the day's 6.3 s of A\* (169 nodes a search).
+- Failed searches: spawnVehicle 408, headBack 311, re-routes 79 a day, every one after the whole 4,000-node budget.
+  None of their goals was unreachable (an unbounded search, live and over the whole corpus), so a road-component test
+  would answer none of them early: they are long trips across London, not cut-off ones.
+
+The change kept: **a re-route search stops once nothing it could still find would be taken.** A new way is taken only
+if it costs less than 0.85 × the rest of the current route (or the AVOID price), so `findRoute` now takes a `maxCost`
+and gives up when the cheapest open node's f reaches it: f never falls from one node taken to the next (the Manhattan
+heuristic is consistent, every tile costs at least 1), and a route found from a node costs at least its f. So the
+search ends with no route exactly where the full search would have found one that is then turned down. A margin of
+1e-9 keeps rounding from stopping a search short of one that would be taken.
+
+| London, the day after the fill | A\* ms a tick | re-route A\* s a day | searches | taken | queued | speed | parked | trips | trip mean (ticks) | stuck (mean) | give-ups |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| main rules | 2.62 | 2.83 | 39,478 | 2,880 | 72.2% | 21.7% | 2,741 | 60,738 | 121.2 | 14.3 | 52,078 |
+| **bound (kept)** | **2.20** | **1.78** | 39,478 | 2,880 | 72.2% | 21.7% | 2,741 | 60,738 | 121.2 | 14.3 | 52,078 |
+| cooldown 100 ticks | 2.42 | 2.29 | 32,660 | 2,254 | 72.1% | 21.8% | 2,727 | 60,944 | 120.6 | 14.5 | 51,964 |
+| re-route budget 2,000 nodes | 2.46 | 2.44 | 39,230 | 2,938 | 72.1% | 21.8% | 2,746 | 60,694 | 121.9 | 14.4 | 52,185 |
+| re-route budget 1,000 nodes | 2.18 | 1.81 | 39,160 | 2,767 | 72.1% | 21.8% | 2,748 | 60,851 | 120.3 | 13.8 | 52,214 |
+| bound + cooldown 100 | 2.11 | 1.45 | 32,660 | 2,254 | (as cooldown 100) | | | | | | |
+| bound + budget 1,000 | 2.02 | 1.34 | 39,160 | 2,767 | (as budget 1,000) | | | | | | |
+
+*Stuck* is drivers held past the stuck limit (60 ticks), sampled every 100 ticks; *give-ups* are the Traffic counters'
+sent home, vehicles removed and garage give-ups; *parked* is `parkedCars`, the HUD's figure. The bound changes nothing
+in the game: every figure and every Traffic counter is the same as without it, alone and on top of the other options.
+(Fewer congestion reads means the lazy tidying drops a different set of decayed entries; a run with reads made free of
+side effects showed this changes one re-route in the day, so it was not kept.) The cooldown and the smaller budgets do
+change the game: they take 4–22% fewer re-routes, and the traffic stays within about 1% either way, which is how much
+one day moves when anything changes. They save 0.1–0.2 ms a tick on top of the bound, so they were not kept;
+`rerouteCooldown` (50) and `rerouteNodes` (4,000) are now `TRAFFIC_TUNING` entries for anyone who wants to try them.
+
+### Whole tick
+
+FINAL_TABLE
+
+### Next
+
+- The traffic step is now 42–45% of the tick. Profile `Traffic.guardSweep` (8% of CPU in the study) and the car grid
+  that `beginTick` rebuilds from every lane each tick, before any data-layout change to `moveVehicles`.
+- The 720 failed fleet searches a day (spawnVehicle, headBack) are now the most expensive A\* calls (1.0 s a day, 4,000
+  nodes each). They are reachable, just far: a cheaper first guess at "too far for 4,000 nodes" would need its own
+  check that it changes no answers.
+- A Rust `findRoute` now has less to win: the A\* is 2.2 ms a tick, 6% of the tick.
+
 ## Files
 
 - `packages/server/src/loadtest/searchprof.ts`, `search-phases.ts`: the probe (phases, bare, record, CPU profile).
 - `packages/server/src/loadtest/search-corpus.ts`: corpus format, recorder and reader.
 - `packages/server/src/loadtest/search-replay.ts`: TS replay, check and worker-thread benchmark.
 - `packages/server/src/loadtest/probe-city.ts`: the probes' city setup, shared with `jobsearch.ts`.
+- `packages/server/src/loadtest/reroute-probe.ts`: `searchprof.ts --mode reroutes`, A\* by caller, re-route outcomes and traffic with `--set`.
 - `packages/server/src/loadtest/count-hook.mjs`: also exposes the unwrapped search functions, and node counts with
   `SEARCH_HOOK_EXPANDED=1`.
 - `tools/search-rs/`: the Rust spike (`cargo run --release -- CORPUS_DIR`).

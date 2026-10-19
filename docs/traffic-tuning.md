@@ -391,6 +391,13 @@ and the elapsed / expected distribution of the driven legs (`legs` and `reroute`
 
 Live dev server (feature off), probe-obb.mjs over 60 s after 15 s, late afternoon (229 cars at most): car–car 0, car–pedestrian 0.087 per frame.
 
+**Search cost (2026-10-19, docs/search-perf.md).** In London three in four held-up re-route searches found the way the
+driver was already on. A re-route search now stops as soon as nothing it could still find would be taken (its cheapest
+open node already costs `worse`, 0.85 × the rest of the current route), which takes exactly the same re-routes for 37%
+less A\* time. Two new tunables keep the old fixed values: `rerouteCooldown: 50` (ticks between one driver's searches)
+and `rerouteNodes: 4000` (a held-up driver's node budget). A cooldown of 100 or a budget of 1,000 or 2,000 saved
+0.1–0.2 ms a tick more and took 4–22% fewer re-routes, with the traffic within about 1%; neither was adopted.
+
 ## Buses
 
 Buses (docs/transit.md) are 0.6-tile vehicles in this traffic model. They pull in on the stop's road tile in their lane,
