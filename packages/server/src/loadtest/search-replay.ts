@@ -37,6 +37,8 @@ class Replayer {
   w = new World(0);
   gx0 = 0; gy0 = 0; gw = 0; gh = 0; grid: Int32Array;
   dv: DataView;
+  /** what the last mismatch was, for the log */
+  note = '';
   constructor(public c: Corpus, public f: FieldBufs) {
     const n = c.manifest.counts.chunks, cdv = new DataView(c.chunks.buffer);
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -91,7 +93,7 @@ class Replayer {
         : (x: number, y: number) => ((x === ox1 && y === oy1) || (nov > 1 && x === ox2 && y === oy2) ? avoid : this.costAt(x, y, seq));
       const r = findRoute(this.w, sx, sy, gx, gy, cost, dv.getFloat64(o + 24, true), maxNodes, dv.getInt8(o + 97));
       path = r ? r.path : null;
-      if (r && r.cost !== dv.getFloat64(o + 32, true)) bad |= 4;
+      if (r && r.cost !== dv.getFloat64(o + 32, true)) { bad |= 4; this.note = `search ${i} (tick ${dv.getUint32(o + 4, true)}): cost ${r.cost} against ${dv.getFloat64(o + 32, true)}`; }
     } else if (kind === Kind.Walk) {
       path = pathBetween(this.w, sx, sy, gx, gy);
     } else if (kind === Kind.Job) {
@@ -150,7 +152,10 @@ if (!isMainThread) {
     seen = Atomics.load(ctl, 0);
     if (ctl[5]) break;
     const end = ctl[2], t = performance.now();
-    for (let i = Atomics.add(ctl, 3, 1); i < end; i = Atomics.add(ctl, 3, 1)) d.results[i] = r.run(i) || 0;
+    for (let i = Atomics.add(ctl, 3, 1); i < end; i = Atomics.add(ctl, 3, 1)) {
+      d.results[i] = r.run(i) || 0;
+      if (d.results[i] && r.note) { const n = r.note; r.note = ''; const again = r.run(i); console.error(`worker ${d.id}: mismatch ${d.results[i]}: ${n}; run again at once: ${again ? r.note : 'matches'}; batch ${ctl[1]}-${end}, gen ${seen}/${Atomics.load(ctl, 0)}`); r.note = ''; }
+    }
     d.busy[d.id] += performance.now() - t;
     Atomics.add(ctl, 4, 1);
     Atomics.notify(ctl, 4);
