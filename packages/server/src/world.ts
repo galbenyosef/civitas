@@ -291,9 +291,10 @@ export class World {
   // ---- chunks & tiles -------------------------------------------------
 
   getChunk(cx: number, cy: number, create = true): Chunk | undefined {
-    const nk = tkey(cx, cy);
+    if (cx === this.lastCx && cy === this.lastCy) return this.lastChunk;
+    const nk = (cx + 0x800) * 0x1000 + cy + 0x800;
     let c = this.chunkByNum.get(nk);
-    if (c) return c;
+    if (c) { this.lastCx = cx; this.lastCy = cy; this.lastChunk = c; return c; }
     const key = chunkKey(cx, cy);
     c = this.chunks.get(key);
     if (!c && create) {
@@ -306,10 +307,12 @@ export class World {
     return c;
   }
   /**
-   * `chunks` by numeric key, filled as chunks are looked up, so the road searches' tens of thousands of tile peeks a
-   * tick build no key strings. Chunks are only ever added, never replaced, so it cannot go stale.
+   * `chunks` by numeric key (a small integer: |cx|, |cy| < 2048), filled as chunks are looked up, so the road searches'
+   * tens of thousands of tile peeks a tick build no key strings, and the last chunk found. Chunks are only ever added,
+   * never replaced, so neither can go stale.
    */
   private chunkByNum = new Map<number, Chunk>();
+  private lastCx = NaN; private lastCy = NaN; private lastChunk: Chunk | undefined;
 
   generateChunk(cx: number, cy: number): Chunk {
     const tiles = new Uint16Array(CHUNK_SIZE * CHUNK_SIZE);
