@@ -521,7 +521,7 @@ export const TOUR: string[] = [
   'nursery', 'primary-school', 'secondary-school', 'sixth-form', 'fe-college', 'university', 'halls', 'research-institute',
   'airport', 'runway',
   'block-estate', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
-  'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3', 'world-map',
+  'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3', 'world-map', 'ranks',
   'ind-plant', 'ind-works', 'ind-row', 'ind-depot', 'com-centre', 'com-parade', 'com-store', 'com-hotel',
   'off-tower', 'off-hq', 'off-centre', 'res-estate', 'res-terrace', 'res-midrise', 'res-tower', 'res-block',
   'marina', 'jetty', 'ferry-pier', 'line-ferry-1', 'ferry-pier-2', 'fishing-harbour', 'cargo-port', 'sea-gate',
