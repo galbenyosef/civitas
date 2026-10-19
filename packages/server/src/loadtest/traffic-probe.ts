@@ -14,17 +14,19 @@
  * `--client` connects one client after the fill (hello, then a subscription to every chunk), as a browser would over a
  * socket (`--client-at H`: at hour H of the day instead); every frame it is sent is counted and hashed (`wire` in the
  * summary). The network flush is timed per tick either way. `--reload` saves the filled world and loads it again
- * (snapshot.ts) before the day, as a server restart does, and prints a hash of the snapshot's content.
+ * (snapshot.ts) before the day, as a server restart does, and prints a hash of the snapshot's content (`--save FILE`
+ * writes it, `--resave FILE` writes the loaded world saved again); `--load FILE` plays the day from a save instead of a fill.
  */
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { Session } from 'node:inspector';
-import { TICKS_PER_DAY, TICKS_PER_HOUR, isDemoId, type DemoId } from '@msimcity/shared';
+import { DEMO_TOWN, TICKS_PER_DAY, TICKS_PER_HOUR, isDemoId, type DemoId } from '@msimcity/shared';
 import { Traffic } from '../sim/traffic';
 import type { World, Mover } from '../world';
 import type { Conn } from '../transport';
 import { probeGame } from './probe-city';
 import { snapshotOf, worldFromSnapshot } from '../snapshot';
-import { createGame } from '../game';
+import { createGame, type Game } from '../game';
+import { seededRandom } from '../demo/seed';
 
 type Fn = (this: unknown, ...a: unknown[]) => unknown;
 interface PfHook { orig: Record<string, Fn>; set: Record<string, (f: Fn) => void> }
@@ -55,14 +57,32 @@ export async function main(argv: string[]) {
   const t0 = performance.now();
   let connect: ((c: Conn) => void) | null = null;
   const source = { onConnection(fn: (c: Conn) => void) { connect = fn; } };
-  const probe = await probeGame(demo, districts, source);
-  const { label, fill } = probe;
-  let game = probe.game;
-  if (argv.includes('--reload')) {
-    // the server's restart: the world saved and loaded again (snapshot.ts), and a new game made round it
-    const text = JSON.stringify(snapshotOf(game.world));
-    console.log(`snapshot: ${text.length} bytes, ${sortedHash(JSON.parse(text))} with its keys sorted`);
+  const loadFile = arg('load', '');
+  let label: string, fill: { pop: number; ticks: number }, game: Game;
+  if (loadFile) {
+    // a save written by --save (by this build or another): no fill, the game from the file
+    Math.random = seededRandom(DEMO_TOWN.seed);
+    const text = readFileSync(loadFile, 'utf8');
+    console.log(`snapshot ${loadFile}: ${text.length} bytes, ${sortedHash(JSON.parse(text))} with its keys sorted`);
     game = createGame(worldFromSnapshot(JSON.parse(text))!, source, { devTools: false, sandbox: true });
+    label = `loaded ${loadFile}`; fill = { pop: game.world.citizens.size, ticks: 0 };
+  } else {
+    const probe = await probeGame(demo, districts, source);
+    ({ label, fill, game } = probe);
+  }
+  const save = (g: Game, file: string) => {
+    const text = JSON.stringify(snapshotOf(g.world));
+    console.log(`snapshot: ${text.length} bytes, ${sortedHash(JSON.parse(text))} with its keys sorted${file ? `, written to ${file}` : ''}`);
+    if (file) writeFileSync(file, text);
+    return text;
+  };
+  if (argv.includes('--reload') || arg('save', '')) {
+    // the server's restart: the world saved and loaded again (snapshot.ts), and a new game made round it
+    const text = save(game, arg('save', ''));
+    if (argv.includes('--reload')) {
+      game = createGame(worldFromSnapshot(JSON.parse(text))!, source, { devTools: false, sandbox: true });
+      if (arg('resave', '')) save(game, arg('resave', ''));
+    }
   }
   const w = game.world;
   console.log(`${label} filled: ${fill.pop} citizens, ${(fill.ticks / DAY).toFixed(2)} days, ${((performance.now() - t0) / 1000).toFixed(0)} s wall, ${process.arch} node ${process.version}, mode ${mode}`);
