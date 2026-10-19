@@ -1251,3 +1251,12 @@ traffic step (+19%), not in the citizens' own updates (+2%) or anything E5 added
 | 4 | 533 / 397 | 105.5/192 → 93.6/165 | 28.9 → 31.8% | 581 / 471 | 109.3/177 → 97.9/162 |
 
 Trips in the window fall by 10-19% (fewer workers per home); the citizens are within 8% of main on every seed.
+
+**On record for later tuning: what families cost.** Accepted for E5 (2026-10-19): with families on, the Commons runs
++4% sim ms per tick at 08:00 and +11-13% at 17:00, over section 8's 5% target. The cause is not E5's code (with
+`FAMILIES=0` the branch matches main trip for trip) but the population it brings: about 18% children, who run the child
+behaviour that already existed (going out with a parent, `bringCompany`; riding along in the family car, `rideToVenue`
+and the carpool lifts; walking beside a grown-up). Timing each step of `Simulation.tick` puts the extra in
+`moveVehicles` and the traffic step (+19%); the citizens' own updates rise 2%. The evening window costs most because that
+is when parents take children out. Levers, if it needs tuning: `LIFE.childJoins` (setting it to 0 took about 5% off at
+17:00 in one interleaved check), `EDU.familyShare`, `EDU.familyKids`, or the carpool's passenger handling.
