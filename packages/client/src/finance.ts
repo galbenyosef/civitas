@@ -63,7 +63,7 @@ export class FinancePanel {
     btn.classList.toggle('admin', f?.admin !== undefined);
     btn.classList.toggle('od', !!f && f.admin === undefined && me!.money < 0);
     if (f) {
-      if (f.admin !== undefined) btn.textContent = `in administration · day ${Math.max(0, this.d.day() - f.admin) + 1} · recovery plan`;
+      if (f.admin !== undefined) btn.textContent = 'in administration · the plan';
       else if (me!.money < 0) btn.textContent = `overdraft · ${f.days}/${f.after}`;
       else btn.textContent = `mothballed ${f.plan.mothballed}`;
       btn.title = f.admin !== undefined ? 'Your city is in administration: the recovery plan' : me!.money < 0 ? `On the overdraft: ${f.days} of ${f.after} midnights below zero before administration` : 'Services you mothballed';
@@ -91,7 +91,7 @@ export class FinancePanel {
     const head = `<div class="thead"><h2 class="${admin ? 'bad' : ''}">${title}</h2><span class="sub">${lead}</span><button class="chip" id="adminClose">✕</button></div>`;
     const stats = '<div class="fstats">'
       + stat('Treasury', money(me.money), me.money < 0 ? 'neg' : '')
-      + stat('Overdraft limit', `${money(f.limit)}<small> · ${money(spend)} left to spend</small>`)
+      + stat('Overdraft limit', `${money(f.limit)}<small> · ${admin ? 'spending stopped' : `${money(spend)} left to spend`}</small>`)
       + stat('Interest', f.interest ? `${money(f.interest)}<small> a day</small>` : '<small>none above zero</small>', f.interest ? 'neg' : '')
       + (admin ? stat('In administration', `${plural(days, 'day')}<small> · since day ${f.admin}</small>`, 'neg') : stat('Midnights below zero', `${f.days}<small> of ${f.after}</small>`, f.days ? 'neg' : ''))
       + (me.money < 0 ? stat('Back to zero', money(-me.money)) : '')
