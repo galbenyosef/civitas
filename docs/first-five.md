@@ -163,25 +163,37 @@ Residents counts everyone on the player's land, the camp included; "in homes" is
 | | before F 05:00 | before F 12:00 | before F 20:00 | **after F 05:00** | **after F 12:00** | **after F 20:00** | before B 05:00 | after B 05:00 |
 |---|---|---|---|---|---|---|---|---|
 | first resident (min) | 2.8 | 7.8 | 4.8 | **0.8** | **0.8** | **0.8** | 3.1 | 0.8 |
-| 12 residents (min) | 10.5 | 9.1 | 6.5 | **2.4** | **AF12_RES12** | **5.5** | - (run ended at 30) | 10.5 |
-| 12 in homes, the goal (min) | 10.3 | 9.1 | 6.6 | 3.6 | AF12_HOMES | 5.9 | - | 10.6 |
-| longest stretch with nothing new in the first 30 (min) | 4.7 | 5.7 | 3.3 | **2.0** | **AF12_GAP** | **1.7** | 1.7 | 7.3 |
-| Masonry ready (min) | 9.1 | 7.1 | 4.1 | 2.1 | AF12_MAS | 2.1 | 3.1 | 9.4 |
+| 12 residents (min) | 10.5 | 9.1 | 6.5 | **2.4** | **6.8*** | **5.5** | - (run ended at 30) | 10.5 |
+| 12 in homes, the goal (min) | 10.3 | 9.1 | 6.6 | 3.6 | 6.8* | 5.9 | - | 10.6 |
+| longest stretch with nothing new in the first 30 (min) | 4.7 | 5.7 | 3.3 | **2.0** | **1.7*** | **1.7** | 1.7 | 7.3 |
+| Masonry ready (min) | 9.1 | 7.1 | 4.1 | 2.1 | 3.1* | 2.1 | 3.1 | 9.4 |
 | yard placed (min) | 0.9 | 0.9 | 0.9 | 1.3 | 1.3 | 1.3 | - | 8.3 |
-| A growing town (50) (min) | 18.3 | 17.1 | 21.6 | 7.9 | AF12_R50 | 8.8 | - | 14.6 |
-| Balance the books (min) | 22.1 | 19.8 | 25.1 | 14.1 | AF12_BOOKS | 17.1 | - | 22.1 |
+| A growing town (50) (min) | 18.3 | 17.1 | 21.6 | 7.9 | 11.4* | 8.8 | - | 14.6 |
+| Balance the books (min) | 22.1 | 19.8 | 25.1 | 14.1 | 19.8* | 17.1 | - | 22.1 |
 | the settlers moment | - | - | - | yes | yes | yes | - | yes |
 
 The acceptance test (first resident within 3, 12 within 8, no stretch over 4 in the first 30) passes at all three hours
 for the player who follows the card. The noon join is the slowest because the Commons' jobs are all taken by midday,
-which is what the followers rule answers (its run is the one marked; the other two ran before it). B pitches the camp
+which is what the followers rule answers (* the noon column was measured before that rule; the 05:00 column after it; the frontier runs in section 0 include it). B pitches the camp
 (its first eight arrive at 0.8) but places no yard until its one-day fallback at 8.3, because the builders hint stays
 quiet while "Hire your own builders" is the active goal: B is a player who has the card up and does not read it, and
 its 7.3-minute stretch is the wait for its own yard. Before, B's first resident took 3.1 minutes and F's up to 7.8.
 
 Bots B and F to day 15 (two hours), after against the onboarding section's figures:
 
-BALANCE_TABLE
+| F to day 15 (two hours), joined 05:00 | before (d90f05f, same bot) | after |
+|---|---|---|
+| money at day 2 / 4 / 7 / 10 / 15 | $13,487 / $10,665 / $7,654 / $10,392 / $15,718 | $8,246 / $9,721 / $10,780 / $12,810 / $17,326 |
+| lowest money | $7,582 (day 6.8) | $8,246 (day 2.0) |
+| residents at 10 / 30 / 60 / 120 min | 2 / 49 / 250 / 485 | 97 / 217 / 324 / 477 |
+| own jobs at the end (cap / filled) | 154 / 144 | 147 / 136 |
+| techs bought; `built` | 13; 24,663 | 13; 20,224 |
+| tax a day at the end | $1,245 | $1,015 |
+| goals: shops / Masonry / 50 / books / 250 / bus line (min) | 18 / 18 / 18 / 22 / 53 / - (onboarding section, F) | 7.4 / 7.6 / 7.8 / 14.1 / 42.6 / 46.6 |
+
+The after curve spends earlier (every tier-1 node is affordable by minute 8) and ends higher; the low point is
+$700 higher and comes at day 2 instead of day 7; two-hour population is the same within noise. B (the sensible player
+who waits for the builders hint) was run to 30 minutes only: see the table above.
 
 Tick cost: TICK_COST.
 
