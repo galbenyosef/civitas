@@ -715,11 +715,16 @@ export class Traffic {
   private inBox(tx: number, ty: number): number {
     const M = this.boxM, I = this.boxIn, O = this.boxOut;
     let n = 0;
+    // inside a chunk, not on its edge: every lane looked at is in this tile's RoadChunk
+    const lx = tx - Math.floor(tx / CHUNK_SIZE) * CHUNK_SIZE, ly = ty - Math.floor(ty / CHUNK_SIZE) * CHUNK_SIZE;
+    const inner = lx >= 1 && lx <= CHUNK_SIZE - 2 && ly >= 1 && ly <= CHUNK_SIZE - 2;
+    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx;
+    if (inner && !rc) return 0;
     for (let d = 0; d < 4; d++) {
       // arriving lanes: from the neighbour on the opposite side, heading d
-      const q = this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
+      const q = rc ? rc.lanes[(i0 - DIRS[d][0] - DIRS[d][1] * CHUNK_SIZE) * 4 + d] : this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
       if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m)) { M[n] = m; I[n] = d; O[n] = this.nextDirOf(m); n++; }
-      const o = this.laneQ(tx, ty, d);
+      const o = rc ? rc.lanes[i0 * 4 + d] : this.laneQ(tx, ty, d);
       if (o) for (const m of o) if (m.prog < this.clearAt(m)) { M[n] = m; I[n] = m.inDir; O[n] = d; n++; }
     }
     return n;
