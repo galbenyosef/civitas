@@ -1260,3 +1260,22 @@ and the carpool lifts; walking beside a grown-up). Timing each step of `Simulati
 `moveVehicles` and the traffic step (+19%); the citizens' own updates rise 2%. The evening window costs most because that
 is when parents take children out. Levers, if it needs tuning: `LIFE.childJoins` (setting it to 0 took about 5% off at
 17:00 in one interleaved check), `EDU.familyShare`, `EDU.familyKids`, or the carpool's passenger handling.
+
+### London A/B, education on against off (2026-10-19, main 389df42)
+
+London built as `demo:check` builds it (seeded `Math.random(7)`), the live fast fill with education on and
+`seedDemoStudents`. The fill is deterministic, so both arms reach the same world: hash 3bda1b81, 30,890 citizens, 1,015
+of them children. Then the off arm sets `SCHOOLS.on`, `SKILLS.on` and `FAMILIES.on` to false (the switches `EDU=0` and
+`FAMILIES=0` set) and ends every enrolment (421), so pupils stay at home. Both arms then run 24 game hours from 09:30,
+timing every tick. One pair, run one after the other at `nice 15` on a box that was also running prod and dev (load
+about 8), so absolute times are about twice `demo:check`'s 47 ms and only the difference counts:
+
+| tick ms, mean / p95 | education on | off | on - off |
+| --- | --- | --- | --- |
+| the whole day | 95.5 / 159.9 | 81.8 / 137.5 | +16.7% / +16.3% |
+| 08:00-09:00 | 110.0 / 160.5 | 90.1 / 136.3 | +22.1% / +17.8% |
+| 17:00-18:00 | 146.2 / 204.0 | 124.6 / 165.3 | +17.3% / +23.4% |
+
+The citizens ended at 32,137 (on) and 32,187 (off). The 17:00 difference is well over 5%, so no second pair was run.
+This covers all of education, not just the families: the school runs and escorts, students at lectures, the census,
+the skill gate and wages, against a town whose children stay at home.
