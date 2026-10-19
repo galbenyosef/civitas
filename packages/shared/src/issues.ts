@@ -19,13 +19,34 @@ export interface IssueText {
 }
 export const ISSUE_TEXT: Record<number, IssueText> = {
   [Issue.NoRoad]: { title: 'No road', explain: 'Nothing grows or opens without a road beside it. Lay a road along the lot, or zone the lot next to one.' },
-  [Issue.NoBuilders]: { title: 'No builders', explain: 'Builders were at work elsewhere but none came here for an hour. Place a builders\' yard of your own, check a road links it, or raise this site\'s priority.' },
+  [Issue.NoBuilders]: { title: 'No builders', explain: 'Builders are at work elsewhere but none has come to your sites for an hour and you have no builders\' yard, or none has come to this one for two days. Place a builders\' yard (another, if yours is busy), check a road links it, or raise this site\'s priority.' },
   [Issue.Unstaffed]: { title: 'Unstaffed', explain: 'Fewer than half the staff it needs are at work. It needs homes nearby (people to hire) and a road to reach it.' },
   [Issue.ParkingFull]: { title: 'Parking full', explain: 'Drivers find it full and park at the kerb, slowing the street. Put a parking lot within ten tiles, or Deep foundations for parking underneath.' },
   [Issue.NoCustomers]: { title: 'No customers', explain: 'Nobody came all of yesterday. Customers need homes in reach by road; check the street links up.' },
   [Issue.Fire]: { title: 'On fire', explain: 'A fire is burning. The nearest staffed fire post or station within 14 tiles sends an engine; with none in reach it burns down. A fire post (Emergency services) is cheap.' },
-  [Issue.Unhappy]: { title: 'Very unhappy', explain: 'The people living here are miserable: high taxes, long commutes, no services or nothing to do. Hover a resident to see why.' },
+  [Issue.Unhappy]: { title: 'Very unhappy', explain: 'Far unhappier than the rest of your town. Each home says what hurts most and what helps; hover a resident for the rest.' },
 };
+
+/**
+ * Why a very unhappy home is unhappy: the largest complaint of its unhappiest resident that the player can do something
+ * about (sim/life.ts happinessParts labels; loneliness and being over-qualified are left out), sent with the problems list
+ * (message `problems`, r). 0 is none known.
+ */
+export const MOOD_REASONS: { id: number; labels: string[]; title: string; advice: string }[] = [
+  { id: 1, labels: ['no services nearby'], title: 'no services nearby', advice: 'Services in reach: a police station, fire station or clinic counts in full, a box or post for less.' },
+  { id: 2, labels: ['out of work'], title: 'out of work', advice: 'Zone jobs nearby: shops, industry or offices.' },
+  { id: 3, labels: ['long commute'], title: 'long commute', advice: 'Zone jobs closer to these homes, or run a bus line.' },
+  { id: 4, labels: ['nothing to do'], title: 'nothing to do', advice: 'Put a park or a venue in reach.' },
+  { id: 5, labels: ['short of money', 'money is tight', 'spending more than earning'], title: 'short of money', advice: 'More jobs, and better-paid ones (offices), let them earn.' },
+  { id: 6, labels: ['stuck in traffic'], title: 'stuck in traffic', advice: 'Ease the streets: another road out, or a bus line.' },
+  { id: 7, labels: ['no school place'], title: 'no school place', advice: 'Build a school in reach.' },
+  { id: 8, labels: ['poor health', 'so-so health', 'unwell right now'], title: 'poor health', advice: 'Put a clinic in reach.' },
+];
+/** The reason id for a happiness part's label ("long commute (42 min)" matches "long commute"), 0 when it is not one to act on. */
+export function moodReasonOf(label: string): number {
+  for (const r of MOOD_REASONS) for (const l of r.labels) if (label.startsWith(l)) return r.id;
+  return 0;
+}
 
 /** The data overlays the server can send (message `overlay`); congestion is the traffic message's own tint. 0 is none. */
 export const Overlay = { None: 0, Coverage: 1, Leisure: 2, Happiness: 3, JobsHomes: 4 } as const;

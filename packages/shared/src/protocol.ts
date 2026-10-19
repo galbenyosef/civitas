@@ -612,7 +612,7 @@ export type ServerMsg =
   /** every fire burning, being put out or in its aftermath (server sim/fires.ts, shared/src/fires.ts), whenever the list changes */
   | { t: 'fires'; f: FireDTO[] }
   /** your own parcels' problems, flat triples x, y, code: on hello, then when they change (at most every ISSUE_TUNING.problemsHours) */
-  | { t: 'problems'; p: number[] }
+  | { t: 'problems'; p: number[]; /** one per triple: why a very unhappy home is (shared/src/issues.ts MOOD_REASONS), 0 for others; absent when none */ r?: number[] }
   /** per chunk: the overlay you asked for, base64 Uint8Array(CHUNK_SIZE^2) (overlayByte; 0 no data), sent when it changes */
   | { t: 'overlay'; ch: number; cx: number; cy: number; d: string };
 

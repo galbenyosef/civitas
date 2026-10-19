@@ -262,8 +262,12 @@ export const ISSUE_TUNING = {
    */
   evalHours: 0.25,
   problemsHours: 0.5,
-  /** no builders: a site no builder has come to while builders were at work somewhere, for this long (sites wait out the night) */
+  /** no builders: a site no builder has come to while builders were at work somewhere, for this long (sites wait out the night) ... */
   noBuildersHours: 1,
+  /** ... while no site of its owner's has been worked for that long either and they have no builders' yard: nobody is building
+   *  for them. A site in the queue behind its owner's own crew is not stuck (a new town zones dozens of lots for two builders)
+   *  unless it waits this long */
+  noBuildersStuckHours: 48,
   /** unstaffed: staff on shift or on the way under this share of what the roster expects at the hour ... */
   unstaffedShare: 0.5,
   /** ... for this long (shift changes and jittered starts never last that long) ... */
@@ -279,9 +283,14 @@ export const ISSUE_TUNING = {
   parkingClearAt: 2,
   /** no customers: a shop or staffed venue standing all of yesterday with no visitor yesterday and none yet today */
   noCustomersDays: 1,
-  /** very unhappy: residents' mean happiness under this; clears above unhappyClear (hysteresis) */
-  unhappyBelow: 35,
-  unhappyClear: 45,
+  /** very unhappy: residents' mean happiness under this; clears above unhappyClear (hysteresis) ... */
+  unhappyBelow: 30,
+  unhappyClear: 38,
+  /** ... in a home standing this long (newcomers arrive broke, jobless and friendless; that is not a problem yet) ... */
+  unhappyGraceHours: 24,
+  /** ... and this far under its owner's town mean: the outliers, unless the whole town is under unhappyTownBelow */
+  unhappyMargin: 8,
+  unhappyTownBelow: 25,
   /** 1: the Commons' own buildings get icons too outside sandboxes (its queue of sites would otherwise crowd the start) */
   commons: 0,
 };
