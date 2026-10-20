@@ -70,7 +70,7 @@ export const NEED_HOW: Record<RankNeedId, string> = {
   shops: 'Commercial (5): zone a few lots near your homes.',
   leisure: 'Park (G): place one among your homes, $120.',
   cover: 'A police box and a fire post (Emergency services, T): cheap, with few staff.',
-  level2: 'Masonry (T) lets lots grow to two storeys; your builders raise them as the lots fill.',
+  level2: 'Masonry (T) lets lots grow to two storeys, and they need power: a substation (Electrification, T) beside your streets. Your builders raise them as the lots fill.',
   black: 'Finish days with taxes above wages and upkeep: the ledger (click the treasury) and the parcel tax slider.',
   school: 'A school (Education, T) or a bus line (Public transport, T).',
   busline: 'Place bus stops and draw a line in the Lines panel (Public transport, T).',

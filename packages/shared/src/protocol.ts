@@ -12,8 +12,9 @@ import type { FireDTO } from './fires';
 import type { AdTarget, AdsDTO } from './adverts';
 import type { StoryDTO } from './news';
 import type { GraveSiteDTO, DeceasedInfo, RemembranceInfo, FamilyRef } from './remembrance';
+import type { UtilityInfo, UtilLinkDTO } from './utilities';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
-export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | KindToolId;
+export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'pylons' | 'cable' | KindToolId;
 
 export interface ParcelStats {
   population: number;
@@ -68,10 +69,11 @@ export interface PlayerDTO {
   fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'funeral' | 'burial' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', builders: "Builders' fees",
-  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advertising', funeral: 'Funeral fees', burial: 'Burial and cremation fees', other: 'Other',
+  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advertising',
+  bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees', other: 'Other',
 };
 /**
  * Money that can run out (docs/start-from-zero.md B3): the overdraft line, the count of midnights below zero, and
@@ -211,6 +213,8 @@ export interface BuildingInfo {
   media?: MediaInfo;
   /** a funeral director, resting place or mortuary (docs/remembrance.md): plots, fees, funerals planned, bodies waiting */
   remembrance?: RemembranceInfo;
+  /** utilities (docs/utilities.md, server sim/utilities.ts): what it gets, from which node, its bill; a node's or plant's network */
+  utilities?: UtilityInfo;
   visitors?: number;
   visitorCapacity?: number;
   /** builders' yard: sites its crews are on right now */
@@ -251,6 +255,17 @@ export interface BuildingInfo {
   harbour?: HarbourInfo;
   /** education kinds (docs/education.md, server sim/schools.ts): pupils, places, teachers and results */
   school?: SchoolInfo;
+  /** homes, for a viewer with Focus groups (docs/motivation.md, Culture tier 2): what the people of this parcel care about */
+  focus?: FocusInfo;
+}
+
+/** A Focus group's finding for one parcel (docs/motivation.md, BuildingInfo.focus): its grown-ups' values in whole percentages. */
+export interface FocusInfo {
+  parcel: string;
+  /** adults and retirees asked (children are not) */
+  people: number;
+  /** percentages in Value order (shared/src/motivation.ts), summing to 100 */
+  pct: number[];
 }
 
 /** A school, college or university for its tooltip (docs/education.md section 3). Stage is a Study value. */
@@ -469,6 +484,10 @@ export interface CitizenLife {
   education?: CitizenEducation;
   /** relatives and friends who have died (docs/remembrance.md): open a headstone from them; `grieving` while they mourn one */
   mourning?: FamilyRef[]; grieving?: string;
+  /** what they care about, in words (docs/motivation.md section 9): "Cares most about family; restless" */
+  values?: string;
+  /** their latest change of job or home of their own accord, in words, while recent: "changed job for the pay" */
+  lately?: string;
 }
 /** A citizen's schooling for the panel (docs/education.md); level, track and stage are EduLevel, EduTrack and Study. */
 export interface CitizenEducation {
@@ -565,7 +584,10 @@ export type ClientMsg =
   /** adverts (docs/adverts.md, server sim/adverts.ts): a new campaign; put one up on slots ([door x, door y, slot]) or the n free ones nearest a point; take posters down, or end a campaign */
   | { t: 'adCampaign'; theme: number; claim: number; look: number; target?: AdTarget }
   | { t: 'adRent'; campaign: number; slots?: [number, number, number][]; near?: { x: number; y: number; n: number } }
-  | { t: 'adEnd'; slots?: [number, number, number][]; campaign?: number; drop?: boolean };
+  | { t: 'adEnd'; slots?: [number, number, number][]; campaign?: number; drop?: boolean }
+  /** utilities (docs/utilities.md, server sim/utilities.ts): take down the trunk link through (x, y); pin a node as protected, or switch your grid import */
+  | { t: 'utilLink'; op: 'remove'; x: number; y: number }
+  | { t: 'utilNode'; x: number; y: number; protect?: boolean; importOn?: boolean };
 
 export type ServerMsg =
   | { t: 'welcome'; you: string; seed: number; day: number; /** a frontier start (docs/first-five.md section 0) and its road end, where the goals' "show me" looks */ start?: 'frontier'; home?: [number, number]; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
@@ -637,7 +659,11 @@ export type ServerMsg =
   /** every resting place's filled plots and the funerals under way (shared/src/remembrance.ts), on join and when they change */
   | { t: 'graves'; list: GraveSiteDTO[] }
   /** a deceased person's panel (answer to inspectDeceased); null when nobody of that id is remembered */
-  | { t: 'deceased'; id: number; info: DeceasedInfo | null };
+  | { t: 'deceased'; id: number; info: DeceasedInfo | null }
+  /** utilities (shared/src/utilities.ts): every node's state once a game hour and on a fault or repair, flat [x, y, UtilState, load %, ...] (doors); `h` the game hour */
+  | { t: 'utilState'; h: number; n: number[] }
+  /** every trunk link (shared/src/utilities.ts UtilLinkDTO), on hello and whenever one is laid, taken down or faults */
+  | { t: 'utilLinks'; links: UtilLinkDTO[]; /** link ids faulted now */ down?: number[] };
 
 /** A broadcaster in the building panel (server sim/news.ts describe). */
 export interface MediaInfo {

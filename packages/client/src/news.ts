@@ -13,8 +13,12 @@ import type { ClientWorld } from './world';
 /** The stories this client holds, by id: what the panel and ticker read, and later the Lights' news turn and the FPV TV. */
 export class NewsStore {
   private byId = new Map<number, StoryDTO>();
+  /** bumped by every change (the news helicopters and the TV cache on it) */
+  version = 0;
+  private sorted: StoryDTO[] | null = null;
   /** Take a `news` message: `all` replaces what was held (joining), otherwise each story is added or updated by id. */
   apply(list: readonly StoryDTO[], all = false) {
+    this.version++; this.sorted = null;
     if (all) this.byId.clear();
     for (const s of list) this.byId.set(s.id, s);
     if (this.byId.size > NEWS.keep) {
@@ -35,8 +39,8 @@ export class NewsStore {
     return out;
   }
   get(id: number) { return this.byId.get(id); }
-  /** every story held, covered or not, oldest first */
-  all(): StoryDTO[] { return [...this.byId.values()].sort((a, b) => a.id - b.id); }
+  /** every story held, covered or not, oldest first (the same array until the next change: do not modify it) */
+  all(): readonly StoryDTO[] { return (this.sorted ??= [...this.byId.values()].sort((a, b) => a.id - b.id)); }
 }
 /** The one store (the Piccadilly Lights' news turn reads `news.latest(1)[0]?.h`). */
 export const news = new NewsStore();

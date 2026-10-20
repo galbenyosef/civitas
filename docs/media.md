@@ -1,6 +1,6 @@
 # Media: TV studios, the news, news helicopters, live TV and citizen memories
 
-**Built: N1+N2 (2026-10-20).** This covers the broadcaster ladder, the techs, coverage, the news story log, the News panel and ticker, and the news overlay. N3–N6 are designed below and not built yet.
+**Built: N1+N2, N3+N4 and the TV filler (2026-10-20).** N1+N2 cover the broadcaster ladder, the techs, coverage, the news story log, the News panel and ticker, and the news overlay. N3 is the news helicopter (section 7), N4 live TV in the first-person rooms, and the filler is what TVs show between the news (section 8, UTD e857a19d). N5 and N6 are designed in section 6 and not built yet.
 
 Rich, 2026-10-20: *"a new building, a media / TV centre. At later levels it has its own helicopters that fly to scenes
 around the city and broadcast live to people watching the TV (in FPV mode). We also need to keep track of short-term
@@ -42,7 +42,7 @@ Rich's answers (UTD card 90cd3857):
 - `newsTier`: decides who wins a story that two channels reach.
 - `newsHelicopters`: 1 on the media centre.
 
-**The pad.** The media centre's helipad is found like any other (helipads.ts). `padKindOf` gives it the new PadKind **`'news'`**. Its routine timetable in helicopters.ts is empty, so the helicopter waits on the roof until N3 sends it out. The showcase feature `heli-news` is a `todo` until then. `HELI_OPERATORS.news` holds two stand-in liveries.
+**The pad.** The media centre's helipad is found like any other (helipads.ts). `padKindOf` gives it the new PadKind **`'news'`**. Its routine timetable in helicopters.ts is empty: N3 (section 7) flies it to stories in its channel's livery, and the showcase feature `heli-news` checks that it does. `HELI_OPERATORS.news` holds two stand-in liveries for a flight without a channel.
 
 **The techs** are on the culture track, after Advertising, because the media centre is also adverts' TV studio:
 
@@ -129,15 +129,14 @@ The client keeps stories by id.
 
 ## 4. Hooks for what comes next
 
-- **N3, news helicopters.** Write `newsFlights(pads, stories, tick)` in shared/helicopters.ts as a pure function. It picks covered stories (`ch`) above a salience whose channel owns a `'news'` pad (the pad's `bx, by` lies on that owner's parcel), using `storyLive(s, tick)` and `x, y`. The nearest free news helicopter takes off at `t` plus a hashed delay, orbits while live and comes home. Every client has the same stories, so every viewer sees the same flight. Give `SERVICE.news` rush-hour traffic flights for days with no stories. The outside-broadcast vans of tier 2 can follow the same choice by road.
-- **N4, live TV in FPV.** A home's TV shows the stories of the channel covering the home: `coverStory(home)` over the centres in loaded chunks, or simply `story.ch`. When a story has a helicopter over it (N3), the TV shows that camera. Otherwise it shows a studio card with `h` over the station's look. adverts' ad break plays between items.
+- **N3, news helicopters** and **N4, live TV** are built: sections 7 and 8.
 - **N5, memories.** A memory's subject is a story `id`:
   - **Witnessed:** a citizen whose daily path passes within N tiles of `x, y` between `t` and `end` (uncovered stories count too).
-  - **Watched:** at home in the evening with a TV, on a story whose `ch` reaches the home.
+  - **Watched:** at home with the set on (shared tv.ts `tvOnAt(homeSeed, hour, retired)`), tuned to `homeChannel(homeSeed, tick, channels)`, whose `programmeAt` (or live news) is what they watched. These are pure, so the server can ask them for a household; the client's `TvGuide.onWatch` hook fires when a set's programme changes.
   - Salience `s` is the memory's starting strength. `who`, `pc` and `b` give the people involved: the residents of the building at the door tile.
   - **The dead** (docs/remembrance.md): a death story (`k: 'death'`) lists the deceased in `dead`, and `Death.memoriesOf(c)` (server sim/death.ts) gives a citizen's dead relatives and friends with how and when they died and the story of an incident, so a memory can name them ("my grandad died in the Brixton fire") and open the headstone.
 - **N6, conversations.** Lines come from templates keyed by `k` and fill from `h`'s words. The client keeps the stories, so nothing new goes on the wire.
-- **The Piccadilly Lights' news turn** (built). NewsUI's `toScreens` puts the newest covered headline on the big screens' news card with `AdvertsView.setNewsHeadline(text)` (render/adverts.ts, docs/adverts.md "Turns"), only when it changes. That redraws the card's cell of the ad atlas and uploads it again. Measured on this Mac in Chrome, a frame takes 4.6 ms with or without a new headline. A sub-rectangle patch of the cell (`copyTextureToTexture` from a 256×128 canvas, checked pixel-exact by reading the texture back) was tried and dropped, because it is slower: 5.4 ms, or 244 ms under SwiftShader, as reading the cell out of the canvas and regenerating the mipmaps costs more than Chrome's own upload of a GPU canvas. `setNewsFeed(tex)` stays for N4's helicopter picture. `news.latest(n, ch)` gives one channel's stories.
+- **The Piccadilly Lights' news turn** (built). NewsUI's `toScreens` puts the newest covered headline on the big screens' news card with `AdvertsView.setNewsHeadline(text)` (render/adverts.ts, docs/adverts.md "Turns"), only when it changes. That redraws the card's cell of the ad atlas and uploads it again. Measured on this Mac in Chrome, a frame takes 4.6 ms with or without a new headline. A sub-rectangle patch of the cell (`copyTextureToTexture` from a 256×128 canvas, checked pixel-exact by reading the texture back) was tried and dropped, because it is slower: 5.4 ms, or 244 ms under SwiftShader, as reading the cell out of the canvas and regenerating the mipmaps costs more than Chrome's own upload of a GPU canvas. `setNewsFeed(tex)` takes N4's helicopter picture (section 8). `news.latest(n, ch)` gives one channel's stories.
 
 ## 5. Measured
 
@@ -148,21 +147,7 @@ The client keeps stories by id.
   The same game on both: the same citizens and the same ticks. News runs only at events.
 - **The probe:** `npx tsx packages/server/src/loadtest/media.ts` passes 34 of 34. It checks coverage and overlap between two players, a tier-3 centre winning, the overlay counts, the building panel, a fire story and its end, a rank-up through `Ranks.check`, the ring bound, two runs giving the same stories, a gas explosion and the fires it spreads, and old saves.
 
-## 6. The rest of the design (N3–N6, not built)
-
-**News helicopters (N3).** These run on the client, deterministic like the other helicopters, and fly from a new pad kind `'news'`. Each has a light airframe and the station's livery (a colour per instance). The schedule stays a pure function of the pads and the story list, which every client already has. For each covered story above a salience, the nearest free news helicopter:
-1. takes off at the story's start plus a hashed delay;
-2. flies to the scene;
-3. orbits it at about 120–200 m for the story's length;
-4. returns.
-
-On days with no stories it flies routine traffic flights over the busiest junctions in the 08:00 and 17:00 rush. It is selectable, with a tooltip like "News 1: live over the fire at …".
-
-**Live TV in FPV (N4).** The FPV is inside a home, the TV is on, and a story with a helicopter over it is live. Then the TV shows the helicopter's view:
-- a second camera renders to about 320×180 at 5–8 fps, only while that room exists;
-- the picture has a lower-third headline, a LIVE bug and the station logo.
-
-Otherwise the TV shows a studio card. At 21:00 adverts' ad break plays between items. This costs nothing unless the FPV is in such a room.
+## 6. The rest of the design (N5–N6, not built)
 
 **Citizen memories (N5).** Each citizen has two bounded stores:
 - **4 short-term entries**, fading over about 3 game days: saw a fire, watched the match, a long jam, saw the news, a friend's news.
@@ -185,7 +170,121 @@ They are written at events and in the daily `lifeStep`, never per tick, and save
 |---|---|---|---|
 | N1 | Media centre kinds (3 tiers), techs, coverage, Showcase stops | – | **built** |
 | N2 | News story log, coverage of stories, News panel and ticker, overlay, snapshot | N1 | **built** |
-| N3 | News helicopters: `newsFlights`, orbit, livery, rush-hour flights | N1, N2 | designed |
-| N4 | Live TV in FPV: helicopter render-to-texture, lower third, LIVE bug, studio card, ad break | N3 | designed |
+| N3 | News helicopters: `newsHelisAt`, orbit, livery, rush-hour traffic watches | N1, N2 | **built** |
+| N4 | Live TV in FPV: helicopter render-to-texture, lower third, LIVE bug, studio card, the ad break's hook; the TV filler | N3 | **built** |
 | N5 | Citizen memories: short and long term, personal, witnessed and watched | N2 | designed |
 | N6 | Conversations: the daily exchange, heard memories, FPV lines, bubbles, M4 belief hooks | N5 | designed |
+
+## 7. News helicopters (N3, built)
+
+`shared/src/newsHelis.ts`: `newsHelisAt(pads, stories, tick)`. Like the helicopter timetable (docs/helicopters.md), this is a pure function. Its inputs are the `'news'` pads and the story log every client already holds (client news.ts `news.all()`), so every viewer sees the same flight and nothing new goes on the wire.
+
+- **Whose helicopter.** `newsPadsOf(pads, owner, channel)` gives each media centre's pad its channel. The channel belongs to the owner of the parcel at the pad's anchor (the story's `ch`). Its livery is the owner's colour, with a white stripe (`HeliFlight.op`, which `heliOperator` honours), and its callsign is "News 1". There is one helicopter per pad, and its flight id is minus the pad's id, so a selection follows it from sortie to sortie. Between sorties it is parked on the roof.
+- **What it flies to.** A story is worth the flight when it is covered and `s` is at least `NEWS_HELI.minSalience` (10, so the showcase's drills count). Its kind must be a fire, an explosion, a rank, a milestone, an opening or a new line. When one channel has two centres, a story goes to the one nearest it.
+  - **Timing.** It lifts off 5–14 game minutes after the story breaks (hashed per story).
+  - **Duration.** It covers the story while it is live, and at least `onSceneMin` (1.5 game hours) once it is there.
+  - **Priority.** The newest live story wins. If a newer story breaks while it is out, it goes there from wherever it is. If that story ends while an older one is still live, it goes back to the older one.
+  - **Traffic watches.** When no story is live, it flies a traffic watch in the 08:00 and 17:00 rush (hashed ±20 minutes, 0.6–1.1 hours) over a point 7–16 tiles out.
+- **Live again.** `StoryDTO.lit` (new, optional) is the tick a story went live again after it had ended. The showcase's drill home catches light again the same day and keeps its story (server sim/news.ts), and the helicopter goes back out from `lit`. Old saves have no `lit` and fly from `t`.
+- **The plan.** For each pad there is a list of segments: parked, lifting off (spool, lift, turn), flying, over the scene, and landing (hover, settle, run-down). The plan is found by walking through the moments something changes and re-targeting from wherever the helicopter is then. It starts at the previous day's start, so a sortie under way at midnight carries on, and it is cached per pad, day and story set.
+  - **Flight path.** A flight joins the orbit on a tangent, going its way round, so it never turns sharply. A long hop climbs to clear the skyline (`CRUISE_Y` at most), and a short hop with a big height change slows so it never climbs faster than 0.08 tiles a tick.
+- **The orbit (organic rule).** Each sortie has its own radius (2.6–4.4 tiles), height (5.2–7.6), speed along the orbit (0.12–0.24 tiles a tick) and direction, all from the pad and story ids. The radius and height also wobble slowly. 22% of sorties hover and creep round instead, closer in. It banks into the turn by its speed.
+- **Client.** `HelicoptersView.news` (main.ts) gives the owner at a tile, a channel's name and colour, and the stories. `frame` draws the news helicopters with the others. `newsStates` is what live TV's camera rides, and `stateOf(-padId)` is the selected one. Its tooltip and panel (vehicles.ts) say what it is doing, for example "live over the fire: Fire at a house in Riverside", "off on the rush-hour traffic watch" or "flying back to the media centre". The crew is a pilot and a camera operator. I or O rides in it.
+- **Showcase.** The media section's tour stop `news-heli` frames the civic district's fire drill, and the feature `heli-news` is enforced (demo:check: a story at the drill on the pad's channel puts the helicopter over the scene within a couple of hours).
+
+## 8. Television: live news (N4) and the programmes between (built)
+
+`shared/src/tv.ts` holds the schedule, and `client/src/render/tv.ts` holds the guide and the live feed. In `client/src/render/interiors.ts`, `SCREEN_FRAG` draws the programmes, and a set's `Screen` asks the guide each frame.
+
+**Channels.** Every set gets Civitas 1 and Civitas 2 (`CIVITAS_CHANNELS`). Each player whose channel has reported a story also has a channel (`playerChannel`: "Ada TV", in their colour). A home is tuned by its seed (`homeChannel`): it has a favourite, and in about three hours in ten it hops to another channel. A pub's set shows the match on a match night, and otherwise mostly Civitas 1.
+
+**The schedule** is `programmeAt(channel, tick, matchNight)`. Each hour has a table of genres for each kind of channel, and `hash(channel, game hour)` picks one, so everyone watching a channel sees the same programme. The day runs like this:
+- the news at breakfast, at noon, at 18:00 and late;
+- the forecast in the last 12 minutes of each news hour;
+- cooking, quizzes and nature by day;
+- cartoons at 15:00–17:00;
+- quizzes and films in the evening;
+- on a stadium's or sports hall's event night (shared leisure.ts `eventOn` over the venues in loaded chunks), the match over the 20:00–22:00 block on the channels that carry it;
+- teletext or the test card after 01:00.
+
+Titles come from fictional tables: "Quiz Night", "Brain of the Borough", "Bake Street", "Hedgerow Diaries", "Toon Time", "The Six O'Clock News" and so on.
+
+**Priority on a set:** live news, then the advert break, then the programme. The advert break is `TvGuide.adBreak`, a hook for adverts A6, and returns nothing yet.
+- **Live news.** A player's channel goes live while its own helicopter is over a story. Civitas 1 takes the pool feed from any channel's helicopter. Civitas 2 never interrupts.
+
+**Genres in the shader**, by `GENRE_CODE`:
+- **The news:** a studio in the channel's colour, a video wall with the town's skyline, a presenter and a desk.
+- **The weather:** cloud, rain and a front with its teeth, all moving over the channel layer's map. The map shows the town's real built tiles and roads (a player channel shows only its owner's land), with the three biggest places and their temperatures from the day's `forecast`.
+- **A quiz:** three podiums with lit panels, sweeping spotlights and a question board that flashes.
+- **The match:** a pitch in perspective with stripes and lines, 22 players in two colours and the ball. The channel layer carries the score bug: the home club is named for the stadium, the visitors from shared CITIES, and goals fall at hashed minutes.
+- **Cooking:** a tiled studio, shelves of jars, a chef, and a pan with steam.
+- **Nature:** sky, sun, three layers of hills panning, sometimes the sea, and a bird.
+- **Cartoons:** three bouncing shapes with eyes.
+- **A film:** letterboxed, with grain.
+- **Teletext:** the channel layer is the page.
+- **The test card:** bars, a grey ramp, a circle and the channel's name.
+- **The live feed.**
+
+Organic rule: every set has its own colour cast and brightness, and a little barrel warp (more on older sets). Every channel has its pacing, and every programme its colours.
+
+**The channel's layer** is a 320×240 canvas per channel, not per set. All the sets on Civitas 1 share one texture. It is redrawn only when what it shows changes:
+- the news lower third with the LIVE or NEWS bug and the channel's logo;
+- a programme's title strap in its first six minutes, and the logo in the corner;
+- the weather map;
+- the match's score bug;
+- the test card's name;
+- the whole teletext page.
+
+**Teletext** is Ceefax-style: 40 columns by 24 rows, double-height headings on a colour band, page numbers, the clock and the fastext row. A page turns every 40 ticks (about 8 s at 1x). The pages are built from what the client already holds:
+
+| Page | Content | Source |
+|---|---|---|
+| 101 NEWS | the channel's headlines | the story log |
+| 140 WEATHER | today's and tomorrow's forecast | `forecast(day)` |
+| 430 TRAVEL | queues on the roads, by place, with "Slow traffic" and "Standstill" | the congestion bytes of the loaded chunks, clustered |
+| 302 SPORT | each venue's last result and next fixture | its event nights |
+| 200 PRICES | the bus fare, taxi, takeaway, each venue type's ticket and the mean council tax | the shared constants and the loaded venues |
+| 500 YOUR TOWN | the rank's needs, have against target, or without a rank (demos) the town in figures | the `rank` message, read with `net.tap`; the parcels |
+
+**Live TV (N4).** The live feed is `LiveFeed`: one 160×90 render target and one camera under the helicopter's nose, looking at the scene. Its long lens breathes in and out a little, and its far plane is 45 tiles.
+- **When it runs.** Only while a set showing live news is in the room camera's view this frame (interiors.ts tests each set against the frustum), or while a big screen stands within 40 tiles of the camera (`AdvertsView.bigScreenNear`) outside the full FPV.
+- **Limits.** It renders at 5 fps and carries one feed at a time: the first asker keeps it while it keeps asking. It is off on the low preset, which is the lighting's quality 0 (adaptive, or pinned with `?fx=0`), and with `?tvlive=0`.
+- **The render.** It leaves out the overhead helpers and what is under a pixel at that size: people, parked cars and signal heads. It does not refresh the shadow map.
+- **Culling.** The camera goes into the buildings' cull and detail tiers (render/buildings.ts `updateLod`), so the scene is there to film even when the player's camera is elsewhere. The buildings still have to be in loaded chunks.
+- **The picture.** The set shows the texture with the channel layer's lower third: the headline, the LIVE bug and "from the news helicopter". While the feed runs, the same texture goes to the big screens' news turn (`AdvertsView.setNewsFeed`). During the feed's own render they get the card back, because a target cannot be read while it is written.
+- **No feed.** A live story without the feed (low preset, or a set not on screen) shows the studio.
+
+**Rooms.** The lounge's set is on most evenings. This is `tvOnAt`, now in shared, with the same formula as before. The room's line reads "in the lounge, watching Quiz Night on Civitas 1". The pub (`cafeOrBar`, bar) now has a set high on the wall the viewer faces.
+
+**Where it shows.** The citizen panel has a "Watching" row ("Quiz Night on Civitas 1", "teletext on Civitas 2", "the live news on Ada TV") for someone at home in the lounge with the set on, or in the pub (ui.ts `watching`, `TvGuide.watching`).
+
+**Showcase.** The tour stop `live-tv` (view `'tv'`, shown at 20:30) asks the homes of district B2 who is in. It then follows residents at home one by one in the FPV inset until one is in the lounge with the set on (main.ts `watchTv`); the next stop closes it. Features `live-tv` and `tv-programmes` are on it.
+
+**Debug.**
+- `msc.fpv.preview('lounge' | 'bar', seed, hour)` shows a room full-window with nobody selected; `msc.fpv.preview(null)` goes back.
+- `msc.tvDebug.force` = 1 or 0 forces every set on or off.
+- `msc.tv` is the guide: `stats()` reports the layers and their redraws, `feed.renders` and `feed.lastMs` the feed.
+
+## 9. Measured (N3, N4, filler)
+
+- **Server:** nothing new per tick. The only server change is `lit`, set when a drill relights.
+- **`npx tsx packages/client/scripts/tv-check.ts`** (all ok):
+  - the schedule is deterministic and runs the day as planned;
+  - homes spread over the channels;
+  - a lounge with its set on, not live, draws 124 calls, the same as with it off (+0, the budget is +2);
+  - its CPU is +0.0003 ms a frame;
+  - there is one layer per channel shown, and two sets on one channel share it;
+  - an hour of teletext redraws its page 3 times in 6,000 frames;
+  - there is no feed without a helicopter.
+- **Chrome, headless with the Metal GPU, `?fx=2`, the showcase.** Timings are GPU timer queries over batches of 100 renders, medians of 7 rounds.
+  - **The lounge, not live:** 0.086 ms with the set off and 0.075–0.104 ms with any genre on (+0.018 ms at most, the budget is 0.2). Every genre draws 83 calls, the same as off.
+  - **One live feed render (160×90):** 160–270 draw calls, about 1.6–2 ms GPU and 5–8 ms CPU (submission). The CPU figure was taken on a machine loaded with other jobs. It runs 5 times a second, about 30–40 ms of CPU a second, and only while a set showing it is on screen or a big screen is near the camera. Leaving out the people saves about 30 calls.
+- **The probe `loadtest/media.ts`** (43 of 43). Its section 8 is new:
+  - Ada's helicopter is over her fire 0.43 h after it broke, 2.9 tiles out and 6.5 up;
+  - Ben's stays on its roof;
+  - the same stories in any order give the same flight, tick by tick;
+  - there are no jumps (at most 0.4 tiles a half tick);
+  - it leaves when the story ends;
+  - a story live again is flown to again;
+  - the schedule is the same for the same channel and hour;
+  - `lit` survives a save.

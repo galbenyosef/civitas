@@ -193,7 +193,7 @@ export interface Attributes {
 
 // ---------------------------------------------------------------- kinds
 
-export type Family = 'residential' | 'commercial' | 'industrial' | 'office' | 'civic' | 'transport' | 'leisure';
+export type Family = 'residential' | 'commercial' | 'industrial' | 'office' | 'civic' | 'transport' | 'leisure' | 'utility';
 
 export interface Flags {
   /** grows by itself on zoned land (via construction sites), up to its top level */

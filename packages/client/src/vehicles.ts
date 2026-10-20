@@ -3,6 +3,7 @@ import {
   type HeliState, type TrainInfo, type RailLineDTO, type TrainState, type FlightState, type FlightManifest, type FlightPhase, type PlaneType, type CrewMember, type PersonRow,
 } from '@msimcity/shared';
 import { consistText } from './rail';
+import { news } from './news';
 
 /**
  * The panels of a selected train, plane or helicopter (docs/rail.md, docs/airport.md, docs/helicopters.md). Where each
@@ -134,8 +135,23 @@ const padPlace = (s: HeliState) => {
   const n = s.pad ? CATALOGUE_KIND_NAMES[s.pad.building] ?? 'a helipad' : 'a helipad';
   return /^[A-Z]|^the /.test(n) ? n : `the ${n}`;
 };
+/** What a news helicopter's story is, in a word: 'the fire', 'the celebrations' */
+const STORY_WORD: Record<string, string> = { fire: 'the fire', explosion: 'the explosion', rank: 'the celebrations', milestone: 'the celebrations', opening: 'the opening', line: 'the new line' };
+/** A news helicopter (docs/media.md N3): parked, flying to its story, live over it, on a traffic watch, or flying home. */
+function newsDoing(s: HeliState): string {
+  const n = s.news!, st = n.story !== undefined ? news.get(n.story) : undefined;
+  const what = st ? `${STORY_WORD[st.k] ?? 'the story'}: ${st.h}` : '';
+  switch (n.doing) {
+    case 'parked': return s.rotor > 0.05 ? `on the roof pad at ${padPlace(s)} · rotors turning` : `on the roof pad at ${padPlace(s)}, waiting for a story`;
+    case 'out': return n.traffic ? 'off on the rush-hour traffic watch' : st ? `flying to ${what}` : 'lifting off';
+    case 'live': return n.traffic ? 'on traffic watch over the rush hour' : st ? `live over ${what}` : 'on the scene';
+    default: return s.phase === 'landing' ? `landing at ${padPlace(s)}` : `flying back to ${padPlace(s)}`;
+  }
+}
+
 /** What a helicopter is doing, in a line. */
 export function heliDoing(s: HeliState): string {
+  if (s.news) return newsDoing(s);
   const f = s.flight, towns = heliTowns(f), last = s.stop >= f.stops.length - 1;
   const med = s.kind === 'medical', pol = s.kind === 'police', roy = s.kind === 'royal';
   switch (s.phase) {
@@ -168,11 +184,14 @@ export function heliPanelHtml(s: HeliState, knots: number): string {
   const f = s.flight, op = heliOperator(f), towns = heliTowns(f), crew = heliCrew(f), pax = heliPassengers(f);
   let html = `<h3>${heliTitle(s)}</h3><div class="sub">${esc(heliDoing(s))}</div>`;
   html += row('Aircraft', `${HELI_LABEL[s.type]} · ${op.reg}`);
-  const stops = f.stops.map((st) => CATALOGUE_KIND_NAMES[st.pad.building] ?? 'helipad').join(' → ');
-  html += row('Route', `${esc(towns.from)} → ${esc(stops)} → ${esc(towns.to)}`);
+  if (s.news) html += row('Channel', `${esc(s.news.name)} · ${s.news.doing === 'live' ? '<span class="bad">LIVE</span>' : 'base: the media centre'}`);
+  else {
+    const stops = f.stops.map((st) => CATALOGUE_KIND_NAMES[st.pad.building] ?? 'helipad').join(' → ');
+    html += row('Route', `${esc(towns.from)} → ${esc(stops)} → ${esc(towns.to)}`);
+  }
   if (s.phase !== 'onPad') html += row('Altitude', `${planeFeet(s.y).toLocaleString()} ft`);
   html += row('Speed', knots > 0 ? `${knots} kt` : s.rotor > 0.05 ? 'hovering' : 'stopped');
-  if (pax) html += row(s.kind === 'medical' ? 'Patient' : 'Passengers', s.kind === 'medical' ? '1 on a stretcher' : String(pax));
+  if (pax && !s.news) html += row(s.kind === 'medical' ? 'Patient' : 'Passengers', s.kind === 'medical' ? '1 on a stretcher' : String(pax));
   html += `<div class="sect">Crew (${crew.length})</div>${crewRows(crew)}`;
   return html;
 }

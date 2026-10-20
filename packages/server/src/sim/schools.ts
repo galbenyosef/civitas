@@ -7,6 +7,7 @@ import { tkey, type Building, type Citizen, type World } from '../world';
 import { ACUTE, HEALTH, LIFE, ageOf } from './life';
 import { env } from '../env';
 import { CARPOOL } from './carpool';
+import { stayOnLift, stemShare } from './motivation';
 
 /**
  * Schools (docs/education.md sections 3-5): admissions, the school day, attendance, results and drop-outs.
@@ -387,7 +388,7 @@ export class Schools {
         const earns = spec.years ? spec.earns : Math.min(spec.earns, c.edu + 1); // an adult course: one level up, to its cap (E5)
         if (earns > c.edu) { c.edu = earns; this.onGraduated?.(c); }
         // the track follows the course: A-levels at a sixth form (STEM or arts by inclination), vocational at an FE college
-        if (c.study === Study.SixthForm) c.track = s.spec.stage === Study.FeCourse ? EduTrack.Trades : hash2(c.id, 233) < 0.5 ? EduTrack.Stem : EduTrack.Arts;
+        if (c.study === Study.SixthForm) c.track = s.spec.stage === Study.FeCourse ? EduTrack.Trades : hash2(c.id, 233) < stemShare(c) ? EduTrack.Stem : EduTrack.Arts; // by values (sim/motivation.ts): 0.5 on average
         if (c.study === Study.Degree && c.track === EduTrack.Trades && hash2(c.id, 247) < 0.8) c.track = EduTrack.Stem; // engineering
         this.events.graduations++; this.lifeEvents.graduations++;
       }
@@ -399,8 +400,9 @@ export class Schools {
     this.leave(c, r);
     // offers on results day: a share of sixth-form leavers with Level 3 go on to a university in town, and of graduates to a master's
     if (r !== EduResult.Passed) return;
-    if (done === Study.SixthForm && hash2(c.id, 245) < EDU.uniShare) this.goOn(c, Study.Degree);
-    else if (done === Study.Degree && hash2(c.id, 246) < EDU.postgradTake) this.goOn(c, Study.Postgrad);
+    // staying on leans on Status and Adventure (sim/motivation.ts stayOnLift: 1 on average)
+    if (done === Study.SixthForm && hash2(c.id, 245) < EDU.uniShare * stayOnLift(c)) this.goOn(c, Study.Degree);
+    else if (done === Study.Degree && hash2(c.id, 246) < EDU.postgradTake * stayOnLift(c)) this.goOn(c, Study.Postgrad);
   }
   /** An adult course finished by days attended (sim/learning.ts): results now, at the college it was taken at. */
   finish(c: Citizen) {

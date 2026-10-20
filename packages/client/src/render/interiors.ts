@@ -1,9 +1,9 @@
 import {
   Scene, Group, Mesh, BoxGeometry, CylinderGeometry, SphereGeometry, PlaneGeometry, MeshLambertMaterial, MeshBasicMaterial, ShaderMaterial,
-  HemisphereLight, DirectionalLight, PointLight, PerspectiveCamera, Color, Matrix4, Vector3,
-  type Object3D, type Material, type BufferGeometry, type WebGLRenderer,
+  HemisphereLight, DirectionalLight, PointLight, PerspectiveCamera, Color, Matrix4, Vector3, Frustum,
+  type Object3D, type Material, type BufferGeometry, type WebGLRenderer, type Texture,
 } from 'three';
-import { hash2, familyOf, Zone, LifeStage, VENUE_WORDS, type CitizenInfo, type VenueType } from '@msimcity/shared';
+import { hash2, familyOf, Zone, LifeStage, VENUE_WORDS, tvOnAt, type CitizenInfo, type VenueType } from '@msimcity/shared';
 import { Crowd, lookOf, EYE, type Look } from './people';
 import { sceneUniforms } from './materials';
 
@@ -99,6 +99,35 @@ export function placeOf(info: CitizenInfo, hour: number): Place | null {
   return { room, seed, key: `venue:${seed}:${room}` };
 }
 
+/** A home's seed: its paint, furniture, the TV's channel (render/tv.ts asks for the citizen panel's "watching" line). */
+export const homeSeedOf = (info: CitizenInfo) => homeSeed(info);
+
+// ---- television ------------------------------------------------------------------------------
+
+/** What a TV set shows this frame (render/tv.ts TvGuide): the genre the shader draws, the channel's layer and the live feed. */
+export interface TvPicture {
+  /** shared tv.ts GENRE_CODE, or 11 for the live helicopter feed */
+  genre: number;
+  /** the programme's seed (its colours, its episode) and the channel's pacing */
+  seed: number; pace: number;
+  /** the channel's colour */
+  color: number;
+  /** the channel's graphics layer (lower third, teletext page, weather map), one texture per channel */
+  gfx: Texture | null;
+  /** the live feed's render target, while it carries this set's pictures */
+  feed: Texture | null;
+  /** "Quiz Night on Civitas 1" */
+  label: string;
+}
+/** Where sets get their pictures (main.ts sets the TvGuide); without one they show the old generic shots. */
+export interface TvSource { picture(setSeed: number, home: boolean, visible: boolean): TvPicture }
+let tvSource: TvSource | null = null;
+/** Debug (the TV check and timings): force every TV set on (1) or off (0), or leave it to the room (null). */
+export const tvDebug: { force: 0 | 1 | null } = { force: null };
+/** A pub's set: seeded by the room (render/tv.ts asks with the same seed for the citizen panel). */
+export const barSetSeed = (roomSeed: number) => (roomSeed * 17 + 5) | 0;
+export function setTvSource(src: TvSource | null) { tvSource = src; }
+
 // ---- shaders ---------------------------------------------------------------------------------
 
 const VERT = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
@@ -130,10 +159,158 @@ void main() {
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
-/** a screen (TV, cinema, monitor): two colours from the CPU per shot, a moving shape, and a dark glassy look when off */
+/**
+ * a screen (TV, cinema, monitor). A work screen draws a desktop. A TV draws its programme by genre (shared tv.ts
+ * GENRE_CODE, docs/media.md section 7): the studio news, a weather map (the channel's layer) with fronts and rain moving
+ * over it, a quiz set, a football pitch, a cooking studio, a nature scene, cartoon shapes, a film, a teletext page (the
+ * layer), the test card, or the helicopter's live feed; the channel's layer goes over it. Genre 0 (cinema, theatre, a set
+ * without a guide) is the old two-colour shot with a moving figure. Every set has its own colour cast, brightness and
+ * a little barrel warp (uCast, uWarp); every channel its pacing (uPace). Dark and glassy when off.
+ */
 const SCREEN_FRAG = /* glsl */ `
-uniform vec3 uA; uniform vec3 uB; uniform float uOn; uniform float uT; uniform float uSeed; uniform float uDesk; varying vec2 vUv;
+uniform vec3 uA; uniform vec3 uB; uniform float uOn; uniform float uT; uniform float uSeed; uniform float uDesk;
+uniform float uGenre; uniform float uPace; uniform vec3 uCast; uniform float uWarp;
+uniform sampler2D uGfx; uniform float uGfxOn; uniform sampler2D uFeed; uniform float uFeedOn;
+varying vec2 vUv;
 float sh(float n) { return fract(sin(n * 91.7 + uSeed * 47.3) * 43758.5453); }
+float hs(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7)) + uSeed * 13.0) * 43758.5453); }
+float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hs(i), hs(i + vec2(1.0, 0.0)), f.x), mix(hs(i + vec2(0.0, 1.0)), hs(i + vec2(1.0, 1.0)), f.x), f.y); }
+float fbm(vec2 p) { return 0.55 * vn(p) + 0.3 * vn(p * 2.1 + 3.1) + 0.15 * vn(p * 4.3 + 7.7); }
+float box(vec2 p, vec2 c, vec2 h) { vec2 d = abs(p - c) - h; return step(max(d.x, d.y), 0.0); }
+float disc(vec2 p, vec2 c, float r) { return step(length((p - c) * vec2(1.78, 1.0)), r); }
+/** a figure from the waist up at x, base y0, scale s */
+float person(vec2 p, float x, float y0, float s) {
+  vec2 q = (p - vec2(x, y0)) / s;
+  float body = step(abs(q.x), 0.16 - 0.06 * q.y) * step(0.0, q.y) * step(q.y, 0.42);
+  float head = step(length((q - vec2(0.0, 0.56)) * vec2(1.6, 1.0)), 0.11);
+  return max(body, head);
+}
+vec3 legacy(vec2 p, float t) {
+  float hz = 0.35 + 0.25 * fract(uSeed * 7.3 + floor(t / 3.0) * 0.37);
+  vec3 c = mix(uB * 0.7, uB * 1.2 + 0.05, step(hz, p.y));
+  vec2 q = p - vec2(0.5 + 0.22 * sin(t * 0.31 + uSeed * 6.0), 0.0);
+  float body = step(abs(q.x), 0.11 - 0.05 * q.y) * step(q.y, 0.55);
+  float head = step(length((q - vec2(0.0, 0.66)) * vec2(1.0, 0.8)), 0.09);
+  return mix(c, uA, max(body, head)) * (0.75 + 0.3 * p.y);
+}
+vec3 studio(vec2 p, float t) {
+  vec3 c = mix(uB * 0.45, uB * 1.05 + 0.04, p.y);
+  c += 0.05 * step(0.6, fract(p.x * 7.0 + 0.2)) * step(0.5, p.y);
+  // the video wall: the town's skyline at dusk
+  float wall = box(p, vec2(0.73, 0.6), vec2(0.21, 0.23));
+  float col = floor(p.x * 34.0);
+  float top = 0.43 + 0.17 * hs(vec2(col, 1.0)) * step(0.35, hs(vec2(col, 2.0)));
+  vec3 sky = mix(uA * 0.8 + 0.2, vec3(0.9, 0.55, 0.35), p.y - 0.4);
+  vec3 town = vec3(0.05, 0.06, 0.1) + step(0.82, hs(floor(p * vec2(120.0, 90.0)))) * vec3(0.6, 0.45, 0.2);
+  c = mix(c, mix(sky, town, step(p.y, top)), wall);
+  c = mix(c, uA * 0.3 + vec3(0.06, 0.05, 0.05), person(p, 0.35 + 0.006 * sin(t * 0.9), 0.2, 0.62));
+  c = mix(c, vec3(0.07, 0.08, 0.11) + uB * 0.18, step(p.y, 0.24));
+  return c + 0.05 * step(abs(p.y - 0.24), 0.006);
+}
+vec3 weather(vec2 p, float t, vec3 map) {
+  // fronts and cloud moving in from the west over the map
+  float cl = fbm(p * vec2(4.0, 3.0) + vec2(-t * 0.06, t * 0.01));
+  float cover = smoothstep(0.52, 0.78, cl) * step(0.14, p.y) * step(p.y, 0.9);
+  vec3 c = mix(map, vec3(0.93, 0.94, 0.97), cover * 0.7);
+  float rain = step(0.66, cl) * step(0.93, hs(floor(p * vec2(140.0, 80.0)) + floor(t * 5.0)));
+  c = mix(c, vec3(0.3, 0.5, 1.0), rain);
+  float fx = fract(t * 0.012 + uSeed) * 1.4 - 0.2 + 0.06 * sin(p.y * 9.0 + uSeed * 4.0);
+  float line = step(abs(p.x - fx), 0.004) * step(0.14, p.y) * step(p.y, 0.88);
+  float teeth = step(abs(p.x - fx - 0.012), 0.012 * (1.0 - abs(fract(p.y * 18.0) - 0.5) * 2.0)) * step(0.14, p.y) * step(p.y, 0.88);
+  c = mix(c, mix(vec3(0.15, 0.3, 0.95), vec3(0.95, 0.2, 0.15), step(0.5, sh(4.0))), max(line, teeth));
+  // a sun where the sky is clear
+  vec2 sp = vec2(0.25 + 0.5 * sh(6.0), 0.55 + 0.2 * sh(7.0));
+  return mix(c, vec3(1.0, 0.82, 0.2), disc(p, sp, 0.05) * (1.0 - cover));
+}
+vec3 quiz(vec2 p, float t) {
+  vec3 c = mix(vec3(0.03, 0.02, 0.1), uB * 0.5 + vec3(0.08, 0.02, 0.16), p.y);
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i), a = sin(t * 0.5 + fi * 2.1 + uSeed * 3.0) * 0.5;
+    float x0 = 0.2 + 0.3 * fi;
+    c += vec3(0.35, 0.3, 0.5) * 0.35 * step(abs(p.x - x0 - (1.0 - p.y) * a), 0.03 + 0.07 * (1.0 - p.y));
+    float px = 0.22 + 0.28 * fi;
+    c = mix(c, uA * 0.25 + 0.05, person(p, px, 0.26, 0.38));
+    vec3 lit = mix(uA, vec3(1.0, 0.9, 0.3), step(0.9, fract(t * 0.2 + fi * 0.33)));
+    c = mix(c, vec3(0.06), box(p, vec2(px, 0.14), vec2(0.1, 0.12)));
+    c = mix(c, lit, box(p, vec2(px, 0.16), vec2(0.08, 0.05)));
+  }
+  float flash = step(0.88, fract(t * 0.07 + uSeed));
+  c = mix(c, mix(vec3(0.1, 0.15, 0.6), vec3(0.95, 0.85, 0.2), flash), box(p, vec2(0.5, 0.8), vec2(0.3, 0.08)));
+  return mix(c, vec3(1.0), box(p, vec2(0.5, 0.8), vec2(0.26, 0.012)) * (1.0 - flash));
+}
+vec3 pitch(vec2 p, float t) {
+  float top = 0.78;
+  if (p.y > top) return mix(vec3(0.12, 0.12, 0.16), vec3(0.4, 0.35, 0.3), hs(floor(p * vec2(160.0, 60.0)))) * (0.6 + 0.4 * step(0.86, p.y));
+  float v = p.y / top, sc = 0.55 + 0.45 * v;
+  float u = (p.x - 0.5) / sc + 0.5 + 0.18 * sin(t * 0.05 + uSeed * 6.0);
+  vec3 c = mix(vec3(0.16, 0.48, 0.18), vec3(0.2, 0.56, 0.22), step(0.5, fract(u * 9.0)));
+  float lw = 0.004 / sc;
+  c = mix(c, vec3(0.92), max(step(abs(u - 0.5), lw * 1.5), step(abs(length(vec2((u - 0.5) * 2.2, (v - 0.5) * 1.1)) - 0.2), 0.008)));
+  c = mix(c, vec3(0.92), max(step(abs(v - 0.06), 0.006), step(abs(v - 0.94), 0.006)));
+  for (int i = 0; i < 22; i++) {
+    float fi = float(i);
+    vec2 q = vec2(0.5 + (sh(fi) - 0.5) * 0.9 + 0.08 * sin(t * (0.3 + 0.3 * sh(fi + 30.0)) + fi), 0.1 + 0.8 * sh(fi + 7.0) + 0.05 * sin(t * 0.4 + fi * 1.7));
+    float d = length(vec2((u - q.x) * 1.6, (v - q.y)) * vec2(1.0, 0.6));
+    c = mix(c, i < 11 ? uA : vec3(0.95), step(d, 0.02));
+  }
+  vec2 b = vec2(0.5 + 0.3 * sin(t * 0.37 + uSeed * 9.0), 0.5 + 0.3 * sin(t * 0.53));
+  return mix(c, vec3(1.0), step(length(vec2((u - b.x) * 1.6, v - b.y)), 0.012));
+}
+vec3 cooking(vec2 p, float t) {
+  vec2 g = fract(p * vec2(18.0, 12.0));
+  vec3 c = mix(uB * 0.4 + 0.5, vec3(0.75), step(0.08, g.x) * step(0.08, g.y));
+  c = mix(c, vec3(0.45, 0.3, 0.2), box(p, vec2(0.5, 0.72), vec2(0.5, 0.012)));
+  for (int i = 0; i < 6; i++) c = mix(c, uA * (0.5 + 0.5 * sh(float(i))), box(p, vec2(0.1 + 0.15 * float(i), 0.77), vec2(0.03, 0.04)));
+  c = mix(c, uA * 0.2 + vec3(0.85), person(p, 0.62 + 0.03 * sin(t * 0.4), 0.3, 0.55));
+  c = mix(c, vec3(0.62, 0.64, 0.66), step(p.y, 0.3));
+  c = mix(c, vec3(0.08), box(p, vec2(0.3, 0.33), vec2(0.12, 0.025)));
+  float steam = smoothstep(0.55, 0.8, fbm(vec2(p.x * 8.0, p.y * 5.0 - t * 0.5))) * step(0.35, p.y) * step(abs(p.x - 0.3), 0.1) * (1.0 - smoothstep(0.35, 0.65, p.y));
+  return mix(c, vec3(0.95), steam * 0.7);
+}
+vec3 nature(vec2 p, float t) {
+  float dusk = step(0.6, sh(2.0));
+  vec3 c = mix(mix(vec3(0.6, 0.78, 0.95), vec3(0.95, 0.6, 0.45), dusk), mix(vec3(0.25, 0.45, 0.8), vec3(0.35, 0.25, 0.5), dusk), p.y);
+  c = mix(c, vec3(1.0, 0.92, 0.6), disc(p, vec2(0.7 + 0.1 * sh(3.0), 0.75), 0.06));
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    float h = 0.55 - 0.13 * fi + 0.12 * fbm(vec2(p.x * (1.5 + fi) + t * 0.01 * (fi + 1.0) + uSeed * 9.0 + fi * 3.0, fi));
+    c = mix(c, mix(vec3(0.25, 0.42, 0.3), vec3(0.12, 0.3, 0.14), fi * 0.5) * (1.0 - 0.3 * dusk), step(p.y, h));
+  }
+  if (sh(5.0) < 0.5) c = mix(c, vec3(0.15, 0.35, 0.55) + 0.25 * step(0.9, hs(floor(p * vec2(90.0, 40.0)) + floor(t * 2.0))), step(p.y, 0.16));
+  vec2 bp = vec2(fract(t * 0.025 + sh(8.0)) * 1.2 - 0.1, 0.72 + 0.04 * sin(t * 0.5));
+  float flap = 0.02 * sin(t * 6.0);
+  float wing = step(abs(abs(p.x - bp.x) * 0.6 - (p.y - bp.y + flap * (1.0 - abs(p.x - bp.x) * 20.0))), 0.004) * step(abs(p.x - bp.x), 0.04);
+  return mix(c, vec3(0.05), wing);
+}
+vec3 cartoons(vec2 p, float t) {
+  vec3 bg = mix(uA * 0.6 + 0.4, uB * 0.5 + 0.5, step(0.5, fract((p.x + p.y) * 6.0)) * 0.3);
+  vec3 c = mix(bg, vec3(0.35, 0.75, 0.3), step(p.y, 0.2));
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    float x = fract(0.2 + 0.3 * fi + t * 0.03 * (1.0 + fi * 0.3) + sh(fi)), y = 0.2 + 0.08 + abs(sin(t * (1.1 + 0.4 * fi) + fi)) * 0.35;
+    vec2 q = (p - vec2(x, y)) * vec2(1.78, 1.0);
+    float sz = 0.08 + 0.02 * fi, d = i == 0 ? length(q) - sz : i == 1 ? max(abs(q.x), abs(q.y)) - sz : max(abs(q.x) * 0.87 + q.y * 0.5, -q.y) - sz * 0.6;
+    vec3 fill = i == 0 ? vec3(1.0, 0.35, 0.3) : i == 1 ? vec3(0.3, 0.55, 1.0) : vec3(1.0, 0.85, 0.2);
+    c = mix(c, vec3(0.05), step(d, 0.012));
+    c = mix(c, fill, step(d, 0.0));
+    c = mix(c, vec3(1.0), step(length(q - vec2(-0.03, 0.03)), 0.022) + step(length(q - vec2(0.03, 0.03)), 0.022));
+    c = mix(c, vec3(0.0), step(length(q - vec2(-0.025, 0.03)), 0.01) + step(length(q - vec2(0.035, 0.03)), 0.01));
+  }
+  return c;
+}
+vec3 testcard(vec2 p) {
+  vec3 bars[8];
+  bars[0] = vec3(0.9); bars[1] = vec3(0.9, 0.9, 0.1); bars[2] = vec3(0.1, 0.9, 0.9); bars[3] = vec3(0.1, 0.85, 0.1);
+  bars[4] = vec3(0.85, 0.1, 0.85); bars[5] = vec3(0.9, 0.1, 0.1); bars[6] = vec3(0.1, 0.1, 0.9); bars[7] = vec3(0.05);
+  int k = int(clamp(floor(p.x * 8.0), 0.0, 7.0));
+  vec3 c = vec3(0.05);
+  for (int i = 0; i < 8; i++) if (i == k) c = bars[i];
+  if (p.y < 0.3) c = vec3(floor(p.x * 6.0) / 5.0);
+  float r = length((p - 0.5) * vec2(1.78, 1.0));
+  c = mix(c, vec3(0.95), step(abs(r - 0.42), 0.006));
+  return mix(c, vec3(0.5), step(abs(fract(p.x * 16.0) - 0.5), 0.02) * step(0.92, p.y));
+}
 void main() {
   vec2 p = vUv;
   if (uDesk > 0.5) {
@@ -149,15 +326,32 @@ void main() {
     #include <colorspace_fragment>
     return;
   }
-  float hz = 0.35 + 0.25 * fract(uSeed * 7.3 + floor(uT / 3.0) * 0.37);
-  vec3 c = mix(uB * 0.7, uB * 1.2 + 0.05, step(hz, p.y));
-  vec2 q = p - vec2(0.5 + 0.22 * sin(uT * 0.31 + uSeed * 6.0), 0.0);
-  float body = step(abs(q.x), 0.11 - 0.05 * q.y) * step(q.y, 0.55);
-  float head = step(length((q - vec2(0.0, 0.66)) * vec2(1.0, 0.8)), 0.09);
-  c = mix(c, uA, max(body, head));
-  c *= 0.75 + 0.3 * p.y;
+  // the set's own barrel warp
+  vec2 d = p - 0.5;
+  p = 0.5 + d * (1.0 + uWarp * dot(d, d) * 4.0);
+  float inside = step(0.0, p.x) * step(p.x, 1.0) * step(0.0, p.y) * step(p.y, 1.0);
+  float t = uT * uPace;
+  int g = int(uGenre + 0.5);
+  vec4 o = uGfxOn > 0.5 ? texture2D(uGfx, p) : vec4(0.0);
+  vec3 c;
+  if (g == 1) c = studio(p, t);
+  else if (g == 2) c = weather(p, t, o.rgb);
+  else if (g == 3) c = quiz(p, t);
+  else if (g == 4) c = pitch(p, t);
+  else if (g == 5) c = cooking(p, t);
+  else if (g == 6) c = nature(p, t);
+  else if (g == 7) c = cartoons(p, t);
+  else if (g == 8) c = legacy(p, t) * step(0.1, p.y) * step(p.y, 0.9) + 0.04 * hs(floor(p * 200.0) + floor(t * 24.0));
+  else if (g == 9) c = o.rgb;
+  else if (g == 10) c = testcard(p);
+  else if (g == 11) c = texture2D(uFeed, p).rgb * 1.08 + 0.03 * (hs(floor(p * vec2(160.0, 90.0)) + floor(uT * 8.0)) - 0.5);
+  else c = legacy(p, t);
+  if (g != 2 && g != 9) c = mix(c, o.rgb, o.a);
+  c *= uCast;
   c *= 0.94 + 0.06 * sin(p.y * 220.0 + uT * 9.0);
-  vec3 off = vec3(0.01) + 0.025 * smoothstep(0.25, 0.0, abs(p.x - p.y - 0.2));
+  if (g > 0) c *= 1.0 - 0.35 * dot(d, d) * 2.0;
+  c *= inside;
+  vec3 off = vec3(0.01) + 0.025 * smoothstep(0.25, 0.0, abs(vUv.x - vUv.y - 0.2));
   gl_FragColor = vec4(mix(off, c, uOn), 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -167,31 +361,69 @@ void main() {
 class Screen {
   mat: ShaderMaterial;
   on = 1;
+  /** a TV set: the seed its channel is picked by (a household's, a pub's) and whether it is in a home; null for other screens */
+  set: { seed: number; home: boolean } | null = null;
+  /** the panel, and whether it was in the room camera's view last frame (the live feed runs only for a set on screen) */
+  mesh: Mesh | null = null;
+  visible = false;
+  /** what it is showing, for the room's line ("watching Quiz Night on Civitas 1") */
+  label = '';
   private shot = -1;
+  private prog = -1;
   constructor(public seed: number, public bright: number, public light: PointLight | null, private palette: 'tv' | 'film' | 'work') {
+    // every set its own colour cast, brightness and (older sets more) barrel warp
+    const h = (k: number) => hash2(seed, 21 + k);
+    const tv = palette === 'tv';
+    const k = tv ? 0.92 + 0.16 * h(0) : 1;
     this.mat = new ShaderMaterial({
-      uniforms: { uA: { value: new Color() }, uB: { value: new Color() }, uOn: { value: 1 }, uT: { value: 0 }, uSeed: { value: hash2(seed, 1) }, uDesk: { value: palette === 'work' ? 1 : 0 } },
+      uniforms: {
+        uA: { value: new Color() }, uB: { value: new Color() }, uOn: { value: 1 }, uT: { value: 0 }, uSeed: { value: hash2(seed, 1) }, uDesk: { value: palette === 'work' ? 1 : 0 },
+        uGenre: { value: 0 }, uPace: { value: 1 }, uWarp: { value: tv ? h(4) * h(4) * 0.12 : 0 },
+        uCast: { value: tv ? new Color(k * (1 + (h(1) - 0.5) * 0.12), k * (1 + (h(2) - 0.5) * 0.08), k * (1 + (h(3) - 0.5) * 0.14)) : new Color(1, 1, 1) },
+        uGfx: { value: null }, uGfxOn: { value: 0 }, uFeed: { value: null }, uFeedOn: { value: 0 },
+      },
       vertexShader: VERT, fragmentShader: SCREEN_FRAG,
     });
   }
   update(t: number) {
     const u = this.mat.uniforms;
+    if (this.set && tvDebug.force !== null) this.on = tvDebug.force;
     u.uT.value = t; u.uOn.value = this.on;
-    const len = this.palette === 'work' ? 40 : 2.6 + 3 * hash2(this.seed, 9);
-    const shot = Math.floor(t / len + hash2(this.seed, 2) * 10);
-    if (shot !== this.shot) {
-      this.shot = shot;
-      const h = (k: number) => hash2(this.seed * 13 + shot, k);
-      const a = u.uA.value as Color, b = u.uB.value as Color;
-      if (this.palette === 'work') { a.setHSL(h(1), 0.45, 0.45); b.setHSL(0.58, 0.1, 0.85 + h(2) * 0.08); }
-      else if (this.palette === 'film') { a.setHSL(h(1), 0.3 + h(2) * 0.4, 0.25 + h(3) * 0.35); b.setHSL((h(1) + 0.4 + h(4) * 0.2) % 1, 0.3, 0.12 + h(5) * 0.3); }
-      else { a.setHSL(h(1), 0.25 + h(2) * 0.6, 0.3 + h(3) * 0.4); b.setHSL((h(1) + 0.5) % 1, 0.2 + h(4) * 0.5, 0.15 + h(5) * 0.45); }
-      a.multiplyScalar(this.bright); b.multiplyScalar(this.bright);
+    if (this.set && tvSource && this.on) this.tune(t);
+    else {
+      u.uGenre.value = 0; u.uGfxOn.value = 0; u.uFeedOn.value = 0;
+      const len = this.palette === 'work' ? 40 : 2.6 + 3 * hash2(this.seed, 9);
+      const shot = Math.floor(t / len + hash2(this.seed, 2) * 10);
+      if (shot !== this.shot) {
+        this.shot = shot; this.prog = -1;
+        const h = (k: number) => hash2(this.seed * 13 + shot, k);
+        const a = u.uA.value as Color, b = u.uB.value as Color;
+        if (this.palette === 'work') { a.setHSL(h(1), 0.45, 0.45); b.setHSL(0.58, 0.1, 0.85 + h(2) * 0.08); }
+        else if (this.palette === 'film') { a.setHSL(h(1), 0.3 + h(2) * 0.4, 0.25 + h(3) * 0.35); b.setHSL((h(1) + 0.4 + h(4) * 0.2) % 1, 0.3, 0.12 + h(5) * 0.3); }
+        else { a.setHSL(h(1), 0.25 + h(2) * 0.6, 0.3 + h(3) * 0.4); b.setHSL((h(1) + 0.5) % 1, 0.2 + h(4) * 0.5, 0.15 + h(5) * 0.45); }
+        a.multiplyScalar(this.bright); b.multiplyScalar(this.bright);
+      }
     }
     if (this.light) {
       const f = this.palette === 'work' ? 1 : 0.82 + 0.1 * Math.sin(t * 11 + this.seed) * Math.sin(t * 6.3) + 0.08 * Math.sin(t * 2.1 + this.seed);
       this.light.color.copy(u.uA.value as Color).lerp(u.uB.value as Color, 0.6).multiplyScalar(1 / Math.max(0.2, this.bright));
       this.light.intensity = this.light.userData.max * f * this.on;
+    }
+  }
+  /** A TV: what the guide says is on its channel (render/tv.ts); the programme's colours change with the programme. */
+  private tune(_t: number) {
+    const u = this.mat.uniforms, pic = tvSource!.picture(this.set!.seed, this.set!.home, this.visible);
+    u.uGenre.value = pic.genre; u.uPace.value = pic.pace;
+    u.uGfx.value = pic.gfx; u.uGfxOn.value = pic.gfx ? 1 : 0;
+    u.uFeed.value = pic.feed; u.uFeedOn.value = pic.feed ? 1 : 0;
+    this.label = pic.label;
+    if (pic.seed !== this.prog) {
+      this.prog = pic.seed; this.shot = -1;
+      const h = (k: number) => hash2(Math.floor(pic.seed * 1e6), k);
+      const a = u.uA.value as Color, b = u.uB.value as Color;
+      a.setHSL(h(1), 0.45 + h(2) * 0.4, 0.4 + h(3) * 0.25);
+      b.set(pic.color).offsetHSL((h(4) - 0.5) * 0.1, 0, (h(5) - 0.5) * 0.1);
+      a.multiplyScalar(this.bright * 0.8); b.multiplyScalar(this.bright * 0.8);
     }
   }
 }
@@ -350,7 +582,7 @@ class Kit {
     const s = new Screen(seed, bright, pl, palette);
     this.screens.push(s);
     this.own.push(s.mat);
-    this.panel(x, y, z, w, h, s.mat, ry);
+    s.mesh = this.panel(x, y, z, w, h, s.mat, ry);
     return s;
   }
   /** a person sitting with hips on a seat of height `seat` (legs hidden in it), facing yaw */
@@ -409,6 +641,7 @@ class Kit {
     this.crowd.mesh.dispose();
   }
 }
+const FRUSTUM = new Frustum(), PROJ = new Matrix4();
 const TMP_M = new Matrix4(), WARM_WHITE = new Color(0xfff2dc), MOON = new Color(0x8ea4e0);
 
 /** where the viewer's eyes are and what they look at; glances are other things they look at now and then */
@@ -526,8 +759,9 @@ function lounge(k: Kit, c: Ctx): View {
   k.box(tvx, 0.56, -D / 2 + 0.12, 0.05, 0.08, 0.05, 0x1a1a1c);
   k.box(tvx, 0.62, -D / 2 + 0.1, 1.28, 0.76, 0.06, 0x101012);
   // the TV is on most evenings (each home its own hours), and some days for a retiree at home
-  const tvOn = (hour: number) => hash2(c.place.seed, Math.floor(hour)) < (hour >= 17.5 || hour < 2 ? 0.85 : c.stage === LifeStage.Retired ? 0.5 : 0.15);
+  const tvOn = (hour: number) => tvOnAt(c.place.seed, hour, c.stage === LifeStage.Retired);
   const tv = k.screen(tvx, 1.0, -D / 2 + 0.135, 1.2, 0.68, c.place.seed, 1.6, 'tv', 1.6);
+  tv.set = { seed: c.place.seed, home: true };
   // the sofa along one side wall, facing in
   const sx = -mx * (W / 2 - 0.5), sz = 0.1 + (r() - 0.5) * 0.4, sry = mx * Math.PI / 2;
   const cushion = new Color(sofaCol).multiplyScalar(1.12).getHex();
@@ -580,7 +814,7 @@ function lounge(k: Kit, c: Ctx): View {
     tv.on = on ? 1 : 0;
     k.lampOn = evening ? 1 : 0;
     k.ceilOn = evening && !on ? 0.6 : 0;
-    return on ? 'in the lounge, watching TV' : mates.length ? 'in the lounge with the family' : 'in the lounge';
+    return on ? `in the lounge, watching ${tv.label || 'TV'}` : mates.length ? 'in the lounge with the family' : 'in the lounge';
   };
   // household members on the sofa (children sometimes on the rug), facing the TV
   const mates = housemates(c, 'lounge');
@@ -1164,7 +1398,23 @@ function cafeOrBar(k: Kit, c: Ctx, bar: boolean): View {
   k.ceil.position.set(0, H - 1.0, -0.5);
   k.ceilOn = 1; k.ceil.userData.max = bar ? 9 : 10; k.daylight = bar ? 0 : 0.9; k.ambientNight = bar ? 0.2 : 0.1;
   k.lamp.position.set(0, 1.6, -D / 2 + 0.8); k.lamp.userData.max = bar ? 6 : 0; k.lampOn = 1;
-  return { eye: new Vector3(ex + 0.02, 0.47 + 0.75 * c.viewer.height, ez), aim: new Vector3(ex - 1.4, 1.0, ez), glances: [new Vector3(0, 1.4, -D / 2 + 1), ...glances], label: bar ? 'out at a bar' : 'at a café' };
+  // the pub's TV high on the wall the viewer faces: the match on a match night, else the news or the programmes (render/tv.ts)
+  let tv: Screen | null = null;
+  if (bar) {
+    const tz = ez + (r() - 0.5) * 1.2;
+    k.onWall('left', tz, () => {
+      k.box(0, 1.78, 0.03, 1.36, 0.82, 0.07, 0x101012);
+      k.box(0, 1.6, 0.02, 0.08, 0.18, 0.04, 0x2a2a2a);
+      tv = k.screen(0, 2.19, 0.072, 1.24, 0.7, c.place.seed + 3, 1.3, 'tv', 0);
+    });
+    tv!.set = { seed: barSetSeed(c.place.seed), home: false };
+    glances.unshift(new Vector3(-W / 2, 2.1, tz));
+  }
+  const label = bar ? 'out at a bar' : 'at a café';
+  return {
+    eye: new Vector3(ex + 0.02, 0.47 + 0.75 * c.viewer.height, ez), aim: new Vector3(ex - 1.4, 1.0, ez), glances: [new Vector3(0, 1.4, -D / 2 + 1), ...glances], label,
+    live: () => (tv?.label ? `${label}, the TV on ${tv.label}` : label),
+  };
 }
 
 function doctor(k: Kit, c: Ctx): View {
@@ -1267,7 +1517,16 @@ export class Interior {
     c.rotation.set(0, 0, 0);
     c.rotation.order = 'YXZ';
     c.rotation.y = yaw; c.rotation.x = pitch; c.rotation.z = lying ? 0.08 : 0.01 * Math.sin(t * 0.17 + ph);
+    // which TV sets are on screen: only those may ask for the live feed
+    c.updateMatrixWorld();
+    FRUSTUM.setFromProjectionMatrix(PROJ.multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse));
+    for (const s of this.k.screens) if (s.set && s.mesh) s.visible = FRUSTUM.intersectsObject(s.mesh);
   }
+
+  /** the TV sets in the room (debug and the TV check) */
+  get tvs() { return this.k.screens.filter((s) => s.set); }
+  /** the room's scene (the TV check counts its meshes) */
+  get scene() { return this.k.scene; }
 
   setAspect(a: number) { if (Math.abs(this.camera.aspect - a) > 1e-4) { this.camera.aspect = a; this.camera.updateProjectionMatrix(); } }
 

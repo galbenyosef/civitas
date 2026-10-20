@@ -13,6 +13,7 @@ import type { FireSave } from './sim/fires';
 import type { AdvertsSave } from './sim/adverts';
 import type { NewsSave } from './sim/news';
 import type { DeathSave } from './sim/death';
+import type { UtilitiesSave } from '@msimcity/shared';
 
 export interface Chunk {
   cx: number; cy: number;
@@ -193,6 +194,8 @@ export interface Citizen extends Mover, EduFields {
   // education (shared/src/education.ts EduFields, docs/education.md): edu, track, study, sx/sy, att/due, eduBits, eduLog
   // migration (sim/gateways.ts): 1 travelling in from a gateway, 2 leaving town once home, 3 on the way out to gateway (gx, gy)
   mig?: number; gx?: number; gy?: number;
+  // motivation (sim/motivation.ts, docs/motivation.md): six values 0-15, four bits each (shared/src/motivation.ts); 0 not yet seeded
+  vals: number;
 }
 export type CitizenLifeFields = Pick<Citizen, 'born' | 'stage' | 'health' | 'cond' | 'condDays' | 'care' | 'errand' | 'sickDays' | 'offSickDay'
   | 'hh' | 'sn' | 'partner' | 'babyWait' | 'par' | 'friends' | 'happy' | 'commuteTicks' | 'leisure' | 'tripStart' | 'ledgerDay' | 'in7' | 'out7'
@@ -212,8 +215,9 @@ export function lifeDefaults(id: number, tick: number, age: number, health: numb
  * each take a new hidden class, and London had eleven among its movers: past four, every read of a mover's fields in
  * the traffic step went through V8's megamorphic path, about nine times slower.
  */
-export const citizenLater = (): Pick<Citizen, 'skill' | 'drain' | 'grad' | 'appr' | 'mig' | 'gx' | 'gy' | 'call' | 'halt' | 'dwell'> => ({
+export const citizenLater = (): Pick<Citizen, 'skill' | 'drain' | 'grad' | 'appr' | 'mig' | 'gx' | 'gy' | 'call' | 'halt' | 'dwell' | 'vals'> => ({
   skill: undefined, drain: undefined, grad: undefined, appr: undefined, mig: undefined, gx: undefined, gy: undefined, call: undefined, halt: undefined, dwell: undefined,
+  vals: 0, // seeded by Simulation.makeCitizen, or on load (snapshot.ts)
 });
 /** The people sharing one home as a family: partners, their children, adult children who have not moved out. */
 export interface Household { id: number; sn: number; ids: number[] }
@@ -269,6 +273,9 @@ export class World {
   /** death and remembrance (sim/death.ts): what to save, set by the Death module; and what a loaded snapshot carried, taken once by it */
   deathSave: (() => DeathSave) | null = null;
   deathLoaded: DeathSave | null = null;
+  /** utilities (sim/utilities.ts, docs/utilities.md): what to save, set by the Utilities module; and what a loaded snapshot carried, taken once by it */
+  utilitiesSave: (() => UtilitiesSave | null) | null = null;
+  utilitiesLoaded: UtilitiesSave | null = null;
   /** fired when builders finish a site (completeSite), after the tile shows the finished building: the news reports openings */
   onSiteCompleted: ((site: Site) => void) | null = null;
   /** merged lots since start (zones.ts): sites opened, lots absorbed, people moved, sites completed, people evicted at completion, structures broken back into lots */

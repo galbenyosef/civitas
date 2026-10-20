@@ -1,0 +1,594 @@
+import {
+  TICKS_PER_DAY, TICKS_PER_HOUR, Zone, FleetKind, MOTORWAY_KIND, KIND_NAMES,
+  capacityOf, tileKey, hash2, isRoad, hasFeature, terrainOf, Terrain, kindManifest, signSource, signText, chunkKey, chunkOf, trackDragPath,
+  UTIL, UTIL_WEATHER, UtilRole, UtilState, UTIL_STATE_WORDS, UTIL_ROLE_OF, UTIL_SUPPLY_OF, UTIL_NODE_CAP_OF, UTIL_IMPORT_OF, UTIL_FUEL_OF,
+  UtilityField, Unions, utilityReach, solveNetwork, powerDemand, availability, linkCost, chunkUtilSig, utilKey, isMotorwayAt,
+  type UtilEnv, type UtilNode, type SolveNode, type UtilLinkDTO, type LinkMode, type UtilitiesSave, type FaultSave, type UtilityInfo, type NetworkInfo,
+} from '@msimcity/shared';
+import type { Building, Citizen, Player, World } from '../world';
+import type { Mobile, Unit, Stop, FleetService, FleetInfoRows } from './mobile';
+
+const TPH = TICKS_PER_HOUR, DAY = TICKS_PER_DAY;
+/** the hourly solve runs at this tick of each game hour (staggered from the other hourly work) */
+const SOLVE_AT = 41;
+/** van dispatch every so many ticks while a fault is open */
+const DISPATCH_EVERY = 10;
+/** a fault a van could not reach this many times is left to the contractor */
+const MAX_TRIES = 3;
+/** a demo's blackout drill faults its substations every so many game hours (showcase 'blackout' spots): with the van's
+ *  drive and two hours' work the streets are dark about half the time, and lit long enough between to come back block by block */
+const DRILL_EVERY = 6;
+const DX = [1, -1, 0, 0], DY = [0, 0, 1, -1];
+
+interface Fault extends FaultSave {
+  /** the van on its way or at work (vehicle id), 0 none */
+  crew: number;
+  /** the van is on site */
+  working: boolean;
+  tries: number;
+}
+/** A network this hour: its nodes and plants (indexes), what it had and did. */
+interface NetSummary {
+  owner: string; nodes: number[]; plants: Building[];
+  demand: number; supply: number; generated: number; imported: number;
+  importable: boolean; importOn: boolean; importCap: number;
+}
+/** What a building drew this hour and from which node (index into the field). */
+interface Draw { node: number; units: number }
+
+/**
+ * Utilities on the server (docs/utilities.md): power in phase 1. It keeps the reach field fresh (shared UtilityField,
+ * rebuilt when a chunk's road or node signature changes and every game hour), lays and takes down trunk links, solves
+ * every network once a game hour (shared solveNetwork), collects bills and pays for fuel and grid import, rolls faults
+ * and sends repair vans (a FleetService on the roaming-worker framework, sim/mobile.ts), answers the growth gate and the
+ * building panels, and saves its links, faults and settings in the snapshot's optional `utilities` field.
+ */
+export class Utilities implements FleetService {
+  readonly kinds = [FleetKind.UtilityVan];
+  readonly field = new UtilityField();
+  links: UtilLinkDTO[] = [];
+  private nextLink = 1;
+  private faults = new Map<number, Fault>();
+  private nextFault = 1;
+  /** nodes pinned as protected (door keys), owners who switched grid import off, tariff multipliers */
+  readonly protect = new Set<number>();
+  readonly noImport = new Set<string>();
+  readonly tariff = new Map<string, number>();
+  /** a sandbox (test city, demo): never gated; faults only if `faults` is set */
+  sandbox = false;
+  /** faults roll at all (UTIL.faultsFromDay on); a sandbox turns them off unless a demo opts in */
+  faultsOn = true;
+  /** switched off whole (loadtest/utilities.ts --bench: the tick cost without utilities) */
+  off = false;
+  /** a demo's blackout drill (index.ts, showcase demoBlackouts): these substations' doors fault every DRILL_EVERY game hours */
+  drills: [number, number][] = [];
+  /** the state of each node by door key after the last solve */
+  readonly nodeState = new Map<number, { state: number; load: number }>();
+  /** the networks of the last solve, and each node's and plant's network (indexes into nets) */
+  nets: NetSummary[] = [];
+  private netOfNode = new Map<number, number>();
+  private netOfPlant = new Map<Building, number>();
+  private draws = new Map<Building, Draw>();
+  /** plants this hour: output (units) */
+  private plantOut = new Map<Building, number>();
+  /** nodes that can take grid import (field indexes) */
+  private importNodes = new Set<number>();
+  /** the field needs rebuilding: a chunk's signature changed, a link changed, or nothing has been built yet */
+  private dirty = true;
+  private touched = new Set<string>();
+  private sigs = new Map<string, number>();
+  private ensuredAt = -1;
+  /** growth held back by power this game hour, by owner (the hint) */
+  private held = new Map<string, number>();
+  private heldLast = new Map<string, number>();
+  /** the last hour solved (world hour index) */
+  hour = -1;
+  /** net.ts sends `utilState` / `utilLinks` when these are set */
+  stateChanged = false;
+  linksChanged = false;
+  /** owners' notices (net.ts sends them as toasts) */
+  notices: { owner: string; msg: string }[] = [];
+  /** since start (loadtest/utilities.ts reads them) */
+  stats = { solves: 0, rebuilds: 0, faults: 0, repaired: 0, byVan: 0, byContractor: 0, vansSent: 0, unreachable: 0, bills: 0, fuel: 0, imported: 0, cutHours: 0, brownHours: 0, held: 0, solveMs: 0 };
+  readonly env: UtilEnv;
+
+  constructor(private w: World, private mobile: Mobile) {
+    this.env = {
+      tile: (x, y) => w.peekTile(x, y), sub: (x, y) => w.subAt(x, y), aux: (x, y) => w.auxAt(x, y),
+      owner: (x, y) => w.parcelAt(x, y)?.owner ?? null,
+    };
+    mobile.register(this);
+    const prev = w.onTileChanged;
+    w.onTileChanged = (x, y) => { prev?.(x, y); this.touched.add(chunkKey(chunkOf(x), chunkOf(y))); };
+    if (w.utilitiesLoaded) { this.load(w.utilitiesLoaded); w.utilitiesLoaded = null; }
+    w.utilitiesSave = () => (this.empty ? null : this.save());
+  }
+
+  // ---- the field ---------------------------------------------------------------------------------------------------
+
+  /** Rebuild the reach field if a chunk's road or node signature changed since the last look (at most once a tick). */
+  ensure(force = false) {
+    const tick = this.w.tick;
+    if (!force && this.ensuredAt === tick) return;
+    this.ensuredAt = tick;
+    for (const k of this.touched) {
+      const c = this.w.chunks.get(k);
+      if (!c) continue;
+      const sig = chunkUtilSig(c.tiles, c.sub);
+      if (this.sigs.get(k) !== sig) { this.sigs.set(k, sig); this.dirty = true; }
+    }
+    this.touched.clear();
+    if (!this.dirty && !force) return;
+    this.dirty = false;
+    this.stats.rebuilds++;
+    const nodes: UtilNode[] = [];
+    for (const b of this.w.builtOf(Zone.Hub)) {
+      if (UTIL_ROLE_OF[b.id] !== UtilRole.Node) continue;
+      const owner = this.w.parcelAt(b.x, b.y)?.owner;
+      if (owner) nodes.push({ key: utilKey(b.x, b.y), x: b.x, y: b.y, kind: b.id, owner });
+    }
+    this.field.rebuild(nodes, this.env);
+    // grid import: nodes within importReach road steps of a motorway connection's door, on their owner's and public roads
+    this.importNodes.clear();
+    const owners = new Set(this.field.nodes.map((n) => n.owner));
+    for (const m of this.w.builtOf(Zone.Hub)) {
+      if (m.id !== MOTORWAY_KIND) continue;
+      for (const owner of owners) {
+        const r = utilityReach({ key: utilKey(m.x, m.y), x: m.x, y: m.y, kind: m.id, owner }, this.env, UTIL.importReach);
+        const hit = new Set<number>();
+        for (let i = 0; i < r.dist.length; i++) hit.add(utilKey(r.tiles[i * 2], r.tiles[i * 2 + 1]));
+        this.field.nodes.forEach((n, i) => {
+          if (n.owner !== owner || !UTIL_IMPORT_OF[n.kind]) return;
+          for (let d = 0; d < 4; d++) if (hit.has(utilKey(n.x + DX[d], n.y + DY[d]))) { this.importNodes.add(i); return; }
+        });
+      }
+    }
+  }
+  /** Mark the field stale (a link laid or taken down, a save loaded). */
+  invalidate() { this.dirty = true; }
+
+  /** The field index of the node serving building b, or -1. */
+  private servingOf(b: Building, owner: string) { return this.field.serving(owner, b.x, b.y); }
+
+  // ---- the hourly solve --------------------------------------------------------------------------------------------
+
+  /** Called by sim/mobile.ts each tick (the Mobile framework ticks its services), so the solve runs inside Simulation.tick. */
+  tick() {
+    if (this.off) return;
+    const w = this.w;
+    if (w.tick % TPH === SOLVE_AT) this.solve();
+    if (w.tick % DISPATCH_EVERY === 6 && this.faults.size) this.dispatch();
+  }
+
+  /** One game hour: rebuild the field, total each node's patch, join the networks, solve each, bill, pay, roll faults. */
+  solve() {
+    const t0 = performance.now();
+    const w = this.w, tick = w.tick, hourIndex = Math.floor(tick / TPH), hour = (tick % DAY) / TPH;
+    this.hour = hourIndex;
+    this.stats.solves++;
+    this.heldLast = this.held; this.held = new Map();
+    this.ensure(true);
+    const nodes = this.field.nodes, N = nodes.length;
+    // each node's patch: demand, workplaces' share, never-cut services
+    const demand = new Float64Array(N), work = new Float64Array(N), never = new Uint8Array(N);
+    this.draws.clear();
+    if (N) for (const b of w.buildings.values()) {
+      if (b.level <= 0 || UTIL_ROLE_OF[b.id]) continue;
+      const owner = w.parcelAt(b.x, b.y)?.owner;
+      if (!owner) continue;
+      const n = this.servingOf(b, owner);
+      if (n < 0) continue;
+      const units = powerDemand(b.zone, b.level, b.occupants + (b.lodgers ?? 0), capacityOf(b.id, b.level), hour);
+      demand[n] += units;
+      if (b.zone !== Zone.Residential) work[n] += units;
+      if (b.zone === Zone.Hospital || b.zone === Zone.Police) never[n] = 1;
+      this.draws.set(b, { node: n, units });
+    }
+    // networks: nodes joined by touching reach and by links, plants joined to the node whose reach takes in their door
+    const plants: Building[] = [];
+    for (const b of w.builtOf(Zone.Hub)) if (UTIL_ROLE_OF[b.id] === UtilRole.Plant && w.parcelAt(b.x, b.y)?.owner) plants.push(b);
+    const u = new Unions(N + plants.length);
+    const faultedNode = new Set<number>(), faultedLink = new Set<number>();
+    for (const f of this.faults.values()) (f.kind === 'node' ? faultedNode : faultedLink).add(f.ref);
+    const nodeUp = (i: number) => !faultedNode.has(nodes[i].key);
+    for (let i = 0; i < this.field.adjacent.length; i += 2) {
+      const a = this.field.adjacent[i], b = this.field.adjacent[i + 1];
+      if (nodeUp(a) && nodeUp(b)) u.join(a, b);
+    }
+    const plantIndex = new Map<number, number>();
+    plants.forEach((p, j) => {
+      plantIndex.set(utilKey(p.x, p.y), j);
+      const owner = w.parcelAt(p.x, p.y)!.owner;
+      const n = this.field.serving(owner, p.x, p.y);
+      if (n >= 0 && nodeUp(n)) u.join(n, N + j);
+    });
+    const linkImport = new Set<number>(); // components (by a member id) with a link to a motorway connection
+    for (const l of this.links) {
+      if (faultedLink.has(l.id)) continue;
+      const ea = this.endpoint(l.a, l.owner, plantIndex), eb = this.endpoint(l.b, l.owner, plantIndex);
+      if (ea === -1 || eb === -1) continue;
+      if (ea === -2 && eb >= 0) linkImport.add(eb); else if (eb === -2 && ea >= 0) linkImport.add(ea);
+      else if (ea >= 0 && eb >= 0) u.join(ea, eb);
+    }
+    // group into networks (a network needs a node: plants on their own feed nobody)
+    const groups = new Map<number, { nodes: number[]; plants: number[] }>();
+    for (let i = 0; i < N; i++) { const r = u.find(i); let g = groups.get(r); if (!g) groups.set(r, g = { nodes: [], plants: [] }); g.nodes.push(i); }
+    for (let j = 0; j < plants.length; j++) { const g = groups.get(u.find(N + j)); if (g) g.plants.push(j); }
+    const importRoots = new Set([...linkImport].map((id) => u.find(id)));
+    this.nets = []; this.netOfNode.clear(); this.netOfPlant.clear(); this.plantOut.clear();
+    const prevState = new Map(this.nodeState);
+    this.nodeState.clear();
+    const bills = new Map<string, number>(), fuel = new Map<string, number>();
+    const add = (m: Map<string, number>, k: string, v: number) => m.set(k, (m.get(k) ?? 0) + v);
+    for (const [root, g] of groups) {
+      const owner = nodes[g.nodes[0]].owner;
+      let gen = 0;
+      const outs: [Building, number][] = [];
+      for (const j of g.plants) {
+        const p = plants[j];
+        const cap = capacityOf(p.id, p.level);
+        const staff = cap > 0 ? Math.min(1, p.occupants / Math.max(1, cap * UTIL.fullStaffShare)) : 1;
+        const out = w.mothballed.has(tileKey(p.x, p.y)) ? 0 : UTIL_SUPPLY_OF[p.id] * staff * availability(p.id, tick, w.seed);
+        outs.push([p, out]); gen += out;
+      }
+      const importOn = !this.noImport.has(owner);
+      let importCap = 0;
+      const importable = g.nodes.some((i) => this.importNodes.has(i)) || importRoots.has(root);
+      // the grid comes in where a node meets it and runs through the network: every node of a network that reaches it adds its own import cap
+      if (importable) for (const i of g.nodes) if (nodeUp(i)) importCap += UTIL_IMPORT_OF[nodes[i].kind];
+      const sn: SolveNode[] = g.nodes.map((i) => ({
+        key: nodes[i].key, demand: demand[i], cap: UTIL_NODE_CAP_OF[nodes[i].kind], never: never[i] === 1, protect: this.protect.has(nodes[i].key),
+        workShare: demand[i] > 0 ? work[i] / demand[i] : 0, fault: !nodeUp(i),
+      }));
+      const r = solveNetwork(sn, gen, importOn ? importCap : 0, hour, hourIndex);
+      const ni = this.nets.length;
+      this.nets.push({ owner, nodes: g.nodes, plants: g.plants.map((j) => plants[j]), demand: r.demand, supply: gen + (importOn ? importCap : 0), generated: r.generated, imported: r.imported, importable, importOn, importCap });
+      g.nodes.forEach((i, k) => { this.nodeState.set(nodes[i].key, { state: r.state[k], load: r.load[k] }); this.netOfNode.set(i, ni); });
+      // fuel for what was generated, shared over the plants by output; grid import at its price
+      for (const [p, out] of outs) {
+        const share = gen > 0 ? out / gen : 0, used = r.generated * share;
+        this.plantOut.set(p, used); this.netOfPlant.set(p, ni);
+        if (used > 0) add(fuel, owner, used * UTIL_FUEL_OF[p.id]);
+      }
+      if (r.imported > 0) { add(fuel, owner, r.imported * UTIL.importPrice); this.stats.imported += r.imported; }
+      for (const s of r.state) { if (s === UtilState.Cut) this.stats.cutHours++; else if (s === UtilState.Brown) this.stats.brownHours++; }
+    }
+    // bills: every supplied building pays its units at the owner's tariff
+    for (const [b, d] of this.draws) {
+      const s = this.nodeState.get(nodes[d.node].key)?.state;
+      if (s !== UtilState.Ok && s !== UtilState.Brown) continue;
+      const owner = w.parcelAt(b.x, b.y)?.owner;
+      if (owner) add(bills, owner, d.units * UTIL.tariff * (this.tariff.get(owner) ?? 1));
+    }
+    for (const [owner, v] of bills) if (v > 0) { w.credit(owner, v, 'bills'); this.stats.bills += v; }
+    for (const [owner, v] of fuel) if (v > 0) { w.credit(owner, -v, 'fuel'); this.stats.fuel += v; }
+    // a node going dark tells its owner, once a game hour at most
+    for (const [key, st] of this.nodeState) {
+      const was = prevState.get(key)?.state;
+      if ((st.state === UtilState.Cut || st.state === UtilState.Unpowered) && was === UtilState.Ok) {
+        const i = this.field.indexOf(key), n = nodes[i];
+        this.notice(n.owner, st.state === UtilState.Cut ? `Rolling power cuts: your network is short of power. Build a power station, a grid supply point near the motorway, or switch on grid import` : `A substation has no supply: join it to a power station (pylons or buried cable), or put it within ${UTIL.importReach} road tiles of a motorway connection for the grid`);
+      }
+    }
+    this.rollFaults(hourIndex);
+    if (this.drills.length && hourIndex % DRILL_EVERY === 0) for (const [x, y] of this.drills) {
+      const k = utilKey(x, y), i = this.field.indexOf(k);
+      if (i >= 0 && !this.faultOn('node', k)) this.openFault('node', k, nodes[i].owner, x, y);
+    }
+    this.stateChanged = true;
+    this.stats.solveMs += performance.now() - t0;
+  }
+
+  /** A link end: a node's field index, N + a plant's index, -2 for a motorway connection, -1 for nothing of the owner's. */
+  private endpoint(at: [number, number], owner: string, plantIndex: Map<number, number>): number {
+    const [x, y] = at;
+    if (isMotorwayAt(this.env, x, y)) return -2;
+    if (this.w.parcelAt(x, y)?.owner !== owner) return -1;
+    const k = utilKey(x, y), i = this.field.indexOf(k);
+    if (i >= 0) return i;
+    const j = plantIndex.get(k);
+    return j === undefined ? -1 : this.field.nodes.length + j;
+  }
+
+  private notice(owner: string, msg: string) {
+    const p = this.w.players.get(owner);
+    if (!p || owner === 'sys') return;
+    this.notices.push({ owner, msg });
+  }
+
+  // ---- the growth gate ---------------------------------------------------------------------------------------------
+
+  /**
+   * Whether building b may grow to `target` (docs/utilities.md section 3.4): level 1 needs nothing; level 2 and up need
+   * power, from a node of the owner's whose state is ok. The Commons and sandboxes are on a notional public supply.
+   */
+  mayGrow(b: Building, target: number): boolean {
+    if (target < 2 || this.sandbox) return true;
+    const owner = this.w.parcelAt(b.x, b.y)?.owner;
+    if (!owner || owner === 'sys') return true;
+    if (this.supplied(b, owner)) return true;
+    this.held.set(owner, (this.held.get(owner) ?? 0) + 1);
+    this.stats.held++;
+    return false;
+  }
+  /** Whether b has power now: covered by an owner's node whose last state is ok. */
+  supplied(b: Building, owner = this.w.parcelAt(b.x, b.y)?.owner ?? ''): boolean {
+    if (!owner) return false;
+    this.ensure();
+    const n = this.servingOf(b, owner);
+    if (n < 0) return false;
+    return this.nodeState.get(this.field.nodes[n].key)?.state === UtilState.Ok;
+  }
+  /** Growths held back by power in the last game hour, for the owner's hint. */
+  heldBack(owner: string): number { return Math.max(this.held.get(owner) ?? 0, this.heldLast.get(owner) ?? 0); }
+
+  // ---- links -------------------------------------------------------------------------------------------------------
+
+  /**
+   * Lay a trunk link along a drag (docs/utilities.md section 4.2): the path is the drag's (trackDragPath, one corner),
+   * every tile the owner's land or unowned, each end on or beside a plant or node of the owner (or a motorway
+   * connection), and the two ends different. A string is the refusal.
+   */
+  lay(p: Player, mode: LinkMode, drag: [number, number][], free = false): string | UtilLinkDTO {
+    if (drag.length < 2) return 'Drag from a power station or substation to another';
+    const path = trackDragPath(drag[0], drag[drag.length - 1]);
+    if (path.length < 2) return 'Drag from a power station or substation to another';
+    if (path.length > UTIL.maxLinkTiles) return `A trunk line is at most ${UTIL.maxLinkTiles} tiles long`;
+    for (const [x, y] of path) {
+      const o = this.w.parcelAt(x, y)?.owner;
+      if (o && o !== p.id && !this.sandbox) return 'A trunk line runs only over your land or unowned land (contracts with neighbours come later)';
+    }
+    const a = this.endAt(p.id, path[0][0], path[0][1]), b = this.endAt(p.id, path[path.length - 1][0], path[path.length - 1][1]);
+    if (!a) return 'Start the line on or beside one of your power stations, substations or grid supply points';
+    if (!b) return 'End the line on or beside one of your power stations, substations or grid supply points, or a motorway connection';
+    if (a[0] === b[0] && a[1] === b[1]) return 'The line must join two different places';
+    const motorway = (q: [number, number]) => isMotorwayAt(this.env, q[0], q[1]);
+    if (motorway(a) && motorway(b)) return 'A line between two motorway connections carries nothing of yours';
+    const tiles = path.flatMap(([x, y]) => [x, y]);
+    const wet = (x: number, y: number) => { const t = this.w.peekTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water && !isRoad(t); };
+    const cost = linkCost(mode, tiles, wet);
+    if (!free) {
+      if (this.w.spendable(p) < cost) return this.w.shortOf(p, cost, `for ${path.length} tiles of ${mode === 'overhead' ? 'pylons' : 'buried cable'}`);
+      this.w.credit(p.id, -cost, 'build');
+    }
+    const link: UtilLinkDTO = { id: this.nextLink++, util: 'power', owner: p.id, mode, a, b, tiles };
+    this.links.push(link);
+    this.linksChanged = true; this.invalidate();
+    return link;
+  }
+  /** The plant or node door (or motorway connection door) a link end at (x, y) attaches to: on it or beside it. */
+  private endAt(owner: string, x: number, y: number): [number, number] | null {
+    const at = (qx: number, qy: number): [number, number] | null => {
+      const [dx, dy] = this.w.doorOf(qx, qy);
+      const b = this.w.buildings.get(tileKey(dx, dy));
+      if (!b || b.level <= 0) return null;
+      if (b.id === MOTORWAY_KIND) return [dx, dy];
+      const role = UTIL_ROLE_OF[b.id];
+      if ((role !== UtilRole.Node && role !== UtilRole.Plant) || (this.w.parcelAt(dx, dy)?.owner !== owner && !this.sandbox)) return null;
+      return [dx, dy];
+    };
+    const here = at(x, y);
+    if (here) return here;
+    for (let d = 0; d < 4; d++) { const r = at(x + DX[d], y + DY[d]); if (r) return r; }
+    return null;
+  }
+  /** Take down the owner's link through (x, y), giving back UTIL.refund of its cost. */
+  remove(p: Player, x: number, y: number): string | UtilLinkDTO {
+    const l = this.links.find((q) => (q.owner === p.id || this.sandbox) && this.onLink(q, x, y));
+    if (!l) return 'No trunk line of yours runs through there';
+    this.links = this.links.filter((q) => q !== l);
+    for (const [id, f] of this.faults) if (f.kind === 'link' && f.ref === l.id) this.faults.delete(id);
+    const wet = (qx: number, qy: number) => { const t = this.w.peekTile(qx, qy); return t !== undefined && terrainOf(t) === Terrain.Water && !isRoad(t); };
+    this.w.credit(l.owner, Math.round(linkCost(l.mode, l.tiles, wet) * UTIL.refund), 'build');
+    this.linksChanged = true; this.invalidate();
+    return l;
+  }
+  private onLink(l: UtilLinkDTO, x: number, y: number) { for (let i = 0; i < l.tiles.length; i += 2) if (l.tiles[i] === x && l.tiles[i + 1] === y) return true; return false; }
+  /** Pin or unpin a node of the owner's, or switch their grid import. */
+  setNode(p: Player, x: number, y: number, o: { protect?: boolean; importOn?: boolean }): string {
+    const [dx, dy] = this.w.doorOf(x, y);
+    const b = this.w.buildings.get(tileKey(dx, dy));
+    if (!b || !UTIL_ROLE_OF[b.id]) return 'That is not part of a power network';
+    if (this.w.parcelAt(dx, dy)?.owner !== p.id && !this.sandbox) return 'Not your substation';
+    const said: string[] = [];
+    if (o.protect !== undefined && UTIL_ROLE_OF[b.id] === UtilRole.Node) {
+      const k = utilKey(dx, dy);
+      if (o.protect) this.protect.add(k); else this.protect.delete(k);
+      said.push(o.protect ? 'This substation is protected: rolling cuts take it last' : 'This substation takes its turn in rolling cuts again');
+    }
+    if (o.importOn !== undefined) {
+      if (o.importOn) this.noImport.delete(p.id); else this.noImport.add(p.id);
+      said.push(o.importOn ? 'Grid import is on: the National Grid tops up any shortfall, at $0.06 a unit' : 'Grid import is off: your networks run on their own power stations');
+    }
+    return said.join('. ');
+  }
+
+  // ---- faults and repair vans --------------------------------------------------------------------------------------
+
+  /** Roll this hour's faults: deterministic from the node or link, the hour and the world seed. */
+  private rollFaults(hourIndex: number) {
+    const w = this.w;
+    if (!this.faultsOn || this.sandbox || w.day < UTIL.faultsFromDay) return;
+    const tick = w.tick;
+    // faults come with the bigger grid: only an owner who can build a power depot (Power stations) has them, so a town
+    // on its first substations never sits dark waiting for a contractor it can do nothing about
+    const can = new Map<string, boolean>();
+    const able = (o: string) => { let v = can.get(o); if (v === undefined) can.set(o, v = hasFeature(w.players.get(o)?.tech ?? [], 'powerdepot')); return v; };
+    for (const n of this.field.nodes) {
+      if (n.owner === 'sys' || !able(n.owner) || this.faultOn('node', n.key)) continue;
+      const p = UTIL.nodeFaultPerHour * UTIL_WEATHER.faultMul(n.x, n.y, tick, false);
+      if (hash2((n.key % 1000003) * 3 + (w.seed % 977), hourIndex * 7 + 11) < p) this.openFault('node', n.key, n.owner, n.x, n.y);
+    }
+    for (const l of this.links) {
+      if (!able(l.owner) || this.faultOn('link', l.id)) continue;
+      const p = UTIL.linkFaultPerTileHour * (l.tiles.length / 2) * UTIL_WEATHER.faultMul(l.a[0], l.a[1], tick, l.mode === 'overhead');
+      if (hash2(l.id * 131 + (w.seed % 977), hourIndex * 13 + 5) < p) this.openFault('link', l.id, l.owner, l.a[0], l.a[1]);
+    }
+  }
+  private faultOn(kind: 'node' | 'link', ref: number) { for (const f of this.faults.values()) if (f.kind === kind && f.ref === ref) return true; return false; }
+  /** Open a fault now (the hourly roll, the probe and the showcase's scripted blackout). The node or link is off until repaired. */
+  openFault(kind: 'node' | 'link', ref: number, owner: string, x: number, y: number): FaultSave {
+    const f: Fault = { id: this.nextFault++, owner, kind, ref, x, y, at: this.w.tick, until: this.w.tick + UTIL.contractorHours * TPH, crew: 0, working: false, tries: 0 };
+    this.faults.set(f.id, f);
+    this.stats.faults++;
+    const st = kind === 'node' ? this.nodeState.get(ref) : null;
+    if (st) { st.state = UtilState.Fault; this.stateChanged = true; }
+    if (kind === 'link') this.linksChanged = true;
+    const where = kind === 'node' ? `a ${KIND_NAMES[this.w.buildings.get(tileKey(x, y))?.id ?? 0] ?? 'substation'} at (${x}, ${y})` : `the trunk line from (${x}, ${y})`;
+    this.notice(owner, `Power fault at ${where}: its streets are dark until a repair van fixes it`);
+    return f;
+  }
+  get openFaults(): readonly FaultSave[] { return [...this.faults.values()]; }
+  private repair(f: Fault, by: 'van' | 'contractor') {
+    if (!this.faults.delete(f.id)) return;
+    this.stats.repaired++;
+    if (by === 'van') this.stats.byVan++; else this.stats.byContractor++;
+    if (f.kind === 'link') this.linksChanged = true;
+    // the area comes back at once: the next solve puts it in its network; until then it reads as it was before the fault
+    const st = f.kind === 'node' ? this.nodeState.get(f.ref) : null;
+    if (st && st.state === UtilState.Fault) { st.state = UtilState.Ok; this.stateChanged = true; }
+    this.notice(f.owner, `Power restored at (${f.x}, ${f.y})${by === 'contractor' ? ': a contractor fixed it (a power depot of your own is quicker)' : ''}`);
+  }
+  /** Send the nearest free lineworker of the fault's owner; clear faults whose contractor time has come. */
+  private dispatch() {
+    const tick = this.w.tick;
+    let crews: Citizen[] | null = null;
+    for (const f of [...this.faults.values()]) {
+      if (!f.crew && tick >= f.until) { this.repair(f, 'contractor'); continue; }
+      if (f.crew || f.tries >= MAX_TRIES) continue;
+      crews ??= this.mobile.onShift(FleetKind.UtilityVan).filter((c) => this.mobile.free(c));
+      let best: Citizen | null = null, bd = Infinity;
+      for (const c of crews) {
+        if (this.w.parcelAt(c.wx, c.wy)?.owner !== f.owner) continue;
+        const d = Math.abs(c.wx - f.x) + Math.abs(c.wy - f.y);
+        if (d < bd) { bd = d; best = c; }
+      }
+      if (!best) continue;
+      const stop = this.mobile.stopAt(f.x, f.y, UTIL.repairHours * TPH, 1, f.id);
+      const u = this.mobile.launch(this, best, FleetKind.UtilityVan, [best.wx, best.wy], [best.wx, best.wy], [stop], `on the way to a power fault at (${f.x}, ${f.y})`);
+      f.tries++;
+      if (!u) { this.stats.unreachable++; continue; }
+      f.crew = u.v.id;
+      crews = crews.filter((c) => c !== best);
+      this.stats.vansSent++;
+    }
+  }
+  arrive(u: Unit, s: Stop) {
+    const f = this.faults.get(s.ref);
+    if (f) { f.working = true; u.working = true; u.task = `repairing a power fault at (${f.x}, ${f.y})`; }
+  }
+  depart(u: Unit, s: Stop) {
+    const f = this.faults.get(s.ref);
+    u.working = false; u.jobs++;
+    if (f) this.repair(f, 'van');
+    u.task = 'back to the depot';
+  }
+  unreachable(_u: Unit, s: Stop) { const f = this.faults.get(s.ref); if (f) { f.crew = 0; this.stats.unreachable++; } }
+  withdrawn(_u: Unit) { for (const f of this.faults.values()) if (f.crew === _u.v.id) { f.crew = 0; f.working = false; } }
+  returned(_u: Unit) {}
+  label(u: Unit) { return `${this.depotName(u.base[0], u.base[1])} repair van`; }
+  baseName(c: Citizen) { return this.depotName(c.wx, c.wy); }
+  private depotName(x: number, y: number) {
+    const b = this.w.buildings.get(tileKey(x, y)), k = b ? kindManifest(b.id) : undefined;
+    return k ? signText(signSource(k, x, y)) : 'the power depot';
+  }
+  describe(bx: number, by: number, kindId: number): FleetInfoRows | null {
+    if (UTIL_ROLE_OF[kindId] !== UtilRole.Depot) return null;
+    let out = 0;
+    for (const u of this.mobile.units.values()) if (u.svc === this && u.base[0] === bx && u.base[1] === by) out++;
+    const owner = this.w.parcelAt(bx, by)?.owner;
+    const open = [...this.faults.values()].filter((f) => f.owner === owner).length;
+    return { role: 'Repair vans', rows: [['Out now', `${out}`], ['Faults open on your network', `${open}`]] };
+  }
+
+  // ---- panels and the wire -----------------------------------------------------------------------------------------
+
+  /** The building panel's utilities section (BuildingInfo.utilities). */
+  info(b: Building): UtilityInfo | undefined {
+    const owner = this.w.parcelAt(b.x, b.y)?.owner;
+    if (!owner) return undefined;
+    this.ensure();
+    const role = UTIL_ROLE_OF[b.id];
+    if (role) return { network: this.networkInfo(b, owner, role) };
+    if (b.level <= 0) return undefined;
+    const n = this.servingOf(b, owner), d = this.draws.get(b);
+    const needed = !this.sandbox && owner !== 'sys';
+    if (n < 0) return { power: { state: UtilState.Unpowered, units: 0, bill: 0, needed } };
+    const node = this.field.nodes[n], st = this.nodeState.get(node.key)?.state ?? UtilState.Unpowered;
+    const units = d?.units ?? 0;
+    let steps = 99;
+    for (let k = 0; k < 4; k++) { const x = b.x + DX[k], y = b.y + DY[k]; if (this.field.nodeIndexAt(owner, x, y) === n) steps = Math.min(steps, this.field.distAt(owner, x, y)); }
+    return { power: { state: st, node: [node.x, node.y], nodeKind: node.kind, steps, units, bill: units * UTIL.tariff * (this.tariff.get(owner) ?? 1), needed } };
+  }
+  private networkInfo(b: Building, owner: string, role: number): NetworkInfo {
+    let ni = -1, state: number | undefined, load: number | undefined, output: number | undefined, share: number | undefined, protect: boolean | undefined;
+    if (role === UtilRole.Node) {
+      const i = this.field.indexOf(utilKey(b.x, b.y));
+      ni = i >= 0 ? this.netOfNode.get(i) ?? -1 : -1;
+      const st = i >= 0 ? this.nodeState.get(utilKey(b.x, b.y)) : undefined;
+      state = st?.state ?? UtilState.Unpowered; load = st?.load ?? 0;
+      protect = this.protect.has(utilKey(b.x, b.y));
+    } else if (role === UtilRole.Plant) {
+      ni = this.netOfPlant.get(b) ?? -1;
+      output = Math.round(this.plantOut.get(b) ?? 0);
+      share = UTIL_SUPPLY_OF[b.id] > 0 ? (this.plantOut.get(b) ?? 0) / UTIL_SUPPLY_OF[b.id] : 0;
+    }
+    const n = ni >= 0 ? this.nets[ni] : null;
+    const faults = [...this.faults.values()].filter((f) => f.owner === owner && (!n || f.kind === 'link' || n.nodes.some((i) => this.field.nodes[i]?.key === f.ref)))
+      .map((f) => `${f.kind === 'node' ? 'substation' : 'trunk line'} at (${f.x}, ${f.y}): ${f.working ? 'crew at work' : f.crew ? 'van on its way' : `waiting${f.tries >= MAX_TRIES ? ' for the contractor' : ''}`}`);
+    const info: NetworkInfo = {
+      role: role === UtilRole.Node ? 'node' : role === UtilRole.Plant ? 'plant' : 'depot', state, load, output, share, protect,
+      demand: Math.round(n?.demand ?? 0), supply: Math.round(n?.supply ?? 0), generated: Math.round(n?.generated ?? 0), imported: Math.round(n?.imported ?? 0),
+      nodes: n?.nodes.length ?? 0, plants: n?.plants.length ?? 0,
+      importable: n?.importable ?? false, importOn: !this.noImport.has(owner), importCap: n?.importCap ?? 0, faults,
+    };
+    if (role === UtilRole.Depot) {
+      let vans = 0;
+      for (const u of this.mobile.units.values()) if (u.svc === this && u.base[0] === b.x && u.base[1] === b.y) vans++;
+      info.vans = vans;
+    }
+    return info;
+  }
+  /** `utilState`: flat [x, y, state, load, ...] for every node. */
+  stateMsg() {
+    const n: number[] = [];
+    for (const node of this.field.nodes) { const s = this.nodeState.get(node.key); n.push(node.x, node.y, s?.state ?? UtilState.Unpowered, s?.load ?? 0); }
+    return { t: 'utilState' as const, h: this.hour, n };
+  }
+  linksMsg() {
+    const down = [...this.faults.values()].filter((f) => f.kind === 'link').map((f) => f.ref);
+    return { t: 'utilLinks' as const, links: this.links, ...(down.length ? { down } : {}) };
+  }
+  /** The worst node state words for a tooltip line. */
+  static stateWord(s: number) { return UTIL_STATE_WORDS[s] ?? 'no supply'; }
+
+  // ---- save ------------------------------------------------------------------------------------------------------
+
+  save(): UtilitiesSave {
+    return {
+      links: this.links, nextLink: this.nextLink,
+      faults: [...this.faults.values()].map(({ id, owner, kind, ref, x, y, at, until }) => ({ id, owner, kind, ref, x, y, at, until })), nextFault: this.nextFault,
+      ...(this.protect.size ? { protect: [...this.protect] } : {}),
+      ...(this.noImport.size ? { noImport: [...this.noImport] } : {}),
+      ...(this.tariff.size ? { tariff: Object.fromEntries(this.tariff) } : {}),
+    };
+  }
+  /** Whether there is anything to save (snapshot.ts leaves the field out otherwise, so a world without utilities saves as before). */
+  get empty() { return !this.links.length && !this.faults.size && !this.protect.size && !this.noImport.size && !this.tariff.size; }
+  private load(s: UtilitiesSave) {
+    const ok = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+    for (const l of Array.isArray(s.links) ? s.links : []) {
+      if (!l || !ok(l.id) || typeof l.owner !== 'string' || !Array.isArray(l.tiles) || !Array.isArray(l.a) || !Array.isArray(l.b)) continue;
+      this.links.push({ id: l.id, util: 'power', owner: l.owner, mode: l.mode === 'buried' ? 'buried' : 'overhead', a: [l.a[0], l.a[1]], b: [l.b[0], l.b[1]], tiles: l.tiles.filter(ok) });
+    }
+    this.nextLink = Math.max(ok(s.nextLink) ? s.nextLink : 1, ...this.links.map((l) => l.id + 1));
+    for (const f of Array.isArray(s.faults) ? s.faults : []) {
+      if (!f || !ok(f.id) || typeof f.owner !== 'string' || !ok(f.ref)) continue;
+      this.faults.set(f.id, { id: f.id, owner: f.owner, kind: f.kind === 'link' ? 'link' : 'node', ref: f.ref, x: f.x, y: f.y, at: f.at, until: f.until, crew: 0, working: false, tries: 0 });
+    }
+    this.nextFault = Math.max(ok(s.nextFault) ? s.nextFault : 1, ...[...this.faults.keys()].map((k) => k + 1));
+    for (const k of s.protect ?? []) if (ok(k)) this.protect.add(k);
+    for (const o of s.noImport ?? []) if (typeof o === 'string') this.noImport.add(o);
+    for (const [o, v] of Object.entries(s.tariff ?? {})) if (ok(v)) this.tariff.set(o, Math.max(0.5, Math.min(2, v)));
+  }
+}

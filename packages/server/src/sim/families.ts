@@ -5,6 +5,7 @@ import type { Skills } from './skills';
 import type { Gateways } from './gateways';
 import { SCHOOLS, type Schools } from './schools';
 import { env } from '../env';
+import { inheritValues } from './motivation';
 
 /**
  * Families moving in (docs/education.md sections 5 and 18, phase E5). About a fifth of newcomers (`EDU.familyShare`,
@@ -76,6 +77,7 @@ export class Families {
       const id = w.nextId++;
       const k = this.host.make(id, home, a, 85 + 12 * hash2(id, 212));
       k.stage = stageFor(id, a); k.car = false; k.money = 0; k.par = c.id; k.sn = c.sn; k.hh = c.hh;
+      k.vals = inheritValues(id, [c, p]); // children take after their parents (sim/motivation.ts)
       this.add(k, home, c, travelling);
     }
     this.stats.children += kids;

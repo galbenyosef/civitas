@@ -633,6 +633,15 @@ void main() {
     if (tex) newsUniform.value = tex;
   }
 
+  /** Whether a big screen stands within `r` tiles of (x, z): the live feed (render/tv.ts) runs for them only then. */
+  bigScreenNear(x: number, z: number, r: number): boolean {
+    for (const c of this.perChunk.values()) for (let i = 0; i < c.gn; i++) {
+      const dx = c.gm[i * 16 + 12] - x, dz = c.gm[i * 16 + 14] - z;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    return false;
+  }
+
   /** The campaigns and rentals (the `ads` message): every chunk's posters again. */
   setAds(campaigns: CampaignDTO[], r: number[], stride: number) {
     this.campaigns = new Map(campaigns.map((c) => [c.id, c]));

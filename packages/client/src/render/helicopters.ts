@@ -3,8 +3,8 @@ import {
   MeshBasicMaterial, Material, Quaternion, Euler, Vector3, Color, AdditiveBlending, DoubleSide, type Camera,
 } from 'three';
 import {
-  TICKS_PER_DAY, helicoptersAt, heliState, heliTimetable, heliOperator, hash2,
-  type Pad, type HeliState, type HeliType, type PadKind,
+  TICKS_PER_DAY, helicoptersAt, heliState, heliTimetable, heliOperator, hash2, newsHelisAt, newsHeliState, newsPadsOf,
+  type Pad, type HeliState, type HeliType, type PadKind, type NewsPad, type StoryDTO,
 } from '@msimcity/shared';
 import { chunkPads } from '@msimcity/shared/src/helipads';
 import type { ClientChunk, ClientWorld } from '../world';
@@ -24,7 +24,19 @@ import { vehicleMaterial, sceneUniforms } from './materials';
  * blur discs that come up with the rotor speed. Every airframe is its own: paint jitter and weathering, and the
  * rotors' phase, are per flight (organic rule). Lights: red and green nav, a red beacon, white strobes in flight and
  * a landing light near the pads.
+ *
+ * News helicopters (docs/media.md N3) come from shared newsHelis.ts, a pure function of the 'news' pads and the story
+ * log (`news`, set by main.ts): one per media centre pad in its channel's colours, parked on the roof or out over a story.
  */
+
+/** What the news helicopters need beyond the pads (main.ts): whose channel a pad is, its name and colour, the stories. */
+export interface NewsHeliSource {
+  owner(x: number, y: number): string | undefined;
+  channel(owner: string): { name: string; color: number };
+  /** the story log and a number that changes when it does */
+  stories(): readonly StoryDTO[];
+  version(): number;
+}
 
 const MAX_HELIS = 24;
 const RED = new Color(0xff2a20), GREEN = new Color(0x22ff55), WHITE = new Color(0xffffff), WARM = new Color(0xfff0c8);
@@ -119,6 +131,13 @@ export class HelicoptersView {
   hover: number | null = null;
   selected: number | null = null;
   lastTick = 0;
+  /** the news helicopters' channels and stories; null: none drawn */
+  news: NewsHeliSource | null = null;
+  /** the news helicopters as drawn last frame (live TV's camera rides one, render/tv.ts) */
+  newsStates: HeliState[] = [];
+  private newsPadList: NewsPad[] = [];
+  private newsKey = '';
+  private newsAt = 0;
   private chunks = new Map<string, Pad[]>();
   private picks: number[] = [];
   private types: Record<HeliType, TypeMeshes>;
@@ -192,6 +211,8 @@ export class HelicoptersView {
     this.nLights = 0;
     this.picks.length = 0;
     helicoptersAt(this.pads, t, this.states);
+    const np = this.newsPads();
+    if (np.length) { newsHelisAt(np, this.news!.stories(), t, this.newsStates); this.states.push(...this.newsStates); } else this.newsStates.length = 0;
     for (const s of this.states) {
       this.draw(s, dt, now / 1000, night, s.id === this.selected ? 1.3 + 0.2 * Math.sin(now / 260) : s.id === this.hover ? 1.25 : 1);
       this.picks.push(s.x, s.y + 0.15 * s.scale, s.z, s.id);
@@ -221,8 +242,22 @@ export class HelicoptersView {
     }
     return best;
   }
-  /** A flight at `tick` (default: as drawn last frame); null once it has gone. */
+  /** The news pads with their channels, read again when the pads or the stories change (an owner's name or colour may have). */
+  newsPads(): NewsPad[] {
+    if (!this.news || !this.pads.some((p) => p.kind === 'news')) { this.newsPadList.length = 0; return this.newsPadList; }
+    const key = `${this.pads.length}:${this.pads[0]?.id}:${this.news.version()}`, now = performance.now();
+    if (key !== this.newsKey || now > this.newsAt) {
+      this.newsKey = key; this.newsAt = now + 2000;
+      this.newsPadList = newsPadsOf(this.pads, (x, y) => this.news!.owner(x, y), (o) => this.news!.channel(o));
+    }
+    return this.newsPadList;
+  }
+  /** A flight at `tick` (default: as drawn last frame); null once it has gone. A news helicopter's flight id is minus its pad's. */
   stateOf(flight: number, tick = this.lastTick): HeliState | null {
+    if (flight < 0) {
+      const pads = this.newsPads(), pad = pads.find((p) => p.id === -flight);
+      return pad && this.news ? newsHeliState(pad, pads, this.news.stories(), tick) : null;
+    }
     const f = heliTimetable(this.pads, Math.floor(flight / 10000)).find((x) => x.id === flight);
     if (!f || tick < f.tStart || tick > f.tEnd) return null;
     return heliState(f, tick);
@@ -235,10 +270,14 @@ export class HelicoptersView {
     return { x: s.x + p.x, y: s.y + p.y, z: s.z + p.z, q };
   }
   /** Every helicopter at a tick (debugging, screenshots). */
-  at(tick: number): HeliState[] { return helicoptersAt(this.pads, tick); }
+  at(tick: number): HeliState[] {
+    const out = helicoptersAt(this.pads, tick), np = this.newsPads();
+    if (np.length) out.push(...newsHelisAt(np, this.news!.stories(), tick));
+    return out;
+  }
   /** Debug helper: the first tick from `from` when a helicopter of this service (any if omitted) is in `phase`. */
   findPhase(phase: HeliState['phase'], from: number, kind?: PadKind, span = TICKS_PER_DAY * 2): number | null {
-    for (let t = from; t < from + span; t += 0.5) for (const s of helicoptersAt(this.pads, t)) if (s.phase === phase && (!kind || s.kind === kind)) return t;
+    for (let t = from; t < from + span; t += 0.5) for (const s of this.at(t)) if (s.phase === phase && (!kind || s.kind === kind)) return t;
     return null;
   }
 

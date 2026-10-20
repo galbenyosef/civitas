@@ -89,6 +89,75 @@ export function findPath(
 }
 
 /**
+ * Like findPath, but a few goals from one search (motivation M2: the job search scores its candidates, sim/motivation.ts).
+ * The search is findPath's own, step for step, so the first goal is the one findPath returns; from there it goes on
+ * until it holds `take` goals, its next node is deeper than the first goal plus `slack`, or it has expanded `extra`
+ * nodes more, whichever comes first (and never past maxNodes). Goals are in the order found, nearest first, each once.
+ * With no goal at all it has walked exactly what findPath walks.
+ */
+export function findPaths(
+  w: World, sx: number, sy: number,
+  isGoal: (x: number, y: number) => boolean,
+  maxNodes = 2500, take = 4, slack = 10, extra = 300,
+): PathResult[] {
+  const out: PathResult[] = [];
+  const has = (x: number, y: number) => { for (const r of out) if (r.gx === x && r.gy === y) return true; return false; };
+  for (const [dx, dy] of DIRS) {
+    const gx = sx + dx, gy = sy + dy;
+    if (out.length < take && isGoal(gx, gy)) out.push({ path: [sx, sy, gx, gy], gx, gy });
+  }
+  if (out.length >= take) return out;
+  const S = slotsOf(w), st = nextStamp();
+  const queue: Node[] = [];
+  let head = 0;
+  const s0 = S.slot(w, chunkOf(sx), chunkOf(sy)), li0 = localIndex(sx, sy);
+  const root: Node = { x: sx, y: sy, parent: null, depth: 0, a: s0 < 0 ? 0 : S.chunks[s0].aux[li0] };
+  if (s0 >= 0) visited[s0 * NODES + li0] = st;
+  if (s0 >= 0 && isRoad(S.chunks[s0].tiles[li0])) {
+    queue.push(root);
+  } else {
+    for (const [dx, dy] of DIRS) {
+      const nx = sx + dx, ny = sy + dy;
+      const s = S.slot(w, chunkOf(nx), chunkOf(ny));
+      if (s < 0) continue;
+      const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
+      if (isRoad(t) && !sideways(a, dx)) {
+        visited[s * NODES + routeLayer(a, dx) * CELLS + li] = st;
+        queue.push({ x: nx, y: ny, parent: root, depth: 1, a });
+      }
+    }
+  }
+  let expanded = 0, firstDepth = out.length ? 1 : -1, firstAt = 0;
+  const found = (nx: number, ny: number, n: Node, a: number) => {
+    if (out.length >= take || has(nx, ny)) return;
+    out.push({ path: unwind({ x: nx, y: ny, parent: n, depth: n.depth + 1, a }), gx: nx, gy: ny });
+    if (firstDepth < 0) { firstDepth = n.depth + 1; firstAt = expanded; }
+  };
+  while (head < queue.length && expanded < maxNodes) {
+    const n = queue[head++];
+    if (firstDepth >= 0 && (out.length >= take || n.depth + 1 > firstDepth + slack || expanded - firstAt >= extra)) break;
+    expanded++;
+    for (const [dx, dy] of DIRS) {
+      const nx = n.x + dx, ny = n.y + dy;
+      const s = S.slot(w, chunkOf(nx), chunkOf(ny));
+      if (s < 0) {
+        if ((s0 < 0 && nx === sx && ny === sy) || !stepOk(w, n, nx, ny)) continue;
+        if (isGoal(nx, ny)) found(nx, ny, n, 0);
+        continue;
+      }
+      const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
+      const key = s * NODES + routeLayer(a, dx) * CELLS + li;
+      if (visited[key] === st || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
+      if (isGoal(nx, ny)) { found(nx, ny, n, a); continue; }
+      if (!isRoad(t)) continue;
+      visited[key] = st;
+      queue.push({ x: nx, y: ny, parent: n, depth: n.depth + 1, a });
+    }
+  }
+  return out;
+}
+
+/**
  * Like findPath, but keeps searching and returns the goal with the best
  * (score - distance). `score` returns null for non-goals. Used by builders so a
  * high-priority site a bit further away beats a low-priority one next door.

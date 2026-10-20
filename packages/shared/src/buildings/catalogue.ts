@@ -26,6 +26,7 @@ import { bigScreens } from './bigscreens';
 import { EDUCATION } from './education';
 import { MEDIA } from './media';
 import { REMEMBRANCE } from './remembrance';
+import { POWER } from './utilities';
 
 /**
  * Every building kind. This is source data: only the compile step
@@ -51,6 +52,8 @@ const BASE: KindDef[] = [residential, commercial, industrial, office, police, fi
   ...MEDIA,
   // death and remembrance (docs/remembrance.md): kind ids 150-154, the funeral director (office family) and the resting places (park family)
   ...REMEMBRANCE,
+  // utilities (docs/utilities.md section 2): kind ids 160-166, the power network's nodes, depot and plants, placed sub-kinds of the transport-hub family
+  ...POWER,
   // landmarks (docs/buildings.md "Landmarks"): real buildings in a city's collection, placed only where their locked tech is given
   ...LONDON_LANDMARKS];
 

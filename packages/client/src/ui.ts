@@ -1,4 +1,4 @@
-import { ROAD_COST, ZONE_COST, LAND_PRICE_PER_TILE, MAX_TAX, CIVIC_COST, Zone, KIND_NAMES, PRIORITY_NAMES, DAYS_PER_WEEK, isCivicId, familyOf, hasFeature, techFor, TECH, TECH_BY_ID, TRACK_NAMES, describeCondition, type ParcelDTO, type PlayerDTO, type BuildingInfo, type PersonRow, type PersonRef, type RoadInfo, type CitizenInfo, type SiteDTO } from '@msimcity/shared';
+import { ROAD_COST, ZONE_COST, LAND_PRICE_PER_TILE, MAX_TAX, CIVIC_COST, Zone, KIND_NAMES, PRIORITY_NAMES, DAYS_PER_WEEK, isCivicId, familyOf, hasFeature, techFor, TECH, TECH_BY_ID, TRACK_NAMES, describeCondition, type ParcelDTO, type PlayerDTO, type BuildingInfo, type PersonRow, type PersonRef, type RoadInfo, type CitizenInfo, type SiteDTO, type FocusInfo, VALUE_NAMES } from '@msimcity/shared';
 import { TOOL_KINDS, DEV_TOOLS, type ToolId } from './input';
 import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo, type HarbourInfo } from '@msimcity/shared';
 import { railStationHtml, metroStationHtml } from './rail';
@@ -10,10 +10,12 @@ import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
 import { mediaHtml } from './news';
 import { deceasedHtml, remembranceHtml, mourningHtml } from './remembrance';
 import type { DeceasedInfo } from '@msimcity/shared';
+import { utilitiesHtml } from './utilities';
+import { UTIL } from '@msimcity/shared';
 import { POLICIES } from '@msimcity/shared';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
-const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌', hearse: '⚰️' };
+const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌', 'repair van': '🚐', hearse: '⚰️' };
 
 /** Tool bar groups: land and roads first, then the catalogue kinds by what they are, bulldoze last. */
 const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable || k.family === 'residential' ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
@@ -47,6 +49,12 @@ export const TOOLS: { id: ToolId; label: string; key: string; cost?: string; col
 {
   const i = TOOLS.findIndex((t) => t.id === 'railstation');
   if (i >= 0) TOOLS.splice(i + 1, 0, { id: 'rail', label: 'Railway track (drag)', key: '', cost: `$${RAIL_COST}/tile`, color: '#7d776c', group: TOOLS[i].group });
+}
+// power trunk links (docs/utilities.md 4.2) are dragged too: right after the power grid's rungs; every letter is taken, so no key
+{
+  const i = TOOLS.findIndex((t) => t.id === 'powerdepot');
+  if (i >= 0) TOOLS.splice(i + 1, 0, { id: 'pylons', label: 'Pylons (drag)', key: '', cost: `$${UTIL.overheadCost}/tile`, color: '#9aa1aa', group: TOOLS[i].group },
+    { id: 'cable', label: 'Buried cable (drag)', key: '', cost: `$${UTIL.buriedCost}/tile`, color: '#b5463a', group: TOOLS[i].group });
 }
 /** tool id -> kind code, for the swatch colour of a building's tooltip (every catalogue kind with a tool) */
 /** tool id -> kind id (BuildingInfo.kind and SiteDTO.kind are kind ids, docs/sub-kinds.md) */
@@ -306,7 +314,7 @@ export class UI {
     const cell = (v: number | undefined) => (v ? `<td class="${v < 0 ? 'bad' : ''}">${v < 0 ? '−' : '+'}${fmt(Math.abs(v))}</td>` : '<td class="z">·</td>');
     const netY = inY + outY;
     // days of cash left at yesterday's rate, counting only the running costs (building and buying are choices)
-    const running = (['wages', 'upkeep', 'interest'] as LedgerCat[]).reduce((a, k) => a + (L.yesterday[k] ?? 0), 0) + (L.yesterday.tax ?? 0) + (L.yesterday.fees ?? 0);
+    const running = (['wages', 'upkeep', 'interest', 'bills', 'fuel'] as LedgerCat[]).reduce((a, k) => a + (L.yesterday[k] ?? 0), 0) + (L.yesterday.tax ?? 0) + (L.yesterday.fees ?? 0);
     // the overdraft (server sim/finance.ts) is spendable too: days until the limit
     const limit = ECONOMY_TUNING.overdraftLimit;
     const left = running < 0 ? Math.max(0, Math.floor((money + limit) / -running)) : -1;
@@ -318,12 +326,18 @@ export class UI {
       <div class="note">${left < 0 ? 'Taxes and fees cover the running costs (wages, upkeep).'
         : `<span class="${left < 30 ? 'bad' : ''}">Running costs exceed taxes and fees${left < 30 ? `: about ${left} day${left === 1 ? '' : 's'} to the end of the ${fmt(limit)} overdraft at this rate` : ''}.</span> Raise the tax rate in a parcel, add homes, or hold off on services.`}</div>`;
   }
+  /** main.ts: a power node's switches (the `utilNode` message): protect it in rolling cuts, or the owner's grid import */
+  onUtil: ((x: number, y: number, what: 'protect' | 'import', on: boolean) => void) | null = null;
+  /** main.ts: whether a parcel owner's display name is the viewer (BuildingInfo.parcel carries the name) */
+  mineByName: ((ownerName: string) => boolean) | null = null;
   /** main.ts: mothball or reopen the building at (x, y) (the `recover` message with its door) */
   onMothball: ((x: number, y: number, on: boolean) => void) | null = null;
   /** onboarding.ts takes advisor hints (shared/src/goals.ts HINTS) and returns true; false: toast them as before */
   onHint: ((id: 'night') => boolean) | null = null;
   /** charts.ts: open the charts panel on a chart (population and treasury figures link to theirs) */
   onOpenChart: ((id: string) => void) | null = null;
+  /** what a citizen at home or in the pub is watching ("Quiz Night on Civitas 1", render/tv.ts), for the citizen panel */
+  watching: ((info: CitizenInfo) => string | null) | null = null;
   /** the light chip's mode, and whether the clock has been shown yet (the first one may say it is night) */
   private lightMode: 'live' | 'fixed' = 'live';
   private clockSeen = false;
@@ -504,6 +518,7 @@ export class UI {
         html += row('Leisure coverage', `${esc(l.label)}${what ? ` (${what})` : ''}`);
       }
     }
+    if (info.focus) html += focusHtml(info.focus);
     if (info.workers && !((info.venue || info.gateway) && info.capacity === 0)) { // a park or a motorway connection has no staff
       const w = info.workers;
       html += `<div class="sect">${fam === Zone.Yard ? 'Builders' : 'Staff'}</div>`;
@@ -520,6 +535,7 @@ export class UI {
     if (info.fire) html += row('Fire', `<span class="bad">${info.fire}</span>`);
     if (info.media) html += mediaHtml(info.media, row);
     if (info.remembrance) html += remembranceHtml(info.remembrance, row);
+    if (info.utilities) html += utilitiesHtml(info.utilities, row, !!info.parcel && this.mineByName?.(info.parcel.owner) === true);
     if (info.airport) html += airportHtml(info.airport, row);
     if (info.rail) html += railStationHtml(info.rail, row);
     if (info.metro) html += metroStationHtml(info.metro, row);
@@ -609,6 +625,8 @@ export class UI {
     panel.onclick = (e) => {
       const dead = (e.target as HTMLElement).closest<HTMLElement>('[data-did]');
       if (dead) { this.onDeceased?.(Number(dead.dataset.did)); return; }
+      const ub = (e.target as HTMLElement).closest<HTMLElement>('[data-util]'); // a node's protect or grid import switch (utilities.ts)
+      if (ub) { this.onUtil?.(info.x, info.y, ub.dataset.util as 'protect' | 'import', ub.dataset.on === '1'); return; }
       const row = (e.target as HTMLElement).closest<HTMLElement>('[data-cid]');
       if (row) this.cb.onSelectCitizen(Number(row.dataset.cid));
     };
@@ -674,6 +692,8 @@ export class UI {
     const icon = info.role === 'citizen' ? (info.taxi ? '🚕' : info.mode === 'drive' ? '🚗' : info.mode === 'ride' ? '🚌' : '🚶') : FLEET_ICON[info.role] ?? (info.role === 'delivery truck' ? '🚚' : info.role === 'visitor' ? '🚘' : info.role === 'police patrol' ? '🚓' : info.role === 'fire engine' ? '🚒' : info.role === 'bus' ? '🚌' : '🚑');
     let html = `<h3>${icon} ${esc(info.name)}${info.role !== 'citizen' ? ` <span style="color:var(--muted);font-weight:400">${esc(info.role)}</span>` : ''}</h3>`;
     html += `<div class="sub">${esc(info.activity)}${info.status === 'queued' ? ` · <span class="bad">held up ${Math.round(info.waitTicks * 0.6)} min</span>` : ''}</div>`;
+    const tvOn = this.watching?.(info);
+    if (tvOn) html += row('Watching', esc(tvOn));
     if (info.bus) html += busHtml(info.bus, row);
     if (info.occupation) html += row('Works as', `${esc(info.occupation)}${info.fleet?.base ? `, ${esc(info.fleet.base)}` : info.employer ? ` at the ${esc(KIND_NAMES[info.employer.kind])}` : ''}`);
     if (info.employer?.parcel) html += row('Employer', esc(info.employer.parcel));
@@ -707,6 +727,7 @@ export class UI {
       html += row('Health', `${life.health}${life.conditions.length ? ` · ${esc(life.conditions.join(', '))}` : ''}`);
       html += row('Happiness', `${life.happiness}`);
       if (life.leisureNeed !== undefined) html += row('Leisure need', `${life.leisureNeed}%`);
+      if (life.values) html += `<div class="row"><span class="values">${esc(life.values)}</span></div>`;
     }
     if (life && full) html += this.lifeHtml(life);
     return html;
@@ -717,6 +738,8 @@ export class UI {
     const meter = (v: number, cls: string) => `<div class="bar meter ${cls}"><i style="width:${Math.max(0, Math.min(100, v))}%"></i></div>`;
     const person = (r: PersonRef) => `<div class="person" data-cid="${r.id}" title="click to select ${esc(r.name)}"><span class="pname">${esc(r.name)} <span class="page">${r.age}</span></span><span class="prel">${esc(r.relation === 'friend' ? r.activity : `${r.relation} · ${r.activity}`)}</span></div>`;
     let html = `<div class="sect">Life</div>`;
+    if (life.values) html += `<div class="row"><span class="values">${esc(life.values)}</span></div>`; // docs/motivation.md: words, never numbers
+    if (life.lately) html += row('Lately', esc(life.lately));
     html += row('Age', `${life.age} · ${life.stage}${life.birthday ? ` · turns ${life.age + 1} on ${WEEKDAY_NAMES[life.birthday.weekday]}` : ''}`);
     const ed = life.education;
     if (ed) html += educationHtml(ed);
@@ -878,6 +901,16 @@ const SHORT_EDU: Record<number, string> = {
 };
 const shortKind = (k: number) => SHORT[k] ?? SHORT_EDU[k] ?? KIND_NAMES[k];
 /** the education policies a tech node opens, for its card in the tech tree (shared/src/policies.ts) */
+/** Focus groups (docs/motivation.md, Culture tier 2): the value mix of a home's parcel, a bar per value, largest first. */
+function focusHtml(f: FocusInfo): string {
+  let html = `<div class="sect">Focus group · ${esc(f.parcel)}</div>`;
+  if (!f.people) return html + `<div class="row"><span>Nobody here to ask yet</span></div>`;
+  html += `<div class="row"><span>Asked</span><span>${f.people} resident${f.people === 1 ? '' : 's'}</span></div>`;
+  const order = f.pct.map((p, i) => [p, i]).sort((a, b) => b[0] - a[0]);
+  for (const [p, i] of order) html += `<div class="row focus"><span>${VALUE_NAMES[i]}</span><span><span class="bar meter good"><i style="width:${Math.min(100, p * 2)}%"></i></span>${p}%</span></div>`;
+  return html;
+}
+
 const policiesOf = (t: { unlocks: string[] }) => {
   const names = POLICIES.filter((p) => t.unlocks.includes(p.feature)).map((p) => p.name);
   return names.length ? `<div class="pol">Policies: ${names.join(', ')}</div>` : '';

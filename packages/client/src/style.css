@@ -120,6 +120,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
 #tip .row span:last-child { color: var(--fg); font-variant-numeric: tabular-nums; text-align: right; }
 #tip .bar { height: 6px; margin: 4px 0 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
 #tip .bar i { display: block; height: 100%; background: #e0a040; }
+/* Focus groups (docs/motivation.md): a short bar per value beside its percentage */
+.row.focus .bar { display: inline-block; vertical-align: middle; width: 64px; height: 5px; margin: 0 6px 0 0; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+.row.focus .bar i { display: block; height: 100%; background: #8fb8ff; }
+.row .values { font-style: italic; opacity: 0.9; }
 #tip .sect { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
 
 .buildhead { display: flex; justify-content: space-between; margin: 4px 0 4px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }

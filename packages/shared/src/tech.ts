@@ -19,7 +19,7 @@ export const COUNTER_LABELS: Record<Counter, string> = {
 
 export interface TechNode {
   id: string;
-  track: 'zoning' | 'construction' | 'transport' | 'civic' | 'culture' | 'education';
+  track: 'zoning' | 'construction' | 'transport' | 'civic' | 'culture' | 'education' | 'utilities';
   tier: number;
   name: string;
   blurb: string;
@@ -81,7 +81,8 @@ export const TECH: TechNode[] = [
   { id: 'civ6', track: 'civic', tier: 6, name: 'Medical school', blurb: 'A teaching hospital campus with a research wing: the finest health care there is.', cost: 8000, requires: ['civ5', 'cul4'], condition: { counter: 'jobs', min: 600 }, unlocks: ['teachhospital'] },
   // culture: places to go (parks need no technology)
   { id: 'cul1', track: 'culture', tier: 1, name: 'Libraries and halls', blurb: 'A library or community hall, and the lakeside park: free daytime outings that retirees and children love, and a reason to stay.', cost: 400, requires: [], condition: { counter: 'housed', min: 25 }, unlocks: ['library', 'lakepark'] },
-  { id: 'cul2', track: 'culture', tier: 2, name: 'Cinemas and sports halls', blurb: 'Evening crowds, premiere and match nights, ticket sales taxed in your parcel, and traffic to match.', cost: 700, requires: ['cul1'], condition: { counter: 'housed', min: 70 }, unlocks: ['cinema', 'sports', 'cafecinema', 'centrallibrary'] },
+  // Focus groups (docs/motivation.md, Rich's 4a: Culture tier 2): a home's tooltip shows what the people of its parcel care about
+  { id: 'cul2', track: 'culture', tier: 2, name: 'Cinemas and sports halls', blurb: 'Evening crowds, premiere and match nights, ticket sales taxed in your parcel, and traffic to match. With them come focus groups: hover a home to see what the people of its parcel care about most.', cost: 700, requires: ['cul1'], condition: { counter: 'housed', min: 70 }, unlocks: ['cinema', 'sports', 'cafecinema', 'centrallibrary', 'focusgroups'] },
   { id: 'cul3', track: 'culture', tier: 3, name: 'Theatre', blurb: 'A playhouse with performances three nights a week. The best night out in town draws people from far away.', cost: 1200, requires: ['cul2', 'zon1'], condition: { counter: 'jobs', min: 100 }, unlocks: ['theatre', 'studiotheatre', 'leisurecentre'] },
   { id: 'cul4', track: 'culture', tier: 4, name: 'Big nights out', blurb: 'A multiplex, an indoor arena and a museum: big venues with big event nights that draw people from across town.', cost: 2200, requires: ['cul3'], condition: { counter: 'housed', min: 350 }, unlocks: ['multiplex', 'arena', 'museum'] },
   { id: 'cul5', track: 'culture', tier: 5, name: 'Landmarks', blurb: 'An opera house, a stadium with floodlights, a botanical garden and a big screens corner: places people cross the city for.', cost: 5000, requires: ['cul4', 'con2'], condition: { counter: 'jobs', min: 500 }, unlocks: ['opera', 'stadium', 'botanic', 'bigscreens'] },
@@ -96,6 +97,11 @@ export const TECH: TechNode[] = [
   { id: 'edu3', track: 'education', tier: 3, name: 'Further education', blurb: 'Sixth-form colleges for A-levels and further-education colleges for trades and adult courses: the skilled workforce offices and factories ask for.', cost: 1800, requires: ['edu2', 'zon2'], condition: { counter: 'jobs', min: 150 }, unlocks: ['sixthform', 'fecollege', 'policy-learning', 'policy-apprentice'] },
   { id: 'edu4', track: 'education', tier: 4, name: 'Higher education', blurb: 'A university campus with halls of residence: degrees for your own school leavers, students from far away, and the best-paid graduates.', cost: 4500, requires: ['edu3', 'con2'], condition: { counter: 'pupils', min: 150 }, unlocks: ['university', 'halls', 'policy-fees'] },
   { id: 'edu5', track: 'education', tier: 5, name: 'Research', blurb: 'A research institute of glass and steel labs: postgraduates, the finest jobs in town, and offices that want to be near it.', cost: 7000, requires: ['edu4', 'zon3'], condition: { counter: 'graduates', min: 200 }, unlocks: ['research'] },
+  // utilities (docs/utilities.md section 4, buildings/utilities.ts): Electrification comes before Masonry (1,500 built), so the
+  // moment two-storey buildings are possible the player has been told houses want power too. Grid import needs no node of its own
+  { id: 'ut1', track: 'utilities', tier: 1, name: 'Electrification', blurb: 'Substations and the National Grid. A substation passes power 12 road tiles along your streets; near a motorway connection it brings in the grid, at a price. Homes and workplaces need power to grow to two storeys.', cost: 300, requires: [], condition: { counter: 'built', min: 250 }, unlocks: ['substation'] },
+  { id: 'ut2', track: 'utilities', tier: 2, name: 'Power stations', blurb: 'Gas and coal power stations, grid supply points, a power depot whose vans repair faults, and trunk lines on pylons or buried cable to join them up. Your own units are cheaper than the grid\'s, and every bill is income.', cost: 900, requires: ['ut1'], condition: { counter: 'housed', min: 150 }, unlocks: ['gasplant', 'coalplant', 'gridsupply', 'powerdepot', 'pylons', 'cable'] },
+  { id: 'ut3', track: 'utilities', tier: 3, name: 'Renewables', blurb: 'Wind turbines and solar farms: nothing to burn and no smoke, but they make power only when the wind blows or the sun is up.', cost: 1200, requires: ['ut2'], condition: { counter: 'jobs', min: 200 }, unlocks: ['windturbine', 'solarfarm'] },
   // London landmarks (buildings/landmarks-london.ts, docs/buildings.md "Landmarks"): real buildings, tagged 'london'. How a
   // live game earns them is still to be decided, so the node is `locked`: only sandboxes and dev clients place them.
   // The second five tool ids are reserved for the landmarks of kind ids 96-100.
@@ -107,7 +113,7 @@ export const TECH: TechNode[] = [
 ];
 export const TECH_BY_ID = new Map(TECH.map((t) => [t.id, t]));
 export const ALL_TECH_IDS = TECH.map((t) => t.id);
-export const TRACK_NAMES: Record<TechNode['track'], string> = { zoning: 'Zoning', construction: 'Construction', transport: 'Transport', civic: 'Civic', culture: 'Culture', education: 'Education' };
+export const TRACK_NAMES: Record<TechNode['track'], string> = { zoning: 'Zoning', construction: 'Construction', transport: 'Transport', civic: 'Civic', culture: 'Culture', education: 'Education', utilities: 'Utilities' };
 
 /** The tech node that opens a feature, or undefined when it is available from the start. */
 export function techFor(feature: string): TechNode | undefined {

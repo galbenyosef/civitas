@@ -212,7 +212,7 @@ const gapOf = (a: [number, number, number, number], b: [number, number, number, 
 function spreadRun(g: Game, seeds: Building[], opts: { warning?: boolean } = {}, around = 0) {
   const w = g.world, map = firesOf(g);
   const seen = new Map<number, FireRec & { zone: number }>();
-  let maxWorld = 0, maxOwner = 0, adjacentOk = 0, adjacentBad = 0, blastBad = 0, seedsSpread = 0, lit = 0;
+  let maxWorld = 0, maxOwner = 0, adjacentOk = 0, adjacentBad = 0, adjacentLate = 0, blastBad = 0, seedsSpread = 0, lit = 0;
   const perDay = FIRE.perDay;
   (FIRE as { perDay: number }).perDay = 0;
   const burning = () => [...map.values()].some((f) => f.ph !== FirePhase.Out);
@@ -230,7 +230,10 @@ function spreadRun(g: Game, seeds: Building[], opts: { warning?: boolean } = {},
         if (f.ph !== FirePhase.Out) { active++; byOwner.set(f.owner, (byOwner.get(f.owner) ?? 0) + 1); }
         const rec = seen.get(f.id);
         if (!rec) {
-          if (f.from === 1) { const r = rectOf(w, f.x, f.y); if ([...prev.values()].some((q) => gapOf(q, r) === 0)) adjacentOk++; else adjacentBad++; }
+          // judged only when it lit in the step just watched: one that caught while the last seed's fires burnt out
+          // (the wait above) is first seen here as aftermath, with nothing burning beside it any more
+          if (f.from === 1 && f.t0 < w.tick - 1) adjacentLate++;
+          else if (f.from === 1) { const r = rectOf(w, f.x, f.y); if ([...prev.values()].some((q) => gapOf(q, r) === 0)) adjacentOk++; else adjacentBad++; }
           seen.set(f.id, { ...f, zone: w.buildings.get(k)?.zone ?? -1 });
         } else {
           rec.ph = f.ph;
@@ -243,7 +246,7 @@ function spreadRun(g: Game, seeds: Building[], opts: { warning?: boolean } = {},
     if (g.fires.stats.spread > before) seedsSpread++;
   }
   (FIRE as { perDay: number }).perDay = perDay;
-  return { seen: [...seen.values()], maxWorld, maxOwner, adjacentOk, adjacentBad, blastBad, seedsSpread, lit };
+  return { seen: [...seen.values()], maxWorld, maxOwner, adjacentOk, adjacentBad, adjacentLate, blastBad, seedsSpread, lit };
 }
 /** standing buildings touching a 1×1 lot (corners included) */
 function touching(w: World, b: Building) {
@@ -282,7 +285,7 @@ for (let k = 0; k < 2; k++) {
   uncoveredSpread = spread; uncoveredSeeds = r.lit;
   log(`     ${r.lit} fires lit by hand (${homes.length} homes, shops and offices, ${works.length} works): ${spread} caught from next door, ${blasts.length} explosions setting ${r.seen.filter((f) => f.from === 2).length} alight; ${s.burnt} burnt out; at most ${r.maxWorld} burning at once`);
   ok(r.seedsSpread >= Math.ceil(r.lit * 0.5), `an uncovered fire spreads: ${r.seedsSpread}/${r.lit} hand-lit fires set light to a neighbour (${spread} spread fires in all)`);
-  ok(r.adjacentBad === 0 && r.adjacentOk === spread, `every spread fire touched a fire burning when it caught (${r.adjacentOk}/${spread}): roads, parks and empty lots are firebreaks`);
+  ok(r.adjacentBad === 0 && r.adjacentOk + r.adjacentLate === spread, `every spread fire touched a fire burning when it caught (${r.adjacentOk}/${spread}${r.adjacentLate ? `, ${r.adjacentLate} caught while the last seed's fires burnt out, unwatched` : ''}): roads, parks and empty lots are firebreaks`);
   ok(blasts.length >= 1 && r.blastBad === 0 && blasts.every((f) => f.zone === Zone.Industrial),
     `explosions only at works: ${blasts.length} blasts, all industrial (${blasts.map((f) => `(${f.x},${f.y})`).join(' ')})`);
   ok(r.maxWorld <= FIRE.spreadWorld && r.maxOwner <= FIRE.spreadPerOwner, `the caps hold: at most ${r.maxWorld} burning (cap ${FIRE.spreadWorld}), ${r.maxOwner} in one owner's parcels (cap ${FIRE.spreadPerOwner}); ${s.capped} catches held back`);

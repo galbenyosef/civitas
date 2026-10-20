@@ -49,3 +49,7 @@ export * from './fires';
 export * from './adverts';
 export * from './news';
 export * from './remembrance';
+export * from './utilities';
+export * from './motivation';
+export * from './newsHelis';
+export * from './tv';

@@ -11,6 +11,7 @@ import { Issues } from './sim/issues';
 import { Fires } from './sim/fires';
 import { Adverts } from './sim/adverts';
 import { News } from './sim/news';
+import { Utilities } from './sim/utilities';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
 import { TickWindow } from './tickstats';
@@ -46,6 +47,8 @@ export interface Game {
   adverts: Adverts;
   /** the news story log (sim/news.ts, docs/media.md): stories from fires, ranks, openings and new lines, and who covers them */
   news: News;
+  /** utilities (sim/utilities.ts, docs/utilities.md): the power networks, the hourly solve, bills, faults and repair vans */
+  utilities: Utilities;
   net: Net;
   /** tick time over the last minute (300 loops), for the stats message, /healthz and the client's perf readout */
   tickWin: TickWindow;
@@ -115,13 +118,19 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   sim.death.look = (x, y) => issues.fireChanged(x, y);
   issues.waiting = (x, y) => sim.death.noSpaceAt(x, y);
   sim.death.sandbox = cfg.sandbox;
+  // utilities (sim/utilities.ts): the growth gate, the hourly solve and the repair vans (a mobile service of sim.mobile)
+  const utilities = new Utilities(world, sim.mobile);
+  utilities.sandbox = cfg.sandbox;
+  sim.powerGate = (b, target) => utilities.mayGrow(b, target);
+  net.utilities = utilities;
+  if (net.onboarding) net.onboarding.powerHeld = (o) => utilities.heldBack(o);
   const tickWin = new TickWindow(300);
   let slow = 0, loops = 0;
   // city history for the charts (history.ts): one sample per game hour, pushed to the clients that have the panel open
   const hist = historyOf(world);
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, finance, issues, fires, adverts, news, net, tickWin, steps,
+    world, sim, airports, rail, metro, ferry, harbours, finance, issues, fires, adverts, news, utilities, net, tickWin, steps,
     step() { sim.tick(); airports.tick(); harbours.tick(); finance.tick(); issues.tick(); fires.tick(); adverts.tick(); net.flush(); sampleHistory(); },
     loop() {
       const t0 = performance.now();

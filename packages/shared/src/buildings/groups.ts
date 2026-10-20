@@ -51,6 +51,9 @@ export const GROUPS: GroupDef[] = [
   // death and remembrance (docs/remembrance.md): churchyard, municipal and garden cemetery, crematorium (buildings/remembrance.ts);
   // `stages`: the crematorium, last, is smaller and cheaper than the garden cemetery and takes in more
   { id: 'remembrance', label: 'Cemeteries', section: 'Services', color: '#5d7a52', holds: 'plots', stages: true },
+  // utilities (docs/utilities.md): the power network's nodes and depot, and its plants (buildings/utilities.ts)
+  { id: 'grid', label: 'Power grid', section: 'Services', color: '#d9a43a', holds: 'staff', stages: true },
+  { id: 'power', label: 'Power stations', section: 'Services', color: '#8f9aa6', holds: 'staff' },
   // landmarks (docs/buildings.md "Landmarks"): real buildings, one picker per city; buildings/landmarks-london.ts
   { id: 'london', label: 'London', section: 'Landmarks', color: '#c8102e', holds: 'staff', collection: true },
   // reserved for other cards
