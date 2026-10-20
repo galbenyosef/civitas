@@ -91,7 +91,8 @@ export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: 
 /** A tour stop on something that is neither a kind nor a drag (a level crossing, the river): its caption is SPOT_CAPTIONS[spot]. */
 /** `view`: the tour turns the underground view ('under') or the world map ('map', docs/world-map.md) on at this stop */
 /** `view` 'ranks': the stop plays a rank-up celebration over the rect (client ranks.ts preview, docs/ranks.md) */
-export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks' }
+/** `row`: a 'fire-spread' spot's homes, the lead first, which catch light one after another (server sim/fires.ts rows) */
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks'; row?: readonly DemoXY[] }
 /** Land parcels (by their `land` names, any section's) combined into one estate by the players' rule (parcelops.ts planCombine) */
 export interface DemoEstate { name: string; lands: readonly string[] }
 export interface DemoLine {
@@ -170,6 +171,16 @@ const block = (di: number, dj: number, bi: number, bj: number): DemoRect => [D(d
 /** the showcase's fire drill home: a level-3 house five tiles from the civic district's fire post (-24, -29), and the stop's frame */
 const FIRE_DRILL: DemoXY = [-29, -31];
 const FIRE_DRILL_RECT: DemoRect = [-31, -33, 9, 6];
+/**
+ * Fires v2 (docs/incidents.md): the spread drill's row, the four homes along the south edge of the civic district's
+ * north-west block (the lead by the road at x = -30), and the blast drill's works, the south-east corner lot of the
+ * industrial estate's north-west block in district C1, with lots round it on three blocks within two tiles. Both are
+ * in reach of fire stations, whose engines are held until the visitor has seen the fire spread or the works blow.
+ */
+const FIRE_ROW: readonly DemoXY[] = [[-31, -31], [-32, -31], [-33, -31], [-34, -31]];
+const FIRE_ROW_RECT: DemoRect = [-36, -35, 8, 7];
+const FIRE_BLAST: DemoXY = [-31, 27];
+const FIRE_BLAST_RECT: DemoRect = [-35, 23, 9, 9];
 /**
  * The high street (docs/adverts.md): a street of two-storey shops west off the perimeter road at y = -15, with a gap here
  * and there (an alley, a car park, a bus shelter) so the posters on the shops' flanks face open ground, two car parks with
@@ -370,7 +381,9 @@ export const SECTIONS: DemoSection[] = [
     // the general and teaching hospitals' air ambulances and the police headquarters' helicopter (docs/helicopters.md)
     spots: [{ id: 'helipads', spot: 'helipads', name: 'Helipads', rect: [-34, -27, 18, 10], inspect: [-27, -21] },
       // the fire drill (server sim/fires.ts drills, demoFireDrills): the house five tiles from the fire post catches light again a little after each fire is out
-      { id: 'house-fire', spot: 'house-fire', name: 'House fire', rect: FIRE_DRILL_RECT, inspect: FIRE_DRILL }],
+      { id: 'house-fire', spot: 'house-fire', name: 'House fire', rect: FIRE_DRILL_RECT, inspect: FIRE_DRILL },
+      // the spread drill (sim/fires.ts rows, demoFireRows): the row's lead house catches light with nobody called, and the fire runs along the row until the engines come
+      { id: 'fire-spread', spot: 'fire-spread', name: 'Fire spreading', rect: FIRE_ROW_RECT, inspect: FIRE_ROW[1], row: FIRE_ROW }],
   },
   {
     id: 'rail', name: 'Rail and freight',
@@ -446,6 +459,8 @@ export const SECTIONS: DemoSection[] = [
     // the south-west corner of district C1 all factories, beside the west freight yard
     zones: [block(0, 2, 0, 3), block(0, 2, 1, 3), block(0, 2, 1, 2)].map((rect): DemoZone => ({ zone: 'industrial', rect })),
     blocks: [{ id: 'block-estate', kind: 'industrial', name: 'Industrial estate', rect: [-34, 24, 9, 9], inspect: [-34, 30] }],
+    // the blast drill (sim/fires.ts blastDrills, demoFireBlasts): a works catches light, blows up and sets the lots round it alight
+    spots: [{ id: 'fire-blast', spot: 'fire-blast', name: 'Explosion at the works', rect: FIRE_BLAST_RECT, inspect: FIRE_BLAST }],
   },
   {
     id: 'riverside', name: 'Riverside',
@@ -553,7 +568,7 @@ export const TOUR: string[] = [
   'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
   'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
-  'fire-post', 'house-fire', 'fire', 'large-fire-station', 'fire-hq',
+  'fire-post', 'house-fire', 'fire-spread', 'fire', 'large-fire-station', 'fire-hq',
   'handyman', 'yard', 'builders-depot', 'construction-company',
   'rail-halt', 'track-passenger', 'rail-station', 'line-rail-1', 'metro-entrance', 'line-metro-1', 'metro-station',
   'park', 'lakeside-park', 'botanical-garden',
@@ -563,7 +578,7 @@ export const TOUR: string[] = [
   'library', 'central-library', 'museum',
   'nursery', 'primary-school', 'secondary-school', 'sixth-form', 'fe-college', 'university', 'halls', 'research-institute',
   'airport', 'runway',
-  'block-estate', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
+  'block-estate', 'fire-blast', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
   'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3', 'world-map', 'ranks',
   'ind-plant', 'ind-works', 'ind-row', 'ind-depot', 'com-centre', 'com-parade', 'com-store', 'com-hotel',
   'off-tower', 'off-hq', 'off-centre', 'res-estate', 'res-terrace', 'res-midrise', 'res-tower', 'res-block',
@@ -650,7 +665,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'ranks' | 'high-street' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'cab-office': {
     title: 'Cab office',
@@ -723,6 +738,18 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     what: 'Homes and works catch fire now and then, more often the bigger and older they are. The nearest staffed fire post or station in reach sends its engine on blue lights, through red signals and, when the traffic stops, down the middle of the road; once it is there the crew put it out, and the damage is what had burnt by then. With no engine in reach the building burns down and its people leave. Either way the owner pays, under "Fire damage" in the ledger. In this demo the house beside the fire post catches light every so often, so the engine is always about to turn out.',
     how: `Place a fire post or fire station (Emergency services) within ${FIRE.reach} tiles of your homes and keep it staffed. A town's first fire is a warning that never costs a building: the neighbours' bucket chain saves it when no engine comes.`,
     facts: [['Engine reach', `${FIRE.reach} tiles, or the station's own cover when wider`], ['Unattended', `burns down in about ${FIRE.burnHours} hours`], ['Bill', `${Math.round(FIRE.costShare * 100)}% of the building's value times the share burnt`], ['Technology', techLine('firepost')]],
+  },
+  'fire-spread': {
+    title: 'Fire spreading',
+    what: `A fire nobody is fighting can spread to the buildings next door: every game hour each building whose lot touches it may catch, hardly at all in the first hour, about one chance in ${Math.round(1 / FIRE.spreadMax)} an hour near burn-out. Terraces and tall blocks catch more readily than detached houses, a building touching only at a corner less. A road, a park or an empty lot between is a firebreak. Once an engine crew is hosing it down the chance is almost nothing. A fire that spreads is the next owner's loss: their building, their bill. In this demo nobody calls the fire brigade for a while, so the fire runs along the row of houses until the engines come.`,
+    how: `Keep every home and works within ${FIRE.reach} tiles of a staffed fire post or station, with engines to spare: a post has one, a station two. Gaps in a street (a road, a park) stop a fire running along it.`,
+    facts: [['Spread', `up to ${Math.round(FIRE.spreadMax * 100)}% an hour to each building touching it, unattended`], ['Attended', `${Math.round(FIRE.spreadAttended * 1000) / 10}% an hour`], ['Firebreaks', 'roads, parks, empty lots'], ['Burning at once', `${FIRE.spreadPerOwner} in one owner's land, ${FIRE.spreadWorld} in the world`]],
+  },
+  'fire-blast': {
+    title: 'Explosion at the works',
+    what: `A burning works can blow up: the longer it burns with nobody fighting it, the likelier (about one chance in ${Math.round(1 / FIRE.blastMax)} an hour near burn-out; hardly ever once the crew are on it). The blast wrecks ${Math.round(FIRE.blastDamage * 100)}% of the works there and then, sets light to every building within ${FIRE.blastReach} tiles, across the road too, and costs its owner a share of its value on top of the fire, as "Explosion damage" in the ledger and a line in the milestone feed. In this demo the works blows a little after it catches light, every time.`,
+    how: `Keep fire cover over your industry, and keep homes back from it: a road and a row of works or a park between take the edge off a blast.`,
+    facts: [['Where', 'industrial lots and works only'], ['Blast reach', `${FIRE.blastReach} tiles`], ['Bill', `${Math.round(FIRE.blastCostShare * 100)}% of the works' value, plus the fire`]],
   },
   'pool-of-london': {
     title: 'The Pool of London',
@@ -1155,6 +1182,13 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   { id: 'house-fire', caption: 'a house fire with a fire post\'s engine in reach (the demo\'s fire drill)', tour: 'house-fire',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'house-fire')),
     seeded: (d) => demoFireDrillsOf(d).length > 0 },
+  // fires v2: a row that spreads and a works that blows up, both staged (sim/fires.ts rows and blastDrills)
+  { id: 'fire-spread', caption: 'a row of touching homes where an unattended fire runs from house to house (the spread drill)', tour: 'fire-spread',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'fire-spread' && (sp.row?.length ?? 0) >= 3)),
+    seeded: (d) => demoFireRowsOf(d).length > 0 },
+  { id: 'fire-blast', caption: 'a works with buildings round it within the blast\'s reach (the blast drill)', tour: 'fire-blast',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'fire-blast')),
+    seeded: (d) => demoFireBlastsOf(d).length > 0 },
   { id: 'student-quarter', caption: 'halls of residence within a short walk of the university', tour: 'halls', seeded: studentQuarter },
   // ---- adverts (docs/adverts.md): every frame size stands somewhere in the town, and the high street has posters at three ages
   { id: 'advert-slots', caption: 'an ad frame of every size (poster, billboard, shelter panel, hoarding, banner) open to the street', tour: 'high-street',
@@ -1271,6 +1305,41 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
 /** The homes a demo's fire drill burns (server sim/fires.ts `drills`, set by index.ts): the inspect tiles of its 'house-fire' spots. */
 export function demoFireDrills(id: DemoId): DemoXY[] {
   return demoSections(id).flatMap((s) => (s.spots ?? []).filter((sp) => sp.spot === 'house-fire' && sp.inspect).map((sp) => sp.inspect!));
+}
+/** A demo's spread drill rows (server sim/fires.ts `rows`, set by index.ts): the rows of its 'fire-spread' spots. */
+export function demoFireRows(id: DemoId): DemoXY[][] {
+  return demoSections(id).flatMap((s) => (s.spots ?? []).filter((sp) => sp.spot === 'fire-spread' && sp.row?.length).map((sp) => [...sp.row!]));
+}
+/** A demo's blast drill works (server sim/fires.ts `blastDrills`): the inspect tiles of its 'fire-blast' spots. */
+export function demoFireBlasts(id: DemoId): DemoXY[] {
+  return demoSections(id).flatMap((s) => (s.spots ?? []).filter((sp) => sp.spot === 'fire-blast' && sp.inspect).map((sp) => sp.inspect!));
+}
+/** What the seeded showcase has standing: fire buildings, and the level of every grown lot by tile (home, shop, works, office). */
+function demoFireTiles(d: SeededDemo) {
+  const fire: [number, number][] = [], built = new Map<string, number>();
+  d.scan((x, y, t, a) => {
+    const z = zoneOf(t);
+    if (!a && z === Zone.Fire) fire.push([x, y]);
+    else if ((z === Zone.Residential || z === Zone.Commercial || z === Zone.Industrial || z === Zone.Office) && levelOf(t) > 0) built.set(`${x},${y}`, z);
+  });
+  const covered = ([x, y]: DemoXY) => fire.some(([fx, fy]) => Math.max(Math.abs(fx - x), Math.abs(fy - y)) <= FIRE.reach);
+  return { built, covered };
+}
+/** Spread rows standing as homes, each touching the next, with a fire building in reach (demo:check's seeded test). */
+function demoFireRowsOf(d: SeededDemo): DemoXY[][] {
+  const { built, covered } = demoFireTiles(d);
+  return demoFireRows('showcase').filter((row) => row.every((p, i) => built.get(`${p[0]},${p[1]}`) === Zone.Residential && covered(p)
+    && (i === 0 || Math.max(Math.abs(p[0] - row[i - 1][0]), Math.abs(p[1] - row[i - 1][1])) === 1)));
+}
+/** Blast drills standing on a works, with buildings within FIRE.blastReach and a fire building in reach (demo:check's seeded test). */
+function demoFireBlastsOf(d: SeededDemo): DemoXY[] {
+  const { built, covered } = demoFireTiles(d);
+  return demoFireBlasts('showcase').filter(([x, y]) => {
+    if (built.get(`${x},${y}`) !== Zone.Industrial || !covered([x, y])) return false;
+    let round = 0;
+    for (let dy = -FIRE.blastReach; dy <= FIRE.blastReach; dy++) for (let dx = -FIRE.blastReach; dx <= FIRE.blastReach; dx++) if ((dx || dy) && built.has(`${x + dx},${y + dy}`)) round++;
+    return round >= 6;
+  });
 }
 /** The fire drills of the showcase that stand on a home with a fire building within FIRE.reach (demo:check's seeded test). */
 function demoFireDrillsOf(d: SeededDemo): DemoXY[] {
