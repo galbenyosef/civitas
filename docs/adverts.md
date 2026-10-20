@@ -563,8 +563,14 @@ The TV studio, airtime auctions, evening reach, the ad break on the FPV TV and s
   The instance buffer changes only when a rental does.
 - **The news hook.** One turn per building is a 'news' turn. Today it shows a "LIVE · Civitas News" card from the ad
   atlas: a skyline, a helicopter, the LIVE bug and a ticker.
-  - The media centre (UTD 90cd3857) will hand `AdvertsView.setNewsFeed(texture)` the news helicopter's render target.
-    Every news turn on every screen then samples that texture instead of the card, and `null` puts the card back.
+  - **The headline.** `AdvertsView.setNewsHeadline(text)` puts the latest story on the card's ticker. The media
+    centre's story log (N2) calls it with `news.latest(1)[0]?.h` whenever the latest story changes; an empty text puts
+    the card's own line back. Only the news cell of the atlas is redrawn: the text is cut at 60 characters with an
+    ellipsis and set as large as fits, 12 px down to 8. An unchanged text costs nothing, and a change re-uploads the
+    atlas once (16 ms measured in headless Chrome).
+  - **The picture.** The media centre (UTD 90cd3857, N4) will hand `AdvertsView.setNewsFeed(texture)` the news
+    helicopter's render target. Every news turn on every screen then samples that texture instead of the card, and
+    `null` puts the card back.
   - Selling the news turn, and auctioning airtime, belong to that card.
 
 ### The look
