@@ -486,3 +486,4 @@ body.map-on #tools, body.map-on #panel, body.map-on #cpanel, body.map-on #tip, b
 #adverts .bad { color: #ff8a8a; font-style: normal; }
 #adverts .areach { margin: 10px 0 2px; padding: 7px 8px; border-radius: 6px; background: rgba(94,200,242,0.08); border: 1px solid rgba(94,200,242,0.25); line-height: 1.4; }
 body.adpick canvas { cursor: copy; }
+#adverts .aprev .adposter + .adposter { font-size: 8px; padding: 3px; }

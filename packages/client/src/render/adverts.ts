@@ -247,7 +247,7 @@ export class AdvertsView {
   tick: () => number = () => 0;
 
   constructor() {
-    const mat = new MeshLambertMaterial({ map: this.atlas.texture, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2, transparent: false, alphaTest: 0.5 });
+    const mat = new MeshLambertMaterial({ map: this.atlas.texture, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uNight = sceneUniforms.uNight;
       sh.uniforms.uTime = sceneUniforms.uTime;
@@ -326,7 +326,7 @@ vec4 adTag(vec2 uv, float crew, float t, float s) {
     float rim = 1.0 - smoothstep(0.0, 0.12, edge);
     col = mix(vec3(1.0, 0.86, 0.25) * (0.5 + 0.5 * pulse), vec3(1.0, 0.95, 0.6), rim);
   }
-  diffuseColor.rgb = col;
+  diffuseColor = vec4(col, 1.0);
   if (vDist > ${FAR_AT.toFixed(1)}) discard;
 }`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
