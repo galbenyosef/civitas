@@ -94,7 +94,7 @@ game.fires.enabled = process.env.FIRES !== '0'; // FIRES=0: nothing catches ligh
 if (DEMO) {
   // the scenario's fire drills (docs/incidents.md): a house on a loop, a row the fire runs along, a works that blows up
   game.fires.drills = demoFireDrills(DEMO).map(([x, y]) => [x, y]);
-  // the scenario's blackout drill (docs/utilities.md 4.4): a fault on these substations every three game hours, the depot's van ends it
+  // the scenario's blackout drill (docs/utilities.md 4.4): a fault on these substations every six game hours, the depot's van ends it
   game.utilities.drills = demoBlackouts(DEMO).map(([x, y]) => [x, y]);
   game.fires.rows = demoFireRows(DEMO).map((row) => row.map(([x, y]): [number, number] => [x, y]));
   game.fires.blastDrills = demoFireBlasts(DEMO).map(([x, y]) => [x, y]);

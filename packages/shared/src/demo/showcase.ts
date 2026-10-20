@@ -490,6 +490,8 @@ export const SECTIONS: DemoSection[] = [
       { kind: 'solar-farm', door: [-47, 21], rot: 2 },
       { kind: 'substation', door: POWER_SUB_A, name: 'Perimeter Road substation' },
       { id: 'substation-b', kind: 'substation', door: POWER_SUB_B, name: 'Beacon Lane substation' },
+      // the wind row's own node: its supply runs along the turbines' road and on round to the grid supply point's
+      { id: 'substation-c', kind: 'substation', door: [-50, 21] },
     ],
     utilLinks: [
       { id: 'power-pylons', name: 'The pylon line', mode: 'overhead', from: [-45, 13], to: POWER_SUB_A },
@@ -779,7 +781,7 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   },
   blackout: {
     title: 'Blackout',
-    what: 'A fault on a substation cuts the power to every street its supply runs along: the lamps go out, and the windows drop to a candle here and there, with the odd building on a generator burning bright. The nearest power depot sends a repair van; while the crew digs the streets stay dark, and when they are done the lights come back block by block. Homes in a cut do not grow. In this demo the substation by the perimeter road fails every three game hours, so its streets are dark more often than not.',
+    what: 'A fault on a substation cuts the power to every street its supply runs along: the lamps go out, and the windows drop to a candle here and there, with the odd building on a generator burning bright. The nearest power depot sends a repair van; while the crew digs the streets stay dark, and when they are done the lights come back block by block. Homes in a cut do not grow. In this demo the substation by the perimeter road fails every six game hours, so its streets are dark about half the time.',
     how: `Keep a power depot (Power stations) near the middle of your network: a fault stays dark while its van drives there and the crew works ${UTIL.repairHours} game hours. Without one a contractor takes ${UTIL.contractorHours}. A second substation whose streets overlap keeps a fault's patch on the network's other links.`,
     facts: [['Faults', `about one per substation in 25 game days, none in the first ${UTIL.faultsFromDay} days of a world`], ['Repair', `${UTIL.repairHours} game hours on site`], ['Never cut', 'a patch with a hospital or police station, in rolling cuts']],
   },

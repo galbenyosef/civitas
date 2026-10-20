@@ -259,7 +259,7 @@ The **Power** section (shared/src/demo/showcase.ts) is open land west of distric
 perimeter road at x = −35: a gas and a coal power station, a grid supply point by the road into town, three wind
 turbines, a solar farm and a power depot. Two substations stand on lots of B1 and C1 by the perimeter road. A pylon line
 runs from the coal station to the C1 substation and a buried cable from the solar farm to the B1 one (the seeder lays
-them as the tools would, `demoUtilLinks`, into the save's `utilities.links`). Every three game hours the C1 substation
+them as the tools would, `demoUtilLinks`, into the save's `utilities.links`). Every six game hours the C1 substation
 faults (`demoBlackouts`, `Utilities.drills`): its streets go dark, the depot's van drives round, and after its two hours
 on site they light up again block by block. Tour stops: each plant and node, the pylon line, the buried cable and the
 blackout (shown at 21:36). `SHOWCASE_FEATURES` has `power-plant`, `power-pylons`, `power-buried` and `power-blackout`.

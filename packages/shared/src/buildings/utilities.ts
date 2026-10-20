@@ -86,12 +86,13 @@ const turbine = (x: number, z: number, h: number, turn: number): Op[] => {
     ['box', 0.05, 0.04, 0.09, x, h, z - 0.01, 'white'], // nacelle, facing the road
     ['cyl', 0.016, 0.016, 0.02, x, h + 0.01, z + 0.045, 'silver', 8],
   ];
-  // the blades: thin boxes from the hub at three angles in the rotor plane (x-y), built from short segments so they lean
+  // the blades: three in the rotor plane (x-y) at their angles, each a run of overlapping squares tapering to the tip
+  // (boxes stand square to the axes, so a slanting blade is built of steps, too small to see from the street)
   for (let k = 0; k < 3; k++) {
     const a = t + (k * 2 * Math.PI) / 3;
-    for (let s = 0; s < 4; s++) {
-      const r = (s + 0.5) * (blade / 4);
-      ops.push(['box', 0.018 - s * 0.003, 0.018 - s * 0.003, 0.008, x + Math.cos(a) * r, h + 0.02 + Math.sin(a) * r - 0.009, z + 0.05, 'white']);
+    for (let s = 0; s < 8; s++) {
+      const r = 0.03 + (s + 0.5) * (blade / 8), w = 0.05 - s * 0.004;
+      ops.push(['box', w, w, 0.014, x + Math.cos(a) * r, h + 0.02 + Math.sin(a) * r - w / 2, z + 0.05, 'white']);
     }
   }
   return ops;

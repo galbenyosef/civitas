@@ -16,8 +16,8 @@ const DISPATCH_EVERY = 10;
 /** a fault a van could not reach this many times is left to the contractor */
 const MAX_TRIES = 3;
 /** a demo's blackout drill faults its substations every so many game hours (showcase 'blackout' spots): with the van's
- *  drive and two hours' work the streets are dark most of the time, so the tour stop (lit for 21:36) nearly always shows it */
-const DRILL_EVERY = 3;
+ *  drive and two hours' work the streets are dark about half the time, and lit long enough between to come back block by block */
+const DRILL_EVERY = 6;
 const DX = [1, -1, 0, 0], DY = [0, 0, 1, -1];
 
 interface Fault extends FaultSave {
