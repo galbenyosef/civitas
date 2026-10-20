@@ -1285,6 +1285,8 @@ if (local) {
   if (__LOCAL_ONLY__) registerServiceWorker((kind, msg) => ui.toast(kind, msg));
 }
 if (cityParam) { showCityBanner(cityParam, params, hud); reviveCity(cityParam, net); }
+/** the light as the player had it before a tour stop pinned an hour (TourPanel setHour) */
+let tourLight: { mode: typeof lighting.mode; hour: number } | null = null;
 if (demoParam) {
   showDemoBanner(demoParam, params, hud, !!showcase.spectate, !showcase.defaultDemo);
   reviveDemo(demoParam, net);
@@ -1292,6 +1294,15 @@ if (demoParam) {
     demo: demoParam, net, rig, scene, buildingHtml: (info) => ui.buildingHtml(info, 'h3'),
     chipMount: document.getElementById('techBtn')!, onFly: () => { following = false; }, setUnder: (on) => setUnder(on), setMap: (on) => mapMode.set(on, false),
     celebrate: (x, y) => ranks.preview(x, y),
+    // a stop shown at an hour of its own (the Piccadilly Lights at night): the light is pinned there, and given back after
+    setHour: (h) => {
+      if (h === null) {
+        if (tourLight) { lighting.mode = tourLight.mode; lighting.fixedHour = tourLight.hour; tourLight = null; ui.setLightMode(lighting.mode, lighting.fixedHour); }
+        return;
+      }
+      tourLight ??= { mode: lighting.mode, hour: lighting.fixedHour };
+      lighting.mode = 'fixed'; lighting.fixedHour = h; ui.setLightMode(lighting.mode, lighting.fixedHour);
+    },
   });
   (window as any).msc.tour = tour;
 }

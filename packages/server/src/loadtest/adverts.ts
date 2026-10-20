@@ -14,11 +14,15 @@
  * 5. endings: a poster whose building is pulled down comes down at midnight, and so do an unpaid renter's;
  * 6. the goal "Run your first campaign" measures unlock, campaign and frames; the first poster is a milestone;
  * 7. spectate refuses the intents; a save with rentals loads with them, and a save without adverts loads with none;
- * 8. cost: Adverts.tick over the run (a day check) and the daily pass.
+ * 8. cost: Adverts.tick over the run (a day check) and the daily pass;
+ * 9. big screens (docs/adverts.md section 9): a big screens corner placed on a street corner has six screen slots, open,
+ *    rented only by picking (never by "the nearest free"), at the screen rent, never wearing; its ring of turns puts the
+ *    renting campaigns in their turns, house adverts in the rest and the news in the last unrented one.
  * Prints pass/fail counts; exits 1 on any failure.
  */
 import {
-  TICKS_PER_DAY, AD, AD_CLAIMS, packTile, terrainOf, AD_STRIDE, AD_SIZES, Zone, tileKey, adHostAt, adSlotOpen, adWear, adAge, adSeed, adAreaRate, packLook, ECONOMY_TUNING,
+  TICKS_PER_DAY, AD, AD_CLAIMS, AD_SIZE, packTile, terrainOf, AD_STRIDE, AD_SIZES, Zone, tileKey, adHostAt, adSlotOpen, adWear, adAge, adSeed, adAreaRate, packLook, ECONOMY_TUNING,
+  KIND_ID, HOUSE_ADS, isRoad, isScreenSlot, screenTurns, placedFromDoor, workOf,
   type AdEnv, type ServerMsg,
 } from '@msimcity/shared';
 import { World } from '../world';
@@ -103,7 +107,7 @@ const theirs = open.find((s) => s.owner === 'sys'), own = open.find((s) => s.own
 const r1 = ads.rent(p, cid, theirs ? [[theirs.x, theirs.y, theirs.i]] : [], undefined);
 const rentOf = (s: { x: number; y: number; i: number }) => AD_SIZES[adHostAt(env, s.x, s.y)!.slots[s.i * AD_STRIDE + 1]];
 ok(typeof r1 !== 'string' && r1.n === 1, `rented a frame on the Commons' land (${typeof r1 === 'string' ? r1 : r1.n})`);
-const rent1 = theirs ? { panel: 2, poster: 3, hoarding: 6, billboard: 10, banner: 8 }[rentOf(theirs)] : 0;
+const rent1 = theirs ? AD_SIZE[rentOf(theirs)].rent : 0;
 ok(Math.abs(m1 - p.money - rent1) < 1e-6 && Math.abs(sys.money - sys1 - rent1) < 1e-6, `the first day's rent ($${rent1}) went from the renter to the parcel owner`);
 const taken = theirs ? ads.rent(p, cid, [[theirs.x, theirs.y, theirs.i]], undefined) : '';
 ok(typeof taken === 'string' && /taken/.test(taken), 'a taken frame is refused');
@@ -133,7 +137,7 @@ const rentals0 = ads.list().length;
 const ages0 = new Map(ads.list().map((r) => [`${r.x},${r.y}#${r.i}`, r.age]));
 const paid0 = ads.stats.rentPaid, gone0 = ads.stats.gone;
 let expected = 0;
-const rentNow = () => ads.list().reduce((a, r) => a + [2, 3, 6, 10, 8][r.s], 0);
+const rentNow = () => ads.list().reduce((a, r) => a + AD_SIZE[AD_SIZES[r.s]].rent, 0);
 let t0 = performance.now(), ticks = 0;
 const tickMs = { sum: 0 };
 const orig = ads.tick.bind(ads);
@@ -155,6 +159,53 @@ const seeds = new Set(ads.list().map((r) => adSeed(r.x, r.y, r.i, r.c).toFixed(4
 ok(seeds.size === ads.list().length, 'every poster has its own seed (wear rate, tags, tears, tilt)');
 console.log(`  cost: Adverts.tick ${tickMs.sum.toFixed(2)} ms over ${ticks} ticks (${((tickMs.sum / ticks) * 1000).toFixed(2)} µs a tick), the whole sim ${wall.toFixed(0)} ms`);
 ok(tickMs.sum / ticks < 0.05, 'Adverts.tick costs nothing worth measuring (under 0.05 ms a tick, the daily pass included)');
+
+console.log('9. big screens');
+{
+  // a big screens corner on a corner of the player's district: its front and its right side on roads, the lots cleared
+  const k = KIND_ID['big-screens'];
+  const road = (x: number, y: number) => { const t = w.peekTile(x, y); return t !== undefined && isRoad(t); };
+  let placed: ReturnType<typeof placedFromDoor> | null = null;
+  for (let y = mine.y; y < mine.y + mine.h && !placed; y++) for (let x = mine.x; x < mine.x + mine.w && !placed; x++) for (let r = 0; r < 4 && !placed; r++) {
+    const q = placedFromDoor(k, x, y, r);
+    if (!road(q.frontX, q.frontY)) continue;
+    // the curve turns to the right side (model +x): that side's neighbours want a road too
+    const right = [[0, 1], [1, 0], [0, -1], [-1, 0]][(r + 1) & 3];
+    let fine = true, corner = false;
+    for (let ty = q.ay; ty < q.ay + q.h; ty++) for (let tx = q.ax; tx < q.ax + q.w; tx++) {
+      if (road(tx, ty) || w.auxAt(tx, ty) || w.parcelAt(tx, ty)?.id !== mine.id) fine = false;
+      if (road(tx + right[0], ty + right[1]) && !(tx + right[0] >= q.ax && tx + right[0] < q.ax + q.w && ty + right[1] >= q.ay && ty + right[1] < q.ay + q.h)) corner = true;
+    }
+    if (fine && corner) placed = q;
+  }
+  ok(!!placed, `a corner for the big screens in district A2 (${placed ? `door ${placed.doorX}, ${placed.doorY}, turn ${placed.r}` : 'none'})`);
+  if (placed) {
+    for (let ty = placed.ay; ty < placed.ay + placed.h; ty++) for (let tx = placed.ax; tx < placed.ax + placed.w; tx++) w.setTile(tx, ty, packTile(terrainOf(w.getTile(tx, ty)), false, 0, 0));
+    w.placeStructure(placed, { work: workOf(k, 1), priority: 1, built: true });
+    const dx = placed.doorX, dy = placed.doorY, h = adHostAt(env, dx, dy);
+    const screens = h ? Array.from({ length: h.slots.length / AD_STRIDE }, (_, i) => i).filter((i) => isScreenSlot(h.slots, i)) : [];
+    ok(screens.length === AD.screenTurns && screens.every((i) => adSlotOpen(env, h!, i, dx, dy)), `${screens.length} big screens, all open to the street`);
+    // "the nearest free frames" never takes a screen; picking one does, at the screen's rent, and it never wears
+    const near2 = ads.rent(p, cid, undefined, { x: dx, y: dy, n: 12 });
+    ok(!ads.list().some((r) => r.x === dx && r.y === dy), `renting the nearest frames to the corner leaves its screens alone (${typeof near2 === 'string' ? near2 : `${near2.n} other frames`})`);
+    // (the corner is on the player's own land, so the rent comes back to them: the first day's charge is what is checked)
+    const r3 = ads.rent(p, cid, [[dx, dy, screens[2]]], undefined);
+    const got = ads.list().find((r) => r.x === dx && r.y === dy && r.i === screens[2]);
+    ok(typeof r3 !== 'string' && !!got && r3.cost === AD_SIZE.screen.rent, `a screen's turn rents at $${AD_SIZE.screen.rent} a day, ${AD_SIZE.screen.rent / AD_SIZE.billboard.rent} times a billboard (${typeof r3 === 'string' ? r3 : `charged $${r3.cost}`})`);
+    for (let i = 0; i < DAY; i++) g.step();
+    const after1 = ads.list().find((r) => r.x === dx && r.y === dy && r.i === screens[2]);
+    ok(!!after1 && after1.rate === 0 && adWear(adAge(after1.age, after1.rate, after1.at, w.tick), 0.5) === 0, 'a screen never wears (rate 0 after a midnight)');
+    // the ring: the renting campaigns in their turns, house adverts and the news in the rest
+    const rented = screens.map((i) => ads.list().find((r) => r.x === dx && r.y === dy && r.i === i)?.c ?? null);
+    const ring = screenTurns(rented, 0.37);
+    ok(ring[2].kind === 'campaign' && ring.filter((t) => t.kind === 'news').length === 1 && ring[5].kind === 'news' && ring.filter((t) => t.kind === 'house').length === 4,
+      `the ring: ${ring.map((t) => (t.kind === 'campaign' ? `campaign ${t.campaign}` : t.kind === 'house' ? HOUSE_ADS[t.art] : 'NEWS')).join(', ')}`);
+    const full = screenTurns([1, 2, 3, 4, 5, 6], 0.1), none = screenTurns([null, null, null, null, null, null], 0.9);
+    ok(full.every((t) => t.kind === 'campaign') && none.filter((t) => t.kind === 'news').length === 1 && new Set(none.filter((t) => t.kind === 'house').map((t) => (t as { art: number }).art)).size === 5,
+      'every turn rented shows no house advert and no news; none rented shows five different house adverts and the news');
+    ok(JSON.stringify(screenTurns(rented, 0.37)) === JSON.stringify(ring) && JSON.stringify(screenTurns(rented, 0.81)) !== JSON.stringify(ring), 'the ring is the same for every viewer of a building, and differs between buildings (their seeds)');
+  }
+}
 
 console.log('5. endings');
 const victim = ads.list().find((r) => w.buildings.get(tileKey(r.x, r.y))?.zone === Zone.Commercial && w.parcelAt(r.x, r.y)?.owner === 'sys');

@@ -278,10 +278,15 @@ export const ARTERIALS: Arterial[] = [
     [51.4890, -0.2870], [51.5100, -0.2880], [51.5300, -0.2930], [51.5550, -0.2500], [51.5760, -0.2230], [51.5920, -0.2100],
   ] },
   // west and south-west
-  { name: 'Piccadilly, Knightsbridge, Kensington High Street, Hammersmith Road and Chiswick High Road', pts: [
-    [51.5100, -0.1340], [51.5100, -0.1515], [51.5030, -0.1515], [51.5030, -0.1890], [51.5010, -0.1930], [51.4925, -0.2235],
+  // from the Charing Cross Road along Coventry Street, past Piccadilly Circus (london.ts), then Piccadilly proper
+  { name: 'Coventry Street, Piccadilly, Knightsbridge, Kensington High Street, Hammersmith Road and Chiswick High Road', pts: [
+    [51.5100, -0.1290], [51.5100, -0.1340], [51.5100, -0.1515], [51.5030, -0.1515], [51.5030, -0.1890], [51.5010, -0.1930], [51.4925, -0.2235],
     [51.4925, -0.2570], [51.4890, -0.2870], [51.4870, -0.3050],
   ] },
+  // Piccadilly Circus (london.ts places the Lights there, its front on Piccadilly): Regent Street comes down from Oxford
+  // Circus to its west corner. Piccadilly runs on east past its front as Coventry Street to the Charing Cross Road, a
+  // tile from its east corner, which stands for Shaftesbury Avenue too at this scale; Haymarket is a side street south
+  { name: 'Regent Street', pts: [[51.5150, -0.1422], [51.5104, -0.1422]] },
   { name: "Shepherd's Bush Road and Fulham Palace Road", pts: [[51.5050, -0.2250], [51.4925, -0.2235], [51.4680, -0.2120]] },
   { name: "Victoria Street, Sloane Square, the King's Road and Fulham Road", pts: [
     [51.4985, -0.1395], [51.4965, -0.1440], [51.4925, -0.1565], [51.4860, -0.1750], [51.4800, -0.1950], [51.4700, -0.2100],

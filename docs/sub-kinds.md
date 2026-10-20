@@ -53,7 +53,7 @@ Because base ids equal codes, everything already stored by kind code stays valid
 | 79-81 | business centre, office tower, corporate headquarters | 4 |
 | 82-85 | workshop row, distribution centre, factory complex, heavy plant | 3 |
 
-Ids 24-28 are the harbours, 29-31 are reserved for a sea lock, a boatyard and a lifeboat station (docs/boats.md), and 32-39 are left for the transport cards; the size ladders took 40-69 in one block so each family's rungs sit together, the merged zone lots took 70-89 (70-85 used), and the education kinds took 101-108 (91-100 are the London landmarks, 109-115 stay free for education; docs/education.md). `KIND_ID` in `compiled.ts` maps catalogue string ids to kind ids (`KIND_ID['bus-depot'] === 16`) for code that means one exact kind.
+Ids 24-28 are the harbours, 29-31 are reserved for a sea lock, a boatyard and a lifeboat station (docs/boats.md), and 32-39 are left for the transport cards; the size ladders took 40-69 in one block so each family's rungs sit together, the merged zone lots took 70-89 (70-85 used), and the education kinds took 101-108 (91-100 are the London landmarks, 109-115 stay free for education, 111-114 being the London universities; docs/education.md). 116 is Piccadilly Circus and 117 the big screens corner (docs/adverts.md section 9). `KIND_ID` in `compiled.ts` maps catalogue string ids to kind ids (`KIND_ID['bus-depot'] === 16`) for code that means one exact kind.
 
 ## The catalogue
 

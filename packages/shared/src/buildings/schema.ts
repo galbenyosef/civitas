@@ -67,7 +67,14 @@ export type Op =
    * game can rent out. On a facade box by cell; on a plain box bay and storey are 0 and it is centred, or placed `at`
    * [along, up] (fractions of the wall). Never on the back wall, never over a window.
    */
-  | ['adslot', PartRef, FaceName, number, number, AdSize, [number, number]?];
+  | ['adslot', PartRef, FaceName, number, number, AdSize, [number, number]?]
+  /**
+   * screens x y z r from to cols rows h [bezel='charcoal']: a bank of big screens round a curve (docs/adverts.md section 9,
+   * buildings/adslot.ts screenArc): cols × rows flat `screen` slots on the facets of a dark bezel band of radius r about
+   * (x, z), from `from` to `to` degrees (0 faces the front, 90 the right, -90 the left), foot at y, h tall. A column's
+   * angle must divide 360 and `from`, so the panels sit flush on the bezel's facets; never facing the back.
+   */
+  | ['screens', number, number, number, number, number, number, number, number, number, Color?];
 
 export interface TaperOpts { win?: Win; shift?: [number, number] }
 export interface LatheOpts { seg?: number; twist?: number; stripe?: Color; every?: number; width?: number; axis?: 'y' | 'x' | 'z'; win?: Win }

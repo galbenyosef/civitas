@@ -83,8 +83,9 @@ export function checkOp(op: Op, where: string): string[] {
     return errs;
   }
   if (name === 'taper' || name === 'lathe') return shapeErrors(name, args, where);
+  if (name === 'screens') return screensErrors(args, where);
   const p = PRIMS[name];
-  if (!p) return [`${where}: unknown op '${name}' (known: ${[...Object.keys(PRIMS), 'taper', 'lathe', ...Object.keys(HELPERS), ...Object.keys(FEATURES)].join(', ')})`];
+  if (!p) return [`${where}: unknown op '${name}' (known: ${[...Object.keys(PRIMS), 'taper', 'lathe', 'screens', ...Object.keys(HELPERS), ...Object.keys(FEATURES)].join(', ')})`];
   // boxes and roofs may end with an options object ({ name, facade }), checked per design by facadeErrors
   const opts = (name === 'box' || name === 'roof') && args.length === p.nums + 3 && typeof args[p.nums + 2] === 'object';
   const max = p.nums + 1 + (p.tail ? 1 : 0) + (opts ? 1 : 0);
@@ -97,6 +98,26 @@ export function checkOp(op: Op, where: string): string[] {
     if (p.tail === 'bool' && typeof t !== 'boolean') errs.push(`${where}: roof alongZ must be true or false`);
     if (p.tail === 'seg' && !(Number.isInteger(t) && (t as number) >= 3 && (t as number) <= 64)) errs.push(`${where}: segments must be an integer 3-64`);
   }
+  return errs;
+}
+
+/** A bank of screens on a curve (schema.ts `screens`, adslot.ts screenArc): flush on the bezel's facets, never facing the back. */
+function screensErrors(args: unknown[], where: string): string[] {
+  if (args.length < 9 || args.length > 10) return [`${where}: screens takes x y z r from to cols rows h and an optional bezel colour; got ${args.length} args`];
+  const errs: string[] = [];
+  for (let i = 0; i < 9; i++) if (!isNum(args[i])) errs.push(`${where}: screens arg ${i + 1} must be a number`);
+  if (errs.length) return errs;
+  const [, , , r, from, to, cols, rows, h] = args as number[];
+  if (r <= 0 || h <= 0) errs.push(`${where}: screens radius and height must be positive`);
+  if (!Number.isInteger(cols) || cols < 1 || cols > 12 || !Number.isInteger(rows) || rows < 1 || rows > 4) errs.push(`${where}: screens cols must be 1-12 and rows 1-4`);
+  else if (!(to > from)) errs.push(`${where}: screens must run from a smaller angle to a bigger one`);
+  else {
+    const step = (to - from) / cols, segs = 360 / step;
+    if (Math.abs(segs - Math.round(segs)) > 1e-6 || segs < 3 || segs > 64) errs.push(`${where}: screens: a column of ${step} degrees must divide 360 into 3-64 facets`);
+    else if (Math.abs(from / step - Math.round(from / step)) > 1e-6) errs.push(`${where}: screens: from (${from}) must be a multiple of a column's ${step} degrees, so the panels sit on the bezel's facets`);
+    if (from + step / 2 < -135 || to - step / 2 > 135) errs.push(`${where}: screens must face a road side (front, left or right), not the back`);
+  }
+  if (args[9] !== undefined && !isColor(args[9])) errs.push(`${where}: screens bezel ${JSON.stringify(args[9])} is not a palette name or 0xRRGGBB`);
   return errs;
 }
 

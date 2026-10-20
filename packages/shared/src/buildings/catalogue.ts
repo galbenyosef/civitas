@@ -22,6 +22,7 @@ import { OFFICE_MERGED } from './office-merged';
 import { INDUSTRIAL_MERGED } from './industrial-merged';
 import { BLOCK_INTERIOR } from './block-interior';
 import { LONDON_LANDMARKS } from './landmarks-london';
+import { bigScreens } from './bigscreens';
 import { EDUCATION } from './education';
 
 /**
@@ -36,6 +37,8 @@ const BASE: KindDef[] = [residential, commercial, industrial, office, police, fi
   ...HARBOURS,
   // size ladders (groups.ts): the smaller and bigger rungs around the kinds above
   ...CIVIC_TIERS, ...PARKING_TIERS, ...LEISURE_TIERS,
+  // the big screens corner (docs/adverts.md section 9): kind id 117, the cinema ladder's top rung, six big screens round its corner
+  bigScreens,
   // merged lots (zones.ts): bigger zone kinds that growth assembles from neighbouring lots
   ...RESIDENTIAL_MERGED, ...COMMERCIAL_MERGED, ...OFFICE_MERGED, ...INDUSTRIAL_MERGED,
   // block interiors: deep plots growing back into a block's landlocked middle, and the communal garden (block-interior.ts)

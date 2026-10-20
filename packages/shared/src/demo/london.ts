@@ -80,6 +80,9 @@ const STRUCTURES: Spot[] = [
   ['kings', 'kings', 51.5115, -0.1160, 'N', 'N'],
   ['lse', 'lse', 51.5144, -0.1165, 'W', 'N'],
   ['imperial', 'imperial', 51.4988, -0.1749, 'S'],
+  // Piccadilly Circus (buildings/landmarks-london-4.ts): the Lights on the circus at the east end of Piccadilly, its
+  // front on Piccadilly where Regent Street, Shaftesbury Avenue, Coventry Street and Haymarket meet it
+  ['piccadilly-circus', 'piccadilly-circus', 51.5100, -0.1347, 'S'],
   ['leicester-square', 'multiplex', 51.5103, -0.1301, 'W'],
   ['serpentine', 'lakeside-park', 51.5050, -0.1700, 'S'],
   ['regents-park-lake', 'lakeside-park', 51.5270, -0.1600, 'N'],
@@ -103,6 +106,8 @@ const STRUCTURES: Spot[] = [
   ['stockwell-garage', 'bus-depot', 51.4740, -0.1180, 'E'],
   ['poplar-garage', 'bus-depot', 51.5110, -0.0050, 'N'],
 ];
+/** Landmarks the tour shows at an hour and from an angle of their own: the Piccadilly Lights after dark, from the front-left where the curve faces. */
+const TOUR_VIEWS: Record<string, Pick<DemoPlacement, 'hour' | 'aside' | 'zoom'>> = { 'piccadilly-circus': { hour: 21.5, aside: -0.6, zoom: 0.7 } };
 /** 1×1 venues, on a frontage lot near the real one once the streets are laid. */
 const VENUES: Spot[] = [
   ['palladium', 'theatre', 51.5142, -0.1404, 'S'],
@@ -306,7 +311,7 @@ export function londonScenario(): LondonScenario {
     if (!best) { problems.push(`${id}: no room near (${Math.round(px)}, ${Math.round(py)})`); continue; }
     claim(best);
     keeps.push(best);
-    structures.push({ id, kind, door: [best.doorX, best.doorY], rot: best.r as 0 | 1 | 2 | 3 });
+    structures.push({ id, kind, door: [best.doorX, best.doorY], rot: best.r as 0 | 1 | 2 | 3, ...TOUR_VIEWS[id] });
   }
 
   // ---- the river's harbours and piers: the back rows over the water a tile clear of every bridge deck, the front on
@@ -516,10 +521,10 @@ export function londonScenario(): LondonScenario {
     },
     {
       id: 'london-landmarks', name: 'Landmarks',
-      blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Big Ben and the Houses of Parliament, the London Eye, Buckingham Palace, the Tower and Tower Bridge, UCL, King\'s College, LSE and Imperial College as universities, and the hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
+      blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Piccadilly Circus and its Lights, Big Ben and the Houses of Parliament, the London Eye, Buckingham Palace, the Tower and Tower Bridge, UCL, King\'s College, LSE and Imperial College as universities, and the hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
       placements: [
         ...pick('new-scotland-yard', 'st-thomas', 'royal-london', 'lambeth-fire', 'british-museum', 'natural-history-museum', 'maritime-museum', 'british-library',
-          'royal-opera-house', 'gherkin', 'walkie-talkie', 'shard', 'one-canada-square', 'parliament', 'london-eye', 'buckingham-palace', 'tower-of-london',
+          'royal-opera-house', 'piccadilly-circus', 'gherkin', 'walkie-talkie', 'shard', 'one-canada-square', 'parliament', 'london-eye', 'buckingham-palace', 'tower-of-london',
           'ucl', 'kings', 'lse', 'imperial'),
         ...venues,
         ...pick('leicester-square', 'serpentine', 'regents-park-lake', 'kew-gardens', 'wembley', 'london-stadium', 'copper-box', 'o2-arena'),
@@ -600,7 +605,7 @@ export function londonScenario(): LondonScenario {
 export const LONDON_TOUR: string[] = [
   'welcome',
   'area-westminster', 'parliament', 'london-eye', 'pier-embankment', 'line-ferry-rb1', 'pier-millbank', 'buckingham-palace', 'new-scotland-yard', 'st-thomas', 'lambeth-fire',
-  'area-west-end', 'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'kings', 'lse', 'leicester-square', 'line-bus-25', 'line-bus-159',
+  'area-west-end', 'piccadilly-circus', 'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'kings', 'lse', 'leicester-square', 'line-bus-25', 'line-bus-159',
   'tube-central-tottenham-court-road', 'line-tube-central', 'line-tube-northern',
   'area-city', 'gherkin', 'walkie-talkie', 'tower-of-london', 'tower-bridge', 'pool-of-london', 'st-katharine', 'pier-tower', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
   'area-south-bank', 'shard', 'waterloo', 'tube-crossover', 'line-tube-jubilee', 'line-south-western', 'clapham-junction', 'area-clapham', 'primary-clapham', 'chelsea-jetty', 'victoria-garage', 'stockwell-garage', 'area-brixton', 'primary-brixton', 'secondary-brixton',

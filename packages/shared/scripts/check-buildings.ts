@@ -37,6 +37,7 @@ import { mapByte, MapClass } from '../src/worldmap';
 import * as A from '../src/airport';
 import * as F from '../src/flights';
 import { RECIPES } from '../src/buildings/recipes';
+import { AD } from '../src/adverts';
 import * as TI from '../src/tiers';
 import { GROUPS } from '../src/buildings/groups';
 import { shapeExtent } from '../src/buildings/facade';
@@ -51,7 +52,7 @@ import type { CompiledOp, Op } from '../src/buildings/schema';
 import { LEGACY_WINDOW_COLLISIONS } from './window-baseline';
 import { EXTRA_DESIGNS } from '../src/buildings/designs/index';
 import { AD_SLOTS } from '../src/buildings/compiled';
-import { AD_STRIDE, AD_SIZES } from '../src/buildings/adslot';
+import { AD_STRIDE, AD_SIZES, FACE_YAW } from '../src/buildings/adslot';
 import { compileCatalogue as compileAll } from '../src/buildings/compile';
 
 /**
@@ -1020,6 +1021,8 @@ section('windows');
       if (![0, 1, 3].includes(a[i])) fail(`ad slot ${key}#${i / AD_STRIDE} faces ${a[i]}: never the back wall`);
       if (!(a[i + 1] >= 0 && a[i + 1] < AD_SIZES.length)) fail(`ad slot ${key}#${i / AD_STRIDE}: size code ${a[i + 1]}`);
       if (!(a[i + 5] > 0 && a[i + 6] > 0)) fail(`ad slot ${key}#${i / AD_STRIDE}: empty poster`);
+      // the poster faces its wall, or (a screen on a curve) within 45 degrees of the wall it is filed under
+      if (!(Number.isFinite(a[i + 7]) && Math.abs(Math.atan2(Math.sin(a[i + 7] - FACE_YAW[a[i]]), Math.cos(a[i + 7] - FACE_YAW[a[i]]))) <= Math.PI / 4 + 1e-6)) fail(`ad slot ${key}#${i / AD_STRIDE}: turned ${a[i + 7]}, not towards its ${a[i]} wall`);
     }
     const kind = Number(key.split(':')[0]);
     if (kindOf.get(kind)?.family === 'residential') fail(`a home carries an ad slot (${key}): no ads on homes (docs/adverts.md question 2)`);
@@ -1031,8 +1034,21 @@ section('windows');
   eq('every bus shelter has a panel', !!AD_SLOTS[`${KIND_ID['bus-stop']}:1:0`], true);
   eq('the building-site fence has a hoarding', AD_SLOTS.site?.[1], AD_SIZES.indexOf('hoarding'));
   console.log(`  ${slots} slot(s) on ${Object.keys(AD_SLOTS).length} design(s); ${withSlot}/${live.length} commercial and leisure designs carry one`);
+  // big screens (docs/adverts.md section 9): every design with screens has AD.screenTurns of them, and only landmarks and the big screens corner carry them
+  const screenCode = AD_SIZES.indexOf('screen');
+  for (const [key, a] of Object.entries(AD_SLOTS)) {
+    let n = 0;
+    for (let i = 0; i < a.length; i += AD_STRIDE) if (a[i + 1] === screenCode) n++;
+    if (!n) continue;
+    const k = kindOf.get(Number(key.split(':')[0]));
+    if (n !== AD.screenTurns) fail(`${key} has ${n} big screens; a building's screens share AD.screenTurns (${AD.screenTurns}) turns`); else passes++;
+    if (!k || !(k.landmark || k.id === 'big-screens')) fail(`${key} carries big screens: only landmarks and the big screens corner do`);
+  }
+  eq('Piccadilly Circus has its six screens', (AD_SLOTS[`${KIND_ID['piccadilly-circus']}:1:0`] ?? []).filter((_, i, a) => i % AD_STRIDE === 1 && a[i] === screenCode).length, AD.screenTurns);
   // validation: the back wall, an unknown size, and a frame over a window
   const busStopAt = (cat: KindDef[]) => cat.find((k) => k.id === 'bus-stop')!.levels[0].designs[0].ops;
+  expectError('screens facing the back', (cat) => { busStopAt(cat).push(['screens', 0, 0.1, 0, 0.3, 90, 180, 3, 1, 0.2]); }, /must face a road side/);
+  expectError('screens off the bezel\'s facets', (cat) => { busStopAt(cat).push(['screens', 0, 0.1, 0, 0.3, -80, 0, 3, 1, 0.2]); }, /must divide 360|must be a multiple/);
   expectError('an ad slot on the back wall', (cat) => { busStopAt(cat).push(['adslot', 4, 'back', 0, 0, 'panel']); }, /must face a road side/);
   expectError('an unknown ad size', (cat) => { busStopAt(cat).push(['adslot', 4, 'right', 0, 0, 'mural' as never]); }, /is not one of panel/);
   const usesFacade = (ops: Op[]) => ops.some((op) => (op[0] === 'box') && !!op[9]?.facade);
