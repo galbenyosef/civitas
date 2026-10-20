@@ -127,16 +127,16 @@ The archive holds 1,500 records. Beyond that the oldest go first, but never a re
 
 ## 7. Checks and measurements
 
-`npx tsx packages/server/src/loadtest/death.ts [--seed 1] [--quiet]` runs on a 1×1 Commons with a funeral director beside a churchyard. It has 40 checks in eight sections:
+`npx tsx packages/server/src/loadtest/death.ts [--seed 1] [--quiet]` runs on a 1×1 Commons with a funeral director beside a churchyard. Since motivation (M2) nobody is out of work in that town, so a new service hires only job-switchers; the probe moves five neighbours with ordinary jobs to the funeral director when it has not hired in half a day. It has 40 checks in eight sections:
 1. A death archives with its record and family.
 2. A hearse collects the body; the service is booked 2 to 4 days on; mourners go; the partner takes the day off; the burial fills a plot that the graves message carries; grief ends soon after.
 3. The fees go to the owner under 'funeral' and 'burial', and the rest of the estate to the partner.
 4. With the churchyard full, the dead wait at the hospital under the badge. A crematorium placed in reach takes them (plaques), and the badge clears.
-5. Hand-lit fires at night: unattended ones kill (29 of 190 people at home); with the post staffed, 1. Gas explosions kill; each incident is one news story naming its dead. Accidents happen at a raised rate.
+5. Hand-lit fires at night: unattended ones kill (24 of 140 people at home); with the post staffed, 1. Gas explosions kill; each incident is one news story naming its dead. Accidents happen at a raised rate.
 6. In a player's first hour, 27 deaths are spared; after it they happen. The first death brings the advisor line. The warning fire harms nobody.
 7. The same seed gives the same archive and graves.
 8. A save carries the archive; a save without the field loads with an empty archive.
 
-In the probe's dense test town only 1 of 4 services had the hearse at the chapel: its streets jam at midday, and the hearse cannot turn out of the driveway. The service goes ahead without it, and in the showcase the hearse comes.
+In the probe's dense test town only 1 of 5 services had the hearse at the chapel: its streets jam at midday, and the hearse cannot turn out of the driveway. The service goes ahead without it, and in the showcase the hearse comes.
 
 Tick cost: see the card's report (measured on the 2×2 test city against main).

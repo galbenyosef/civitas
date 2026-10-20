@@ -30,6 +30,7 @@ import { seedCity } from './cities';
 import { createGame, type Game } from '../game';
 import { snapshotOf, worldFromSnapshot } from '../snapshot';
 import { ERRAND_FUNERAL } from '../sim/death';
+import { essentialJob } from '../sim/motivation';
 
 const argv = process.argv.slice(2);
 const get = (n: string, d: number) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? Number(argv[i + 1]) : d; };
@@ -70,11 +71,21 @@ function town(rnd = seed, owner = 'sys', sandbox = true): Town {
   const g = createGame(w, { onConnection() {} }, { devTools: false, sandbox });
   g.fires.enabled = false;
   for (let i = 0; i < 1.05 * DAY; i++) g.step();
+  // the block's front row cleared of any merged building (a res-midrise may straddle it)
+  for (let y = y0 + 3; y <= y0 + 4; y++) for (let x = x0 + 1; x <= x0 + 4; x++) { const s = w.structureAt(x, y); if (s) w.removeStructure(s); }
   const fx = x0 + 1, fy = y0 + 4; // beside the churchyard, so its hearse's runs are short in the town's busy streets
   w.setTile(fx, fy, packTile(terrainOf(w.getTile(fx, fy)), false, Zone.Office, 1), subFor(FUNERAL_KIND));
   const rest = place(w, CHURCHYARD_KIND, x0 + 2, y0 + 4);
   const fd = () => w.buildings.get(tileKey(fx, fy))!;
-  for (let i = 0; i < DAY && !(fd().occupants >= 3 && i > DAY / 4); i++) g.step(); // staff hired
+  for (let i = 0; i < DAY / 2 && !(fd().occupants >= 3 && i > DAY / 4); i++) g.step(); // staff hired
+  // a town with no one out of work (every job-seeker placed, docs/motivation.md) leaves a new service to the job-switchers:
+  // a few neighbours with ordinary jobs take the funeral director's, as a player's town would hire them sooner or later
+  if (fd().occupants < 4) {
+    const near = [...w.citizens.values()].filter((c) => c.job && c.stage === LifeStage.Adult && !essentialJob(c.kind) && !c.study && !c.mig && c.state === S.Home)
+      .sort((a, b) => Math.abs(a.hx - fx) + Math.abs(a.hy - fy) - Math.abs(b.hx - fx) - Math.abs(b.hy - fy) || a.id - b.id);
+    for (const c of near.slice(0, 5 - fd().occupants)) { w.quitJob(c); (g.sim as unknown as { hire(c: Citizen, b: Building, p: number[] | null): void }).hire(c, fd(), null); }
+    for (let i = 0; i < DAY / 4; i++) g.step();
+  }
   return { w, g, x0, y0, fd: fd(), rest };
 }
 const run = (g: Game, ticks: number, until?: () => boolean) => { for (let i = 0; i < ticks; i++) { g.step(); if (until?.()) return true; } return false; };
@@ -137,7 +148,7 @@ const T = town();
   ok(graves.includes(id), `the graves message carries the headstone (${graves.length} at the churchyard)`);
   const fee = ledger(w, 'sys', 'funeral') - f0, burial = ledger(w, 'sys', 'burial') - b0;
   ok(fee > 0 && burial > 0 && (d.fees ?? 0) === Math.round(fee + burial), `fees out of the estate to the owner: funeral $${fee}, burial $${burial} (ledger 'funeral', 'burial')`);
-  ok(Math.abs(partner.money - pMoney0 - (900 - (d.fees ?? 0))) < 40, `the rest of the estate went to the partner: $${900 - (d.fees ?? 0)} (their money ${pMoney0.toFixed(0)} -> ${partner.money.toFixed(0)}; heirs ${d.heirs?.join(', ')})`);
+  ok(D.stats.inherited === 900 - (d.fees ?? 0) && !!d.heirs?.[0]?.includes(nameFor(partner.id, partner.sn)) && partner.money >= pMoney0 + 900 - (d.fees ?? 0) - 60, `the rest of the estate went to the partner: $${900 - (d.fees ?? 0)} (their money ${pMoney0.toFixed(0)} -> ${partner.money.toFixed(0)}; heirs ${d.heirs?.join(', ')})`);
   run(g, DEATH.griefAfterService * DAY + TPH);
   ok(D.grievingFor(partner) === undefined, 'the partner\'s grief ended soon after a funeral on time');
   log(`     stats ${JSON.stringify(D.stats)}`);
@@ -173,7 +184,7 @@ console.log('4. plots fill; the dead wait at the mortuary; a crematorium takes t
   const cs = D.graves().find((s) => s.x === crem.x && s.y === crem.y);
   let plaques = 0;
   for (let i = 0; cs && i < cs.g.length; i += GRAVE_STRIDE) if (cs.g[i + 3] & GRAVE_PLAQUE) plaques++;
-  ok(plaques === recs.length, `memorial plaques in the garden of remembrance: ${plaques}`);
+  ok(plaques >= recs.length, `memorial plaques in the garden of remembrance: ${plaques} (the ${recs.length} and anyone else who died meanwhile)`);
   ok(D.stats.withHearse >= 1, `hearses carried the coffin to ${D.stats.withHearse} of ${D.stats.services} services (the rest held up in this town's jammed streets: the service went ahead without them)`);
 }
 
