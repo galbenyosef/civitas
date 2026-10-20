@@ -6,6 +6,7 @@ import { theatre } from './leisure';
 import { slab, tree, lampPost, flags, PAVING } from './tierkit';
 import { LONDON_LANDMARKS_B } from './landmarks-london-2';
 import { LONDON_LANDMARKS_C } from './landmarks-london-3';
+import { piccadillyCircus } from './landmarks-london-4';
 
 /**
  * London landmarks (docs/buildings.md "Landmarks"): recognisable real buildings, tagged 'london', each a placed civic
@@ -20,6 +21,7 @@ import { LONDON_LANDMARKS_C } from './landmarks-london-3';
  *   97 the London Eye ('londoneye'), 98 the Tower of London ('toweroflondon'), 99 Buckingham Palace ('buckingham'),
  *   100 Tower Bridge ('towerbridge'); collection tiers 6-10 in that order.
  *   111-114 the universities (landmarks-london-3.ts): UCL, Imperial, King's and LSE, tiers 11-14, unlocked by 'lnd2'.
+ *   116 Piccadilly Circus (landmarks-london-4.ts): the Lights, the Criterion and the fountain, tier 15, unlocked by 'lnd1'.
  *
  * Scale: about 33 m to a tile, so the Shard (310 m) is the tallest thing in London at 9.6 tiles, One Canada Square
  * 7.2, the Gherkin 5.5 and the Walkie Talkie 4.9 (the merged supertall, kind 81 level 7, is 8). Each landmark has one
@@ -255,5 +257,5 @@ export const royalOperaHouse: KindDef = {
   }],
 };
 
-/** The landmarks of this file, of landmarks-london-2.ts (96-100) and of landmarks-london-3.ts (the universities, 111-114), in kind-id order (catalogue.ts lists them). */
-export const LONDON_LANDMARKS: KindDef[] = [gherkin, theShard, walkieTalkieKind, canadaSquareKind, royalOperaHouse, ...LONDON_LANDMARKS_B, ...LONDON_LANDMARKS_C];
+/** The landmarks of this file, of landmarks-london-2.ts (96-100), landmarks-london-3.ts (the universities, 111-114) and landmarks-london-4.ts (Piccadilly Circus, 116), in kind-id order (catalogue.ts lists them). */
+export const LONDON_LANDMARKS: KindDef[] = [gherkin, theShard, walkieTalkieKind, canadaSquareKind, royalOperaHouse, ...LONDON_LANDMARKS_B, ...LONDON_LANDMARKS_C, piccadillyCircus];

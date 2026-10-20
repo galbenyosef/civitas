@@ -1,7 +1,7 @@
 import { TICKS_PER_DAY } from './constants';
 import { LEVEL_SLOTS, Zone } from './buildings/codes';
 import { TOP_LEVEL_TABLE, DESIGN_COUNT_TABLE, AD_SLOTS, KIND_ID } from './buildings/compiled';
-import { AD_SIZE, AD_SIZES, AD_STRIDE, type AdSize } from './buildings/adslot';
+import { AD_SIZE, AD_SIZES, AD_STRIDE, FACE_YAW, type AdSize } from './buildings/adslot';
 import { isRoad, zoneOf, levelOf, underConstruction, kindIdOf } from './tile';
 import { isPartAux, isAnchorAux, auxOrientation, isMultiTile, placedFromAnchor, partDx, partDy, type Placed } from './structures';
 import { hash2 } from './noise';
@@ -17,7 +17,7 @@ import { designPick } from './leisure';
  * without sending any. Only a rented slot has state.
  */
 
-export { AD_SIZE, AD_SIZES, AD_STRIDE, type AdSize };
+export { AD_SIZE, AD_SIZES, AD_STRIDE, FACE_YAW, type AdSize };
 
 /** Tunables (docs/adverts.md sections 3 and 6). */
 export const AD = {
@@ -37,7 +37,42 @@ export const AD = {
   rateLow: 0.012, rateHigh: 0.4,
   /** a poster's wear past which it is shown as wrecked (the panel's "needs replacing") */
   wreckedAt: 0.8,
+  /**
+   * Big screens (docs/adverts.md section 9): a building's screens share one ring of turns, one turn per screen panel
+   * (both big-screen designs have `screenTurns` panels). Every `screenSecs` real seconds each panel steps on to the next
+   * turn, so a campaign renting one panel takes its turn on all of them. The clock is the wall clock, so every viewer
+   * sees the same rotation and nothing is sent.
+   */
+  screenSecs: 8, screenTurns: 6,
 };
+
+// ---------------------------------------------------------------- big screens (docs/adverts.md section 9)
+
+/**
+ * What one turn of a building's screens shows: a renting campaign; a house advert (generic brand art, so the screens are
+ * never dark when turns are unrented, `art` picks one of HOUSE_ADS); or the news.
+ *
+ * **The news hook.** One unrented turn per building is a 'news' turn. Today it shows a "LIVE · Civitas News" card from
+ * the ad atlas; the media centre (UTD 90cd3857) is to fill it with the news helicopter's live picture by handing the
+ * client's AdvertsView a render target (`AdvertsView.setNewsFeed`), which every news turn then samples instead. Selling
+ * the news turn (airtime auctions) belongs to that card too.
+ */
+export type ScreenTurn = { kind: 'campaign'; campaign: number } | { kind: 'house'; art: number } | { kind: 'news' };
+/** Generic house adverts for unrented turns (the client draws them once into the ad atlas). */
+export const HOUSE_ADS = ['FIZZ', 'Nimbus', 'Civitas Bank', 'Rail Express', 'Kettle Tea', 'Neon Noodles', 'Metro Mobile'] as const;
+/**
+ * The ring of turns for a building's screens: `rented[k]` is the campaign renting the k-th screen panel, or null. Unrented
+ * turns show house adverts, picked from the building's seed so two screens in a town do not show the same; the last
+ * unrented one is the news.
+ */
+export function screenTurns(rented: readonly (number | null)[], seed: number): ScreenTurn[] {
+  let news = -1;
+  for (let k = rented.length - 1; k >= 0; k--) if (rented[k] === null) { news = k; break; }
+  const first = Math.floor(seed * HOUSE_ADS.length);
+  return rented.map((c, k): ScreenTurn => (c !== null ? { kind: 'campaign', campaign: c } : k === news ? { kind: 'news' } : { kind: 'house', art: (first + k * 3) % HOUSE_ADS.length }));
+}
+/** Whether a building's k-th slot is a big screen (its own rotation, its own rent, no wear). */
+export const isScreenSlot = (slots: readonly number[], i: number) => slots[i * AD_STRIDE + 1] === AD_SIZES.indexOf('screen');
 
 /** What a campaign speaks to (docs/motivation.md section 3, the six values). */
 export const AD_THEMES = ['Money', 'Family', 'Status', 'Roots', 'Time', 'Adventure'] as const;
@@ -204,11 +239,13 @@ export function adTurn(r: number, lx: number, lz: number): [number, number] {
     default: return [-lz, lx];
   }
 }
-/** A slot's world point (the poster's centre, on the ground plane) and the direction it faces. */
+/** A slot's world point (the poster's centre, on the ground plane) and the direction it faces (a screen on a curve: its own). */
 export function adSlotWorld(h: AdHost, i: number): { x: number; y: number; dir: [number, number]; height: number } {
   const s = h.slots, o = i * AD_STRIDE;
   const [dx, dy] = adTurn(h.r, s[o + 2], s[o + 4]);
-  return { x: h.cx + dx, y: h.cy + dy, dir: DIRS[(s[o] + h.r) & 3], height: s[o + 3] };
+  const yaw = s[o + 7] ?? FACE_YAW[s[o]];
+  const dir: [number, number] = Math.abs(yaw - FACE_YAW[s[o]]) < 1e-3 ? DIRS[(s[o] + h.r) & 3] : adTurn(h.r, Math.sin(yaw), Math.cos(yaw));
+  return { x: h.cx + dx, y: h.cy + dy, dir, height: s[o + 3] };
 }
 /**
  * Whether a slot can be seen from the street: a front slot always; a side-wall slot on a 1×1 lot only when the tile it

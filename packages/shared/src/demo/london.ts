@@ -80,6 +80,9 @@ const STRUCTURES: Spot[] = [
   ['kings', 'kings', 51.5115, -0.1160, 'N', 'N'],
   ['lse', 'lse', 51.5144, -0.1165, 'W', 'N'],
   ['imperial', 'imperial', 51.4988, -0.1749, 'S'],
+  // Piccadilly Circus (buildings/landmarks-london-4.ts): the Lights on the circus at the east end of Piccadilly, its
+  // front on Piccadilly where Regent Street, Shaftesbury Avenue, Coventry Street and Haymarket meet it
+  ['piccadilly-circus', 'piccadilly-circus', 51.5100, -0.1347, 'S'],
   ['leicester-square', 'multiplex', 51.5103, -0.1301, 'W'],
   ['serpentine', 'lakeside-park', 51.5050, -0.1700, 'S'],
   ['regents-park-lake', 'lakeside-park', 51.5270, -0.1600, 'N'],
@@ -519,7 +522,7 @@ export function londonScenario(): LondonScenario {
       blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Big Ben and the Houses of Parliament, the London Eye, Buckingham Palace, the Tower and Tower Bridge, UCL, King\'s College, LSE and Imperial College as universities, and the hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
       placements: [
         ...pick('new-scotland-yard', 'st-thomas', 'royal-london', 'lambeth-fire', 'british-museum', 'natural-history-museum', 'maritime-museum', 'british-library',
-          'royal-opera-house', 'gherkin', 'walkie-talkie', 'shard', 'one-canada-square', 'parliament', 'london-eye', 'buckingham-palace', 'tower-of-london',
+          'royal-opera-house', 'piccadilly-circus', 'gherkin', 'walkie-talkie', 'shard', 'one-canada-square', 'parliament', 'london-eye', 'buckingham-palace', 'tower-of-london',
           'ucl', 'kings', 'lse', 'imperial'),
         ...venues,
         ...pick('leicester-square', 'serpentine', 'regents-park-lake', 'kew-gardens', 'wembley', 'london-stadium', 'copper-box', 'o2-arena'),

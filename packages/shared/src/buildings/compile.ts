@@ -1,6 +1,6 @@
 import type { KindDef, HelperModel, Op, CompiledOp, CompiledRecipe, KindManifest, LevelManifest, LevelStats, Design, Color, Flags, Win, CompiledFacade, PartRef } from './schema';
 import { compileFacade, featureOps, isFeature, partIndex, type FeatureTarget } from './facade';
-import { autoAdSlot, adFrameCollisions } from './adslot';
+import { autoAdSlot, adFrameCollisions, screenArc } from './adslot';
 import { PALETTE, WINDOW_CLASSES, type WindowClass } from './palette';
 import { HELPERS } from './helpers';
 import { LEVEL_SLOTS, MAX_KIND_CODE, KIND_FLAG } from './codes';
@@ -66,6 +66,7 @@ export function compileOps(ops: Op[], windows: WindowClass, src?: number[], ads?
       case 'cone': emit(['cone', op[1], op[2], op[3], op[4], op[5], colour(op[6]), op[7] ?? 8]); break;
       case 'wheel': emit(['wheel', op[1], op[2], op[3], op[4], op[5], colour(op[6])]); break;
       case 'taper': { const o = op[10] ?? {}; emit(['taper', op[1], op[2], op[3], op[4], op[5], op[6], op[7], op[8], colour(op[9]), winOf(o.win), o.shift?.[0] ?? 0, o.shift?.[1] ?? 0]); break; }
+      case 'screens': for (const o of screenArc(op[1], op[2], op[3], op[4], op[5], op[6], op[7], op[8], op[9], colour(op[10] ?? 'charcoal'), ads?.slots)) emit(o); break;
       case 'lathe': {
         const o = op[6] ?? {};
         emit(['lathe', op[1], op[2], op[3], colour(op[4]), o.seg ?? 16, colour(o.stripe ?? op[4]), o.stripe === undefined ? 0 : o.every ?? 4, o.width ?? 1, o.twist ?? 0, o.axis === 'x' ? 1 : o.axis === 'z' ? 2 : 0, winOf(o.win), [...op[5]]]);
