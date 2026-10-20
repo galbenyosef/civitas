@@ -33,6 +33,8 @@ export interface StoryDTO {
   s: number;
   /** the tick it stopped being live; absent while it goes on (a fire still burning) */
   end?: number;
+  /** the tick it went live again, when it did after an end (the showcase's drill home catching light again the same day) */
+  lit?: number;
   /** the player whose town, building or line it is about */
   who?: string;
   /** the parcel at the place (0 or absent: unowned land) */

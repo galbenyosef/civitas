@@ -2,9 +2,9 @@ import {
   PerspectiveCamera, OrthographicCamera, Color, Scene, Mesh, PlaneGeometry, ShaderMaterial, WebGLRenderTarget, HalfFloatType, LinearFilter,
   Quaternion, Vector2, Vector3, type WebGLRenderer, type Fog, type Object3D, type Light,
 } from 'three';
-import { hash2, type CitizenInfo } from '@msimcity/shared';
+import { hash2, tvOnAt, type CitizenInfo } from '@msimcity/shared';
 import type { CitizensView } from './citizens';
-import { Interior, placeOf } from './interiors';
+import { Interior, placeOf, homeSeedOf, type Place } from './interiors';
 import { sceneUniforms } from './materials';
 import { Instruments, type AircraftCal } from './instruments';
 import { CarInterior, TrainCab, HelmCab, type CarFeed, type TrainCabFeed, type HelmFeed } from './vehicleInterior';
@@ -146,6 +146,8 @@ export class Fpv {
   private clr = new Color();
   // indoors: the room on show, the selected citizen's latest inspect (whoever it is for), and a fade-out under way
   private room: Interior | null = null;
+  /** a room shown on its own, with nobody selected (debug, screenshots and the TV check: `preview`) */
+  private shown: Interior | null = null;
   private latest: CitizenInfo | null = null;
   private hold = false;
   private sky = new Color(0x9fc4e8);
@@ -217,6 +219,32 @@ export class Fpv {
     this.setMode(mode);
   }
 
+  /**
+   * Debug (msc.fpv.preview, the TV screenshots and timings): show a home's lounge (or a pub) full-window with nobody
+   * selected, built for a made-up household whose set is on at the hour; `null` goes back to the game view.
+   */
+  preview(room: 'lounge' | 'bar' | null, seed = 1, hour = sceneUniforms.uHour.value): string {
+    this.shown?.dispose(); this.shown = null;
+    if (!room) return '';
+    let hh = seed;
+    const info = (h: number): CitizenInfo => ({
+      id: 9_900_000 + seed, name: 'Preview', role: 'citizen', mode: 'none', activity: 'at home, retired', status: 'idle', waitTicks: 0,
+      home: { x: seed * 3, y: seed * 5, label: 'home', parcel: '' }, life: { age: 70, stage: 'retired', household: { id: h, members: [] } },
+    } as unknown as CitizenInfo);
+    // a household whose set is on now
+    for (let i = 0; i < 64 && room === 'lounge' && !tvOnAt(homeSeedOf(info(hh)), hour, true); i++) hh++;
+    const ci = info(hh);
+    const place: Place = room === 'lounge' ? { room, seed: homeSeedOf(ci), key: 'preview' } : { room, seed: (seed * 31 + 7) | 0, key: 'preview' };
+    this.shown = new Interior(place, ci, hour);
+    this.layout(true);
+    return this.shown.label;
+  }
+  /** the previewed room (the TV check reads its screens) */
+  get previewRoom() { return this.shown; }
+
+  /** The room on show's line ("in the lounge, watching Quiz Night on Civitas 1"), '' outdoors. */
+  get roomLabel() { return this.room?.label ?? ''; }
+
   /** Fade out and return to the overhead view. */
   end() { if (this.mode !== 'off') this.want = 0; }
 
@@ -281,6 +309,7 @@ export class Fpv {
   /** Advance the camera, fade and HUD; call once per frame after the citizens have moved. */
   update(now: number, dt: number, route: number[] | null) {
     this.avgMs += (dt * 1000 - this.avgMs) * 0.05;
+    if (this.shown) { this.shown.update(now, dt, sceneUniforms.uHour.value, this.sky); return; }
     if (this.mode === 'off') return;
     this.level = clamp(this.level + (this.want && !this.hold ? 1 : -1) * dt / (this.room || this.hold ? ROOM_FADE : FADE_SECONDS), 0, 1);
     if (!this.want && this.level <= 0) {
@@ -520,6 +549,11 @@ export class Fpv {
   render(renderer: WebGLRenderer, scene: Scene, overhead: PerspectiveCamera, hide: Object3D[]) {
     overhead.layers.enable(1); // the selected agent's own meshes are on layer 1, which the first-person camera skips
     if (scene.background instanceof Color) this.sky.copy(scene.background);
+    if (this.shown) {
+      const a = this.winW / this.winH;
+      this.shown.setAspect(a); this.shown.render(renderer); this.fade.style.opacity = '0';
+      return;
+    }
     if (this.mode === 'off' || !this.ready) { renderer.render(scene, overhead); this.fade.style.opacity = '0'; return; }
     this.layout();
     const t0 = performance.now();

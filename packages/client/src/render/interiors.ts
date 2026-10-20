@@ -122,6 +122,8 @@ export interface TvPicture {
 /** Where sets get their pictures (main.ts sets the TvGuide); without one they show the old generic shots. */
 export interface TvSource { picture(setSeed: number, home: boolean, visible: boolean): TvPicture }
 let tvSource: TvSource | null = null;
+/** Debug (the TV check and timings): force every TV set on (1) or off (0), or leave it to the room (null). */
+export const tvDebug: { force: 0 | 1 | null } = { force: null };
 /** A pub's set: seeded by the room (render/tv.ts asks with the same seed for the citizen panel). */
 export const barSetSeed = (roomSeed: number) => (roomSeed * 17 + 5) | 0;
 export function setTvSource(src: TvSource | null) { tvSource = src; }
@@ -385,6 +387,7 @@ class Screen {
   }
   update(t: number) {
     const u = this.mat.uniforms;
+    if (this.set && tvDebug.force !== null) this.on = tvDebug.force;
     u.uT.value = t; u.uOn.value = this.on;
     if (this.set && tvSource && this.on) this.tune(t);
     else {
@@ -1519,6 +1522,11 @@ export class Interior {
     FRUSTUM.setFromProjectionMatrix(PROJ.multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse));
     for (const s of this.k.screens) if (s.set && s.mesh) s.visible = FRUSTUM.intersectsObject(s.mesh);
   }
+
+  /** the TV sets in the room (debug and the TV check) */
+  get tvs() { return this.k.screens.filter((s) => s.set); }
+  /** the room's scene (the TV check counts its meshes) */
+  get scene() { return this.k.scene; }
 
   setAspect(a: number) { if (Math.abs(this.camera.aspect - a) > 1e-4) { this.camera.aspect = a; this.camera.updateProjectionMatrix(); } }
 

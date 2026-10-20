@@ -104,6 +104,7 @@ export class News {
         // the showcase's drill home lights again and again: one story a game day, live while each drill burns
         const prev = this.byRef.get(`drill:${e.x},${e.y}`);
         if (prev && now - prev.t < NEWS.drillDedupeTicks) {
+          if (prev.end !== undefined) prev.lit = now; // live again: the news helicopter goes back out (shared newsHelis.ts)
           delete prev.end; this.byRef.set(key, prev); this.touch(prev);
           return;
         }

@@ -44,7 +44,7 @@ import { CameraMoment } from './moment';
 import { RanksUI } from './ranks';
 import { NewsUI, news } from './news';
 import { TvGuide } from './render/tv';
-import { setTvSource } from './render/interiors';
+import { setTvSource, tvDebug } from './render/interiors';
 import { Fireworks } from './render/fireworks';
 import { LinesPanel } from './lines';
 import { ChartsPanel } from './charts';
@@ -392,6 +392,39 @@ const tv = new TvGuide({ world, helis, tick: liveTickF, setNewsFeed: (t) => buil
 tv.tapNet((fn) => net.tap(fn));
 setTvSource(tv);
 ui.watching = (info) => tv.watching(info);
+/**
+ * The tour's TV stop (view 'tv', docs/media.md section 8): ask the homes in its rect who is in, then follow residents at
+ * home one by one in the FPV inset until one is in the lounge with the set on; null ends it. Nobody in: the card says so.
+ */
+let tvHunt: { cands: number[]; tried: Set<number>; timer: number; found: boolean } | null = null;
+function watchTv(rect: [number, number, number, number] | null) {
+  if (tvHunt) { clearInterval(tvHunt.timer); const was = tvHunt; tvHunt = null; if (was.tried.size) { if (fpv.mode !== 'off') fpv.end(); selectCitizen(0); } }
+  if (!rect) return;
+  const hunt = { cands: [] as number[], tried: new Set<number>(), timer: 0, found: false };
+  tvHunt = hunt;
+  const asked = new Set<string>();
+  for (let y = rect[1]; y < rect[1] + rect[3]; y++) for (let x = rect[0]; x < rect[0] + rect[2]; x++) {
+    const t = world.getTile(x, y);
+    if (t === undefined || isRoad(t) || zoneOf(t) !== Zone.Residential || levelOf(t) <= 0) continue;
+    const [dx, dy] = world.doorOf(x, y), k = `${dx},${dy}`;
+    if (asked.has(k) || asked.size >= 12) continue;
+    asked.add(k);
+    net.send({ t: 'inspect', x: dx, y: dy, full: true });
+  }
+  hunt.timer = window.setInterval(() => {
+    if (tvHunt !== hunt || hunt.found) return;
+    if (selectedCitizen && hunt.tried.has(selectedCitizen) && /watching/.test(fpv.roomLabel)) { hunt.found = true; return; }
+    const next = hunt.cands.find((c) => !hunt.tried.has(c));
+    if (next === undefined) return;
+    hunt.tried.add(next);
+    selectCitizen(next);
+    fpv.start('inset');
+  }, 2500);
+}
+net.tap((m) => {
+  if (!tvHunt || m.t !== 'building' || !m.info?.people) return;
+  for (const r of m.info.people.residents) if (r.activity.startsWith('at home') && !tvHunt.cands.includes(r.id)) tvHunt.cands.push(r.id);
+});
 net.on('railLines', (m) => { trains.setLines(m.lines); rail.setLines(m.lines); });
 // underground lines (docs/underground.md): their trains run in the bores, and the bores take the lines' colours
 const metroMeta = new Map<number, MetroLineDTO>(); // the metro lines as sent, for station names on a cab ride
@@ -1285,7 +1318,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { tv, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { tv, tvDebug, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------
@@ -1317,6 +1350,7 @@ if (demoParam) {
     demo: demoParam, net, rig, scene, buildingHtml: (info) => ui.buildingHtml(info, 'h3'),
     chipMount: document.getElementById('techBtn')!, onFly: () => { following = false; }, setUnder: (on) => setUnder(on), setMap: (on) => mapMode.set(on, false),
     celebrate: (x, y) => ranks.preview(x, y),
+    watchTv: (r) => watchTv(r),
     // a stop shown at an hour of its own (the Piccadilly Lights at night): the light is pinned there, and given back after
     setHour: (h) => {
       if (h === null) {

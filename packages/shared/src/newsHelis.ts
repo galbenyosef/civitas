@@ -27,12 +27,12 @@ export interface NewsPad extends Pad {
 }
 
 export const NEWS_HELI = {
-  /** stories smaller than this are not worth the helicopter (a house fire is 34 and up, a bus route 30) */
-  minSalience: 30,
+  /** stories smaller than this are not worth the helicopter (a house fire is 34 and up, a bus route 30, the showcase's drills 12) */
+  minSalience: 10,
   kinds: ['fire', 'explosion', 'rank', 'milestone', 'opening', 'line'] as readonly StoryKind[],
   /** game minutes from the story breaking to lifting off */
   delay: [5, 14] as [number, number],
-  /** it stays over the scene at least this long after lifting off (game hours), even when the story ends sooner */
+  /** it stays over the scene at least this long once there (game hours), even when the story ends sooner */
   onSceneMin: 1.5,
   /** the orbit: radius and height above the ground (tiles), speed along it (tiles a tick) */
   radius: [2.6, 4.4] as [number, number], height: [5.2, 7.6] as [number, number], speed: [0.12, 0.24] as [number, number],
@@ -75,11 +75,17 @@ type Seg =
 /** Whether a story is one the helicopter flies to. */
 export const newsWorthy = (s: StoryDTO) => !!s.ch && s.s >= NEWS_HELI.minSalience && NEWS_HELI.kinds.includes(s.k);
 
-/** When a story's helicopter lifts off and when it stops covering it (absolute ticks). */
-export function storyWindow(s: StoryDTO): [number, number] {
-  const go = s.t + Math.round(lerp(NEWS_HELI.delay[0], NEWS_HELI.delay[1], hash2(s.id, 1201)) * TICKS_PER_MINUTE);
-  const end = s.end ?? s.t + NEWS.liveHours[s.k] * TICKS_PER_HOUR;
-  return [go, Math.max(end, go + NEWS_HELI.onSceneMin * TICKS_PER_HOUR)];
+/**
+ * When a story's helicopter lifts off and when it stops covering it (absolute ticks): when the story ends, but not before
+ * it has had NEWS_HELI.onSceneMin over the scene, counted from when it gets there from `pad` (straight, at cruise). A
+ * story live again after an end (`lit`) is flown to again from then.
+ */
+export function storyWindow(s: StoryDTO, pad?: Pick<Pad, 'x' | 'z'>): [number, number] {
+  const t0 = s.lit ?? s.t;
+  const go = t0 + Math.round(lerp(NEWS_HELI.delay[0], NEWS_HELI.delay[1], hash2(s.id * 7 + t0, 1201)) * TICKS_PER_MINUTE);
+  const end = s.end ?? t0 + NEWS.liveHours[s.k] * TICKS_PER_HOUR;
+  const there = pad ? T_UP + Math.hypot(s.x + 0.5 - pad.x, s.y + 0.5 - pad.z) / (V * 0.85) : 0;
+  return [go, Math.max(end, Math.round(go + there + NEWS_HELI.onSceneMin * TICKS_PER_HOUR))];
 }
 
 function mission(pad: NewsPad, id: number, x: number, z: number, go: number, stop: number, story?: StoryDTO): Mission {
@@ -115,7 +121,7 @@ const planCache = new Map<string, Seg[]>();
 /** The segments of one pad's plan over the day `day` (and the day before, so a sortie under way at midnight carries on). */
 function plan(pad: NewsPad, list: readonly StoryDTO[], day: number): Seg[] {
   let key = `${pad.id}|${Math.round(pad.x * 64)},${Math.round(pad.z * 64)},${Math.round(pad.y * 64)}|${day}|`;
-  for (const s of list) key += `${s.id}:${s.t}:${s.end ?? ''}:${Math.round(s.x)},${Math.round(s.y)};`;
+  for (const s of list) key += `${s.id}:${s.t}:${s.lit ?? ''}:${s.end ?? ''}:${Math.round(s.x)},${Math.round(s.y)};`;
   const hit = planCache.get(key);
   if (hit) return hit;
   const out = build(pad, list, day);
@@ -128,7 +134,7 @@ function build(pad: NewsPad, list: readonly StoryDTO[], day: number): Seg[] {
   const S = (day - 1) * TICKS_PER_DAY, E = (day + 1) * TICKS_PER_DAY;
   const ms: Mission[] = [];
   for (const s of list) {
-    const [go, stop] = storyWindow(s);
+    const [go, stop] = storyWindow(s, pad);
     if (stop > S && go < E) ms.push(mission(pad, s.id, s.x + 0.5, s.y + 0.5, go, stop, s));
   }
   // the rush-hour traffic watches of the day before and this day, over a point out from the pad
