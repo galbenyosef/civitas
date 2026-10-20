@@ -23,14 +23,13 @@
  */
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, Zone, Issue, Cause, DEATH, FleetKind, CitizenState as S, LifeStage, KIND_ID, GRAVE_STRIDE, GRAVE_PLAQUE,
-  packTile, terrainOf, subFor, tileKey, placedFromDoor, workOf, nameFor, plotCapacity, FUNERAL_KIND, CHURCHYARD_KIND, CREMATORIUM_KIND,
+  packTile, terrainOf, subFor, tileKey, placedFromDoor, workOf, nameFor, plotCapacity, FUNERAL_KIND, CHURCHYARD_KIND, CREMATORIUM_KIND, capacityOf,
 } from '@msimcity/shared';
-import { World, type Building, type Citizen } from '../world';
+import { World, type Building } from '../world';
 import { seedCity } from './cities';
 import { createGame, type Game } from '../game';
 import { snapshotOf, worldFromSnapshot } from '../snapshot';
 import { ERRAND_FUNERAL } from '../sim/death';
-import { essentialJob } from '../sim/motivation';
 
 const argv = process.argv.slice(2);
 const get = (n: string, d: number) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? Number(argv[i + 1]) : d; };
@@ -77,15 +76,7 @@ function town(rnd = seed, owner = 'sys', sandbox = true): Town {
   w.setTile(fx, fy, packTile(terrainOf(w.getTile(fx, fy)), false, Zone.Office, 1), subFor(FUNERAL_KIND));
   const rest = place(w, CHURCHYARD_KIND, x0 + 2, y0 + 4);
   const fd = () => w.buildings.get(tileKey(fx, fy))!;
-  for (let i = 0; i < DAY / 2 && !(fd().occupants >= 3 && i > DAY / 4); i++) g.step(); // staff hired
-  // a town with no one out of work (every job-seeker placed, docs/motivation.md) leaves a new service to the job-switchers:
-  // a few neighbours with ordinary jobs take the funeral director's, as a player's town would hire them sooner or later
-  if (fd().occupants < 4) {
-    const near = [...w.citizens.values()].filter((c) => c.job && c.stage === LifeStage.Adult && !essentialJob(c.kind) && !c.study && !c.mig && c.state === S.Home)
-      .sort((a, b) => Math.abs(a.hx - fx) + Math.abs(a.hy - fy) - Math.abs(b.hx - fx) - Math.abs(b.hy - fy) || a.id - b.id);
-    for (const c of near.slice(0, 5 - fd().occupants)) { w.quitJob(c); (g.sim as unknown as { hire(c: Citizen, b: Building, p: number[] | null): void }).hire(c, fd(), null); }
-    for (let i = 0; i < DAY / 4; i++) g.step();
-  }
+  for (let i = 0; i < 2 * DAY && !(fd().occupants >= 3 && i > DAY / 4); i++) g.step(); // staff hired (an essential workplace recruits, docs/motivation.md)
   return { w, g, x0, y0, fd: fd(), rest };
 }
 const run = (g: Game, ticks: number, until?: () => boolean) => { for (let i = 0; i < ticks; i++) { g.step(); if (until?.()) return true; } return false; };
