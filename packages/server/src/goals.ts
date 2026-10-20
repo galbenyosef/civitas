@@ -114,6 +114,7 @@ export class Onboarding {
       case 'masonry': return [p.tech.includes('con1') ? 1 : 0];
       case 'cover': return [t.police, t.fire];
       case 'leisure': return [t.leisure];
+      case 'adverts': { const a = this.w.adverts?.counts(p.id); return [p.tech.includes('adv1') ? 1 : 0, a?.campaigns ?? 0, a?.rentals ?? 0]; }
       case 'books': return [housed, this.inTheBlack(p) ? 1 : 0];
       case 'busline': return [[...this.w.transitLines.values()].filter((l) => l.owner === p.id && l.stops.length >= 2).length];
     }

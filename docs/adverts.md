@@ -3,8 +3,8 @@
 Rich, 2026-10-19: "How about if buildings / areas had allocated advertising areas (nothing extreme) that we would see our
 marketing campaigns appear on, however, they are at risk of vandalism, graffiti etc. I am conscious of the refresh
 performance loop though." and "let's not forget tv adverts that we might have in fpv view and or on major city
-landmarks such as Times Square and/or Piccadilly Circus" (section 9). Design 2026-10-19. **Nothing is built.** It stands on `docs/motivation.md` (values and
-beliefs): an advert is a way to plant a belief.
+landmarks such as Times Square and/or Piccadilly Circus" (section 9). Design 2026-10-19. **Slice 1 (A1-A3 and a tutorial) is built: see "Built: slice 1"
+at the end.** It stands on `docs/motivation.md` (values and beliefs): an advert is a way to plant a belief.
 
 Code this touches: `shared/src/adverts.ts` (new: slot sizes, themes, claims, templates, `AD` tunables),
 `shared/src/buildings/` (the `adslot` op, `schema.ts`, `validate.ts`, `facade.ts`), `server/src/sim/adverts.ts` (new:
@@ -15,7 +15,8 @@ rentals, reach, wear events), `server/src/world.ts`, `server/src/snapshot.ts`, `
 
 Some buildings have **ad slots**: modest, believable places for a poster. A hoarding on a shop's side wall, a panel in
 a bus shelter, a 48-sheet billboard above a corner shop, a banner on a stadium. Nothing extreme: no screens on every
-wall, no Times Square.
+wall and no street lit up like Times Square. The big lit screens of Times Square or Piccadilly Circus belong to a handful
+of landmark junctions only (section 9).
 
 A player runs a **campaign** (a message with a theme, a claim and a target) and rents slots to show it. Citizens who
 pass a slot may take the message in, and it plants a belief (`docs/motivation.md` section 4). Whether it moves anyone
@@ -356,3 +357,166 @@ screens corner at night. The TV studio, the big screens corner and Piccadilly Li
    - **A. Piccadilly Lights in the London demo now, a generic big screens corner for every city, Times Square when
      there is a New York scenario** (recommended).
    - B. Only the generic corner, no real landmarks.
+
+## Built: slice 1 (A1-A3 and the tutorial), 2026-10-20
+
+What stands, and where it differs from the design above. Questions 1, 2, 3 and 5 take their recommended answers: rent
+goes to the parcel owner, homes carry no ads, claims come from the table, and vandals are a rate per area.
+
+### A1 slots
+
+- **The op.** `['adslot', part, face, bay, storey, size, at?]` (`buildings/schema.ts`, expanded in `facade.ts`, built by
+  `buildings/adslot.ts`). On a facade box it is placed by cell, like a door: centred in the bay, and in the storey (or
+  standing on its floor when taller). On a plain box `bay` and `storey` are 0 and it is centred, or placed `at`
+  [along, up] as fractions of the wall. It draws an empty frame (a border and blank paper) into the model, so a street
+  with no adverts looks right.
+- **Sizes at the models' scale.** The table in section 2 was about 2.5 times too big: a storey is about 0.25 tiles,
+  which makes a tile about 15 m. The built sizes in tiles are: panel 0.12 × 0.16, poster 0.16 × 0.21, hoarding
+  0.42 × 0.14, billboard 0.44 × 0.22 (a 48-sheet) and banner 0.11 × 0.29. Rents are as in the table. A slot on a small
+  wall shrinks to fit and keeps its shape.
+- **Rules.**
+  - A slot is never on the back wall (`validate.ts`).
+  - A frame may not cover a window: the compiler runs `windowCollisions` on every design's frames and refuses to
+    compile one that does.
+  - Facing a road side is checked when renting (`shared/src/adverts.ts adSlotOpen`). A front slot always faces one. A
+    side-wall slot on a 1×1 lot needs open ground beside it (a road, empty land, a car park, a park or a bus shelter),
+    not a neighbour's wall. Shelter panels and the slots of multi-tile buildings stand free.
+- **Slot identity.** A slot is (door tile, index). `AD_SLOTS` in compiled.ts holds each design's slot records (face,
+  size, poster centre and size in model space). Server and client find a building's design from the same hash and road
+  test as the chunk view, so neither sends anything about an empty slot.
+- **Default slots.** The compiler gives about one commercial or leisure design in three (hash-picked, landmarks
+  excluded) a slot where one fits: 43 of 172 designs. It is either:
+  - a poster in the side bay nearest the road, with the facade cells under it made plain wall like a real shop's blank
+    flank, provided nothing stands in front of it; or
+  - a billboard on legs over the front of a flat roof.
+- **Hand-placed slots.**
+  - Every bus shelter has a panel in its end pane.
+  - The site fence's front became a plywood hoarding with a slot. The renderer now turns a 1×1 site to face the road,
+    as it does the shell.
+  - The kits gained `tierkit.adBoard` (a board on two posts) and `zonekit.billboard`. These give banners by the
+    stadium's gates in both designs, a billboard at the retail park's entrance, and a new surface car park design
+    (designs/adverts.ts) with a 48-sheet over its back row, on about half of all lots.
+- **Checks.** buildings:check section 12 covers the records, the share, no frames on homes, the shelter and the site,
+  and refusals for the back wall, an unknown size and a frame over a window. Two snapshot models were deliberately
+  re-snapshotted (ADSLOT_FIXED).
+
+### A2 campaigns and rent
+
+- **Unlock.** Advertising is a tech: zoning track, tier 2, after Commercial zoning, at 60 residents, $250. A tech was
+  chosen over a rank because every tool and panel in the game is opened by a tech feature. That way the tree previews
+  it, sandboxes and the Commons get it with every other tech, spectate and administration refuse it like any other
+  change, and the goal chain can wait on it as Masonry's goal does. No rank opens a feature today.
+- **Campaigns.** `server/src/sim/adverts.ts`:
+  - A campaign is a theme, a claim from `AD_CLAIMS` (14 claims over the six themes), filled with one of the player's
+    parcel names or a workplace's sign, and a look (palette × layout × icon).
+  - The artwork costs $150, and a player runs at most 8 campaigns.
+- **Rent.**
+  - Renting charges the first day at once, then each midnight. Both sides file it under **Advertising** ('ads') in
+    the ledger.
+  - The money goes to the owner of the parcel the slot stands on. Renting your own frontage is free, and on unclaimed
+    land the money goes nowhere.
+  - A rental ends at midnight if its slot has gone (the building pulled down, the site finished) or if the renter
+    cannot pay or is in administration. The renter gets a toast.
+  - A player may rent at most 60 slots.
+- **Wire.**
+  - One `ads` message carries every campaign and rental, 9 numbers each. It is sent on join and whenever they change,
+    which is rare (intents and midnight).
+  - The intents are `adCampaign`, `adRent` (slots by door and index, or "the n free nearest a point") and `adEnd`
+    (slots, a campaign's slots, or ending the campaign).
+  - Spectate refuses them: they are not in READ_ONLY. Administration refuses creating and renting.
+- **Saves.** The snapshot's optional `adverts` field holds campaigns, rentals and who has posted. It is left out until
+  someone advertises. Older saves load with none, and there is no format bump.
+
+### A3 rendering
+
+- **The mesh.** `client/src/render/adverts.ts` is one InstancedMesh (one draw call) of quads for the rented slots of
+  every loaded chunk, packed per chunk like the name boards and flushed at most once a frame.
+- **Distance.** Within the signs' fade (SIGN_FADE_START plus a hashed per-poster jitter) a poster shows its artwork.
+  Past that the same quad shows the campaign's main colour as a flat tint, and past FAR_AT it is discarded.
+- **The ad atlas.** One 2048² canvas holds a 256² block per campaign, drawn on first sight and handed back when the
+  campaign ends: 56 blocks. Each block has three cells: landscape (billboards, and hoardings from its middle band),
+  portrait (posters, panels) and tall (banners). The bottom row holds 16 graffiti tags in four crews' styles, drawn at
+  start-up.
+- **Wear in the shader.**
+  - The paper fades, yellows and greys with streaks of grime from the top.
+  - A first tag, then a second, appear once the wear passes seeded points, in the area's crew (hashed from the
+    parcel).
+  - Tears open from the edges in a seeded noise pattern, showing old paste and paper behind.
+- **No per-frame work.** Wear is `adWear` from the shared formula, refreshed for every instance once a game hour. Only
+  the shader runs per frame.
+- **Organic variation.** Every poster has its own seed, which sets:
+  - its wear rate (0.7-1.3x);
+  - which tags it gets, where and how big;
+  - its tear pattern;
+  - a slight tilt and offset on the wall.
+- **Lighting.** Billboards and shelter panels are lit at night; paper on walls is not.
+- **Picking.** While the Campaigns panel is picking frames, free frames in view glow and pulse (the same mesh, a flag).
+
+**Wear formula.** Each rental carries an age in wear units and the rate it ages at. Its wear is
+`1 - exp(-age × (0.7 + 0.6 × seed))`. Once a game day the server rolls the age forward and sets the rate afresh from the
+slot's area:
+
+```
+need = 0.6 × min(1, jobless / 0.3) + 0.25 × (1 - cover / 3) + 0.15 × (1 - leisureTier / 2)
+rate = (0.012 + 0.388 × need^1.5) × size wear (panel 1.3, poster 1, hoarding 1.15, billboard 0.6, banner 0.7)
+```
+
+- `jobless` is the share of the parcel's resident adults out of work and not studying (one pass over the citizens at
+  midnight, only while something is rented).
+- `cover` (0-3) and `leisureTier` (0-2) are the simulation's own at the slot's door.
+
+In practice a neglected street tags a poster within three days, and a well-served one keeps it clean for weeks. The
+design's single `rate(area)` becomes a daily-sampled rate, so a district that improves slows its posters' wear from
+that day on.
+
+### The Campaigns panel and the tutorial
+
+- **The panel.**
+  - The **ads** chip shows once Advertising is unlocked, or while its goal is up. It opens a side card
+    (`client/src/adverts.ts`).
+  - The card makes a campaign: theme, claim, what it is about, colours, layout, icon, a live preview of the poster,
+    and the price.
+  - Each campaign card shows its frames, cost a day, the state of its posters (words and a bar per frame) and the
+    buttons **Pick frames**, **Rent 3 nearest**, **Take all down** and **End**.
+  - **Reach is not built** (A4 needs beliefs, docs/motivation.md). The card says so in the players' terms: "Townsfolk
+    walk past without taking much in for now: people will start to notice posters, and change their minds about where
+    to live and work, in a coming update."
+- **The goal.**
+  - "Run your first campaign" sits after "Somewhere to go" (shared/src/goals.ts). Its parts are: Advertising unlocked,
+    a campaign made, two frames rented. The reward is $250.
+  - Its **show me** opens the tech tree while Advertising is locked. After that it opens the Campaigns panel, starts
+    picking for the first campaign and flies the camera down to street level, looking at the nearest free frame.
+  - A returning player already past that point in the chain gets the goal too, as an introduction to the feature.
+- **The milestone.** The milestone feed has "Your first poster goes up" (server/src/ranks.ts firsts).
+
+### The showcase
+
+- **The High Street section.** It is a new section west of the town (shared/src/demo/showcase.ts HIGH_STREET). Shops
+  line both sides, with gaps picked by design hash so the posters on their flanks face open ground. There are two car
+  parks with billboards, a bus shelter and a building site behind its hoarding.
+- **The seeder.** `server/src/demo/adverts.ts` opens the site after the fill and puts three campaigns up on every open
+  frame there, kept at their ages: fresh, tagged and wrecked side by side.
+- **The tour.** It stops at 'high-street' after the shops block.
+- **Features.**
+  - `advert-slots`: every frame size open somewhere in the seeded town.
+  - `advert-wear`: three wear levels.
+  - `advert-reach` is registered as a todo for A4.
+
+### Measured
+
+- **Tick cost.** `loadtest/ab.ts` (seed 1, 08:00 + 1,500 ticks) gives identical metrics on this branch and on main
+  a17b145: the same game, 0.689 against 0.659 ms a tick, which is run-to-run noise. `Adverts.tick` is a day check: 0.9 µs
+  a tick over four game days with posters up, the daily pass included (`loadtest/adverts.ts`).
+- **Client cost.** London at street level draws 155 calls a frame with 8 posters up and 154 with the poster mesh hidden:
+  one draw call.
+- **Old saves.** Copies of the live `data/world.json` and the showcase's demo snapshot load and save again without an
+  `adverts` field.
+- **The probe.** `npx tsx packages/server/src/loadtest/adverts.ts` passes 29 of 29.
+
+### What A4 needs next
+
+- An `AdIndex` from road tile to rented slots. `adSlotWorld` gives each slot's facing, from which its road tile
+  follows.
+- The daily pass in `lifeStep` over cached commute paths, and bus riders seeing panels at their stops.
+- Citizens' beliefs and values (motivation M1-M4) for the nudge.
+- The reached / swayed / acted counters for the panel, which then replace its "coming update" line with numbers.

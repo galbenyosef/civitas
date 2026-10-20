@@ -2,7 +2,7 @@ import {
   DEFAULT_TAX, Terrain, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, KIND_ID, KIND_NAMES, chunkKey, isBuildable, isRoad, packTile, terrainOf,
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
-  isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux, isMetroStationKind, SCHOOL_SPECS, capacityOf, Study, EduLevel, LifeStage, CitizenState,
+  isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux, isMetroStationKind, SCHOOL_SPECS, capacityOf, Study, EduLevel, LifeStage, CitizenState, ALL_TECH_IDS, TECH_BY_ID,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, type Building, type Citizen } from '../world';
 import { ageOf, stageFor } from '../sim/life';
@@ -76,7 +76,14 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
   for (const s of sections) {
     for (const l of s.land ?? []) {
       const [x, y, pw, ph] = l.rect;
-      const parcel = { id: w.nextId++, owner: DEMO_OWNER, name: l.name, x, y, w: pw, h: ph, taxRate: DEFAULT_TAX, stats: emptyStats() };
+      let holder = DEMO_OWNER;
+      if (l.frozen) { // its own owner without the construction track: nothing there upgrades or merges (showcase.ts)
+        holder = `${DEMO_OWNER}:${l.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+        const p = w.getOrCreatePlayer(holder, l.name, DEV_FUNDS);
+        p.tech = ALL_TECH_IDS.filter((t) => TECH_BY_ID.get(t)?.track !== 'construction');
+        p.devUnlimited = true; p.color = owner.color;
+      }
+      const parcel = { id: w.nextId++, owner: holder, name: l.name, x, y, w: pw, h: ph, taxRate: DEFAULT_TAX, stats: emptyStats() };
       w.parcels.set(parcel.id, parcel);
       eachTile(l.rect, (tx, ty) => {
         if (w.parcelIdAt(tx, ty)) problems.push(`${s.id}: land ${l.name} overlaps a parcel at ${at([tx, ty])}`);
@@ -103,7 +110,7 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
     }
     for (const z of s.zones ?? []) {
       const k = kindId(z.zone);
-      eachTile(z.rect, (x, y) => { unmerge(x, y); const t = w.getTile(x, y); if (!isRoad(t) && isBuildable(t)) w.setTile(x, y, packTile(terrainOf(t), false, familyOf(k), DEMO_TOWN.built), subFor(k)); });
+      eachTile(z.rect, (x, y) => { unmerge(x, y); const t = w.getTile(x, y); if (!isRoad(t) && isBuildable(t)) w.setTile(x, y, packTile(terrainOf(t), false, familyOf(k), z.level ?? DEMO_TOWN.built), subFor(k)); });
     }
   }
   // merged lots (docs/buildings.md "Merged lots") stand on their zoned lots as growth builds them: through the shared

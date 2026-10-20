@@ -15,6 +15,7 @@ import { seedCity } from './loadtest/cities';
 import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, stopsChildrenOn } from './testcities';
 import { fillCity } from './fill';
 import { seedDemoTown, seedDemoNetwork, seedDemoStudents, fillDemo, seededRandom, worldHash } from './demo/seed';
+import { seedDemoAdverts } from './demo/adverts';
 import { demoFireDrills } from '@msimcity/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -177,6 +178,7 @@ http.listen(PORT, HOST, async () => {
     const r = await fillDemo(world!, game.step, (p) => { fillProgress = p; });
     game.fires.enabled = fires;
     const students = seedDemoStudents(world!, sim, DEMO); // the universities' first students (a campus would stand empty for days)
+    for (const p of seedDemoAdverts(world!, game.adverts, DEMO)) console.warn(`demo ${DEMO}: ${p}`); // the high street's posters (docs/adverts.md)
     Math.random = realRandom;
     startHash = worldHash(world!);
     ready = true;

@@ -27,6 +27,10 @@ export interface OnboardingDeps {
   toast(kind: 'info' | 'error', msg: string): void;
   /** a camera moment at a tile with a caption (moment.ts): the first settlers arriving */
   moment?(x: number, y: number, caption: string): void;
+  /** "Run your first campaign" (adverts.ts): the tech tree or the Campaigns panel, and the camera on a free frame near the player's land */
+  adverts?(near: [number, number] | null): void;
+  /** the active goal changed (or the chain was skipped: null) */
+  goalChanged?(active: string | null): void;
 }
 
 /** At most one hint per this many ticks (two game hours), and how long an undismissed one stays up (real ms). */
@@ -88,6 +92,7 @@ export class Onboarding {
     if (this.showing && (m.goals.dismissed.includes(this.showing) || (m.goals.skipped && HINTS[this.showing].kind === 'tip'))) this.hideHint();
     if (m.completed) this.celebrate(m.completed.id, m.completed.reward);
     this.render();
+    this.d.goalChanged?.(this.activeGoal);
   }
 
   private render() {
@@ -132,6 +137,7 @@ export class Onboarding {
     const s = def.show, w = this.d.world;
     const tool = (w.start === 'frontier' && def.frontier?.tool) || s.tool;
     if (tool) { this.d.tool(tool); this.flash(tool); }
+    if (s.panel === 'adverts' || s.focus === 'slot') { this.d.adverts?.(this.myPlot()); return; }
     if (s.panel) this.openPanel(s.panel);
     if (s.focus) {
       const plot = s.focus === 'plot' ? this.myPlot() : null;
@@ -140,7 +146,9 @@ export class Onboarding {
       else if (plot) this.d.focus(plot[0], plot[1]); else this.d.focus(home[0], home[1]);
     }
   }
-  private openPanel(p: 'tech' | 'ledger' | 'lines' | 'admin') {
+  /** The goal being worked on now, if the card is up (main.ts shows the ads chip during "Run your first campaign"). */
+  get activeGoal(): string | null { return this.goals && !this.goals.skipped ? this.goals.active : null; }
+  private openPanel(p: 'tech' | 'ledger' | 'lines' | 'admin' | 'adverts') {
     if (p === 'tech') this.d.openTech();
     else if (p === 'ledger') { if (!document.getElementById('ledgerBox')) document.getElementById('money')?.click(); }
     else if (p === 'admin') { if (document.getElementById('admin')?.classList.contains('hidden')) document.getElementById('adminBtn')?.click(); }

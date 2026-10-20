@@ -9,6 +9,7 @@ import type { FleetInfo, MobileRows } from './fleet';
 import type { BoatHarbour } from './boats';
 import type { SeaGate } from './waterways';
 import type { FireDTO } from './fires';
+import type { AdTarget, AdsDTO } from './adverts';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
 export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | KindToolId;
 
@@ -65,10 +66,10 @@ export interface PlayerDTO {
   fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'ads' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', builders: "Builders' fees",
-  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', other: 'Other',
+  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', ads: 'Advertising', other: 'Other',
 };
 /**
  * Money that can run out (docs/start-from-zero.md B3): the overdraft line, the count of midnights below zero, and
@@ -550,7 +551,11 @@ export type ClientMsg =
   | { t: 'inspectBoat'; id: number }
   // ---- issue bubbles and overlays (shared/src/issues.ts, server/src/sim/issues.ts) ----
   /** the data overlay to send for the subscribed chunks (Overlay: 1 coverage, 2 leisure, 3 happiness, 4 jobs/homes; 0 none) */
-  | { t: 'overlay'; ch: number };
+  | { t: 'overlay'; ch: number }
+  /** adverts (docs/adverts.md, server sim/adverts.ts): a new campaign; put one up on slots ([door x, door y, slot]) or the n free ones nearest a point; take posters down, or end a campaign */
+  | { t: 'adCampaign'; theme: number; claim: number; look: number; target?: AdTarget }
+  | { t: 'adRent'; campaign: number; slots?: [number, number, number][]; near?: { x: number; y: number; n: number } }
+  | { t: 'adEnd'; slots?: [number, number, number][]; campaign?: number; drop?: boolean };
 
 export type ServerMsg =
   | { t: 'welcome'; you: string; seed: number; day: number; /** a frontier start (docs/first-five.md section 0) and its road end, where the goals' "show me" looks */ start?: 'frontier'; home?: [number, number]; /** a sandbox (test city or demo): anyone may edit any parcel and buy land anywhere */ sandbox?: boolean; /** a read-only showcase (SPECTATE=1 on the server): only looking; every intent that changes the world is refused */ spectate?: boolean; players: PlayerDTO[]; parcels: ParcelDTO[] }
@@ -614,7 +619,9 @@ export type ServerMsg =
   /** your own parcels' problems, flat triples x, y, code: on hello, then when they change (at most every ISSUE_TUNING.problemsHours) */
   | { t: 'problems'; p: number[]; /** one per triple: why a very unhappy home is (shared/src/issues.ts MOOD_REASONS), 0 for others; absent when none */ r?: number[] }
   /** per chunk: the overlay you asked for, base64 Uint8Array(CHUNK_SIZE^2) (overlayByte; 0 no data), sent when it changes */
-  | { t: 'overlay'; ch: number; cx: number; cy: number; d: string };
+  | { t: 'overlay'; ch: number; cx: number; cy: number; d: string }
+  /** every campaign and rented ad slot (shared/src/adverts.ts AdsDTO), on join and whenever they change (rare: intents and midnight) */
+  | ({ t: 'ads' } & AdsDTO);
 
 /**
  * A harbour on the wire (server sim/harbours.ts): what the boat schedule reads (boats.ts BoatHarbour: id, kind, the

@@ -50,6 +50,9 @@ import { windowCollisions, windowRects, isFeature, CELL } from '../src/buildings
 import type { CompiledOp, Op } from '../src/buildings/schema';
 import { LEGACY_WINDOW_COLLISIONS } from './window-baseline';
 import { EXTRA_DESIGNS } from '../src/buildings/designs/index';
+import { AD_SLOTS } from '../src/buildings/compiled';
+import { AD_STRIDE, AD_SIZES } from '../src/buildings/adslot';
+import { compileCatalogue as compileAll } from '../src/buildings/compile';
 
 /**
  * Harbours (docs/boats.md section 5): paint the water a wet kind placed at door (x, y) facing r needs (its wet rows and
@@ -353,9 +356,15 @@ const FACADE_FIXED: Record<string, [number, string]> = {
  * hospital's moves right and its roof cross left so the bigger pad fits. Heights are unchanged.
  */
 const HELIPAD_FIXED: Record<string, [number, string]> = { '4:3:3': [756, '4280ad8e'], '7:1:0': [792, '8e57300a'] };
+/**
+ * Snapshot models deliberately changed since: they carry an ad slot's empty frame (docs/adverts.md section 2, buildings/
+ * adslot.ts). The supermarket gets a default billboard on its flat roof; the site fence's front rail became a plywood
+ * hoarding with a poster frame. Heights are unchanged.
+ */
+const ADSLOT_FIXED: Record<string, [number, string]> = { '2:2:1': [432, '8fe1b839'], site: [402, 'a6732c31'] };
 let identical = 0, refixed = 0;
 for (const [key, height, oldVerts, oldHash] of OLD_MODELS) {
-  const fixed = FACADE_FIXED[key] ?? HELIPAD_FIXED[key];
+  const fixed = FACADE_FIXED[key] ?? HELIPAD_FIXED[key] ?? ADSLOT_FIXED[key];
   const [verts, hash] = fixed ?? [oldVerts, oldHash];
   if (fixed) refixed++;
   const v = now.find((m) => m.key === key);
@@ -368,7 +377,7 @@ for (const [key, height, oldVerts, oldHash] of OLD_MODELS) {
   if (v.geometry.attributes.position.count === verts && h.toString(16) === hash && !fixed) identical++;
 }
 const drafts = allDesigns().filter((d) => d.draft);
-console.log(`  ${identical}/${OLD_MODELS.length} models byte-identical to the old models.ts, ${refixed} deliberately re-snapshotted after facade fixes (${Object.keys(FACADE_FIXED).join(' ')}) and helipads (${Object.keys(HELIPAD_FIXED).join(' ')}); ${drafts.length} draft design(s) built for the viewer only: ${drafts.map((d) => d.key).join(', ')}`);
+console.log(`  ${identical}/${OLD_MODELS.length} models byte-identical to the old models.ts, ${refixed} deliberately re-snapshotted after facade fixes (${Object.keys(FACADE_FIXED).join(' ')}), helipads (${Object.keys(HELIPAD_FIXED).join(' ')}) and ad slot frames (${Object.keys(ADSLOT_FIXED).join(' ')}); ${drafts.length} draft design(s) built for the viewer only: ${drafts.map((d) => d.key).join(', ')}`);
 if (!drafts.length) fail('expected the kiosk draft');
 if (now.some((v) => drafts.some((d) => d.key === v.key))) fail('a draft leaked into the city batch');
 
@@ -933,7 +942,8 @@ section('merged lots');
 section('windows');
 {
   const full = process.argv.includes('--windows');
-  const usesFacade = (ops: Op[]) => ops.some((op) => isFeature(op[0]) || ((op[0] === 'box' || op[0] === 'roof') && !!op[9]?.facade));
+  // an ad slot (adslot.ts) is a feature too, but it does not make a legacy design a facade one: its own frames are checked when it compiles
+  const usesFacade = (ops: Op[]) => ops.some((op) => (isFeature(op[0]) && op[0] !== 'adslot') || ((op[0] === 'box' || op[0] === 'roof') && !!op[9]?.facade));
   const listed: string[] = [], seen = new Set<string>();
   let facades = 0;
   for (const k of CATALOGUE) k.levels.forEach((l, li) => l.designs.forEach((d) => {
@@ -994,6 +1004,46 @@ section('windows');
     expectError('a facade without windows', (cat) => { const b = facadeDesign(cat).ops.find((o) => o[0] === 'box' && o[9]?.facade)!; (b as unknown[])[8] = 'none'; }, /a facade needs a window class/);
     expectError('two parts with one name', (cat) => { const d = facadeDesign(cat); const b = d.ops.find((o) => o[0] === 'box' && o[9]?.facade)!; d.ops.push(['box', 0.1, 0.1, 0.1, 0, 0, 0, 'white', true, { name: (b[9] as { name?: string }).name }]); }, /used twice/);
   }
+}
+
+// ---------------------------------------------------------------- 12. ad slots (buildings/adslot.ts, docs/adverts.md section 2)
+{
+  console.log('12. ad slots');
+  const recipeKeys = new Set([...RECIPES.map((r) => r.key), 'site']);
+  const kindOf = new Map(MANIFEST.map((k) => [k.kindId, k]));
+  let slots = 0;
+  for (const [key, a] of Object.entries(AD_SLOTS)) {
+    if (!recipeKeys.has(key)) fail(`ad slots for unknown design ${key}`);
+    if (a.length % AD_STRIDE) fail(`ad slots of ${key}: ${a.length} numbers, not a multiple of ${AD_STRIDE}`);
+    for (let i = 0; i < a.length; i += AD_STRIDE) {
+      slots++;
+      if (![0, 1, 3].includes(a[i])) fail(`ad slot ${key}#${i / AD_STRIDE} faces ${a[i]}: never the back wall`);
+      if (!(a[i + 1] >= 0 && a[i + 1] < AD_SIZES.length)) fail(`ad slot ${key}#${i / AD_STRIDE}: size code ${a[i + 1]}`);
+      if (!(a[i + 5] > 0 && a[i + 6] > 0)) fail(`ad slot ${key}#${i / AD_STRIDE}: empty poster`);
+    }
+    const kind = Number(key.split(':')[0]);
+    if (kindOf.get(kind)?.family === 'residential') fail(`a home carries an ad slot (${key}): no ads on homes (docs/adverts.md question 2)`);
+  }
+  const live = RECIPES.filter((r) => !r.draft && ['commercial', 'leisure'].includes(kindOf.get(r.kind)?.family ?? '') && !kindOf.get(r.kind)?.landmark);
+  const withSlot = live.filter((r) => AD_SLOTS[r.key]).length;
+  const share = withSlot / live.length;
+  if (share < 0.15 || share > 0.45) fail(`about one commercial or leisure design in three should carry a slot; ${withSlot}/${live.length}`); else passes++;
+  eq('every bus shelter has a panel', !!AD_SLOTS[`${KIND_ID['bus-stop']}:1:0`], true);
+  eq('the building-site fence has a hoarding', AD_SLOTS.site?.[1], AD_SIZES.indexOf('hoarding'));
+  console.log(`  ${slots} slot(s) on ${Object.keys(AD_SLOTS).length} design(s); ${withSlot}/${live.length} commercial and leisure designs carry one`);
+  // validation: the back wall, an unknown size, and a frame over a window
+  const busStopAt = (cat: KindDef[]) => cat.find((k) => k.id === 'bus-stop')!.levels[0].designs[0].ops;
+  expectError('an ad slot on the back wall', (cat) => { busStopAt(cat).push(['adslot', 4, 'back', 0, 0, 'panel']); }, /must face a road side/);
+  expectError('an unknown ad size', (cat) => { busStopAt(cat).push(['adslot', 4, 'right', 0, 0, 'mural' as never]); }, /is not one of panel/);
+  const usesFacade = (ops: Op[]) => ops.some((op) => (op[0] === 'box') && !!op[9]?.facade);
+  const fac = structuredClone(CATALOGUE); // not clone(): JSON turns an op's undefined window class into null
+  const k = fac.find((x) => x.levels.some((l) => l.designs.some((d) => usesFacade(d.ops) && x.family === 'commercial')))!;
+  const d = k.levels.flatMap((l) => l.designs).find((x) => usesFacade(x.ops))!;
+  const host = d.ops.findIndex((o) => o[0] === 'box' && o[9]?.facade);
+  d.ops.push(['adslot', host, 'front', 0, 1, 'poster']); // over a first-floor window
+  let thrown = '';
+  try { compileAll(fac, HELPER_MODELS); } catch (e) { thrown = String(e); }
+  if (/ad slot frame .* covers windows/.test(thrown)) passes++; else fail(`a slot over a window should not compile; got ${thrown.slice(0, 200) || 'no error'}`);
 }
 
 console.log(failures ? `\nbuildings:check FAILED: ${failures} failure(s), ${passes} passed` : `\nbuildings:check passed: ${passes} assertions`);

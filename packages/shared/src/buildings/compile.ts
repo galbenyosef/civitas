@@ -1,11 +1,13 @@
 import type { KindDef, HelperModel, Op, CompiledOp, CompiledRecipe, KindManifest, LevelManifest, LevelStats, Design, Color, Flags, Win, CompiledFacade, PartRef } from './schema';
 import { compileFacade, featureOps, isFeature, partIndex, type FeatureTarget } from './facade';
+import { autoAdSlot, adFrameCollisions } from './adslot';
 import { PALETTE, WINDOW_CLASSES, type WindowClass } from './palette';
 import { HELPERS } from './helpers';
 import { LEVEL_SLOTS, MAX_KIND_CODE, KIND_FLAG } from './codes';
 import { validateCatalogue, mergeAttrs } from './validate';
 import { techFor } from '../tech';
 import { ZONE_COST } from '../constants';
+import { hash2 } from '../noise';
 
 /**
  * Catalogue -> flat tables, a JSON-able manifest and primitive-only model
@@ -32,6 +34,8 @@ export interface CompiledCatalogue {
   manifest: KindManifest[];
   recipes: CompiledRecipe[];
   helpers: CompiledRecipe[];
+  /** ad slots per design key (buildings/adslot.ts AD_STRIDE numbers each), designs and helpers that have any */
+  adSlots: Record<string, number[]>;
 }
 
 const colour = (c: Color) => (typeof c === 'number' ? c : PALETTE[c]);
@@ -41,7 +45,7 @@ const colour = (c: Color) => (typeof c === 'number' ? c : PALETTE[c]);
  * (buildings/facade.ts) and feature ops (door, balcony, ...) expand into boxes and roofs placed by cell, adding cell
  * overrides to the box they name. `src`, when given, receives the authored op index of every compiled op.
  */
-export function compileOps(ops: Op[], windows: WindowClass, src?: number[]): CompiledOp[] {
+export function compileOps(ops: Op[], windows: WindowClass, src?: number[], ads?: { slots: number[]; frames: Set<number> }): CompiledOp[] {
   const out: CompiledOp[] = [];
   const winOf = (w: Win | undefined) => { const c = w === true ? windows : w; return c ? WINDOW_CLASSES[c] : 0; };
   // facades first, so features may name a box before or after it in the list
@@ -82,8 +86,8 @@ export function compileOps(ops: Op[], windows: WindowClass, src?: number[]): Com
     const t: FeatureTarget = target[0] === 'box'
       ? { box, hex: colour(target[7]), cls: winOf(target[8]), facade: facades.get(ti!)?.facade }
       : { box, hex: colour(target[7]), cls: WINDOW_CLASSES[windows], alongZ: !!target[8] };
-    if (target[0] === 'box' && !t.facade) throw new Error(`${op[0]}: op ${ti} has no facade`);
-    for (const o of featureOps(op, t, featureColour)) emit(o);
+    if (target[0] === 'box' && !t.facade && op[0] !== 'adslot') throw new Error(`${op[0]}: op ${ti} has no facade`);
+    for (const o of featureOps(op, t, featureColour, ads?.slots)) { if (op[0] === 'adslot') ads?.frames.add(out.length); emit(o); }
   };
   ops.forEach((op, i) => {
     at = i;
@@ -137,6 +141,8 @@ export function compileCatalogue(kinds: KindDef[], helperModels: HelperModel[]):
   for (let id = 0; id < kindIdCount; id++) footprint.push(1, 1, 0, 0);
   const manifest: KindManifest[] = [];
   const recipes: CompiledRecipe[] = [];
+  const adSlots: Record<string, number[]> = {};
+  const adErrs: string[] = [];
 
   for (const k of sorted) {
     const id = idOf(k);
@@ -171,7 +177,15 @@ export function compileCatalogue(kinds: KindDef[], helperModels: HelperModel[]):
         level, ...s, tech, feature: l.feature, attrs: mergeAttrs(k, l),
         designs: ds.map((d, index) => {
           const key = `${id}:${level}:${index}`;
-          const ops = compileOps(d.ops, k.windows);
+          const ads = { slots: [] as number[], frames: new Set<number>() };
+          let ops = compileOps(d.ops, k.windows, undefined, ads);
+          if (ads.frames.size) adErrs.push(...adFrameCollisions(ops, ads.frames).map((e) => `kind '${k.id}' design ${key} (${d.name}): ${e}`));
+          else if (!d.draft && defaultAdSlot(k) && hash2(id * 131 + level, index * 7 + 3) < AD_DEFAULT_SHARE) {
+            // about one commercial or leisure design in three gets a slot of its own where one fits (docs/adverts.md section 2)
+            const auto = autoAdSlot(ops, hash2(index * 11 + 5, id * 17 + level), k.family === 'leisure');
+            if (auto) { ops = [...ops.map((o, i) => (i === auto.mainAt && auto.main ? auto.main : o)), ...auto.ops]; ads.slots.push(...auto.slot); }
+          }
+          if (ads.slots.length) adSlots[key] = ads.slots;
           recipes.push({ key, kind: id, level, index, height: d.height, draft: !!d.draft, ops });
           return { key, index, name: d.name, height: d.height, draft: !!d.draft, ops: ops.length, attrs: mergeAttrs(k, l, d), ...(d.author ? { author: d.author } : {}) };
         }),
@@ -191,9 +205,21 @@ export function compileCatalogue(kinds: KindDef[], helperModels: HelperModel[]):
       ...(k.landmark ? { landmark: true } : {}), ...(k.tags?.length ? { tags: [...k.tags] } : {}),
     });
   }
-  const helpers = helperModels.map((h) => ({ key: h.key, kind: 0, level: 0, index: 0, height: h.height, draft: false, ops: compileOps(h.ops, 'none') }));
-  return { kindCount, kindIdCount, kindNames, tables: t, kindFlags, topLevel, family, familyBase, footprint, manifest, recipes, helpers };
+  const helpers = helperModels.map((h) => {
+    const ads = { slots: [] as number[], frames: new Set<number>() };
+    const ops = compileOps(h.ops, 'none', undefined, ads);
+    if (ads.frames.size) adErrs.push(...adFrameCollisions(ops, ads.frames).map((e) => `helper model '${h.key}': ${e}`));
+    if (ads.slots.length) adSlots[h.key] = ads.slots;
+    return { key: h.key, kind: 0, level: 0, index: 0, height: h.height, draft: false, ops };
+  });
+  if (adErrs.length) throw new Error(`building catalogue is invalid:\n  ${adErrs.join('\n  ')}`);
+  return { kindCount, kindIdCount, kindNames, tables: t, kindFlags, topLevel, family, familyBase, footprint, manifest, recipes, helpers, adSlots };
 }
+
+/** Commercial and leisure designs may get a default ad slot; landmarks keep their own look (docs/adverts.md section 2). */
+const defaultAdSlot = (k: KindDef) => (k.family === 'commercial' || k.family === 'leisure') && !k.landmark;
+/** about one in three */
+const AD_DEFAULT_SHARE = 1 / 3;
 
 function fnv(s: string) {
   let h = 2166136261;
@@ -245,6 +271,8 @@ export function emitCatalogue(c: CompiledCatalogue): { compiled: string; recipes
     `export const FAMILY_BASE_TABLE = new Uint8Array([${c.familyBase.join(', ')}]);`,
     `/** Footprint per kind id, four bytes each: w, h, door dx, door dy (1, 1, 0, 0 for a single tile). See structures.ts. */`,
     `export const FOOTPRINT_TABLE = new Uint8Array([${c.footprint.join(', ')}]);`,
+    `/** Ad slots per design key (and helper key, 'site'), buildings/adslot.ts: face, size code, poster centre x y z and w h in model space, per slot. Designs without slots are absent. */`,
+    `export const AD_SLOTS: Record<string, number[]> = ${JSON.stringify(c.adSlots)};`,
     ``,
     `export type KindToolId = ${tools.map((k) => JSON.stringify(k.tool!.id)).join(' | ')};`,
     `/** Tool id -> kind id, for every kind that has a tool. */`,

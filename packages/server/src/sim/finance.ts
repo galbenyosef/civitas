@@ -34,7 +34,8 @@ export function adminRefusal(m: ClientMsg): string | null {
     : m.t === 'build' ? (m.tool === 'bulldoze' ? null : m.tool === 'road' ? 'laying roads' : m.tool in ZONE_TOOLS ? 'zoning' : m.tool === 'rail' ? 'laying track' : 'building')
       : m.t === 'unlock' ? 'research'
         : m.t === 'setPolicy' ? (m.on === true ? 'enacting policies' : null)
-          : m.t === 'line' && m.op === 'save' ? 'opening or changing lines' : null;
+          : m.t === 'line' && m.op === 'save' ? 'opening or changing lines'
+            : m.t === 'adCampaign' || m.t === 'adRent' ? 'advertising' : null;
   return what && `In administration: ${what} is stopped until a midnight finds the treasury at zero or above. Bulldozing, parcel settings and the recovery plan (the red chip by the treasury) still work`;
 }
 

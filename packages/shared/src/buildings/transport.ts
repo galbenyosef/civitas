@@ -1,5 +1,13 @@
-import type { KindDef, Op } from './schema';
+import type { KindDef, Op, Win } from './schema';
 import { Zone } from './codes';
+
+/** The surface lot: kerbs, bay lines, a booth and a sign; `y` lifts the booth onto the paving and `win` is its windows (the original sits in the paving with a shop's, low enough that the kerb meets them). */
+export const lotOps = (y = 0, win: Win = true): Op[] => [
+  ['box', 0.96, 0.02, 0.96, 0, 0, 0, 0x3a3d44], ['box', 0.96, 0.03, 0.04, 0, 0, -0.46, 'grey'], ['box', 0.04, 0.03, 0.96, -0.46, 0, 0, 'grey'], ['box', 0.04, 0.03, 0.96, 0.46, 0, 0, 'grey'],
+  ...[0, 1, 2, 3, 4, 5, 6].flatMap((i): Op[] => { const x = -0.42 + i * 0.14; return [['box', 0.015, 0.005, 0.3, x, 0.02, -0.27, 'white'], ['box', 0.015, 0.005, 0.3, x, 0.02, 0.27, 'white']]; }),
+  ['box', 0.14, 0.18, 0.12, 0.36, y, 0.4, 'white', win], ['box', 0.16, 0.02, 0.14, 0.36, 0.18 + y, 0.4, 'dark'],
+  ['cyl', 0.012, 0.012, 0.3, -0.4, 0, 0.42, 'steel', 5], ['box', 0.12, 0.08, 0.02, -0.34, 0.26, 0.42, 'signBlue'], ['box', 0.04, 0.04, 0.01, -0.34, 0.28, 0.432, 'white'],
+];
 
 /** A surface lot: painted and paved at once (no construction), a dozen bays, a fee per stay. */
 export const parking: KindDef = {
@@ -13,12 +21,7 @@ export const parking: KindDef = {
   lot: { parking: { surface: 12, underground: 12 } },
   levels: [{
     capacity: 0, cost: 150, upkeep: 2, work: 0, parking: { surface: 12, underground: 12 },
-    designs: [{ name: 'kerb, bay lines, a booth and a sign (the cars come from live occupancy)', height: 0.3, ops: [
-      ['box', 0.96, 0.02, 0.96, 0, 0, 0, 0x3a3d44], ['box', 0.96, 0.03, 0.04, 0, 0, -0.46, 'grey'], ['box', 0.04, 0.03, 0.96, -0.46, 0, 0, 'grey'], ['box', 0.04, 0.03, 0.96, 0.46, 0, 0, 'grey'],
-      ...[0, 1, 2, 3, 4, 5, 6].flatMap((i): Op[] => { const x = -0.42 + i * 0.14; return [['box', 0.015, 0.005, 0.3, x, 0.02, -0.27, 'white'], ['box', 0.015, 0.005, 0.3, x, 0.02, 0.27, 'white']]; }),
-      ['box', 0.14, 0.18, 0.12, 0.36, 0, 0.4, 'white', true], ['box', 0.16, 0.02, 0.14, 0.36, 0.18, 0.4, 'dark'],
-      ['cyl', 0.012, 0.012, 0.3, -0.4, 0, 0.42, 'steel', 5], ['box', 0.12, 0.08, 0.02, -0.34, 0.26, 0.42, 'signBlue'], ['box', 0.04, 0.04, 0.01, -0.34, 0.28, 0.432, 'white'],
-    ] }],
+    designs: [{ name: 'kerb, bay lines, a booth and a sign (the cars come from live occupancy)', height: 0.3, ops: lotOps() }],
   }],
 };
 
@@ -98,6 +101,7 @@ export const busStop: KindDef = {
       ['cyl', 0.014, 0.014, 0.46, 0.36, 0.02, 0.4, 'steel', 6],           // flag post at the kerb
       ['box', 0.12, 0.12, 0.02, 0.36, 0.36, 0.41, 'yellow'], ['box', 0.07, 0.035, 0.022, 0.36, 0.41, 0.41, 'charcoal'],
       ['box', 0.1, 0.1, 0.1, -0.42, 0.02, 0.38, 'hedge'],                 // a planter
+      ['adslot', 4, 'right', 0, 0, 'panel'],                               // the advertising panel in the end pane (docs/adverts.md)
     ] }],
   }],
 };
