@@ -124,11 +124,12 @@ export interface BotFResult {
  * Join a fresh frontier world as its first player and play bot F for `minutes` (real minutes at 1×). `accept` is the
  * game's ConnSource hook (what createGame passed to `onConnection`); `log`, if given, hears each purchase and rank-up.
  */
-export async function playF(game: Game, accept: (c: Conn) => void, minutes = 180, log?: (min: number, what: string) => void): Promise<BotFResult> {
-  return play(new LocalBot(game, accept, 'Gauntlet'), minutes, log);
+export async function playF(game: Game, accept: (c: Conn) => void, minutes = 180, log?: (min: number, what: string) => void, opts: { power?: boolean } = {}): Promise<BotFResult> {
+  return play(new LocalBot(game, accept, 'Gauntlet'), minutes, log, opts.power ?? true);
 }
 
-async function play(b: LocalBot, minutes: number, log?: (min: number, what: string) => void): Promise<BotFResult> {
+/** `withPower` false: the bot as before utilities (no Electrification, no substations), the baseline loadtest/utilities-ranks.ts compares against */
+async function play(b: LocalBot, minutes: number, log?: (min: number, what: string) => void, withPower = true): Promise<BotFResult> {
   b.sub(-3, -3, 3, 3);
   await b.sleep(1500);
   const T0 = b.day + b.dayFrac;
@@ -205,8 +206,9 @@ async function play(b: LocalBot, minutes: number, log?: (min: number, what: stri
   }
 
   // ---- technology, services, yards, a bus line
-  const ORDER = ['zon1', 'con1', 'civ1', 'cul1', 'zon2', 'tr1', 'civ2', 'cul2', 'zon3', 'con2', 'tr2', 'tr3', 'tr5', 'civ3'];
-  const BUY = new Set(['zon1', 'con1', 'civ1', 'cul1', 'zon2', 'tr1', 'civ2', 'cul2', 'zon3', 'con2', 'civ3', 'tr2', 'tr5']);
+  // Electrification (docs/utilities.md): two-storey buildings need power, so the bot buys it with Masonry, as the rank card says
+  const ORDER = ['zon1', 'con1', ...(withPower ? ['ut1'] : []), 'civ1', 'cul1', 'zon2', 'tr1', 'civ2', 'cul2', 'zon3', 'con2', 'tr2', 'tr3', 'tr5', 'civ3'];
+  const BUY = new Set(['zon1', 'con1', ...(withPower ? ['ut1'] : []), 'civ1', 'cul1', 'zon2', 'tr1', 'civ2', 'cul2', 'zon3', 'con2', 'civ3', 'tr2', 'tr5']);
   const LATE = new Set(['tr2', 'tr3', 'tr5']);
   const ready = () => {
     const owned = new Set(b.me.tech as string[]);
@@ -242,7 +244,9 @@ async function play(b: LocalBot, minutes: number, log?: (min: number, what: stri
     yardPlaced = true;
   }
   async function tech() {
-    const ts = ready().filter((t) => BUY.has(t.id) && !(LATE.has(t.id) && b.day < 6)).sort((a, c) => ORDER.indexOf(a.id) - ORDER.indexOf(c.id));
+    const owned = new Set(b.me.tech as string[]);
+    // Electrification once Masonry is in: before that nothing needs power, and day one plays exactly as it did
+    const ts = ready().filter((t) => BUY.has(t.id) && !(LATE.has(t.id) && b.day < 6) && (t.id !== 'ut1' || owned.has('con1'))).sort((a, c) => ORDER.indexOf(a.id) - ORDER.indexOf(c.id));
     for (const t of ts) {
       if (money() - t.cost < 700) continue;
       b.send({ t: 'unlock', id: t.id } as ClientMsg);
@@ -268,6 +272,30 @@ async function play(b: LocalBot, minutes: number, log?: (min: number, what: stri
     if (!placed.has('park') && ((b.me.progress.housed ?? 0) >= 40 || b.goals?.active === 'leisure') && money() > 300) {
       const ft = freeTile();
       if (ft) { b.build('citypark', [ft]); await b.sleep(300); placed.add('park'); note('park'); }
+    }
+  }
+  // power (docs/utilities.md section 3.4): two-storey buildings need a substation, so once Masonry and Electrification are
+  // in, a substation by each zoned block's connector road (x0), on a middle row: from there its supply runs down the
+  // connector and along all three streets. One a game hour while there is money; a lot already there is bulldozed first,
+  // as a player would. The grid feeds them from the gate.
+  const powered = new Set<Block>();
+  async function power() {
+    if (!withPower || !(b.me.tech as string[]).includes('ut1') || !(b.me.tech as string[]).includes('con1') || money() < 900 + 700) return;
+    for (const blk of blocks) {
+      if (!blk.bought || powered.has(blk) || !blk.rows.some((r) => r.zone && r.zone !== 'svc')) continue;
+      powered.add(blk);
+      for (const rel of [3, 5, 2, 6]) {
+        const x = blk.x0 + 1, y = blk.y0 + rel, t = b.tile(x, y);
+        if (t === undefined || isRoad(t)) continue;
+        const row = blk.rows.find((r) => r.y === y);
+        if (row?.zone === 'svc' && zoneOf(t) !== 0) continue; // a service stands there already
+        b.pendingToasts.length = 0;
+        if (zoneOf(t) !== 0) { b.build('bulldoze', [[x, y]]); await b.sleep(200); }
+        b.build('substation', [[x, y]]); await b.sleep(300);
+        if (b.pendingToasts.some((q) => q.kind === 'error')) continue;
+        note(`substation at (${x}, ${y})`);
+        return;
+      }
     }
   }
   let lineTried = 0;
@@ -316,6 +344,7 @@ async function play(b: LocalBot, minutes: number, log?: (min: number, what: stri
       await services();
       await yard();
       await tech();
+      await power();
       await busLine();
       if (blocks.filter((k) => k.bought).every((k) => k.rows.every((r) => r.zone))) await buyBlock();
       await zoneNext();

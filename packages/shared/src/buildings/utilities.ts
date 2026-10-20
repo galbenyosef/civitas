@@ -107,12 +107,12 @@ const cabinet = (x: number, z: number, w: number, color: Color = 0x8e9aa6): Op[]
 export const substation: KindDef = {
   ...base, id: 'substation', name: 'substation', kindId: 160, group: 'grid', tier: 1,
   occupation: LINEWORK,
-  blurb: 'A fenced yard of transformers: the local node. Power spreads 10 road tiles along the streets from its gate, up to 300 units an hour, and it takes in the National Grid when a motorway connection is within reach.',
+  blurb: 'A fenced yard of transformers: the local node. Power spreads 12 road tiles along the streets from its gate, up to 300 units an hour, and it takes in the National Grid when a motorway connection is within reach.',
   howTo: 'One tile beside a road in the middle of the streets it should serve. Supply follows the roads, not the crow: a good street grid reaches further. Homes need power to grow to two storeys. Needs Electrification.',
   tool: { id: 'substation', key: '', label: 'Substation', color: '#d9a43a' },
-  attrs: { utility: 'power', nodeRadius: 10, nodeCapacity: 300, importCap: 300, title: 'substation' },
+  attrs: { utility: 'power', nodeRadius: 12, nodeCapacity: 300, importCap: 300, title: 'substation' },
   levels: [{
-    capacity: 2, wage: 20, cost: 1500, upkeep: 25, work: 180, parking: { surface: 1, underground: 1 },
+    capacity: 2, wage: 20, cost: 900, upkeep: 15, work: 180, parking: { surface: 1, underground: 1 },
     designs: [
       { name: 'palisade yard with two transformers, a gantry and a danger plate', height: 0.42, ops: [
         slab(1, 1, GRAVEL),
@@ -144,10 +144,10 @@ export const gridSupplyPoint: KindDef = {
   ...base, id: 'grid-supply-point', name: 'grid supply point', kindId: 161, group: 'grid', tier: 2,
   occupation: LINEWORK,
   footprint: { w: 2, h: 2, door: [0, 1] },
-  blurb: 'A big switching yard with gantries and busbars: a node that passes on 1,500 units an hour along 14 road tiles of street, and brings in up to 1,500 from the National Grid near a motorway connection.',
+  blurb: 'A big switching yard with gantries and busbars: a node that passes on 1,500 units an hour along 16 road tiles of street, and brings in up to 1,500 from the National Grid near a motorway connection.',
   howTo: 'Two tiles by two, the gate on a road. Put one near the motorway connection to bring the grid into a growing town, or where a power station\'s trunk line comes in. Needs Power stations.',
   tool: { id: 'gridsupply', key: '', label: 'Grid supply point (2×2)', color: '#c98f2c' },
-  attrs: { utility: 'power', nodeRadius: 14, nodeCapacity: 1500, importCap: 1500, title: 'grid supply point' },
+  attrs: { utility: 'power', nodeRadius: 16, nodeCapacity: 1500, importCap: 1500, title: 'grid supply point' },
   levels: [{
     capacity: 6, wage: 22, cost: 6000, upkeep: 90, work: 520, parking: { surface: 3, underground: 3 },
     designs: [

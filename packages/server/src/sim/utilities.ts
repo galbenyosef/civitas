@@ -15,6 +15,8 @@ const SOLVE_AT = 41;
 const DISPATCH_EVERY = 10;
 /** a fault a van could not reach this many times is left to the contractor */
 const MAX_TRIES = 3;
+/** the hour a demo's blackout drill faults its substations (showcase 'blackout' spots) */
+const DRILL_HOUR = 21;
 const DX = [1, -1, 0, 0], DY = [0, 0, 1, -1];
 
 interface Fault extends FaultSave {
@@ -55,6 +57,10 @@ export class Utilities implements FleetService {
   sandbox = false;
   /** faults roll at all (UTIL.faultsFromDay on); a sandbox turns them off unless a demo opts in */
   faultsOn = true;
+  /** switched off whole (loadtest/utilities.ts --bench: the tick cost without utilities) */
+  off = false;
+  /** a demo's blackout drill (index.ts, showcase demoBlackouts): these substations' doors fault every evening at DRILL_HOUR */
+  drills: [number, number][] = [];
   /** the state of each node by door key after the last solve */
   readonly nodeState = new Map<number, { state: number; load: number }>();
   /** the networks of the last solve, and each node's and plant's network (indexes into nets) */
@@ -147,6 +153,7 @@ export class Utilities implements FleetService {
 
   /** Called by sim/mobile.ts each tick (the Mobile framework ticks its services), so the solve runs inside Simulation.tick. */
   tick() {
+    if (this.off) return;
     const w = this.w;
     if (w.tick % TPH === SOLVE_AT) this.solve();
     if (w.tick % DISPATCH_EVERY === 6 && this.faults.size) this.dispatch();
@@ -226,9 +233,8 @@ export class Utilities implements FleetService {
       const importOn = !this.noImport.has(owner);
       let importCap = 0;
       const importable = g.nodes.some((i) => this.importNodes.has(i)) || importRoots.has(root);
-      if (importable) {
-        for (const i of g.nodes) if (nodeUp(i) && (this.importNodes.has(i) || importRoots.has(root))) importCap += UTIL_IMPORT_OF[nodes[i].kind];
-      }
+      // the grid comes in where a node meets it and runs through the network: every node of a network that reaches it adds its own import cap
+      if (importable) for (const i of g.nodes) if (nodeUp(i)) importCap += UTIL_IMPORT_OF[nodes[i].kind];
       const sn: SolveNode[] = g.nodes.map((i) => ({
         key: nodes[i].key, demand: demand[i], cap: UTIL_NODE_CAP_OF[nodes[i].kind], never: never[i] === 1, protect: this.protect.has(nodes[i].key),
         workShare: demand[i] > 0 ? work[i] / demand[i] : 0, fault: !nodeUp(i),
@@ -264,6 +270,10 @@ export class Utilities implements FleetService {
       }
     }
     this.rollFaults(hourIndex);
+    if (this.drills.length && Math.floor(hour) === DRILL_HOUR) for (const [x, y] of this.drills) {
+      const k = utilKey(x, y), i = this.field.indexOf(k);
+      if (i >= 0 && !this.faultOn('node', k)) this.openFault('node', k, nodes[i].owner, x, y);
+    }
     this.stateChanged = true;
     this.stats.solveMs += performance.now() - t0;
   }

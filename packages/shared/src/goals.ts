@@ -133,7 +133,7 @@ export const HINTS: Record<HintId, HintDef> = {
   fire: { kind: 'alert', tool: 'firepost', panel: 'tech', msg: 'A fire has broken out. A staffed fire post or station sends its engine to fires within 14 tiles and keeps the damage down; without one a building burns down and you pay for it. Emergency services (T) brings the fire post.' },
   night: { kind: 'tip', msg: "It's night in the city. The light chip at the top right holds the view at mid-afternoon; click it again to follow the clock." },
   // utilities (docs/utilities.md section 3.4): growth to two storeys held back by power
-  power: { kind: 'alert', tool: 'substation', panel: 'tech', msg: 'Buildings want power to grow to two storeys. Unlock Electrification (T) and place a substation beside your streets: its supply runs 10 road tiles along them, and the National Grid feeds it (at a price) while it is within 64 road tiles of a motorway connection.' },
+  power: { kind: 'alert', tool: 'substation', panel: 'tech', msg: 'Buildings want power to grow to two storeys. Unlock Electrification (T) and place a substation beside your streets: its supply runs 12 road tiles along them, and the National Grid feeds it (at a price) while it is within 64 road tiles of a motorway connection.' },
 };
 export const isHintId = (id: string): id is HintId => id in HINTS;
 

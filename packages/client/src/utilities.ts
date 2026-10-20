@@ -22,6 +22,8 @@ const HEAT = [64, 128, 192, 192, 255];
 const RESTORE_MIN = 20_000, RESTORE_SPAN = 40_000;
 /** the most towers and birds drawn */
 const MAX_TOWERS = 4000, MAX_BIRDS = 600;
+/** chunks whose power bytes are worked out per frame */
+const FILL_PER_FRAME = 24;
 
 type LinkTool = 'pylons' | 'cable';
 type Msg<T extends ServerMsg['t']> = Extract<ServerMsg, { t: T }>;
@@ -143,8 +145,8 @@ export class PowerClient {
       for (const k of this.world.chunks.keys()) this.texDirty.add(k);
     }
     if (this.texDirty.size) {
-      for (const key of this.texDirty) this.fill(key, now);
-      this.texDirty.clear();
+      let budget = FILL_PER_FRAME; // spread over frames: an hourly refresh of every loaded chunk is no hitch
+      for (const key of this.texDirty) { if (budget-- <= 0) break; this.fill(key, now); this.texDirty.delete(key); }
       powerTexture.needsUpdate = true;
       let dark = 0;
       for (const n of this.darkTiles.values()) dark += n;

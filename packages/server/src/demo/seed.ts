@@ -3,6 +3,7 @@ import {
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
   isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux, isMetroStationKind, SCHOOL_SPECS, capacityOf, Study, EduLevel, LifeStage, CitizenState, ALL_TECH_IDS, TECH_BY_ID,
+  demoUtilLinks, UTIL_ROLE_OF, UtilRole, MOTORWAY_KIND, tileKey, type UtilLinkDTO,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, type Building, type Citizen } from '../world';
 import { ageOf, stageFor } from '../sim/life';
@@ -177,6 +178,22 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
       if (plan.tiles!.length) w.placeBridge(plan.tiles!);
     }
   }
+  // trunk links (docs/utilities.md 4.2), as the pylon and cable tools lay them: the drag's path, each end the plant or node
+  // (or motorway connection) on or beside it; written to the save the Utilities module loads (sim/utilities.ts)
+  const links: UtilLinkDTO[] = [];
+  const endAt = (x: number, y: number): [number, number] | null => {
+    for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const [ex, ey] = w.doorOf(x + dx, y + dy), b = w.buildings.get(tileKey(ex, ey));
+      if (b && b.level > 0 && (b.id === MOTORWAY_KIND || UTIL_ROLE_OF[b.id] === UtilRole.Node || UTIL_ROLE_OF[b.id] === UtilRole.Plant)) return [ex, ey];
+    }
+    return null;
+  };
+  for (const l of demoUtilLinks(id)) {
+    const path = trackDragPath([l.from[0], l.from[1]], [l.to[0], l.to[1]]), a = endAt(l.from[0], l.from[1]), b = endAt(l.to[0], l.to[1]);
+    if (!a || !b) { problems.push(`${l.id}: no power station, node or motorway connection at ${at(a ? l.to : l.from)}`); continue; }
+    links.push({ id: links.length + 1, util: 'power', owner: w.parcelAt(a[0], a[1])?.owner ?? DEMO_OWNER, mode: l.mode, a, b, tiles: path.flatMap(([x, y]) => [x, y]) });
+  }
+  if (links.length) w.utilitiesLoaded = { links, nextLink: links.length + 1, faults: [], nextFault: 1 };
   for (const pid of w.parcels.keys()) w.recountRoads(pid);
   // where the scenario's water meets the sea (docs/boats.md 2.3): every harbour derives its lanes to these
   w.seaGates = sections.flatMap((s) => (s.seaGates ?? []).map((g) => ({ ...g })));

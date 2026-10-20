@@ -79,7 +79,7 @@ attributes the game reads, flattened per kind id in `shared/src/utilities.ts` th
 the same tiles (the `planPlatform` pattern), so **reach never goes on the wire**.
 
 - The search starts from the road tiles beside a node's door and walks road tiles in a fixed order (east, west, south,
-  north) up to `nodeRadius` steps.
+  north) up to `nodeRadius` steps (12 for a substation, 16 for a grid supply point).
 - It walks only roads on the node owner's own parcels and unowned (public) roads, never another player's streets.
   Each player runs their own networks (answer 3).
 - A building is covered when a road tile beside its door is in a node's reach. Where two nodes of one owner reach the
@@ -149,7 +149,8 @@ A node cut, faulted or overloaded is off for the hour: its buildings have no pow
 ### 3.5 Bills and costs (built)
 
 - **Bills are income:** a new `LedgerCat` `'bills'` (protocol.ts). Every supplied building pays its units at the
-  owner's tariff, collected hourly. The tariff is $0.04 a unit by default; a tariff slider (0.5× to 2×) is a hook.
+  owner's tariff, collected hourly. The tariff is $0.05 a unit by default, a little under grid import's $0.06 and well
+  over a gas plant's fuel, so imported power costs a little and your own earns; a tariff slider (0.5× to 2×) is a hook.
 - **Fuel and import are spending:** a new `LedgerCat` `'fuel'` for thermal plants' fuel per unit generated and grid
   import per unit imported.
 - Both count in the "days in the black" sum (`running`, server goals.ts), as taxes and wages do.
@@ -163,8 +164,8 @@ All are family 15, `family: 'utility'`, `utility: 'power'`. Two designs each.
 
 | Id | Kind | Ladder | Size | Output | Staff | Cost / upkeep | Tech |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 160 | substation | grid 1 | 1×1 | node: 300 u, reach 10, import 300 | 2 | $1,500 / $25 | ut1 |
-| 161 | grid supply point | grid 2 | 2×2 | node: 1,500 u, reach 14, import 1,500 | 6 | $6,000 / $90 | ut2 |
+| 160 | substation | grid 1 | 1×1 | node: 300 u, reach 12, import 300 | 2 | $900 / $15 | ut1 |
+| 161 | grid supply point | grid 2 | 2×2 | node: 1,500 u, reach 16, import 1,500 | 6 | $6,000 / $90 | ut2 |
 | 162 | power depot | grid 3 | 2×1 | crews: repair vans | 8 | $2,500 / $40 | ut2 |
 | 163 | gas power station | power 3 | 3×3 | 1,200 u, fuel $0.02/u, pollution 3 | 24 | $8,000 / $180 | ut2 |
 | 164 | coal power station | power 4 | 4×4 | 2,000 u, fuel $0.012/u, pollution 8 | 40 | $15,000 / $250 | ut2 |
@@ -178,7 +179,7 @@ hub. Pylons are not kinds: they are drawn along overhead links.
 
 | Node | Unlocks | Condition | Cost |
 | --- | --- | --- | --- |
-| ut1 Electrification | substation, grid import | 250 units built (it comes before Masonry's 1,500) | $300 |
+| ut1 Electrification | substation, grid import | 250 units built (it is ready before Masonry's 1,500) | $300 |
 | ut2 Power stations | gas and coal power stations, grid supply point, power depot, pylons and buried cable | 150 housed | $900 |
 | ut3 Renewables | wind turbine, solar farm | 200 jobs | $1,200 |
 
@@ -205,9 +206,10 @@ The National Grid comes in at a **motorway connection** (kind 21, a gateway). A 
 - one of its nodes is within 64 road steps of a motorway connection's door (along the owner's and public roads), or
 - a trunk link ends at a motorway connection.
 
-Import costs **$0.06 a unit**, about 2.5× what a gas plant's units cost. It is capped by the importing nodes'
-`importCap` (a substation brings in at most 300 u, a grid supply point 1,500). It is on by default: the first hour's
-crutch and the late game's insurance. The player can switch it off in a node's panel.
+Import costs **$0.06 a unit**, about 2.5× what a gas plant's units cost. The grid comes in where a node meets it and
+runs through the network, so a network that reaches it can import up to the sum of its nodes' `importCap` (a
+substation adds 300 u, a grid supply point 1,500): it is capped by tier, and each substation added raises the cap. It is
+on by default: the first hour's crutch and the late game's insurance. The player can switch it off in a node's panel.
 
 On a frontier the country road links the charter to the gate: a substation in town is about 25–35 road steps from it,
 so a first substation can import at once.
