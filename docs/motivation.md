@@ -447,7 +447,7 @@ entries so the tour can show it: `job-switch` (within `FEATURE_DAYS` a showcase 
   | Rank | Median off | Median on |
   | --- | --- | --- |
   | Hamlet | 18.6 | 18.6 |
-  | Village | 43.1 | 42.6 |
+  | Village | 43.1 | 42.5 |
   | Town | 95.4 | 84.1 |
   | City | 158 | 146 |
 
