@@ -65,7 +65,7 @@ export const DEATH = {
   /** fires (sim/fires.ts): each occupant there when it is out dies with fireUnattended when it burnt down with no crew,
    *  fireAttended × (share burnt when the crew came)^2 when a crew put it out; an explosion kills blastSource of those in
    *  the building, blastLevelled when it flattens it. The warning fire and the demos' drills never kill */
-  fireUnattended: 0.22, fireAttended: 0.12, blastSource: 0.3, blastLevelled: 0.55,
+  fireUnattended: 0.18, fireAttended: 0.12, blastSource: 0.3, blastLevelled: 0.55,
   /** a working day's chance of a fatal accident at a works or a building site, for someone at work there; halved in hospital cover */
   accidentIndustrial: 0.0005, accidentYard: 0.0004, accidentCovered: 0.5,
   /** headstones: fresh flowers for this many days after a burial, wilted ones until wiltedDays; on an anniversary some have flowers again */

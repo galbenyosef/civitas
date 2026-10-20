@@ -20,6 +20,10 @@ const Job = { Collect: 1, Fetch: 2, Service: 3 } as const;
 const STEP_EVERY = 10, PLACES_EVERY = 100, GRAVES_EVERY = 25;
 /** a body nobody has collected for this long goes to the funeral director anyway (a private ambulance) */
 const COLLECT_GIVE_UP = DAY;
+/** a service waits this long past its time for a hearse held up in traffic, then goes ahead without it */
+const HEARSE_WAIT = Math.round(1.5 * TPH);
+/** a mourner who comes late (or early) still stands at the grave this long */
+const PAY_RESPECTS = Math.round(TPH / 3);
 
 /** One person who died: the record the archive keeps, the body's progress and the estate until the funeral. */
 export interface Dead {
@@ -100,7 +104,7 @@ export class Death implements FleetService {
   /** the archive, by deceased id (oldest first) */
   readonly dead = new Map<number, Dead>();
   /** counters since the simulation started (probes) */
-  stats = { deaths: 0, oldAge: 0, illness: 0, fire: 0, explosion: 0, accident: 0, spared: 0, collected: 0, services: 0, noHearse: 0, buried: 0, cremated: 0, mortuary: 0, away: 0, fees: 0, inherited: 0, evicted: 0, drills: 0 };
+  stats = { deaths: 0, oldAge: 0, illness: 0, fire: 0, explosion: 0, accident: 0, spared: 0, collected: 0, byHearse: 0, services: 0, withHearse: 0, noHearse: 0, buried: 0, cremated: 0, mortuary: 0, away: 0, fees: 0, inherited: 0, evicted: 0, drills: 0 };
   /** notices for owners (net.ts drains them) */
   notices: DeathNotice[] = [];
   /** the graves message is due (net.ts) */
@@ -342,9 +346,11 @@ export class Death implements FleetService {
   }
   /** When the service c went to ends (Simulation.arriveVenue, a funeral errand). */
   serviceEnd(c: Citizen): number {
-    for (const d of this.dead.values()) if (d.svc !== undefined && !d.held && d.rest && c.venue === tileKey(...d.rest) && d.mourners?.includes(c.id)) return Math.max(this.w.tick + 1, d.svc + this.serviceTicks());
-    for (const d of this.drillsLive) if (d.mourners?.includes(c.id)) return Math.max(this.w.tick + 1, d.svc! + this.serviceTicks());
-    return this.w.tick + 1;
+    const end = (d: Dead) => (d.st === Body.Service ? d.since : Math.max(d.svc!, this.w.tick)) + this.serviceTicks();
+    const at = this.w.tick + PAY_RESPECTS; // late, or the service already over: a while at the grave all the same
+    for (const d of this.dead.values()) if (d.svc !== undefined && !d.held && d.rest && c.venue === tileKey(...d.rest) && d.mourners?.includes(c.id)) return Math.max(at, end(d));
+    for (const d of this.drillsLive) if (d.mourners?.includes(c.id)) return Math.max(at, end(d));
+    return at;
   }
   private serviceTicks() { return Math.round(DEATH.serviceHours * TPH); }
 
@@ -523,7 +529,7 @@ export class Death implements FleetService {
         this.serviceStep(d, now);
         return;
       case Body.Service:
-        if (!this.hearse.has(d.id) && now >= d.svc! + this.serviceTicks()) this.rest(d); // held without the hearse
+        if (!this.hearse.has(d.id) && now >= d.since + this.serviceTicks()) this.rest(d); // held without the hearse
         return;
     }
   }
@@ -533,7 +539,11 @@ export class Death implements FleetService {
     const svc = d.svc!, pl = d.rest ? this.places.get(tileKey(...d.rest)) : undefined;
     if (!pl) { if (d.slot !== undefined) d.slot = undefined; d.svc = undefined; d.rest = undefined; return; } // cleared meanwhile: book again
     if (!d.sent && now >= svc - DEATH.mournerLeadHours * TPH) { d.sent = true; this.sendMourners(d); }
-    if (this.hearse.has(d.id)) return;
+    if (this.hearse.has(d.id)) {
+      // the hearse is on its way: the service waits for it, but not past HEARSE_WAIT
+      if (now >= svc + HEARSE_WAIT) { this.stats.noHearse++; this.startService(d); }
+      return;
+    }
     if (now >= svc) { this.stats.noHearse++; this.startService(d); return; } // no hearse to be had: the service goes ahead at the chapel all the same
     if (now < svc - DEATH.hearseLeadHours * TPH) return;
     const stops: Stop[] = [];
@@ -582,13 +592,13 @@ export class Death implements FleetService {
     if (!d) return;
     if (s.what === Job.Collect || s.what === Job.Fetch) {
       u.loaded = true; u.task = `carrying the late ${nameFor(d.id, d.sn)}${s.what === Job.Collect ? ' to the funeral director' : ` to ${this.named(d.rest?.[0] ?? 0, d.rest?.[1] ?? 0)}`}`;
-      if (s.what === Job.Collect) d.st = Body.Carried;
+      if (s.what === Job.Collect) { d.st = Body.Carried; this.stats.byHearse++; }
       if (s.what === Job.Fetch && d.mort) { const m = d.mort; d.mort = undefined; this.unbadge(m); }
       return;
     }
-    // at the chapel: the service; the hearse stands there until it ends
-    if (!d.drill) this.startService(d); else { d.st = Body.Service; this.changed = true; }
-    u.dwellUntil = Math.max(u.dwellUntil, (d.svc ?? this.w.tick) + this.serviceTicks());
+    // at the chapel: the service (unless it went ahead without the hearse); the hearse stands there until it ends
+    if (d.st !== Body.Service) { if (!d.drill) { this.startService(d); this.stats.withHearse++; } else { d.st = Body.Service; d.since = this.w.tick; this.changed = true; } }
+    u.dwellUntil = Math.max(u.dwellUntil, d.since + this.serviceTicks());
     u.task = `at the funeral of ${nameFor(d.id, d.sn)}`;
   }
   depart(u: Unit, s: Stop) {
@@ -707,7 +717,7 @@ export class Death implements FleetService {
     const key = tileKey(pl.x, pl.y);
     let n = 0;
     for (const id of d.mourners ?? []) { const c = this.w.citizens.get(id); if (c && c.state === S.AtVenue && c.errand === ERRAND_FUNERAL && c.venue === key) n++; }
-    return { slot: d.drill ? this.drillSlot(pl) : d.slot ?? -1, id: d.id, t0: d.svc ?? d.since, t1: (d.svc ?? d.since) + this.serviceTicks(), n };
+    return { slot: d.drill ? this.drillSlot(pl) : d.slot ?? -1, id: d.id, t0: d.since, t1: d.since + this.serviceTicks(), n };
   }
 
   /** A building's remembrance lines: a funeral director, a resting place, a mortuary with bodies waiting. */
@@ -821,9 +831,10 @@ export class Death implements FleetService {
       if (d.st === Body.Parlour && now >= d.svc! - DEATH.mournerLeadHours * TPH && !d.sent) { d.sent = true; this.sendMourners(d); }
       if (d.st === Body.Parlour && !this.hearse.has(d.id) && now >= d.svc! - DEATH.hearseLeadHours * TPH) {
         const pl = this.places.get(tileKey(...d.rest!));
-        if (pl && !this.send(d, [this.mobile.stopAt(pl.x, pl.y, this.serviceTicks(), Job.Service, d.id)], `carrying the late ${nameFor(d.id, d.sn)} to ${this.named(pl.x, pl.y)}`) && now > d.svc!) { d.st = Body.Service; this.changed = true; }
+        if (pl && !this.send(d, [this.mobile.stopAt(pl.x, pl.y, this.serviceTicks(), Job.Service, d.id)], `carrying the late ${nameFor(d.id, d.sn)} to ${this.named(pl.x, pl.y)}`) && now > d.svc!) { d.st = Body.Service; d.since = now; this.changed = true; }
       }
-      if (d.st === Body.Service && !this.hearse.has(d.id) && now >= d.svc! + this.serviceTicks()) this.drillDone(d);
+      if (d.st === Body.Parlour && this.hearse.has(d.id) && now >= d.svc! + HEARSE_WAIT) { d.st = Body.Service; d.since = now; this.changed = true; }
+      if (d.st === Body.Service && !this.hearse.has(d.id) && now >= d.since + this.serviceTicks()) this.drillDone(d);
     }
     if (now < this.nextDrill || this.drillsLive.length >= this.drills.length) return;
     for (const dr of this.drills) {
