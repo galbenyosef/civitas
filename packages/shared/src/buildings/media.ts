@@ -15,6 +15,8 @@ import { slab, car, carRow, bayLines, van, tree, helipad, fence, PAVING } from '
  * `newsHelicopters`, the news helicopters based on the roof pad (N3 flies them; the pad is a PadKind 'news',
  * shared/src/helipads.ts).
  *
+ * Their boards read `title` (names.ts signSource), not a company name from the office pool.
+ *
  * Per-instance variation: two designs per rung, the facade tints picked per tile, and the lights. Mast and roof-corner
  * beacons use the `beacon` window class (each blinks on its own period and phase per building and per light) and the
  * logos and screens the `sign` class (lit from a dusk time of their own per building, render/materials.ts).
@@ -86,7 +88,7 @@ export const tvStudio: KindDef = {
   blurb: 'A local radio and television studio: a newsroom, a small sound stage and a mast. It reports the news of its own town and, later, sells TV airtime to advertisers.',
   howTo: 'One tile beside a road. Its channel covers 24 tiles round it, about a town; a rival player\'s channel that reaches the same streets competes for the stories. Needs Local television.',
   tool: { id: 'tvstudio', key: '', label: 'TV studio', color: '#c8463c' },
-  attrs: { newsRadius: 24, newsTier: 1, newsHelicopters: 0, skill: [4, 0.4] },
+  attrs: { newsRadius: 24, newsTier: 1, newsHelicopters: 0, skill: [4, 0.4], title: 'TV studio' },
   levels: [{
     capacity: 14, wage: 22, cost: 900, upkeep: 35, work: 260, parking: { surface: 3, underground: 6 },
     designs: [
@@ -123,7 +125,7 @@ export const broadcastCentre: KindDef = {
   blurb: 'A regional broadcast centre: live studios, a satellite dish yard and a lit logo. Its channel covers a whole district, and its outside-broadcast vans go out to the stories.',
   howTo: 'Two tiles by two, entrance on the left of the frontage. Covers 48 tiles round it. Needs Broadcasting.',
   tool: { id: 'broadcast', key: '', label: 'Broadcast centre', color: '#b13a5a' },
-  attrs: { newsRadius: 48, newsTier: 2, newsHelicopters: 0, skill: [4, 0.5] },
+  attrs: { newsRadius: 48, newsTier: 2, newsHelicopters: 0, skill: [4, 0.5], title: 'broadcasting house' },
   levels: [{
     capacity: 40, wage: 26, cost: 3000, upkeep: 90, work: 900, parking: { surface: 10, underground: 24 },
     designs: [
@@ -164,7 +166,7 @@ export const mediaCentre: KindDef = {
   blurb: 'A national media centre: a tower with the news helicopter on its roof, a big screen, a satellite dish array and studios for every channel. Its channel reaches the whole map.',
   howTo: 'Three tiles across and two deep, entrance in the middle of the frontage. Covers the whole map, so rival channels compete with it everywhere. Needs Media centres.',
   tool: { id: 'mediacentre', key: '', label: 'Media centre', color: '#8e2f6e' },
-  attrs: { newsRadius: 0, newsTier: 3, newsHelicopters: 1, skill: [4, 0.6] },
+  attrs: { newsRadius: 0, newsTier: 3, newsHelicopters: 1, skill: [4, 0.6], title: 'media centre' },
   levels: [{
     capacity: 90, wage: 30, cost: 7500, upkeep: 200, work: 2000, parking: { surface: 20, underground: 60 },
     designs: [

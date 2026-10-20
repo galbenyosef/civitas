@@ -124,7 +124,7 @@ The client keeps stories by id.
 - `NewsStore`, with the exported singleton `news`.
 - The **news** chip in the top bar. It appears once a channel has reported something and glows red for unseen stories.
 - The **News panel**: newest first, each story with its channel's colour, the time, a LIVE mark while it goes on, its rival channels and "show me". The "my channel" filter appears when you own a channel.
-- The **ticker** under the top bar: the channel bug and the headline of each story that just broke, about 7 seconds each.
+- The **ticker** above the help line: the channel bug and the headline of each story that just broke, about 7 seconds each.
 - `mediaHtml` for the building panel.
 
 ## 4. Hooks for what comes next

@@ -5,7 +5,7 @@ import type { ClientWorld } from './world';
 /**
  * The news on the client (shared/src/news.ts, server/src/sim/news.ts, docs/media.md N2): the stories as the server
  * sends them, the news chip in the top bar, the News panel (newest first, each with its channel, a LIVE mark while it
- * goes on and "show me"), the ticker that brings each new covered story up under the top bar for a few seconds, and the
+ * goes on and "show me"), the ticker that brings each new covered story up above the help line for a few seconds, and the
  * media centre's lines in the building panel. Nothing shows until a channel has reported something: uncovered stories
  * are kept (N5's witnesses will want them) but never shown.
  */
@@ -56,7 +56,7 @@ const hex = (c: number) => `#${(c & 0xffffff).toString(16).padStart(6, '0')}`;
 function when(t: number, now: number): string {
   const day = Math.floor(t / TICKS_PER_DAY), h = (t % TICKS_PER_DAY) / TICKS_PER_HOUR;
   const hm = `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`;
-  return day === Math.floor(now / TICKS_PER_DAY) ? hm : `day ${day + 1}, ${hm}`;
+  return day === Math.floor(now / TICKS_PER_DAY) ? hm : `day ${day}, ${hm}`; // numbered as the top bar's clock numbers them
 }
 /** The ticker holds each story this long (ms), and shows at most this many queued. */
 const TICKER_MS = 7000, TICKER_QUEUE = 4;
@@ -150,7 +150,8 @@ export class NewsUI {
     if (!list.length) html += `<div class="nempty">No news yet. A staffed TV studio, broadcast centre or media centre reports the fires, openings and big days in its reach.</div>`;
     for (const s of list) {
       const c = this.channel(s.ch!);
-      const live = storyLive(s, now);
+      // a fire with its end is out, whatever this client's clock says; the rest are live until the end they broke with
+      const live = s.k === 'fire' ? s.end === undefined : storyLive(s, Math.max(now, s.t));
       const rivals = s.rv?.length ? ` · also on ${s.rv.map((r) => esc(this.channel(r).name)).join(', ')}` : '';
       html += `<div class="nstory${s.ch === me ? ' nmine' : ''}">
         <div class="nmeta"><span class="ndot" style="background:${c.color}"></span>${esc(c.name)} · ${when(s.t, now)}${live ? ' <span class="nlive">LIVE</span>' : ''}${rivals}</div>
@@ -194,10 +195,10 @@ function injectStyle() {
 #newsPanel .nlive { color: #fff; background: #c8463c; border-radius: 3px; padding: 0 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; }
 #newsPanel .nhl { margin-top: 2px; line-height: 1.35; font-weight: 600; }
 #newsPanel .nshow { position: absolute; right: 0; top: 6px; font-size: 11px; }
-#newsTicker { position: absolute; top: 48px; left: 12px; max-width: min(560px, calc(100vw - 24px)); display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 5px;
+#newsTicker { position: absolute; bottom: 44px; left: 50%; transform: translate(-50%, 6px); max-width: min(620px, calc(100vw - 24px)); display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 5px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(8px); font-size: 12px; pointer-events: none; z-index: 6;
-  opacity: 0; transform: translateY(-6px); transition: opacity 0.4s, transform 0.4s; }
-#newsTicker.on { opacity: 1; transform: none; }
+  opacity: 0; transition: opacity 0.4s, transform 0.4s; }
+#newsTicker.on { opacity: 1; transform: translate(-50%, 0); }
 #newsTicker .nbug { color: #fff; font-weight: 700; font-size: 11px; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
 #newsTicker .nhl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #panel .nrow span, #tip .nrow span { color: var(--fg); font-style: italic; }
