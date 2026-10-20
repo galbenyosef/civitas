@@ -48,6 +48,9 @@ export const GROUPS: GroupDef[] = [
   { id: 'education', label: 'Education', section: 'Services', color: '#d8b25a', holds: 'pupils', stages: true },
   // broadcasters (docs/media.md): a local TV studio, a broadcast centre and a media centre with a news helipad (buildings/media.ts)
   { id: 'media', label: 'Media', section: 'Services', color: '#c8463c', holds: 'staff' },
+  // utilities (docs/utilities.md): the power network's nodes and depot, and its plants (buildings/utilities.ts)
+  { id: 'grid', label: 'Power grid', section: 'Services', color: '#d9a43a', holds: 'staff', stages: true },
+  { id: 'power', label: 'Power stations', section: 'Services', color: '#8f9aa6', holds: 'staff' },
   // landmarks (docs/buildings.md "Landmarks"): real buildings, one picker per city; buildings/landmarks-london.ts
   { id: 'london', label: 'London', section: 'Landmarks', color: '#c8102e', holds: 'staff', collection: true },
   // reserved for other cards
