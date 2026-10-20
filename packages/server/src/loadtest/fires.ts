@@ -206,13 +206,16 @@ const gapOf = (a: [number, number, number, number], b: [number, number, number, 
  * Seed fires one at a time in a town (no background fires: FIRE.perDay 0) and run each until every fire it started is
  * out. Records every fire seen, whether each spread fire touched a fire burning when it lit, and the most burning at once.
  */
-function spreadRun(g: Game, seeds: Building[], opts: { warning?: boolean } = {}) {
+function spreadRun(g: Game, seeds: Building[], opts: { warning?: boolean } = {}, around = 0) {
   const w = g.world, map = firesOf(g);
   const seen = new Map<number, FireRec & { zone: number }>();
   let maxWorld = 0, maxOwner = 0, adjacentOk = 0, adjacentBad = 0, blastBad = 0, seedsSpread = 0, lit = 0;
   const perDay = FIRE.perDay;
   (FIRE as { perDay: number }).perDay = 0;
+  const burning = () => [...map.values()].some((f) => f.ph !== FirePhase.Out);
   for (const b of seeds) {
+    for (let i = 0; i < 24 * TPH && burning(); i++) g.step(); // the last one's fires all out first (a chain can outlast its run)
+    if (around && touching(w, b) < around) continue; // its neighbours burnt down by an earlier one meanwhile
     const before = g.fires.stats.spread;
     if (!g.fires.ignite(b, opts)) continue;
     lit++;
@@ -239,14 +242,18 @@ function spreadRun(g: Game, seeds: Building[], opts: { warning?: boolean } = {})
   (FIRE as { perDay: number }).perDay = perDay;
   return { seen: [...seen.values()], maxWorld, maxOwner, adjacentOk, adjacentBad, blastBad, seedsSpread, lit };
 }
+/** standing buildings touching a 1×1 lot (corners included) */
+function touching(w: World, b: Building) {
+  let k = 0;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && (w.buildings.get(tileKey(...w.doorOf(b.x + dx, b.y + dy)))?.level ?? 0) > 0) k++;
+  return k;
+}
 /** homes and works in the middle of things: a 1×1 lot with at least `n` buildings touching it */
 function crowded(w: World, zones: number[], n: number, pred: (b: Building) => boolean = () => true) {
   const out: Building[] = [];
   for (const z of zones) for (const b of w.builtOf(z)) {
     if (b.level < 1 || w.sites.has(tileKey(b.x, b.y)) || w.auxAt(b.x, b.y) || !pred(b)) continue;
-    let k = 0;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && w.buildings.has(tileKey(...w.doorOf(b.x + dx, b.y + dy)))) k++;
-    if (k >= n) out.push(b);
+    if (touching(w, b) >= n) out.push(b);
   }
   return out.sort((a, b) => a.x - b.x || a.y - b.y);
 }
@@ -265,7 +272,7 @@ for (let k = 0; k < 2; k++) {
   let blastLedger = 0;
   const credit = w.credit.bind(w);
   w.credit = (id, amount, cat) => { if (cat === 'blast') blastLedger += amount; credit(id, amount, cat); };
-  const r = spreadRun(g, [...homes, ...works]);
+  const r = spreadRun(g, [...homes, ...works], {}, 3);
   runs5.push(r.seen.map((f) => `${f.x},${f.y}@${f.t0 - t0}${f.from ? `<${f.from}` : ''}${f.bx !== undefined ? `!${f.bx - t0}` : ''}`).sort().join(' '));
   if (k) continue;
   const s = g.fires.stats, spread = r.seen.filter((f) => f.from === 1).length, blasts = r.seen.filter((f) => f.bx !== undefined);
@@ -284,7 +291,7 @@ for (let k = 0; k < 2; k++) {
   ok(wr.lit >= 6 && s.spread === before.sp && s.blasts === before.bl, `${wr.lit} warning fires, ${s.spread - before.sp} spread, ${s.blasts - before.bl} explosions`);
 
   console.log('5c. v2: a fire saved before v2 (no hourly roll on it) loads and carries on; a blown-up works keeps its blast');
-  const b = crowded(w, [Zone.Industrial], 3).find((h) => g.fires.ignite(h))!;
+  const b = [...crowded(w, [Zone.Industrial], 3), ...w.builtOf(Zone.Industrial)].find((h) => h.level > 0 && g.fires.ignite(h))!;
   for (let i = 0; i < 5; i++) g.step();
   const snap = JSON.parse(JSON.stringify(snapshotOf(w)));
   for (const f of snap.fires?.fires ?? []) { delete f.next; delete f.from; delete f.bx; delete f.hold; delete f.round; delete f.blastCost; }
