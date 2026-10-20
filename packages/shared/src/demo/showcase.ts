@@ -1351,6 +1351,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
     for (const t of s.tracks ?? []) dup(t.id);
     for (const j of s.junctions ?? []) dup(j.id);
     for (const b of s.bridges ?? []) dup(b.id);
+    for (const u of s.utilLinks ?? []) dup(u.id);
     for (const l of s.lines ?? []) dup(l.id);
     for (const sp of s.spots ?? []) dup(sp.id);
   }
