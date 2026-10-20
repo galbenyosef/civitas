@@ -23,6 +23,7 @@ Every building kind is data. One file per kind family under `packages/shared/src
 | `education.ts`, `edukit.ts` | The education ladder (kind ids 101-108: nursery, primary, secondary, sixth form, FE college, university campus, research institute, halls of residence), two designs each, and the recipe parts they share (playground, pitch, cupola, clock, lamp and bench and tree scatter at hashed offsets). Sub-kinds of the library family (code 14), civic and not leisure; placed in the Showcase (docs/education.md sections 3 and 14) |
 | `landmarks-london.ts` | London landmarks (kind ids 91-100): the Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, and ids 96-100 reserved for the second five (see "Landmarks") |
 | `landmarks-london-3.ts` | London's four universities (kind ids 111-114): UCL, Imperial College, King's College and the LSE, landmarks that work as universities (see "Landmarks", docs/education.md section 14) |
+| `media.ts` | The broadcasters (kind ids 130-132): the local TV studio, broadcast centre and media centre, placed sub-kinds of the office family whose `newsRadius`, `newsTier` and `newsHelicopters` the news reads (docs/media.md) |
 | `catalogue.ts` | The list of kinds the compile step reads |
 | `validate.ts`, `compile.ts` | Validation and the pure catalogue-to-tables compiler |
 | `compiled.ts` | Generated: typed tables, tool maps and the manifest. Committed like source |
@@ -212,7 +213,7 @@ Copy this section into the prompt of a model designing buildings. It is complete
 | `chimneyStack` | x y z h r [colour] |
 | `door`, `garage`, `balcony`, `baywindow`, `porch`, `awning`, `cornice`, `dormer` | the facade helpers in the table above |
 
-Windows: write `true` as the box's window class to get the kind's windows (homes: sashes, shops: a shopfront on the ground floor and sashes above, factories: strip windows high up). Only boxes with windows get windows; plain boxes are solid. One class is not a window: `fire` makes the whole box glow, faintly by day and fully from dusk, flickering on a phase of its own per building and per part (the pioneer camp's fire pit, lanterns and festoon bulbs, `camp.ts`).
+Windows: write `true` as the box's window class to get the kind's windows (homes: sashes, shops: a shopfront on the ground floor and sashes above, factories: strip windows high up). Only boxes with windows get windows; plain boxes are solid. One class is not a window: `fire` makes the whole box glow, faintly by day and fully from dusk, flickering on a phase of its own per building and per part (the pioneer camp's fire pit, lanterns and festoon bulbs, `camp.ts`). Two more are lights, not windows: `beacon`, a red aviation light that flashes on a period and phase of its own per building and per light, and `sign`, a lit logo or screen that comes on at a dusk time of its own per building (the broadcasters' masts and logos, `media.ts`).
 
 Colours: `cream white pale stone brick grey dark slate terracotta glass glassDark corrugated rust chimney yellow navy red crossRed brown sand signBlue awning door steel plant roofGrey tan green silver charcoal timber mint boxBlue boxOrange boxGreen flare lawn lawnDark gravel pond hedge court gold marquee plum`, or a `0xRRGGBB` number.
 
@@ -378,6 +379,7 @@ A building family can come in sizes. Kinds with the same `group` form a **ladder
 | Theatres | studio theatre (1×1) · theatre (the original) · opera house (3×3) |
 | Sport | sports hall (the original) · leisure centre with a pool (2×2) · arena (3×3) · stadium with floodlights (4×4) |
 | Libraries | library (the original) · central library (2×2) · museum (3×2) |
+| Media | local TV studio (1×1) · broadcast centre (2×2) · media centre with a news helipad and a dish array (3×2): placed sub-kinds of the office family, kind ids 130-132 (`media.ts`, docs/media.md) |
 | Education (draft) | nursery (1×1) · primary school (2×2) · secondary school (3×3) · sixth-form college (2×2) · FE college (3×2) · university campus (6×6) · research institute (3×3) · halls of residence (2×2). A ladder of stages, not of sizes (see below) |
 | Harbours (draft) | jetty (1×2) · ferry pier (2×2) · marina (4×4) · fishing harbour (4×3) · cargo port (8×6), each with its back rows over water (docs/boats.md section 5) |
 
