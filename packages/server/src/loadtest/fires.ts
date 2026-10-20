@@ -342,7 +342,7 @@ ok(runs5[0] === runs5[1] && runs5[0].length > 0, 'the same fires, spreads and bl
   let blastLedger = 0;
   const credit = w.credit.bind(w);
   w.credit = (id, amount, cat) => { if (cat === 'blast') blastLedger += amount; credit(id, amount, cat); };
-  const fired = g.fires.explode(home.x, home.y, { cause: 'gas' });
+  const fired = g.fires.explode([home.x, home.y], { cause: 'gas', level: true });
   const dto = g.fires.dtos().find((f) => f.x === home.x && f.y === home.y);
   const lit = round.filter((b) => g.fires.burningAt(b!.x, b!.y)).length;
   ok(fired && (w.buildings.get(tileKey(home.x, home.y))?.level ?? 0) === 0 && dto?.ph === FirePhase.Out && dto.bc === 1 && dto.bx === w.tick,
@@ -350,9 +350,9 @@ ok(runs5[0] === runs5[1] && runs5[0].length > 0, 'the same fires, spreads and bl
   ok(lit === round.length && lit > 0, `and sets light to every building touching it (${lit}/${round.length}, radius ${BLAST_CAUSES.gas.radius})`);
   ok(blastLedger < 0, `billed under 'blast': $${-blastLedger}`);
   const road = [...Array(40).keys()].map((i) => [home.x + i - 20, home.y] as const).find(([x, y]) => !w.buildings.has(tileKey(x, y)) && !w.auxAt(x, y));
-  ok(!!road && !g.fires.explode(road[0], road[1], { cause: 'gas' }), 'nothing to blow up where no building stands');
+  ok(!!road && !g.fires.explode(road, { cause: 'gas' }), 'nothing to blow up where no building stands');
   const works = crowded(w, [Zone.Industrial], 3)[0];
-  const first = g.fires.explode(works.x, works.y, { cause: 'industrial' }), again = g.fires.explode(works.x, works.y, { cause: 'industrial' });
+  const first = g.fires.explode([works.x, works.y], { cause: 'industrial' }), again = g.fires.explode([works.x, works.y], { cause: 'industrial' });
   const wf = g.fires.dtos().find((f) => f.x === works.x && f.y === works.y);
   ok(first && !again && wf?.ph === FirePhase.Burning && wf.bc === undefined && (w.buildings.get(tileKey(works.x, works.y))?.level ?? 0) > 0,
     `a works not yet burning catches light with its blast, is left standing at ${Math.round(FIRE.blastDamage * 100)}% burnt, and blows once (a second call: ${again})`);

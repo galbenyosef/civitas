@@ -324,7 +324,7 @@ export class Fires {
     const w = this.w, key = tileKey(...w.doorOf(x, y)), f = this.fires.get(key);
     const b = w.buildings.get(key);
     if (f && f.ph !== FirePhase.Out) {
-      if (b && f.bx === undefined && f.ph === FirePhase.Burning && now - f.t0 >= FIRE.drillBlastHours * TPH) this.explode(f.x, f.y, { cause: 'industrial' });
+      if (b && f.bx === undefined && f.ph === FirePhase.Burning && now - f.t0 >= FIRE.drillBlastHours * TPH) this.explode([f.x, f.y], { cause: 'industrial' });
       return;
     }
     if (!b || !this.burnable(b) || now - (this.drillOut.get(key) ?? -Infinity) < FIRE.drillBlastGapHours * TPH) return;
@@ -467,7 +467,7 @@ export class Fires {
     const u = (now - f.t0) / Math.max(1, f.burn), mix = (this.w.seed * 2654435761) >>> 0, hr = Math.floor(at / TPH);
     if (f.bx === undefined && b.zone === Zone.Industrial) {
       const p = crew ? FIRE.blastAttended : FIRE.blastMax * fireRamp(u, FIRE.blastFrom, FIRE.blastPow);
-      if (p > 0 && hash2(f.x * 7907 + f.id * 31 + (hr ^ mix), f.y * 6151 + hr * 4099 + (mix & 0xffff)) < p) { this.explode(f.x, f.y, { cause: 'industrial' }); return; }
+      if (p > 0 && hash2(f.x * 7907 + f.id * 31 + (hr ^ mix), f.y * 6151 + hr * 4099 + (mix & 0xffff)) < p) { this.explode([f.x, f.y], { cause: 'industrial' }); return; }
     }
     const base = crew ? FIRE.spreadAttended : FIRE.spreadMax * fireRamp(u, FIRE.spreadFrom, FIRE.spreadPow);
     if (base <= 0) return;
@@ -490,15 +490,16 @@ export class Fires {
   }
 
   /**
-   * An explosion at the building at (x, y), whatever the cause (docs/incidents.md "Explosions"): the one entry point for
+   * An explosion at the building at `at` (x, y), whatever the cause (docs/incidents.md "Explosions"): the one entry point for
    * a burning works' blast (the hourly roll, the demo's drill) and for later causes (a gas leak, card 968d0d2f). The
-   * cause's defaults (shared BLAST_CAUSES) can be overridden: `radius`, `damage` (1: destroyed outright), `costShare`;
+   * cause's defaults (shared BLAST_CAUSES) can be overridden: `radius`; `level` true flattens the source to an empty lot
+   * there and then, false never does (the cause's `damage`, at most FIRE.blastDamage, then the fire carries on); `costShare`;
    * `seed` sets the drawing's variation when the blast starts the fire (else it comes of the tile and the tick). A
    * building not already burning catches light with it. Returns false when nothing at (x, y) can burn, or it has blown
    * up already. The client draws the cause its own way (FireDTO.bc).
    */
-  explode(x: number, y: number, opts: { cause: BlastCause; radius?: number; damage?: number; costShare?: number; seed?: number }): boolean {
-    const w = this.w, key = tileKey(...w.doorOf(x, y)), b = w.buildings.get(key);
+  explode(at: readonly [number, number], opts: { cause: BlastCause; radius?: number; level?: boolean; costShare?: number; seed?: number }): boolean {
+    const [x, y] = at, w = this.w, key = tileKey(...w.doorOf(x, y)), b = w.buildings.get(key);
     if (!b) return false;
     let f = this.fires.get(key);
     if (f && f.ph !== FirePhase.Out && f.bx !== undefined) return false; // one blast to a fire
@@ -509,7 +510,8 @@ export class Fires {
       f = this.fires.get(key)!;
     }
     const d = BLAST_CAUSES[opts.cause];
-    this.blast(f, b, w.tick, opts.cause, { radius: opts.radius ?? d.radius, damage: opts.damage ?? d.damage, costShare: opts.costShare ?? d.costShare, label: d.label });
+    const damage = opts.level === true ? 1 : opts.level === false && d.damage >= 1 ? FIRE.blastDamage : d.damage;
+    this.blast(f, b, w.tick, opts.cause, { radius: opts.radius ?? d.radius, damage, costShare: opts.costShare ?? d.costShare, label: d.label });
     return true;
   }
 
