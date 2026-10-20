@@ -1,6 +1,6 @@
 import {
   AD, AD_THEMES, AD_CLAIMS, AD_PALETTES, AD_ICONS, AD_LAYOUTS, AD_STRIDE, AD_SIZES, AD_SIZE, THEME_ICON,
-  packLook, unpackLook, claimText, adHostAt, adSlotOpen, adSlotWorld, adWear, adAge, adSeed, wearWords, hasFeature, techFor, zoneOf, levelOf, Zone,
+  packLook, unpackLook, claimText, adHostAt, adSlotOpen, adSlotWorld, isScreenSlot, adWear, adAge, adSeed, wearWords, hasFeature, techFor, zoneOf, levelOf, Zone,
   type AdEnv, type AdSize, type AdTarget, type CampaignDTO, type PlayerDTO,
 } from '@msimcity/shared';
 import type { NetClient } from './net';
@@ -110,7 +110,7 @@ export class AdPanel {
       const h = adHostAt(this.env, it.door[0], it.door[1]);
       if (!h || h.key !== it.key) continue;
       for (let i = 0; i * AD_STRIDE < h.slots.length; i++) {
-        if (this.d.view.rental(it.door[0], it.door[1], i) || !adSlotOpen(this.env, h, i, it.door[0], it.door[1])) continue;
+        if (isScreenSlot(h.slots, i) || this.d.view.rental(it.door[0], it.door[1], i) || !adSlotOpen(this.env, h, i, it.door[0], it.door[1])) continue;
         const w = adSlotWorld(h, i), dd = Math.hypot(w.x - px, w.y - py);
         if (!best || dd < best.d) best = { d: dd, x: w.x, y: w.y, height: w.height, dir: w.dir };
       }

@@ -1,5 +1,5 @@
 import {
-  AD, AD_CLAIMS, AD_RENTAL, AD_STRIDE, TICKS_PER_DAY, LifeStage, adHostAt, adSlotOpen, adSizeOf, adRent, adAge, adAreaRate, adSlotWorld,
+  AD, AD_CLAIMS, AD_RENTAL, AD_STRIDE, TICKS_PER_DAY, LifeStage, adHostAt, adSlotOpen, adSizeOf, adRent, adAge, adAreaRate, adSlotWorld, isScreenSlot,
   claimText, kindManifest, signSource, signText, spendableMoney, tileKey, hasFeature, techFor,
   type AdEnv, type AdHost, type AdTarget, type AdsDTO, type CampaignDTO,
 } from '@msimcity/shared';
@@ -203,7 +203,7 @@ export class Adverts {
     return '';
   }
 
-  /** Free slots nearest a point, nearest first. */
+  /** Free slots nearest a point, nearest first. Big screens are rented only by picking them (they cost four times a billboard). */
   private nearest(px: number, py: number, n: number): [number, number, number][] {
     const out: { d: number; s: [number, number, number] }[] = [];
     const R = AD.nearReach, seen = new Set<string>();
@@ -215,7 +215,7 @@ export class Adverts {
       if (!h) continue;
       for (let i = 0; i < h.slots.length / AD_STRIDE; i++) {
         const k = rkey(x, y, i);
-        if (seen.has(k) || this.free(x, y, i)) continue;
+        if (seen.has(k) || isScreenSlot(h.slots, i) || this.free(x, y, i)) continue;
         seen.add(k);
         const wp = adSlotWorld(h, i);
         out.push({ d: Math.hypot(wp.x - px, wp.y - py), s: [x, y, i] });

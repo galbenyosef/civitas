@@ -13,9 +13,9 @@ import { faceFrame, facePoint, facadeGrid, windowRects, windowCollisions, CELL, 
  * is about 0.25, a door 0.19), which is about 15 m to the tile: a 48-sheet billboard (6 x 3 m) is 0.44 x 0.22.
  */
 
-export type AdSize = 'panel' | 'poster' | 'hoarding' | 'billboard' | 'banner';
-/** Size codes in slot records, in this order. */
-export const AD_SIZES: readonly AdSize[] = ['panel', 'poster', 'hoarding', 'billboard', 'banner'];
+export type AdSize = 'panel' | 'poster' | 'hoarding' | 'billboard' | 'banner' | 'screen';
+/** Size codes in slot records, in this order (new sizes go on the end, so old codes keep their meaning). */
+export const AD_SIZES: readonly AdSize[] = ['panel', 'poster', 'hoarding', 'billboard', 'banner', 'screen'];
 export interface AdSizeDef {
   /** the poster's width and height (tiles); a slot on a small wall shrinks to fit, keeping the shape */
   w: number; h: number;
@@ -37,15 +37,23 @@ export const AD_SIZE: Record<AdSize, AdSizeDef> = {
   hoarding: { w: 0.42, h: 0.14, rent: 6, cell: 'L', wear: 1.15, lit: false, frame: PALETTE.dark, border: 0.01, label: 'hoarding' },
   billboard: { w: 0.44, h: 0.22, rent: 10, cell: 'L', wear: 0.6, lit: true, frame: 0x24382c, border: 0.014, label: 'billboard' },
   banner: { w: 0.11, h: 0.29, rent: 8, cell: 'B', wear: 0.7, lit: false, frame: PALETTE.charcoal, border: 0.008, label: 'banner' },
+  // a big screen (docs/adverts.md section 9): lit, animated, its turns shared round the building's screens; it never wears
+  screen: { w: 0.5, h: 0.28, rent: 40, cell: 'L', wear: 0, lit: true, frame: 0x14171b, border: 0.012, label: 'big screen' },
 };
 export const isAdSize = (s: unknown): s is AdSize => typeof s === 'string' && (AD_SIZES as readonly string[]).includes(s);
 
-/** Numbers per slot in a record: face (0 front, 1 right, 3 left), size code, poster centre x y z, poster w h. */
-export const AD_STRIDE = 7;
+/**
+ * Numbers per slot in a record: face (0 front, 1 right, 3 left: the nearest wall's for a screen on a curve), size code,
+ * poster centre x y z, poster w h, and the way the poster faces as a turn about y in model space (radians: 0 faces +z,
+ * pi/2 +x; a wall's own direction, or a screen panel's on a curve).
+ */
+export const AD_STRIDE = 8;
+/** The turn about y that faces a wall (front, right, back, left). */
+export const FACE_YAW = [0, Math.PI / 2, Math.PI, -Math.PI / 2] as const;
 /** How far the poster stands out of the wall (in front of the frame's paper). */
 export const AD_POSTER_OUT = 0.0125;
-/** The blank paper an empty frame shows. */
-const PAPER = 0xe6e2d6;
+/** The blank paper an empty frame shows, and the black glass of a screen that is off. */
+const PAPER = 0xe6e2d6, GLASS = 0x0b0d10;
 
 /**
  * The frame for one slot on a wall: a border box and the blank paper inside it, and the slot record. `s` is the poster's
@@ -60,10 +68,35 @@ export function adFrame(fr: FaceFrame, s: number, yc: number, size: AdSize, pw: 
     out.push(fr.axis === 2 ? ['box', r4(width), r4(h), r4(n1), r4(cx), r4(y), r4(cz), hex, 0] : ['box', r4(n1), r4(h), r4(width), r4(cx), r4(y), r4(cz), hex, 0]);
   };
   onWall(pw + 2 * b, yc - ph / 2 - b, ph + 2 * b, 0.008, def.frame);
-  onWall(pw, yc - ph / 2, ph, 0.011, PAPER);
+  onWall(pw, yc - ph / 2, ph, 0.011, size === 'screen' ? GLASS : PAPER);
   if (slots) {
     const [x, y, z] = facePoint(fr, s, yc, AD_POSTER_OUT);
-    slots.push(fr.face, AD_SIZES.indexOf(size), r4(x), r4(y), r4(z), r4(pw), r4(ph));
+    slots.push(fr.face, AD_SIZES.indexOf(size), r4(x), r4(y), r4(z), r4(pw), r4(ph), r4(FACE_YAW[fr.face]));
+  }
+  return out;
+}
+
+/**
+ * A bank of screens on a curve (the `screens` op, docs/adverts.md section 9): `cols` × `rows` flat panels round the
+ * outside of a vertical arc of radius `r` about (x, z), from `from` to `to` degrees (0 faces +z, the front; 90 the
+ * right, -90 the left), the bank's foot at `y` and its height `h`. Each column is one facet of a dark bezel cylinder
+ * whose segments line up with the columns (so `360 / ((to - from) / cols)` must be a whole number and `from` a
+ * multiple of a column's angle; validate.ts checks). Every panel is a `screen` slot of its own, facing out of its facet.
+ */
+export function screenArc(x: number, y: number, z: number, r: number, from: number, to: number, cols: number, rows: number, h: number, bezel: number, slots?: number[]): CompiledOp[] {
+  const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+  const step = (to - from) / cols, segs = Math.round(360 / step), rad = Math.PI / 180;
+  const gap = 0.012, rim = 0.016;
+  const chord = 2 * r * Math.sin((step * rad) / 2), apo = r * Math.cos((step * rad) / 2);
+  const pw = chord - gap, ph = (h - (rows + 1) * gap) / rows;
+  // the bezel: one band, its facets the columns', a hair taller than the panels. Nothing stands proud of radius r, so a
+  // wall the curve meets tangentially keeps its windows (the windows check)
+  const out: CompiledOp[] = [['cyl', r4(r), r4(r), r4(h + 2 * rim), r4(x), r4(y - rim), r4(z), bezel, segs]];
+  if (slots) for (let row = 0; row < rows; row++) for (let c = 0; c < cols; c++) {
+    const a = (from + (c + 0.5) * step) * rad, d = apo + 0.004;
+    const yc = y + gap + ph / 2 + row * (ph + gap);
+    const deg = a / rad, face = deg >= 45 ? 1 : deg <= -45 ? 3 : 0;
+    slots.push(face, AD_SIZES.indexOf('screen'), r4(x + Math.sin(a) * d), r4(yc), r4(z + Math.cos(a) * d), r4(pw), r4(ph), r4(a));
   }
   return out;
 }

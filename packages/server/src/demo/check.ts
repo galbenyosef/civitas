@@ -101,7 +101,8 @@ function adsOf(w: World, adverts: Adverts): NonNullable<SeededDemo['ads']> {
     const h = adHostAt(env, x, y);
     if (h) for (let i = 0; i * AD_STRIDE < h.slots.length; i++) if (adSlotOpen(env, h, i, x, y)) { const s = AD_SIZES[h.slots[i * AD_STRIDE + 1]]; slots[s] = (slots[s] ?? 0) + 1; }
   }
-  return { slots, wears: adverts.list().map((r) => adWear(adAge(r.age, r.rate, r.at, w.tick), adSeed(r.x, r.y, r.i, r.c))) };
+  const screen = AD_SIZES.indexOf('screen');
+  return { slots, wears: adverts.list().map((r) => adWear(adAge(r.age, r.rate, r.at, w.tick), adSeed(r.x, r.y, r.i, r.c))), screensRented: adverts.list().filter((r) => r.s === screen).length };
 }
 
 console.log('completeness (showcase)');

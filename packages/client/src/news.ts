@@ -1,3 +1,4 @@
+import { CanvasTexture, SRGBColorSpace, type Texture } from 'three';
 import { NEWS, TICKS_PER_DAY, TICKS_PER_HOUR, channelName, storyLive, type StoryDTO, type MediaInfo, type ServerMsg } from '@msimcity/shared';
 import type { NetClient } from './net';
 import type { ClientWorld } from './world';
@@ -48,6 +49,8 @@ export interface NewsDeps {
   liveTick(): number;
   /** a short camera flight to a tile ("show me") */
   flyTo(x: number, y: number): void;
+  /** the big screens' news turn (render/adverts.ts AdvertsView.setNewsFeed): the newest headline as a card, null for the placeholder */
+  feed?(tex: Texture | null): void;
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -72,6 +75,8 @@ export class NewsUI {
   private queue: StoryDTO[] = [];
   private tickerUntil = 0;
   private html = '';
+  /** the card on the big screens' news turn, and the story it shows */
+  private card: { tex: CanvasTexture; g: CanvasRenderingContext2D; id: number; h: string } | null = null;
 
   constructor(private d: NewsDeps) {
     injectStyle();
@@ -113,6 +118,49 @@ export class NewsUI {
     this.renderChip();
     if (this.open) this.render();
     this.pump();
+    this.drawCard();
+  }
+
+  /**
+   * The newest covered headline as a 1.7:1 card for the big screens' news turn (the Piccadilly Lights, a big screens
+   * corner): the channel's bug, LIVE while it goes on, and the headline. Drawn only when the newest story or its headline
+   * changes; N4's helicopter picture replaces it.
+   */
+  private drawCard() {
+    if (!this.d.feed) return;
+    const s = news.latest(1)[0];
+    if (!s) { if (this.card) { this.card = null; this.d.feed(null); } return; }
+    if (this.card && this.card.id === s.id && this.card.h === s.h) return;
+    if (!this.card) {
+      const c = document.createElement('canvas'); c.width = 512; c.height = 300;
+      const tex = new CanvasTexture(c); tex.colorSpace = SRGBColorSpace;
+      this.card = { tex, g: c.getContext('2d')!, id: 0, h: '' };
+    }
+    const { g, tex } = this.card, W = 512, H = 300, ch = this.channel(s.ch!);
+    const bg = g.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#0c1a33'); bg.addColorStop(1, '#173a6b');
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    g.fillStyle = ch.color; g.fillRect(0, 0, W, 54);
+    g.font = 'bold 30px system-ui, sans-serif'; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = '#fff';
+    g.fillText(ch.name.toUpperCase(), 20, 28);
+    const live = s.k === 'fire' ? s.end === undefined : storyLive(s, Math.max(this.d.liveTick(), s.t));
+    if (live) { g.fillStyle = '#d42a20'; g.fillRect(W - 112, 10, 96, 34); g.fillStyle = '#fff'; g.textAlign = 'center'; g.fillText('LIVE', W - 64, 28); }
+    // the headline, wrapped to at most four lines
+    g.textAlign = 'left'; g.fillStyle = '#fff'; g.font = 'bold 34px system-ui, sans-serif';
+    const lines: string[] = [];
+    let line = '';
+    for (const word of s.h.split(' ')) {
+      const next = line ? `${line} ${word}` : word;
+      if (g.measureText(next).width > W - 40 && line) { lines.push(line); line = word; } else line = next;
+    }
+    if (line) lines.push(line);
+    if (lines.length > 4) { lines.length = 4; lines[3] = `${lines[3].replace(/\s+\S*$/, '')}…`; }
+    const y0 = 54 + (H - 54 - 40 - lines.length * 42) / 2 + 21;
+    lines.forEach((l, i) => g.fillText(l, 20, y0 + i * 42));
+    g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(0, H - 40, W, 40);
+    g.fillStyle = '#cfe0ff'; g.font = '22px system-ui, sans-serif'; g.fillText(`NEWS · ${when(s.t, this.d.liveTick())}`, 20, H - 20);
+    tex.needsUpdate = true;
+    this.card.id = s.id; this.card.h = s.h;
+    this.d.feed(tex);
   }
 
   private channel(id: string) {
