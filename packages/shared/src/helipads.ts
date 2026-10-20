@@ -61,12 +61,13 @@ export function designPad(kind: number, level: number, pick: number): LocalPad |
   return padTable()[s]?.[Math.min(n - 1, Math.floor(pick * n))] ?? null;
 }
 
-const PALACE = KIND_ID['buckingham-palace'];
+const PALACE = KIND_ID['buckingham-palace'], MEDIA = KIND_ID['media-centre'];
 /** Which service a building's pad is for. */
 export function padKindOf(kind: number, code: number): PadKind {
   if (code === Zone.Hospital) return 'medical';
   if (code === Zone.Police) return 'police';
   if (kind === PALACE) return 'royal';
+  if (kind === MEDIA) return 'news'; // the media centre's news helicopter (docs/media.md N3)
   return 'corporate';
 }
 

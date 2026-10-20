@@ -300,7 +300,7 @@ const occ = Object.fromEntries(Object.entries(OCCUPATIONS).map(([k, o]) => [k, {
 const oldOcc = Object.fromEntries(Object.entries(OLD.OCCUPATIONS as Record<string, { name: string; kind: number; rotate: boolean; shifts: unknown; cycles: unknown }>).map(([k, o]) => [k, { name: o.name, kind: o.kind, rotate: o.rotate, shifts: o.shifts, cycles: o.cycles }]));
 eq('OCCUPATIONS', oldKeys(occ), oldOcc);
 for (const m of MANIFEST.filter((e) => isNew(e.kindId) && e.occupation)) eq(`new kind ${m.id}: occupation`, OCCUPATIONS[m.kindId]?.name, m.occupation!.name);
-eq('window classes match render/materials.ts Win', Object.values(WINDOW_CLASSES), [Win.None, Win.Home, Win.Shop, Win.Office, Win.Civic, Win.Factory, Win.Venue, Win.Fire]);
+eq('window classes match render/materials.ts Win', Object.values(WINDOW_CLASSES), [Win.None, Win.Home, Win.Shop, Win.Office, Win.Civic, Win.Factory, Win.Venue, Win.Fire, Win.Beacon, Win.Sign]);
 // facade and empty-lot tints that render/chunkView.ts used to hard-code
 const tintsOf = (code: number) => MANIFEST.find((k) => k.code === code)?.tints;
 eq('residential tints', tintsOf(1), [0xffffff, 0xffd9b8, 0xfff0b3, 0xcfe3f7, 0xd6ebc9, 0xf7cfcf, 0xf2e6ff, 0xffe4c4]);

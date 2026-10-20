@@ -1007,12 +1007,13 @@ const JUNCTION_TOUR: Record<DemoJunction['tool'], string> = { roundabout: 'round
 const PLANE_CAPTIONS: Record<PlaneType, string> = {
   turboprop: 'a turboprop', regional: 'a regional jet', narrowbody: 'a narrow-body jet', widebody: 'a wide-body jet', jumbo: 'a jumbo jet', bizjet: 'a business jet',
 };
-const HELI_SERVICES: Record<PadKind, Pick<ShowcaseFeature, 'caption' | 'tour' | 'demo' | 'rule'>> = {
+const HELI_SERVICES: Record<PadKind, Pick<ShowcaseFeature, 'caption' | 'tour' | 'demo' | 'rule' | 'todo'>> = {
   medical: { caption: 'air ambulances (a hospital helipad)', tour: 'helipads' },
   police: { caption: 'the police helicopter (police headquarters)', tour: 'helipads' },
   corporate: { caption: 'executive helicopters (a tall office with a rooftop pad)', tour: 'off-hq' },
   royal: { caption: 'the royal flight (Buckingham Palace)', tour: 'buckingham-palace', demo: 'london',
     rule: 'only Buckingham Palace has a royal pad, and landmarks stand in their own city\'s demo (the London landmarks in London), not the showcase' },
+  news: { caption: 'the news helicopter (a media centre\'s roof pad)', tour: 'media-centre', todo: 'its pad stands in the showcase; it flies once N3 sends it to stories (docs/media.md)' },
 };
 
 /**

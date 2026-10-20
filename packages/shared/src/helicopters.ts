@@ -22,7 +22,8 @@ import { CITIES } from './crews';
  * Space is tiles (x, z on the ground, y up), time is ticks (TICKS_PER_HOUR to the game hour).
  */
 
-export type PadKind = 'medical' | 'police' | 'corporate' | 'royal';
+/** `news`: a media centre's roof pad (docs/media.md). Its routine timetable is empty; N3's `newsFlights` flies it to stories. */
+export type PadKind = 'medical' | 'police' | 'corporate' | 'royal' | 'news';
 export type HeliType = 'light' | 'medium';
 
 /** A helipad in world space: the centre of its touchdown circle. */
@@ -174,6 +175,8 @@ const SERVICE: Record<PadKind, { perDay: [number, number]; perDaySmall: [number,
   police: { perDay: [2, 3], perDaySmall: [2, 3], hours: [6, 22], dwell: [60, 150], onward: 0 },
   corporate: { perDay: [1, 3], perDaySmall: [0, 1], hours: [7, 20], dwell: [10, 45], onward: 0.25 },
   royal: { perDay: [0, 1], perDaySmall: [0, 1], hours: [9, 17], dwell: [120, 260], onward: 0 },
+  // none yet: the news helicopter waits on its pad until N3 sends it to stories (docs/media.md)
+  news: { perDay: [0, 0], perDaySmall: [0, 0], hours: [7, 20], dwell: [10, 30], onward: 0 },
 };
 /** pads smaller than this are on one-tile buildings */
 const SMALL_PAD = 0.25;
@@ -302,6 +305,11 @@ export const HELI_OPERATORS: Record<PadKind, readonly HeliOperator[]> = {
     { name: 'Verdant Aviation', body: 0x2d6a4f, stripe: 0xf3efe6, callsign: 'Verdant' },
   ],
   royal: [{ name: "The King's Flight", body: 0x6e1a2a, stripe: 0xc9a54a, callsign: 'Crown' }],
+  // the channel's own livery comes with N3 (docs/media.md); these stand in for it
+  news: [
+    { name: 'City News Air', body: 0xf4f4f0, stripe: 0xc8463c, callsign: 'Newshawk' },
+    { name: 'Metro Live Air', body: 0x1b1d22, stripe: 0x8e2f6e, callsign: 'Eye' },
+  ],
 };
 /** The operator of a flight, and its callsign and registration, all from the flight's seed. */
 export function heliOperator(f: Pick<HeliFlight, 'kind' | 'seed'>): HeliOperator & { reg: string; flightNo: string } {
