@@ -146,15 +146,16 @@ v2 block of `FIRE`), the drawing in `client/src/render/fires.ts` (`blast`).
 
 ### Explosions: one entry point for any cause
 
-Every explosion goes through `Fires.explode(x, y, { cause, radius?, damage?, costShare?, seed? })` (sim/fires.ts):
+Every explosion goes through `Fires.explode([x, y], { cause, radius?, level?, costShare?, seed? })` (sim/fires.ts):
 the works' hourly roll, the demo's blast drill, and later causes. The gas utility (card 968d0d2f, "full drama": gas
 explosions destroy buildings) is meant to call it from its leak roll and needs no change here. The call works like this:
 
 - `cause` picks the defaults in `BLAST_CAUSES` (shared/src/fires.ts) and the look in the client (`BLAST_LOOK`,
   render/fires.ts, keyed by `FireDTO.bc`). Each option passed overrides its default:
   - `radius`: every burnable building whose lot is within this many tiles catches light (2 for a works, 1 for gas);
-  - `damage`: the share of the source wrecked there and then. 0.7 for a works, whose fire carries on from there. At 1,
-    as for gas, the building is destroyed outright: it is cleared to an empty lot of its zone (a merged one breaks
+  - `level`: true flattens the source there and then; false never does. Unset, the cause's `damage` decides: the share
+    of the source wrecked there and then. That is 0.7 for a works, whose fire carries on from there, and 1 for gas, which
+    levels the building. `level: false` on gas wrecks 0.7 instead. A levelled building is destroyed outright: it is cleared to an empty lot of its zone (a merged one breaks
     back into lots), its people leave, it is billed as burnt out under 'fire', and its aftermath (scorch, debris,
     smoke) is drawn over the empty lot;
   - `costShare`: the blast's own bill, a share of the source's book value under 'blast' (0.25 for a works, 0.5 for
