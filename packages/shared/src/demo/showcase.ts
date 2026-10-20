@@ -78,6 +78,8 @@ export interface DemoPlacement {
   hour?: number;
   /** how far round from straight in front of the door the tour's camera stands (radians, + to the right; default 0.45): towards a big screen's curve */
   aside?: number;
+  /** the tour's camera this much nearer (a factor on its distance, at least 13 tiles), for a low landmark among towers */
+  zoom?: number;
 }
 /** `level`: what the lots stand at (default the town's, DEMO_TOWN.built) */
 export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 'office'; rect: DemoRect; level?: number }
@@ -873,7 +875,7 @@ export function demoTour(id: DemoId): TourStop[] {
         const tall = Math.max(...k.levels.flatMap((l) => l.designs.map((dz) => dz.height)));
         const c = kindCaption(k, p.door, rot, p.level);
         const shown: [string, string][] = p.hour === undefined ? [] : [['Shown at', `${Math.floor(p.hour)}:${String(Math.round((p.hour % 1) * 60)).padStart(2, '0')}, ${p.hour >= 19 || p.hour < 6 ? 'after dark' : 'by day'}`]];
-        out.push({ id: sid, ...base, ...c, facts: [...c.facts, ...shown], title: p.name ? `${c.title}: ${p.name}` : c.title, ...framing(area[0], area[1], area[2], area[3], rot, tall > 3 ? tall / 3 : 1, p.aside), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door, ...(p.hour !== undefined ? { hour: p.hour } : {}) });
+        out.push({ id: sid, ...base, ...c, facts: [...c.facts, ...shown], title: p.name ? `${c.title}: ${p.name}` : c.title, ...framing(area[0], area[1], area[2], area[3], rot, (tall > 3 ? tall / 3 : 1) * (p.zoom ?? 1), p.aside), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door, ...(p.hour !== undefined ? { hour: p.hour } : {}) });
         continue;
       }
       const b = s.blocks?.find((q) => q.id === sid);

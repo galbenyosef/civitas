@@ -138,6 +138,14 @@ Code:
   the Tower of London is on the river by Tower Bridge, the Shard by London Bridge, the Gherkin and the Walkie Talkie in
   the City, One Canada Square at Canary Wharf and the Royal Opera House in Covent Garden. `demo:check` fails a landmark
   that no city demo places. Tall placements are framed from further out on the tour.
+- **Piccadilly Circus** (kind id 116, `landmarks-london-4.ts`; docs/adverts.md section 9) stands where Piccadilly ends
+  at the West End: its 4×2 plot fills the block between Oxford Street and Piccadilly, its front on Piccadilly and Regent
+  Street (a short main road in `ARTERIALS`, down from Oxford Circus) along its west side. Piccadilly's main road starts at
+  the Charing Cross Road, so it runs past the circus's front as Coventry Street; the Charing Cross Road, a tile east of
+  the circus, stands for Shaftesbury Avenue too at this scale, and a side street runs south from its door as Haymarket.
+  The 159's Piccadilly stop is beside its east end. Its six big screens (the Piccadilly Lights) take turns showing two
+  of the town's campaigns, house adverts and the news (server/src/demo/adverts.ts seeds the two). The tour stops there
+  after the West End, at night (below, "The tour").
 - **The universities** are landmarks too (kind ids 111-114, `landmarks-london-3.ts`, tech `lnd2`; docs/education.md
   section 14): UCL's Wilkins Building by Gower Street, King's College's Strand building and LSE's Centre Building in
   Aldwych and Covent Garden, and Imperial's Queen's Tower in South Kensington. They are fitted with the other landmarks
@@ -175,8 +183,8 @@ How the map is made:
   longitude waypoints as L-shaped legs or staircases of legs at least two tiles long (Uxbridge Road, Bayswater Road,
   Oxford Street and Holborn to Cheapside, Whitechapel and Mile End; Marylebone and Euston Road to City Road and Old
   Street; the Highway and Commercial Road to the A13; the Edgware Road, Tottenham Court Road and Camden High Street,
-  Upper Street and the Holloway Road, Bishopsgate and the Kingsland Road; Piccadilly, Knightsbridge and Kensington High
-  Street to Chiswick; the King's Road; Kennington and Brixton Road, Borough High Street and Walworth Road, the Old Kent
+  Upper Street and the Holloway Road, Bishopsgate and the Kingsland Road; Coventry Street, Piccadilly, Knightsbridge and
+  Kensington High Street to Chiswick; Regent Street from Oxford Circus to Piccadilly Circus; the King's Road; Kennington and Brixton Road, Borough High Street and Walworth Road, the Old Kent
   Road, Jamaica Road to Woolwich, Clapham Road, Lavender Hill to Richmond, the South Circular; the loop round the Isle
   of Dogs over the gaps between the docks); a road along every placed structure's front; a road round every park; each
   bridge's approach on to the nearest road. (2) Each cell of land left between them is split by through roads until it
@@ -492,6 +500,11 @@ Each stop's card shows:
 Captions come from the catalogue, so they stay in step with the game. Runways, track, junctions, bridges, lines and spots are not catalogue kinds, so their captions are in `showcase.ts` (`SURFACE_CAPTIONS`, `BRIDGE_CAPTION` with `STYLE_NOTES`, `LINE_CAPTIONS`, `SPOT_CAPTIONS`). Merged lots have no tool text in the catalogue, so their stops are captioned from their form (`mergedText`).
 
 On the map, a structure's footprint outline and marks are drawn (`FootprintOverlay`): door, platform, apron, dock and gates. A block or a runway strip gets a yellow outline, a line's extent an outline in the line's colour, a track a blue one. A track gets a mark on every tile it lays. A line gets a square at each stop and its ribbon, the lap its vehicles run, drawn from the `lines` message. While the panel is open, every stop near the view has a floating label, nearest first and never overlapping. Clicking a label jumps to that stop.
+
+**A stop at its own hour.** A placement may carry `hour` (and `aside`, how far round from its front the camera stands):
+the client pins the light at that hour while the stop is up and gives the player's light back at the next stop without
+one, and the card's facts say "Shown at 21:30, after dark". The Piccadilly Lights (London, 21:30, from the front-left
+where the curve faces) and the showcase's big screens corner (21:00) use it.
 
 `window.msc.tour` exposes `go(i)`, `stops`, `current` and `flying` for scripted checks.
 

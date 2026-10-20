@@ -62,19 +62,24 @@ function fountain(x: number, z: number): Op[] {
     ['cyl', 0.042 * s, 0.016 * s, 0.016 * s, x, at(0.275), z, BRONZE, 10],
     ['cyl', 0.012 * s, 0.014 * s, 0.012 * s, x, at(0.291), z, BRONZE_DK, 6],
   ];
-  // Anteros (Eros), in aluminium: balanced on the left foot, the body leaning forward over it
-  const y0 = at(0.303), k = s * 0.95;
+  // Anteros (Eros), in aluminium, facing the street: balanced on the left foot with the right leg kicked up behind,
+  // leaning forward, arms out in front holding the bow, and the wings raised in a V behind the shoulders
+  const y0 = at(0.303), k = s * 1.35, X = (v: number) => x + v * k, Y = (v: number) => y0 + v * k, Z = (v: number) => z + v * k;
   ops.push(
-    ['cyl', 0.005 * k, 0.004 * k, 0.034 * k, x - 0.004 * k, y0, z, ALUMINIUM, 5], // the standing left leg
-    ['taper', 0.008 * k, 0.008 * k, 0.006 * k, 0.006 * k, 0.026 * k, x + 0.004 * k, y0 + 0.022 * k, z - 0.004 * k, ALUMINIUM, { shift: [0, -0.03 * k] }], // the right leg raised behind
-    ['taper', 0.016 * k, 0.011 * k, 0.019 * k, 0.012 * k, 0.034 * k, x, y0 + 0.032 * k, z, ALUMINIUM, { shift: [0, 0.006 * k] }], // the torso, leaning forward
-    ['lathe', x, y0 + 0.066 * k, z + 0.007 * k, ALUMINIUM, [0, 0, 0.006 * k, 0.003 * k, 0.0075 * k, 0.008 * k, 0.006 * k, 0.012 * k, 0, 0.015 * k], { seg: 8 }], // the head
-    // the wings, swept up and back from the shoulders
-    ['taper', 0.004 * k, 0.018 * k, 0.002 * k, 0.01 * k, 0.05 * k, x - 0.009 * k, y0 + 0.055 * k, z - 0.006 * k, ALUMINIUM, { shift: [-0.03 * k, -0.018 * k] }],
-    ['taper', 0.004 * k, 0.018 * k, 0.002 * k, 0.01 * k, 0.05 * k, x + 0.009 * k, y0 + 0.055 * k, z - 0.006 * k, ALUMINIUM, { shift: [0.03 * k, -0.018 * k] }],
-    // the arms out in front, the bow held across them
-    ['box', 0.03 * k, 0.004 * k, 0.004 * k, x, y0 + 0.058 * k, z + 0.016 * k, ALUMINIUM],
-    ['box', 0.003 * k, 0.04 * k, 0.003 * k, x - 0.012 * k, y0 + 0.04 * k, z + 0.02 * k, ALUMINIUM],
+    ['lathe', x, Y(-0.004), z, ALUMINIUM, [0, 0, 0.007 * k, 0.003 * k, 0.006 * k, 0.006 * k, 0, 0.007 * k], { seg: 8 }], // the orb he stands on
+    ['taper', 0.005 * k, 0.006 * k, 0.008 * k, 0.008 * k, 0.032 * k, X(-0.002), Y(0), z, ALUMINIUM, { shift: [0, 0.004 * k] }], // the standing left leg
+    ['taper', 0.006 * k, 0.005 * k, 0.008 * k, 0.008 * k, 0.014 * k, X(0.004), Y(0.02), Z(-0.034), ALUMINIUM, { shift: [0, 0.03 * k] }], // the right leg, up behind
+    ['taper', 0.013 * k, 0.009 * k, 0.017 * k, 0.01 * k, 0.03 * k, x, Y(0.03), Z(0.002), ALUMINIUM, { shift: [0, 0.007 * k] }], // the torso, leaning forward
+    ['lathe', x, Y(0.06), Z(0.011), ALUMINIUM, [0, 0, 0.006 * k, 0.003 * k, 0.0075 * k, 0.008 * k, 0.006 * k, 0.012 * k, 0, 0.015 * k], { seg: 8 }], // the head
+    // the arms out in front at the shoulders, the bow upright in the hands and its string
+    ['box', 0.022 * k, 0.005 * k, 0.03 * k, x, Y(0.053), Z(0.024), ALUMINIUM],
+    ['box', 0.003 * k, 0.05 * k, 0.004 * k, x, Y(0.03), Z(0.04), ALUMINIUM],
+    ['box', 0.001 * k, 0.046 * k, 0.001 * k, x, Y(0.032), Z(0.034), 0x8e949b],
+    // the wings: each a broad lower feathering and a long upper tip, raised and swept back from the shoulders
+    ...[-1, 1].flatMap((side): Op[] => [
+      ['taper', 0.004 * k, 0.022 * k, 0.003 * k, 0.012 * k, 0.03 * k, X(side * 0.007), Y(0.046), Z(-0.006), ALUMINIUM, { shift: [side * 0.022 * k, -0.012 * k] }],
+      ['taper', 0.003 * k, 0.012 * k, 0.001 * k, 0.004 * k, 0.04 * k, X(side * 0.029), Y(0.076), Z(-0.018), ALUMINIUM, { shift: [side * 0.016 * k, -0.01 * k] }],
+    ]),
   );
   return ops;
 }

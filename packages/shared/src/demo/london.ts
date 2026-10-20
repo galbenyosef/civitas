@@ -107,7 +107,7 @@ const STRUCTURES: Spot[] = [
   ['poplar-garage', 'bus-depot', 51.5110, -0.0050, 'N'],
 ];
 /** Landmarks the tour shows at an hour and from an angle of their own: the Piccadilly Lights after dark, from the front-left where the curve faces. */
-const TOUR_VIEWS: Record<string, Pick<DemoPlacement, 'hour' | 'aside'>> = { 'piccadilly-circus': { hour: 21.5, aside: -0.6 } };
+const TOUR_VIEWS: Record<string, Pick<DemoPlacement, 'hour' | 'aside' | 'zoom'>> = { 'piccadilly-circus': { hour: 21.5, aside: -0.6, zoom: 0.7 } };
 /** 1×1 venues, on a frontage lot near the real one once the streets are laid. */
 const VENUES: Spot[] = [
   ['palladium', 'theatre', 51.5142, -0.1404, 'S'],

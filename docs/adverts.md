@@ -4,7 +4,7 @@ Rich, 2026-10-19: "How about if buildings / areas had allocated advertising area
 marketing campaigns appear on, however, they are at risk of vandalism, graffiti etc. I am conscious of the refresh
 performance loop though." and "let's not forget tv adverts that we might have in fpv view and or on major city
 landmarks such as Times Square and/or Piccadilly Circus" (section 9). Design 2026-10-19. **Slice 1 (A1-A3 and a tutorial) is built: see "Built: slice 1"
-at the end.** It stands on `docs/motivation.md` (values and beliefs): an advert is a way to plant a belief.
+at the end; so is a first cut of A6's big screens, with Piccadilly Circus: see "Built: the big screens".** It stands on `docs/motivation.md` (values and beliefs): an advert is a way to plant a belief.
 
 Code this touches: `shared/src/adverts.ts` (new: slot sizes, themes, claims, templates, `AD` tunables),
 `shared/src/buildings/` (the `adslot` op, `schema.ts`, `validate.ts`, `facade.ts`), `server/src/sim/adverts.ts` (new:
@@ -520,3 +520,121 @@ that day on.
 - The daily pass in `lifeStep` over cached commute paths, and bus riders seeing panels at their stops.
 - Citizens' beliefs and values (motivation M1-M4) for the nudge.
 - The reached / swayed / acted counters for the panel, which then replace its "coming update" line with numbers.
+
+## Built: the big screens, a first cut of A6 (2026-10-20)
+
+Rich, 2026-10-20 (UTD "New landmark: Piccadilly circus"): "Great for having a big TV showing adverts, or news etc
+(especially from the helicopter)", and "Needs Eros as well!". This cut builds the screens and the two big-screen kinds.
+The TV studio, airtime auctions, evening reach, the ad break on the FPV TV and screen failures are still to come.
+
+### The slot
+
+- **A sixth size, `screen`** (`buildings/adslot.ts`): rent $40 a day, four times a billboard, which is how this cut prices
+  "the best screen in town". Screens are lit and never wear (size wear 0, so their area rate is 0). It is the 'L' artwork
+  shape. A flat screen can stand on a wall like any slot (`adslot … 'screen'`). The curved banks use a new op.
+- **The `screens` op** (`x y z r from to cols rows h [bezel]`, `screenArc`) lays `cols` × `rows` flat panels round a
+  vertical arc. Each column is one facet of a dark bezel cylinder whose segments line up with the columns, so validation
+  asks that a column's angle divide 360 and `from`. Every panel is a `screen` slot of its own, facing out of its facet.
+  Nothing stands proud of the radius, so the walls the curve meets tangentially keep their windows.
+- **Slot records grew a number.** `AD_STRIDE` is 8: the eighth is the way the poster faces, as a turn about y in model
+  space. For a wall slot it is its wall's (`FACE_YAW`). A curve's panel faces its own way, and `face` is the nearest
+  wall's, so `adSlotWorld` and the never-the-back-wall check still read it. `compiled.ts` is regenerated, nothing about
+  a rental changes, and old saves load as they were.
+- **Renting.** A screen is rented through the Campaigns panel like any frame: **Pick frames**, then click the building,
+  and its first free screen is taken. "Rent 3 nearest" never takes a screen, on the server (`Adverts.nearest`) or in the
+  panel's "show me". Rent goes to the parcel owner as for any slot.
+
+### Turns
+
+- **One ring per building** (`shared/src/adverts.ts screenTurns`). A building's screens share a ring of turns, one turn
+  per panel. Both big-screen designs have `AD.screenTurns` (6), and `buildings:check` holds every screen design to that.
+  - Turn k shows the campaign renting the k-th panel.
+  - An unrented turn shows a house advert. There are seven generic brands, `HOUSE_ADS`: a drink, a phone, a bank, a
+    railway, tea, noodles in neon and a mobile network. The building's seed picks which, so two screens in a town differ.
+  - The last unrented turn is **the news**.
+  - So the Lights are never dark, and a campaign renting one panel takes its turn on all six.
+- **The rotation is in the shader** (`client/src/render/adverts.ts`). Every `AD.screenSecs` (8 s) each panel steps on to
+  the next turn of the ring. The clock is the wall clock (`Date.now`, one uniform a frame, wrapped at a whole number of
+  every ring's cycles), so every viewer sees the same rotation, give or take their machines' clock skew. Nothing goes
+  over the wire. The ring is packed into the instance's `aRect` as atlas codes, three to a float:
+  - 0-55: a campaign's block;
+  - 56-62: the house adverts;
+  - 63: the news.
+  The instance buffer changes only when a rental does.
+- **The news hook.** One turn per building is a 'news' turn. Today it shows a "LIVE · Civitas News" card from the ad
+  atlas: a skyline, a helicopter, the LIVE bug and a ticker.
+  - The media centre (UTD 90cd3857) will hand `AdvertsView.setNewsFeed(texture)` the news helicopter's render target.
+    Every news turn on every screen then samples that texture instead of the card, and `null` puts the card back.
+  - Selling the news turn, and auctioning airtime, belong to that card.
+
+### The look
+
+- **The art.** Campaigns use their 'L' cell. The house adverts and the news are a row of 256×128 cells under the
+  graffiti tags, drawn once at start-up.
+- **Drawn whether rented or not.** Screens are drawn from the moment a chunk loads, with no distance fade and no tint,
+  out to 900 tiles. Posters still stop at `FAR_AT`.
+- **Brightness and screen effects.** Screens are mostly emissive: 0.75 of their colour by day and 1.2 at night, over a
+  dim diffuse. They have scanlines and an LED grain close up, both fading with distance so far screens do not shimmer,
+  a darker rim at the bezel, and a wipe from one turn to the next.
+- **Organic** (the standing rule):
+  - every panel has its own phase offset (up to 1.9 s), so neighbours never flip together;
+  - its own brightness (0.86-1.1x) and a slow breath;
+  - its own wipe direction (across or down);
+  - its own slow drift and zoom across the picture;
+  - and now and then (about one turn in 25, from its seed and the step) a glitch of its own, for a fifth of a second to
+    1.4 s: a frozen frame, colour bars, the blue error screen or a picture torn into bands.
+- **The glow.** A second, additive instanced mesh (`AdvertsView.glow`, a child of the poster mesh) carries each panel's
+  halo and pool:
+  - the halo spills above and below the panel, never over it or a neighbour, which would wash the pictures out;
+  - the pool of the panel's current colour lies on the ground in front, brightest at the wall and reaching further
+    from the upper row;
+  - its colour is the turn's art, read from a small mip in the vertex shader;
+  - it is faint by day and strong at night, and the fog thins it with distance.
+  This is the colour the screens throw on the street and the haze at night.
+
+### The two kinds
+
+- **Piccadilly Circus** (kind 116, `buildings/landmarks-london-4.ts`, London tier 15, `lnd1`) is a 4×2
+  theatre-family venue: the Criterion Theatre, with four event nights a week.
+  - **The Lights.** The London Pavilion and Monico block's stone corner, of radius 0.75, turns from facing west to
+    facing the road. The six screens run round it, three columns of 30 degrees in two rows.
+  - **The Criterion** has a mansard and dormers and its lit canopy on the square.
+  - **The Shaftesbury Memorial Fountain** has its octagonal steps, the bronze basin and tiers, and Anteros (Eros) in
+    aluminium on top: winged, bow held out, balanced on his left foot.
+  - **On the square:** the Underground stairs behind railings with their roundels, two red telephone boxes and lamps.
+  - **In London** it stands where Piccadilly ends, its front on Piccadilly and Regent Street down its west side
+    (docs/demo.md "London").
+- **The big screens corner** (kind 117, `buildings/bigscreens.ts`) is the generic one for any city: the cinema ladder's
+  fourth rung, unlocked by Landmarks (`cul5`).
+  - It is a 2×2 corner block whose rounded corner of radius 0.62 turns from the front to the right side, with six
+    screens.
+  - There are two designs: modern grey with a sign blade, or terracotta with a copper dome over the corner.
+  - It wants roads on its front and its right side.
+
+### The demos
+
+- **The showcase.** The big screens corner stands at the High Street's east end, on the corner with the perimeter road,
+  its screens turned to the junction. The tour stop `big-screens` follows `high-street`, at 21:00, the camera round
+  towards the curve.
+- **London.** Piccadilly Circus is in the Landmarks section. Its tour stop follows the West End, at 21:30, from the
+  front-left where the curve faces (a placement's `hour` and `aside`, docs/demo.md "The tour").
+- **Seeding.** `server/src/demo/adverts.ts` rents turns 2 and 5 of every big screen in a demo to two of the town's
+  campaigns ("Come and see …", "Five minutes from work in …"), kept and free. The tour therefore shows campaigns, house
+  adverts and the news taking turns.
+- **Features.** `advert-slots` now asks for every size including the screen. The new `advert-screens` asks for big
+  screens with some, but not all, turns rented.
+
+### Checks
+
+- `buildings:check` section 12:
+  - every slot record's facing agrees with its wall;
+  - every design with screens has `AD.screenTurns` of them, and only landmarks and the big screens corner carry any;
+  - Piccadilly Circus has six;
+  - screens facing the back are refused, and so are screens off the bezel's facets.
+- The adverts probe (`loadtest/adverts.ts`) section 9 places a big screens corner on a corner of a filled city and
+  checks that:
+  - its six screens are open;
+  - "the nearest free frames" leaves them alone;
+  - a screen rents at $40 and never wears;
+  - the ring puts the campaign in its turn, house adverts in four, and the news in the last unrented one;
+  - the ring is the same for every viewer and differs between buildings.
