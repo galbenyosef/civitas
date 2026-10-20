@@ -30,7 +30,7 @@ const PREF = 'msimcity.rankCard';
 const ROMAN = ['', 'I', 'II', 'III', 'IV'];
 /** Openers for a rank reached, picked per rank and tick. */
 const HAILS = ['Hear ye', 'Huzzah', 'Bunting out', 'Bells ring', 'The town cheers', 'Ring the bells'];
-const KIND_ICON: Record<Milestone['kind'], string> = { rank: '★', goal: '✓', need: '◆', people: '●', jobs: '■', first: '▲', tech: '✦', money: '$', land: '▣' };
+const KIND_ICON: Record<Milestone['kind'], string> = { rank: '★', goal: '✓', need: '◆', people: '●', jobs: '■', first: '▲', tech: '✦', money: '$', land: '▣', incident: '✸' };
 
 export class RanksUI {
   readonly group = new Group();

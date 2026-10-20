@@ -1147,10 +1147,12 @@ export class Net {
         if (n.hint) this.hint(c, n.hint, n.msg); else this.toast(c, n.msg, 'info');
       }
     }
-    // fires (sim/fires.ts): the warning fire is an advisor hint, the rest toasts
+    // fires (sim/fires.ts): the warning fire is an advisor hint, the rest toasts; an explosion goes in the milestone feed too
     if (this.fires?.notices.length) {
-      for (const n of this.fires.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) {
-        if (n.hint) this.hint(c, n.hint, n.msg); else this.toast(c, n.msg, 'info');
+      for (const n of this.fires.notices.splice(0)) {
+        const p = n.feed ? w.players.get(n.owner) : undefined;
+        if (p && n.feed) this.ranks?.incident(p, n.feed);
+        for (const c of this.clients) if (c.player?.id === n.owner) { if (n.hint) this.hint(c, n.hint, n.msg); else this.toast(c, n.msg, 'info'); }
       }
     }
     // onboarding goals, measured a few times a game hour
