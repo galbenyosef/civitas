@@ -221,6 +221,8 @@ export class Simulation {
       bestJob: (c, except) => this.jobOptions(c, except),
       canSwitch: (c) => c.state === S.Home && !c.site && c.appr === undefined && !c.study && !essentialJob(c.kind) && !this.mobile.roleOf(c),
       switchJob: (c, b, path) => { w.quitJob(c); this.hire(c, b, path); },
+      canTake: (c, b) => this.skills.placeFor(b, c.edu) !== Place.None,
+      pathTo: (c, b) => pathBetween(w, c.hx, c.hy, b.x, b.y),
       cover: (x, y) => Math.floor(this.coverage(x, y) + 1e-6),
       parks: (x, y) => this.leisureCoverage(x, y).parks,
       moveHome: (c, b, hh) => this.moveHome(c, b, hh),

@@ -383,9 +383,15 @@ entries so the tour can show it: `job-switch` (within `FEATURE_DAYS` a showcase 
   - `Motivation.pickJob` scores them: Money by the wage the place would pay this citizen, Status by a skilled place
     and the building's level, Time and Family by the extra steps, Roots by a friend working there, Adventure by a
     hashed taste for the kind. Everyone also pays a commute cost (`MOTIVE.commuteCost`), and there is some noise.
-  - **Essential jobs.** Builders' yards and public services (`essentialJob`) are taken when they are the nearest
-    vacancy, and their staff never look for a better job. Without this rule the first run left the test city's yards
-    at 3 of 10 staff and the town stopped growing.
+  - **Essential jobs.** Builders' yards, public services and utilities (`essentialJob`) come first in a job search: the
+    nearest one among the candidates wins. Their staff never look for a better job. Without this rule the first run
+    left the test city's yards at 3 of 10 staff, and the town stopped growing.
+  - **Recruiting.** An essential workplace under half staffed recruits (`Motivation.recruit`, from the daily look). A
+    plain worker living within 16 tiles takes a place there with chance 0.3 a day. In a town with nobody out of work,
+    no job-seeker comes for a new fire post or funeral director. Main filled one only when its lot freed some
+    workers, or when a newcomer's nearest vacancy was there. Without recruiting, a fire post placed on a lot that had
+    no staff stayed empty with motivation on or off. With it, a fire post and a police box are full within a game day
+    (`loadtest/motivation.ts`).
 - **Homes.**
   - A grown child moving out scores homes (`Motivation.moveOutHome`) in place of `6 x random - d`: an even sample of
     at most 12 of the homes with room within 30 tiles, scored by `homeScore`.
