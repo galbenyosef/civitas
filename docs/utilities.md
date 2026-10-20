@@ -264,6 +264,35 @@ faults (`demoBlackouts`, `Utilities.drills`): its streets go dark, the depot's v
 on site they light up again block by block. Tour stops: each plant and node, the pylon line, the buried cable and the
 blackout (shown at 21:36). `SHOWCASE_FEATURES` has `power-plant`, `power-pylons`, `power-buried` and `power-blackout`.
 
+### 4.8 Measured (utilities-1)
+
+- **The probe** (`npx tsx packages/server/src/loadtest/utilities.ts`), 46 checks: reach walks roads only, to its radius,
+  never along another player's street, the same whatever the node order; the solver's brownout at 0.85-1, cuts below,
+  by night and day, rotating, never a hospital's or police station's patch; overloads, faults, import; a town gated
+  until it has power and then supplied, with bills and fuel in the ledger; a frontier substation importing from the
+  gate; a fault, the depot's van and its repair (2.9 game hours), the contractor (10 game hours); links laid, refused
+  and taken down; bot F's first game day identical with the gate and without; determinism; old saves.
+- **Tick cost** (`--bench`, the 2×2 test city with 16 substations and 4 gas plants, 4,421 citizens, 1,500 ticks):
+  1.509 ms a step with utilities off and 1.499 ms with them on (two runs each), inside the run-to-run noise. The
+  hourly solve takes about 1.45 ms, about 0.015 ms a tick amortised (1%).
+- **Bot F** (`loadtest/utilities-ranks.ts`, frontier, seeds 1-12, three hours; botf.ts now buys Electrification with
+  Masonry and puts a substation by each zoned block's connector road, bulldozing a lot if it must):
+
+  | Rank | Before utilities (mean) | With the gate (mean) | Change |
+  | --- | --- | --- | --- |
+  | Hamlet | 19.1 min | 20.9 min | +9% |
+  | Village | 43.6 min | 44.8 min | +3% |
+  | Town | 96.5 min | 85.1 min | −12% |
+  | City | 151.4 min (11 of 12 runs) | 124.8 min (12 of 12) | −18% |
+
+  The first three ranks are within 15%. City comes 18% sooner, not later: lots the bot has not powered stay one
+  storey and its builders build out new lots instead of raising old ones. With the bot's substations and no gate
+  (POWER=1 GATE=0) City is 6% sooner, so most of that is the gate. The treasury's low is lower: $4,271 at the worst
+  (seed 6) against $8,216 before; seed 1, which the ranks probe plays, keeps $6,045, over its $5,000 floor. Tried and
+  dropped: a $3,500 cushion before each substation (no change) and two substations a block (Hamlet +17%, low $1,615).
+- **Checks:** typecheck, buildings:check, demo:check, finance:check, the fires, ranks, adverts and media probes,
+  rail-check, metro-check, boats-check and gesture-check pass.
+
 ## 5. Data and wire (built)
 
 | | Stored | Derived | Wire |
