@@ -26,6 +26,14 @@ export interface RankState {
   peak?: number; peakAt?: number;
 }
 
+/**
+ * A rank reached or a milestone passed, for the news (sim/news.ts, docs/media.md): which player, where (the rank-up's
+ * celebration spot, or the middle of their buildings), the feed's words and, for a rank, which one and its grant.
+ */
+export interface RankStoryEvent { kind: 'rank' | 'milestone'; player: string; at: [number, number]; text: string; rank?: number; grant?: number }
+/** The milestone kinds that make news: residents and jobs marks, firsts and research (not needs, goals, money or land). */
+const NEWS_KINDS = new Set<Milestone['kind']>(['people', 'jobs', 'first', 'tech']);
+
 /** Residents not rising for this long (half a game day, four real minutes at 1×) is a pause worth a word; at most this many words a pause. */
 const STALL_TICKS = TICKS_PER_DAY / 2, STALL_WORDS = 3;
 
@@ -62,6 +70,8 @@ const usd = (n: number) => `$${Math.round(n).toLocaleString('en-GB')}`;
 export class Ranks {
   /** this tick's measurement per player, so every tab a player has open gets the same rank-up and milestones */
   private last = new Map<string, { tick: number; r: { msg: ServerMsg & { t: 'rank' }; sig: string } }>();
+  /** fired for each rank reached and each milestone of NEWS_KINDS (game.ts points it at News.rank) */
+  onStory: ((e: RankStoryEvent) => void) | null = null;
 
   constructor(private w: World) {}
 
@@ -152,6 +162,13 @@ export class Ranks {
     else if (housed >= 25 && s.peakAt !== undefined) {
       const k = Math.floor((w.tick - s.peakAt) / STALL_TICKS), key = `stall:${s.peak}:${k}`;
       if (k >= 1 && k <= STALL_WORDS && !seen.has(key)) note(key, 'need', this.stallText(p, s));
+    }
+    if (this.onStory && fresh.length) {
+      const mid: [number, number] = t.n ? [Math.round(t.cx / t.n), Math.round(t.cy / t.n)] : this.home(p);
+      for (const m of fresh) {
+        if (m.kind === 'rank' && up) this.onStory({ kind: 'rank', player: p.id, at: up.at, text: m.text, rank: up.rank, grant: up.grant });
+        else if (NEWS_KINDS.has(m.kind)) this.onStory({ kind: 'milestone', player: p.id, at: mid, text: m.text });
+      }
     }
     if (s.feed.length > FEED_KEEP) s.feed.length = FEED_KEEP;
     if (s.seen.length > 600) s.seen = s.seen.slice(-600); // the keys are bounded by the steps above; a guard, not a rule

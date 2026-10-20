@@ -51,6 +51,17 @@ export interface FireSave {
 }
 /** Something to tell one owner (net.ts sends a hint or a toast). */
 export interface FireNotice { owner: string; msg: string; hint?: HintId }
+/**
+ * A fire's news (sim/news.ts, docs/media.md): it caught light (`engine` when a crew was sent), went out (`outcome` a
+ * FireOutcome, `lost` levels), spread to a neighbour (`from` the fire it came from) or blew up. Fires v2's spread and
+ * explosions call `onStory` with 'spread' and 'explosion' where they happen.
+ */
+export interface FireStoryEvent {
+  phase: 'lit' | 'out' | 'spread' | 'explosion';
+  id: number; x: number; y: number; owner: string; kind: number;
+  engine?: boolean; warning?: boolean; drill?: boolean; crew?: boolean;
+  outcome?: number; lost?: number; from?: [number, number];
+}
 
 /**
  * House fires with real dispatch (docs/incidents.md, docs/audit-2026-10.md card 3).
@@ -88,6 +99,8 @@ export class Fires {
   stats = { lit: 0, warning: 0, saved: 0, partial: 0, burnt: 0, gone: 0, engines: 0, arrived: 0, cost: 0 };
   /** fired after any fire starts, changes phase or goes out (game.ts points it at Issues.fireChanged) */
   onChange: ((x: number, y: number) => void) | null = null;
+  /** fired when a fire starts and when it goes out, for the news (game.ts points it at News.fire) */
+  onStory: ((e: FireStoryEvent) => void) | null = null;
 
   private fires = new Map<string, Fire>();
   private born = new Map<number, number>();
@@ -188,6 +201,7 @@ export class Fires {
           : 'no staffed fire post or station is in reach: it will burn down';
       this.notices.push({ owner, msg: `Fire at the ${what} at (${b.x}, ${b.y}): ${help}`, ...(f.warning ? { hint: 'fire' as const } : {}) });
     }
+    this.onStory?.({ phase: 'lit', id: f.id, x: f.x, y: f.y, owner, kind: f.kind, engine: !!f.station, ...(f.warning ? { warning: true } : {}), ...(f.drill ? { drill: true } : {}) });
     this.touch(f);
     return true;
   }
@@ -380,7 +394,7 @@ export class Fires {
     const w = this.w;
     f.ph = FirePhase.Out; f.t1 = now; f.engine = null; f.onFoot = undefined; f.hose = undefined;
     if (f.drill) this.drillOut.set(tileKey(f.x, f.y), now);
-    if (!b) { f.out = FireOutcome.Saved; f.lost = 0; this.stats.gone++; this.touch(f); return; }
+    if (!b) { f.out = FireOutcome.Saved; f.lost = 0; this.stats.gone++; this.onStory?.({ phase: 'out', id: f.id, x: f.x, y: f.y, owner: f.owner, kind: f.kind, outcome: f.out, lost: 0 }); this.touch(f); return; }
     const burnt = f.d >= 1 && !f.crew && !f.warning;
     const lost = f.drill || f.warning ? 0 : burnt ? b.level : Math.floor(b.level * f.d);
     const cost = f.drill ? 0 : Math.round(FIRE.costShare * buildingValue(b.id, b.level) * (burnt ? 1 : f.d));
@@ -408,6 +422,7 @@ export class Fires {
         : f.lost ? `Fire out at the ${what} at (${f.x}, ${f.y}): ${f.lost} level${f.lost === 1 ? '' : 's'} lost${bill}`
           : `Fire out at the ${what} at (${f.x}, ${f.y})${f.crew ? ' before it spread' : ': the bucket chain saved it'}${bill}` });
     }
+    this.onStory?.({ phase: 'out', id: f.id, x: f.x, y: f.y, owner: f.owner, kind: f.kind, outcome: f.out, lost: f.lost ?? 0, crew: f.crew, ...(f.drill ? { drill: true } : {}) });
     this.touch(f);
   }
 

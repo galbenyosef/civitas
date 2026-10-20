@@ -3,12 +3,12 @@ import { Overlay, OVERLAY_TEXT } from '@msimcity/shared';
 /**
  * The overlays menu (docs/audit-2026-10.md section 4.4) on the top bar's overlay chip and the H key: traffic congestion
  * (the roads' own tint from the traffic bytes) and the server's data overlays (shared/src/issues.ts Overlay: service
- * coverage, leisure, happiness, jobs against homes), each with its legend. H cycles congestion, coverage, leisure,
- * happiness, jobs/homes, off; the chip opens a small menu to pick one. Ramps are colour-blind safe: viridis for the
+ * coverage, leisure, happiness, jobs against homes, news reach), each with its legend. H cycles congestion, coverage, leisure,
+ * happiness, jobs/homes, news, off; the chip opens a small menu to pick one. Ramps are colour-blind safe: viridis for the
  * sequential ones, blue against orange for jobs/homes (render/materials.ts).
  */
 export type OverlayMode = 'off' | 'traffic' | number;
-const CYCLE: OverlayMode[] = ['traffic', Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, 'off'];
+const CYCLE: OverlayMode[] = ['traffic', Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News, 'off'];
 /** legend gradients matching the shaders (render/materials.ts mscViridis, mscDiverge, HEAT) */
 const VIRIDIS = 'linear-gradient(90deg, #440154, #3b528b, #21918c, #5ec962, #fde725)';
 const DIVERGE = 'linear-gradient(90deg, #e6750d, #eeebdb, #2166cc)';
@@ -77,7 +77,7 @@ export class OverlayMenu {
       </button>`;
     let html = '<div class="ohead">Overlays <span>H cycles</span></div>';
     html += row('traffic', 'free flowing', 'jammed', 'Roads by congestion');
-    for (const ch of [Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes]) { const t = OVERLAY_TEXT[ch]; html += row(ch, t.lo, t.hi, t.explain); }
+    for (const ch of [Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News]) { const t = OVERLAY_TEXT[ch]; html += row(ch, t.lo, t.hi, t.explain); }
     html += row('off', '', '', 'No overlay');
     this.menu.innerHTML = html;
   }

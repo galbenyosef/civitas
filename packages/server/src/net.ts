@@ -27,6 +27,7 @@ import { mothballable, adminRefusal, type Finance } from './sim/finance';
 import type { Issues } from './sim/issues';
 import type { Fires } from './sim/fires';
 import type { Adverts } from './sim/adverts';
+import type { News } from './sim/news';
 import { Overlays } from './overlays';
 import { ISSUE_TUNING, OVERLAY_COUNT, Issue } from '@msimcity/shared';
 
@@ -109,6 +110,8 @@ export class Net {
   fires: Fires | null = null;
   /** campaigns and rented ad slots (sim/adverts.ts): the 'ads' message and the advert intents; set by game.ts */
   adverts: Adverts | null = null;
+  /** the news story log (sim/news.ts): the 'news' message, media centres' building panels, the news overlay; set by game.ts */
+  news: News | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
   tickStats: { avg: number; p95: number; max: number } | null = null;
   /** game ticks per TICK_MS of wall time, sent with the stats message when it is not 1 so the client's clock follows a paused or
@@ -273,6 +276,7 @@ export class Net {
     if (this.harbours) this.send(c, this.harbours.msg());
     if (this.fires) this.send(c, { t: 'fires', f: this.fires.dtos() });
     if (this.adverts) this.send(c, { t: 'ads', ...this.adverts.dto() });
+    if (this.news) this.send(c, { t: 'news', s: this.news.recent(), all: true });
     c.goalsSig = undefined; this.goals(c);
     c.rankSig = undefined; this.rankTo(c);
     c.probSig = undefined; this.problemsTo(c);
@@ -332,6 +336,7 @@ export class Net {
     } else if (m.op === 'save') {
       const r = this.sim.transit.saveLine(p.id, m.line ?? {});
       if (typeof r === 'string') return this.toast(c, r);
+      if (!m.line?.id) this.news?.line(r); // a new line's first service is news
       const bored = r.mode === 'metro' ? this.metro?.lastBore : null;
       if (r.mode === 'metro') this.toast(c, `${r.name ? `The ${r.name} line` : `Line ${r.number}`} saved: ${r.stops.length} stations, ${r.vehicles} train${r.vehicles === 1 ? '' : 's'} asked for${bored?.tiles ? `; ${bored.tiles} tiles of tunnel bored${bored.crossovers ? ` with ${bored.crossovers} crossover${bored.crossovers === 1 ? '' : 's'}` : ''} for $${bored.cost.toLocaleString('en-GB')}` : ''}`, 'info');
       else if (r.mode === 'ferry') this.toast(c, `${r.name ? `The ${r.name} line` : `Line ${r.number}`} saved: ${r.stops.length} piers, ${r.vehicles} boat${r.vehicles === 1 ? '' : 's'} asked for`, 'info');
@@ -904,6 +909,8 @@ export class Net {
     if (info && mothballable(b!) && this.w.parcelAt(dx, dy)?.owner === c.player?.id) info.mothballable = true;
     const fire = info && this.fires?.describe(dx, dy);
     if (info && fire) info.fire = fire;
+    const media = info && this.news?.describe(b!);
+    if (info && media) info.media = media;
     this.send(c, { t: 'building', x, y, info });
   }
 
@@ -1109,6 +1116,8 @@ export class Net {
     if (this.fires?.changed) { this.fires.changed = false; this.broadcast({ t: 'fires', f: this.fires.dtos() }); }
     // campaigns and rented ad slots (sim/adverts.ts): the whole short list whenever it changed, and the renters' notices
     if (this.adverts?.changed) { this.adverts.changed = false; this.broadcast({ t: 'ads', ...this.adverts.dto() }); }
+    // the news (sim/news.ts): stories new or changed since the last frame
+    if (this.news?.fresh.size) this.broadcast({ t: 'news', s: this.news.drain() });
     if (this.adverts?.notices.length) for (const n of this.adverts.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed
@@ -1286,6 +1295,7 @@ export class Net {
       for (const c of this.clients) if (c.ovl) c.ovlQueue = [...c.subs];
     }
     this.overlays ??= new Overlays(w, this.sim, is);
+    this.overlays.news = this.news;
     let budget = OVERLAY_CHUNKS_PER_TICK;
     for (const c of this.clients) {
       const q = c.ovlQueue;

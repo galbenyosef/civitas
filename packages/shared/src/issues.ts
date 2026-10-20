@@ -49,13 +49,14 @@ export function moodReasonOf(label: string): number {
 }
 
 /** The data overlays the server can send (message `overlay`); congestion is the traffic message's own tint. 0 is none. */
-export const Overlay = { None: 0, Coverage: 1, Leisure: 2, Happiness: 3, JobsHomes: 4 } as const;
-export const OVERLAY_COUNT = 5;
+export const Overlay = { None: 0, Coverage: 1, Leisure: 2, Happiness: 3, JobsHomes: 4, News: 5 } as const;
+export const OVERLAY_COUNT = 6;
 export interface OverlayText { name: string; /** the legend's two ends */ lo: string; hi: string; /** 0 sequential (viridis-like), 1 diverging (blue-orange) */ ramp: 0 | 1; explain: string }
 export const OVERLAY_TEXT: Record<number, OverlayText> = {
   [Overlay.Coverage]: { name: 'coverage', lo: 'none', hi: 'police, fire and health', ramp: 0, explain: 'Police, fire and health cover from staffed stations, on every lot' },
   [Overlay.Leisure]: { name: 'leisure', lo: 'nothing to do', hi: 'plenty to do', ramp: 0, explain: 'Parks and open venues in reach of each lot' },
   [Overlay.Happiness]: { name: 'happiness', lo: 'miserable', hi: 'happy', ramp: 0, explain: 'Mean happiness of the people living in each home' },
+  [Overlay.News]: { name: 'news', lo: 'no channel', hi: 'rival channels', ramp: 0, explain: 'Where the media centres\' channels reach (docs/media.md): one channel, or two or more competing for the stories' },
   [Overlay.JobsHomes]: { name: 'jobs / homes', lo: 'needs jobs', hi: 'needs homes', ramp: 1, explain: 'Jobs minus residents within 8 tiles: orange has more people than work, blue more work than people' },
 };
 
