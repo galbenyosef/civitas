@@ -76,7 +76,8 @@ const CLUB = ['Rovers', 'United', 'Town', 'Athletic', 'Wanderers', 'City', 'Albi
 
 export class LiveFeed {
   readonly rt = new WebGLRenderTarget(FEED_W, FEED_H, { minFilter: LinearFilter, magFilter: LinearFilter });
-  readonly camera = new PerspectiveCamera(30, FEED_W / FEED_H, 0.05, 140);
+  /** a long lens over the scene: it sees a few tiles round the story, so the far plane is short (fewer draw calls) */
+  readonly camera = new PerspectiveCamera(30, FEED_W / FEED_H, 0.05, 45);
   /** the helicopter a set on screen asked for, until when (ms); and the one being rendered */
   private wantId: number | null = null;
   private wantUntil = 0;
@@ -368,10 +369,12 @@ export class TvGuide implements TvSource {
     const w = this.d.world;
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     const cells: [number, number][] = [];
+    // the town: its built tiles and roads (every tile while the loaded area is small, every other one beyond)
+    const step = w.chunks.size > 120 ? 2 : 1;
     for (const c of w.chunks.values()) {
-      for (let j = 0; j < CHUNK_SIZE; j += 2) for (let i = 0; i < CHUNK_SIZE; i += 2) {
+      for (let j = 0; j < CHUNK_SIZE; j += step) for (let i = 0; i < CHUNK_SIZE; i += step) {
         const t = c.tiles[j * CHUNK_SIZE + i];
-        if (!t) continue;
+        if (t === undefined || (!isRoad(t) && zoneOf(t) === Zone.None)) continue;
         const x = c.cx * CHUNK_SIZE + i, y = c.cy * CHUNK_SIZE + j;
         if (ch.owner && w.parcelAt(x, y)?.owner !== ch.owner) continue;
         cells.push([x, y]);
@@ -382,19 +385,24 @@ export class TvGuide implements TvSource {
       const sc = Math.min((GFX_W - 60) / Math.max(8, x1 - x0 + 2), (GFX_H - 80) / Math.max(8, y1 - y0 + 2));
       const ox = (GFX_W - (x1 - x0 + 2) * sc) / 2 - x0 * sc, oy = 40 + (GFX_H - 70 - (y1 - y0 + 2) * sc) / 2 - y0 * sc;
       // a coastline: the land a little larger in a darker green under it
+      const k = step * sc;
       g.fillStyle = '#2f6b33';
-      for (const [x, y] of cells) g.fillRect(ox + x * sc - sc * 0.6, oy + y * sc - sc * 0.6, sc * 3.2, sc * 3.2);
+      for (const [x, y] of cells) g.fillRect(ox + x * sc - k * 0.8, oy + y * sc - k * 0.8, k * 2.6, k * 2.6);
       g.fillStyle = '#4f9a48';
-      for (const [x, y] of cells) g.fillRect(ox + x * sc, oy + y * sc, sc * 2, sc * 2);
-      // places with their temperatures: the parcels with the most people, at their middles
-      const places = [...w.parcels.values()].filter((p) => !ch.owner || p.owner === ch.owner).sort((a, b) => b.stats.population - a.stats.population || a.id - b.id).slice(0, 4);
+      for (const [x, y] of cells) g.fillRect(ox + x * sc, oy + y * sc, k + 0.5, k + 0.5);
+      // places with their temperatures: the parcels with the most people, at their middles, never on top of each other
+      const places = [...w.parcels.values()].filter((p) => !ch.owner || p.owner === ch.owner).sort((a, b) => b.stats.population - a.stats.population || a.id - b.id);
+      const put: [number, number][] = [];
       g.font = 'bold 11px system-ui, sans-serif';
-      places.forEach((p, i) => {
+      for (const [i, p] of places.entries()) {
+        if (put.length >= 3) break;
         const px = ox + (p.x + p.w / 2) * sc, py = oy + (p.y + p.h / 2) * sc;
+        if (put.some(([qx, qy]) => Math.abs(qx - px) < 90 && Math.abs(qy - py) < 40)) continue;
+        put.push([px, py]);
         g.fillStyle = '#ffd23a'; g.fillRect(px - 13, py - 10, 26, 20);
         g.fillStyle = '#111'; g.textAlign = 'center'; g.fillText(`${fc.local(i)}`, px, py + 4);
         g.fillStyle = '#fff'; g.fillText(p.name.length > 18 ? `${p.name.slice(0, 17)}…` : p.name, px, py + 23);
-      });
+      }
       g.textAlign = 'left';
     }
     g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(0, 0, GFX_W, 32);
@@ -416,9 +424,13 @@ export class TvGuide implements TvSource {
     g.fillStyle = '#000'; g.fillRect(0, 0, GFX_W, GFX_H);
     g.textBaseline = 'top';
     const text = (col: number, row: number, s: string, color: string, dbl = false) => {
-      g.font = `bold ${dbl ? 17 : 9}px "Courier New", monospace`;
+      // double height: the same cell width, stretched to two rows, as the Ceefax headings are
+      g.font = `bold ${dbl ? 11 : 9}px "Courier New", monospace`;
       g.fillStyle = color;
-      for (let i = 0; i < s.length && col + i < 40; i++) g.fillText(s[i], (col + i) * cw + 0.5, row * rh + (dbl ? 1 : 0.5));
+      if (dbl) { g.save(); g.scale(1, 1.9); }
+      const k = dbl ? 1.9 : 1;
+      for (let i = 0; i < s.length && col + i < 40; i++) g.fillText(s[i], (col + i) * cw + 0.5, (row * rh + 0.5) / k);
+      if (dbl) g.restore();
     };
     const day = Math.floor(tick / TICKS_PER_DAY), hh = (tick % TICKS_PER_DAY) / TICKS_PER_HOUR;
     text(0, 0, `P${p.no}`, '#fff');

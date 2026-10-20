@@ -1312,7 +1312,8 @@ function frame(now: number) {
   if (feedCam) cams.push(feedCam);
   buildings.updateLod(cams, lighting.sun); // detail tiers and culling (render/buildings.ts)
   const overheadOnly = [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group];
-  tv.render(renderer, scene, overheadOnly);
+  // the feed leaves out what is under a pixel at 160×90 from the helicopter: people, parked cars, signal heads
+  tv.render(renderer, scene, [...overheadOnly, citizens.group, parked.group, junctions.group]);
   fpv.render(renderer, scene, rig.camera, overheadOnly);
 }
 requestAnimationFrame(frame);
