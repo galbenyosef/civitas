@@ -502,6 +502,17 @@ that day on.
   - `advert-wear`: three wear levels.
   - `advert-reach` is registered as a todo for A4.
 
+### Measured
+
+- **Tick cost.** `loadtest/ab.ts` (seed 1, 08:00 + 1,500 ticks) gives identical metrics on this branch and on main
+  a17b145: the same game, 0.689 against 0.659 ms a tick, which is run-to-run noise. `Adverts.tick` is a day check: 0.9 µs
+  a tick over four game days with posters up, the daily pass included (`loadtest/adverts.ts`).
+- **Client cost.** London at street level draws 155 calls a frame with 8 posters up and 154 with the poster mesh hidden:
+  one draw call.
+- **Old saves.** Copies of the live `data/world.json` and the showcase's demo snapshot load and save again without an
+  `adverts` field.
+- **The probe.** `npx tsx packages/server/src/loadtest/adverts.ts` passes 29 of 29.
+
 ### What A4 needs next
 
 - An `AdIndex` from road tile to rented slots. `adSlotWorld` gives each slot's facing, from which its road tile
