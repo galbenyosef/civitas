@@ -10,7 +10,7 @@ import { roofAnchor } from './issues';
 const MAX_FIRES = 64;
 const FLAMES_MAX = 10, PUFFS_MAX = 18, DROPS_MAX = 36;
 /** explosions drawn at once (fires v2), and the pieces of each: the flash, the ring and the fireball; the smoke column and the debris */
-const BLASTS_MAX = 16, BLAST_GLOW_MAX = 11, BLAST_SMOKE_MAX = 40;
+const BLASTS_MAX = 16, BLAST_GLOW_MAX = 12, BLAST_SMOKE_MAX = 56;
 /** a blast this many ticks old when first seen is drawn as already over (a client joining later sees the aftermath, not the flash) */
 const BLAST_FRESH = 25;
 /** one wind for the town (smoke leans the same general way), each fire and each puff turned off it by its own hash */
@@ -241,7 +241,7 @@ void main() {
   else if (vType < 1.5) {
     // a ragged front of its own: the ring is never a perfect circle
     float front = 0.86 + 0.05 * sin(ang * 5.0 + vSeed * 40.0) + 0.03 * sin(ang * 11.0 - vSeed * 23.0);
-    a = (1.0 - smoothstep(0.0, 0.07 + 0.12 * vK, abs(r - front))) + 0.18 * (1.0 - smoothstep(0.0, front, r)) * (1.0 - vK);
+    a = (1.0 - smoothstep(0.0, 0.1 + 0.15 * vK, abs(r - front))) + 0.35 * (1.0 - smoothstep(0.0, front, r)) * (1.0 - vK);
   } else {
     float lobes = 0.8 + 0.12 * sin(ang * 3.0 + vSeed * 30.0 + vK * 3.0) + 0.06 * sin(ang * 7.0 - vSeed * 13.0);
     a = 1.0 - smoothstep(0.25, 1.0, r / lobes);
@@ -313,7 +313,7 @@ void main() {
   if (vType < 0.5) {
     float ang = atan(q.y, q.x);
     float lobes = 0.8 + 0.11 * sin(ang * 3.0 + vSeed * 20.0) + 0.08 * sin(ang * 5.0 - vSeed * 11.0);
-    a = (1.0 - smoothstep(0.3, 1.0, length(q) / lobes)) * 0.85;
+    a = (1.0 - smoothstep(0.25, 1.0, length(q) / lobes)) * 0.92;
   } else {
     // a jagged chunk: a box whose edges are bitten in by the piece's own notches
     float bite = 0.12 * sin(q.x * 9.0 + vSeed * 40.0) * sin(q.y * 7.0 - vSeed * 17.0);
@@ -449,23 +449,23 @@ export class FiresView {
     const bx = f.bx!, foot = Math.max(hx, hz), h = (i: number, j: number) => hash2(f.x * 7919 + bx * 31 + i * 101, f.y * 104729 + bx + j * 37);
     const base = [roof[0], roof[1] * 0.6, roof[2]];
     const tint = h(1, 1);
-    this.put(this.blastGlow, fi, base, [0, 0, 0, tint], [h(2, 1), 2.6 + 1.4 * h(2, 2) + foot, 0.25 + 0.2 * h(2, 3), 0]);
-    this.put(this.blastGlow, fi, [roof[0], 0, roof[2]], [0, 0, 0, h(3, 4)], [h(3, 1), 2.8 + 1.6 * h(3, 2) + foot, 0.9 + 0.6 * h(3, 3), 1]);
-    const balls = 5 + Math.floor(h(4, 1) * 5);
+    this.put(this.blastGlow, fi, base, [0, 0, 0, tint], [h(2, 1), 4.5 + 2 * h(2, 2) + 1.5 * foot, 0.3 + 0.25 * h(2, 3), 0]);
+    this.put(this.blastGlow, fi, [roof[0], 0, roof[2]], [0, 0, 0, h(3, 4)], [h(3, 1), 3.2 + 1.8 * h(3, 2) + foot, 0.9 + 0.7 * h(3, 3), 1]);
+    const balls = 6 + Math.floor(h(4, 1) * 5);
     for (let i = 0; i < balls; i++) {
-      const a = h(10 + i, 1) * Math.PI * 2, r = 0.3 + 0.9 * h(10 + i, 2);
-      this.put(this.blastGlow, fi, base, [Math.cos(a), Math.sin(a), r * (0.6 + foot), 0.5 + 1.1 * h(10 + i, 3)], [h(10 + i, 4), 0.7 + 0.8 * h(10 + i, 5) + 0.3 * foot, 0.9 + 0.9 * h(10 + i, 6), 2]);
+      const a = h(10 + i, 1) * Math.PI * 2, r = 0.4 + 1.0 * h(10 + i, 2);
+      this.put(this.blastGlow, fi, base, [Math.cos(a), Math.sin(a), r * (0.6 + foot), 0.8 + 1.4 * h(10 + i, 3)], [h(10 + i, 4), 1.1 + 0.9 * h(10 + i, 5) + 0.4 * foot, 1.2 + 1.2 * h(10 + i, 6), 2]);
     }
-    const height = 4 + 3 * h(5, 1) + foot, puffs = 10 + Math.floor(h(5, 2) * 7);
+    const height = 5 + 4 * h(5, 1) + foot, puffs = 18 + Math.floor(h(5, 2) * 9);
     for (let i = 0; i < puffs; i++) {
       this.put(this.blastSmoke, fi, base, [(h(40 + i, 1) - 0.5) * hx * 0.9, (h(40 + i, 2) - 0.5) * hz * 0.9, height * (0.8 + 0.4 * h(40 + i, 3)), 0],
-        [h(40 + i, 4), 0.8 + 0.7 * h(40 + i, 5) + 0.3 * foot, 3 + 3 * h(40 + i, 6), 0]);
+        [h(40 + i, 4), 1.3 + 1.1 * h(40 + i, 5) + 0.4 * foot, 4 + 3 * h(40 + i, 6), 0]);
     }
-    const bits = 10 + Math.floor(h(6, 1) * 15), spread = h(6, 2) * Math.PI * 2, lop = 0.4 + 0.5 * h(6, 3); // the debris thrown more one way than the others
+    const bits = 14 + Math.floor(h(6, 1) * 15), spread = h(6, 2) * Math.PI * 2, lop = 0.4 + 0.5 * h(6, 3); // the debris thrown more one way than the others
     for (let i = 0; i < bits && i + puffs < BLAST_SMOKE_MAX; i++) {
       const a = h(80 + i, 1) * Math.PI * 2, bias = Math.cos(a - spread) * lop;
-      this.put(this.blastSmoke, fi, base, [a, foot + (0.8 + 2.4 * h(80 + i, 2)) * (1 + bias * 0.5), 0.5 + 1.2 * h(80 + i, 3), h(80 + i, 4)],
-        [h(80 + i, 5), 0.06 + 0.11 * h(80 + i, 6), 0.7 + 0.9 * h(80 + i, 7), 1]);
+      this.put(this.blastSmoke, fi, base, [a, foot + (1 + 2.5 * h(80 + i, 2)) * (1 + bias * 0.5), 0.8 + 1.4 * h(80 + i, 3), h(80 + i, 4)],
+        [h(80 + i, 5), 0.12 + 0.16 * h(80 + i, 6), 0.7 + 0.9 * h(80 + i, 7), 1]);
     }
     // a wider scorch than the fire's own: the blast's reach, its outline its own
     const reach = foot + FIRE.blastReach * (0.45 + 0.25 * h(7, 1));
