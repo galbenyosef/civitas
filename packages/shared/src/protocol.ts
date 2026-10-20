@@ -248,6 +248,17 @@ export interface BuildingInfo {
   harbour?: HarbourInfo;
   /** education kinds (docs/education.md, server sim/schools.ts): pupils, places, teachers and results */
   school?: SchoolInfo;
+  /** homes, for a viewer with Focus groups (docs/motivation.md, Culture tier 2): what the people of this parcel care about */
+  focus?: FocusInfo;
+}
+
+/** A Focus group's finding for one parcel (docs/motivation.md, BuildingInfo.focus): its grown-ups' values in whole percentages. */
+export interface FocusInfo {
+  parcel: string;
+  /** adults and retirees asked (children are not) */
+  people: number;
+  /** percentages in Value order (shared/src/motivation.ts), summing to 100 */
+  pct: number[];
 }
 
 /** A school, college or university for its tooltip (docs/education.md section 3). Stage is a Study value. */
@@ -464,6 +475,10 @@ export interface CitizenLife {
   /** the moment of the game week they turn a year older (a game week is a year): weekday 0 = Monday, hour */
   birthday?: { weekday: number; hour: number };
   education?: CitizenEducation;
+  /** what they care about, in words (docs/motivation.md section 9): "Cares most about family; restless" */
+  values?: string;
+  /** their latest change of job or home of their own accord, in words, while recent: "changed job for the pay" */
+  lately?: string;
 }
 /** A citizen's schooling for the panel (docs/education.md); level, track and stage are EduLevel, EduTrack and Study. */
 export interface CitizenEducation {

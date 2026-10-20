@@ -1,4 +1,4 @@
-import { ROAD_COST, ZONE_COST, LAND_PRICE_PER_TILE, MAX_TAX, CIVIC_COST, Zone, KIND_NAMES, PRIORITY_NAMES, DAYS_PER_WEEK, isCivicId, familyOf, hasFeature, techFor, TECH, TECH_BY_ID, TRACK_NAMES, describeCondition, type ParcelDTO, type PlayerDTO, type BuildingInfo, type PersonRow, type PersonRef, type RoadInfo, type CitizenInfo, type SiteDTO } from '@msimcity/shared';
+import { ROAD_COST, ZONE_COST, LAND_PRICE_PER_TILE, MAX_TAX, CIVIC_COST, Zone, KIND_NAMES, PRIORITY_NAMES, DAYS_PER_WEEK, isCivicId, familyOf, hasFeature, techFor, TECH, TECH_BY_ID, TRACK_NAMES, describeCondition, type ParcelDTO, type PlayerDTO, type BuildingInfo, type PersonRow, type PersonRef, type RoadInfo, type CitizenInfo, type SiteDTO, type FocusInfo, VALUE_NAMES } from '@msimcity/shared';
 import { TOOL_KINDS, DEV_TOOLS, type ToolId } from './input';
 import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo, type HarbourInfo } from '@msimcity/shared';
 import { railStationHtml, metroStationHtml } from './rail';
@@ -498,6 +498,7 @@ export class UI {
         html += row('Leisure coverage', `${esc(l.label)}${what ? ` (${what})` : ''}`);
       }
     }
+    if (info.focus) html += focusHtml(info.focus);
     if (info.workers && !((info.venue || info.gateway) && info.capacity === 0)) { // a park or a motorway connection has no staff
       const w = info.workers;
       html += `<div class="sect">${fam === Zone.Yard ? 'Builders' : 'Staff'}</div>`;
@@ -698,6 +699,7 @@ export class UI {
       html += row('Health', `${life.health}${life.conditions.length ? ` · ${esc(life.conditions.join(', '))}` : ''}`);
       html += row('Happiness', `${life.happiness}`);
       if (life.leisureNeed !== undefined) html += row('Leisure need', `${life.leisureNeed}%`);
+      if (life.values) html += `<div class="row"><span class="values">${esc(life.values)}</span></div>`;
     }
     if (life && full) html += this.lifeHtml(life);
     return html;
@@ -708,6 +710,8 @@ export class UI {
     const meter = (v: number, cls: string) => `<div class="bar meter ${cls}"><i style="width:${Math.max(0, Math.min(100, v))}%"></i></div>`;
     const person = (r: PersonRef) => `<div class="person" data-cid="${r.id}" title="click to select ${esc(r.name)}"><span class="pname">${esc(r.name)} <span class="page">${r.age}</span></span><span class="prel">${esc(r.relation === 'friend' ? r.activity : `${r.relation} · ${r.activity}`)}</span></div>`;
     let html = `<div class="sect">Life</div>`;
+    if (life.values) html += `<div class="row"><span class="values">${esc(life.values)}</span></div>`; // docs/motivation.md: words, never numbers
+    if (life.lately) html += row('Lately', esc(life.lately));
     html += row('Age', `${life.age} · ${life.stage}${life.birthday ? ` · turns ${life.age + 1} on ${WEEKDAY_NAMES[life.birthday.weekday]}` : ''}`);
     const ed = life.education;
     if (ed) html += educationHtml(ed);
@@ -844,6 +848,16 @@ const SHORT_EDU: Record<number, string> = {
 };
 const shortKind = (k: number) => SHORT[k] ?? SHORT_EDU[k] ?? KIND_NAMES[k];
 /** the education policies a tech node opens, for its card in the tech tree (shared/src/policies.ts) */
+/** Focus groups (docs/motivation.md, Culture tier 2): the value mix of a home's parcel, a bar per value, largest first. */
+function focusHtml(f: FocusInfo): string {
+  let html = `<div class="sect">Focus group · ${esc(f.parcel)}</div>`;
+  if (!f.people) return html + `<div class="row"><span>Nobody here to ask yet</span></div>`;
+  html += `<div class="row"><span>Asked</span><span>${f.people} resident${f.people === 1 ? '' : 's'}</span></div>`;
+  const order = f.pct.map((p, i) => [p, i]).sort((a, b) => b[0] - a[0]);
+  for (const [p, i] of order) html += `<div class="row focus"><span>${VALUE_NAMES[i]}</span><span><span class="bar meter good"><i style="width:${Math.min(100, p * 2)}%"></i></span>${p}%</span></div>`;
+  return html;
+}
+
 const policiesOf = (t: { unlocks: string[] }) => {
   const names = POLICIES.filter((p) => t.unlocks.includes(p.feature)).map((p) => p.name);
   return names.length ? `<div class="pol">Policies: ${names.join(', ')}</div>` : '';

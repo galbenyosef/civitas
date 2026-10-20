@@ -13,7 +13,7 @@ import {
   type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
   buildingValue, LAND_PRICE_PER_TILE, ROAD_COST,
   eduDefaults, birthdayOf, yearGroup, STAGES, Study, EduResult, EDU_NURSERY, EDU_DROPPED, EDU_HOMEWARD, CITIZEN_STUDY, type CitizenEducation,
-  SKILLS, wageMul, EduLevel, type EduFields,
+  SKILLS, wageMul, EduLevel, type EduFields, MOTIVE, type FocusInfo,
 } from '@msimcity/shared';
 import type { Building, Citizen, Leg, Mover, Vehicle, World, MergePlan } from '../world';
 import { noteTrail, resetTrail, tkey, untkey, lifeDefaults, citizenLater, hasJobs } from '../world';
@@ -22,7 +22,7 @@ import {
   noteIncome, noteSpend, week, today, happinessParts, happinessOf,
   LEISURE, leisureTier, leisureNeed, noteLeisureVisit, leisureDay,
 } from './life';
-import { findPath, findBest, findRoute, pathBetween, pathStillValid } from '../pathfinding';
+import { findPath, findPaths, findBest, findRoute, pathBetween, pathStillValid } from '../pathfinding';
 import { Traffic, crossMask, dirBetween, hypot } from './traffic';
 import { indicatorOf } from './indicators';
 import { Transit, BusService, isMechanic } from './transit';
@@ -40,6 +40,7 @@ import { FirstFive } from './firstfive';
 import { START_TUNING } from '@msimcity/shared';
 import { Families } from './families';
 import { Learning, ERRAND_CLASS } from './learning';
+import { Motivation, MOTIVATION, inheritValues, type MotiveHost } from './motivation';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -192,6 +193,9 @@ export class Simulation {
   learning: Learning;
   /** the first five minutes (sim/firstfive.ts, docs/first-five.md): the camp's settlers, the starter crew, the first-settlers moment */
   start: FirstFive;
+  /** what citizens care about and the choices they score with it (sim/motivation.ts, docs/motivation.md M1-M2) */
+  motive: Motivation;
+  private motiveHost: MotiveHost;
   /** adds the tiles growth must leave alone this pass (sim/fires.ts: buildings on fire), as tkeys; set by game.ts */
   held: ((into: Set<number>) => void) | null = null;
   /** messages for a parcel owner's screen (net.ts sends them as toasts and clears the list) */
@@ -202,6 +206,16 @@ export class Simulation {
   modeLog = { walk: 0, drive: 0, transit: 0, taxi: 0 };
 
   constructor(private w: World) {
+    this.motive = new Motivation(w);
+    this.motiveHost = {
+      bestJob: (c, except) => this.jobOptions(c, except),
+      canSwitch: (c) => c.state === S.Home && !c.site && c.appr === undefined && !c.study && !this.mobile.roleOf(c),
+      switchJob: (c, b, path) => { w.quitJob(c); this.hire(c, b, path); },
+      cover: (x, y) => Math.floor(this.coverage(x, y) + 1e-6),
+      parks: (x, y) => this.leisureCoverage(x, y).parks,
+      moveHome: (c, b, hh) => this.moveHome(c, b, hh),
+      homeOk: (b) => b.zone === Zone.Residential && b.id !== CAMP_KIND && w.hasRoadAccess(b.x, b.y),
+    };
     this.traffic = new Traffic(w);
     this.transit = new Transit(w);
     this.buses = new BusService(w, this.traffic, this.transit);
@@ -492,7 +506,7 @@ export class Simulation {
     for (const id of c.friends) { const o = w.citizens.get(id); if (o) friends.push(ref(o, 'friend')); }
     let colleagues = 0;
     if (c.job) for (const o of w.citizens.values()) if (o.job && o !== c && o.wx === c.wx && o.wy === c.wy) colleagues++;
-    const parts = happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools) });
+    const parts = happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools), bend: this.motive.bend(c) });
     const wk = week(c, tick);
     const fresh = c.statsDay === day;
     let care: string | undefined;
@@ -511,6 +525,7 @@ export class Simulation {
       tripsToday: fresh ? c.tripsToday : 0, trafficMinToday: fresh ? Math.round((c.trafficTicksToday * 60) / TPH) : 0,
       sickDays: c.sickDays, leisureNeed: Math.round(leisureNeed(c) * 100),
       birthday: birthdayOf(c.born, LIFE.daysPerYear), education: this.describeEducation(c),
+      values: this.motive.describe(c), lately: this.motive.lately(c),
     };
   }
   /** Level, track, the stage under way and the finished ones (docs/education.md). */
@@ -766,7 +781,7 @@ export class Simulation {
 
   /** A citizen's happiness parts as the daily update reads them now (sim/issues.ts asks why a very unhappy home is). */
   moodParts(c: Citizen) {
-    return happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick: this.w.tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools) });
+    return happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick: this.w.tick, parks: this.leisureCoverage(c.hx, c.hy).parks, kids: this.families.homeParts(c, this.schools), bend: this.motive.bend(c) });
   }
   /**
    * Service coverage of a tile: for each service family (police, fire, health) the strongest staffed station whose
@@ -774,6 +789,11 @@ export class Simulation {
    * stations are strength 1 within SERVICE_RADIUS, so with only those this is the count of distinct services in reach.
    * Smaller rungs give fractions (a police box is 0.4); happiness reads the whole part, growth and tax tolerance all of it.
    */
+  /** Focus groups (net.ts inspect, for a viewer with the feature): the value mix of the people on the parcel at (x, y). */
+  focusAt(x: number, y: number): FocusInfo | undefined {
+    const p = this.w.parcelAt(x, y);
+    return p ? this.motive.focus(p.id, p.name) : undefined;
+  }
   /** A tile's service cover (0-3) and leisure tier (0-2), for the wear rate of a poster there (sim/adverts.ts). */
   areaCover(x: number, y: number): [number, number] { return [this.coverage(x, y), leisureTier(this.leisureCoverage(x, y).score)]; }
   private coverage(x: number, y: number): number {
@@ -1194,6 +1214,7 @@ export class Simulation {
       ...edu,
       leisure: LEISURE.start + LEISURE.startSpread * hash2(id, 219), // newcomers arrive neither bored nor fresh from a holiday
       ...citizenLater(),
+      vals: this.motive.seed(id, home), // what they care about, drawn by the area they move into (sim/motivation.ts)
     };
   }
 
@@ -1217,7 +1238,7 @@ export class Simulation {
     }
     let x0 = c.hx, y0 = c.hy, x1 = c.hx, y1 = c.hy;
     const full = new Set<Building>();
-    const r = findPath(w, c.hx, c.hy, (x, y) => {
+    const isGoal = (x: number, y: number) => {
       if (x < x0) x0 = x; else if (x > x1) x1 = x;
       if (y < y0) y0 = y; else if (y > y1) y1 = y;
       const t = w.peekTile(x, y);
@@ -1227,10 +1248,36 @@ export class Simulation {
       if (sk.placeFor(b, edu) !== Place.None) return true;
       full.add(b);
       return false;
-    });
+    };
+    // motivation (sim/motivation.ts): a few vacancies from the same search, scored by what the citizen cares about
+    const rs = MOTIVATION.on ? findPaths(w, c.hx, c.hy, isGoal, undefined, MOTIVE.jobOptions, MOTIVE.jobSlack, MOTIVE.jobExtraNodes) : null;
+    const r = rs ? rs[this.pickJob(c, rs)] : findPath(w, c.hx, c.hy, isGoal);
     if (!r) { this.jobMisses.set(home, { x0: x0 - 2, y0: y0 - 2, x1: x1 + 2, y1: y1 + 2, edits: w.jobEdits, full: [...full] }); return false; }
     this.hire(c, w.buildings.get(tileKey(r.gx, r.gy))!, r.path);
     return true;
+  }
+  /** The scored choice among a search's vacancies (an index into rs; 0, the nearest, with one). */
+  private pickJob(c: Citizen, rs: { path: number[]; gx: number; gy: number }[]): number {
+    if (rs.length <= 1) return 0;
+    const facts = rs.map((r) => { const b = this.w.buildings.get(tileKey(r.gx, r.gy))!; return this.motive.jobFacts(c, b, r.path.length / 2 - 1, this.skills.placeFor(b, c.edu)); });
+    return this.motive.pickJob(c, facts);
+  }
+  /**
+   * A worker's look for a better job (Motivation.daily): the scored best of a fresh search from home, never their own
+   * workplace. No miss cache: a worker with a job is not a newcomer to a home with no work in reach.
+   */
+  private jobOptions(c: Citizen, except?: Building): { b: Building; path: number[]; place: number } | null {
+    const w = this.w, sk = this.skills, edu = c.edu;
+    const rs = findPaths(w, c.hx, c.hy, (x, y) => {
+      const t = w.peekTile(x, y);
+      if (t === undefined || isRoad(t) || !hasJobs(zoneOf(t))) return false;
+      const b = w.buildings.get(tileKey(x, y));
+      if (!b || b === except || !hasJobs(b.zone) || (w.mothballed.size && w.mothballed.has(tileKey(x, y)))) return false;
+      return sk.placeFor(b, edu) !== Place.None;
+    }, undefined, MOTIVE.jobOptions, MOTIVE.jobSlack, MOTIVE.jobExtraNodes);
+    if (!rs.length) return null;
+    const r = rs[this.pickJob(c, rs)], b = w.buildings.get(tileKey(r.gx, r.gy))!;
+    return { b, path: r.path, place: sk.placeFor(b, edu) };
   }
 
   private hire(c: Citizen, b: Building, commute: number[]) {
@@ -1421,7 +1468,7 @@ export class Simulation {
     const fx = Math.floor(c.x), fy = Math.floor(c.y);
     const needMul = 0.7 + 0.8 * leisureNeed(c);
     let best: Building | null = null;
-    let bestScore = freeOnly ? 0.15 : BAR_YARDSTICK * (0.6 + 0.8 * Math.random());
+    let bestScore = freeOnly ? 0.15 : BAR_YARDSTICK * (0.6 + 0.8 * Math.random()) * this.motive.yardstick(c);
     w.eachBuiltNear(fx, fy, LEISURE_CODES, freeOnly ? CHILD_TRIP_MAX : LEISURE_TRIP_MAX, (b, d) => {
       const sp = leisureAt(b.id, b.level, b.x, b.y);
       if (!sp || sp.blockOnly) return; // a block's communal garden is for the homes round it; no road leads there
@@ -1433,7 +1480,8 @@ export class Simulation {
       const stage = c.stage === LifeStage.Retired ? sp.retiree : c.stage === LifeStage.Child ? sp.child : 1;
       const taste = 0.35 + 1.3 * hash2(c.id, 301 + VENUE_TYPE_INDEX[sp.type]);
       const pull = this.eventNow(sp, b) ? EVENT_PULL * sp.eventSize : 1; // bigger venues, bigger nights
-      const score = ((evening ? sp.evening : sp.day) * stage * taste * pull * (0.5 + sp.value / 8) * needMul * (0.6 + 0.8 * Math.random())) / (1 + d / 12);
+      const score = ((evening ? sp.evening : sp.day) * stage * taste * pull * (0.5 + sp.value / 8) * needMul * (0.6 + 0.8 * Math.random())) / (1 + d / 12)
+        * (MOTIVATION.on ? this.motive.leisure(c, d, sp.ticket, pull > 1) : 1); // Adventure goes further and loves an event, Money minds the ticket
       if (score > bestScore) { bestScore = score; best = b; }
     });
     return best;
@@ -1626,6 +1674,7 @@ export class Simulation {
     if (c.stage === LifeStage.Retired) { c.money += LIFE.pension; noteIncome(c, LIFE.pension, tick); }
     if (c.stage !== LifeStage.Child && c.state === S.Home) this.lifeFamily(c, age, hh);
     if (c.state === S.Home) this.start.campStep(c); // a camp settler moves into a finished home nearby (sim/firstfive.ts)
+    if (c.state === S.Home) this.motive.daily(c, this.motiveHost); // a better job or home, now and then (sim/motivation.ts)
     if (c.job && c.friends.length < LIFE.maxFriends && Math.random() < LIFE.workFriendPerDay) {
       const o = this.pickFrom(this.socialIndex().work.get(tkey(c.wx, c.wy)), c);
       if (o) this.befriend(c, o);
@@ -1633,7 +1682,7 @@ export class Simulation {
     // the leisure need drains a little every day; parks near home give some of it back
     const lc = this.leisureCoverage(c.hx, c.hy);
     leisureDay(c, lc.parks);
-    c.happy = happinessOf(happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: lc.parks, kids: this.families.homeParts(c, this.schools) }));
+    c.happy = happinessOf(happinessParts(c, { coverage: Math.floor(this.coverage(c.hx, c.hy) + 1e-6), tick, parks: lc.parks, kids: this.families.homeParts(c, this.schools), bend: this.motive.bend(c) }));
     c.trafficTicksLife = 0;
   }
 
@@ -1763,7 +1812,8 @@ export class Simulation {
       if (o && !o.partner && o.stage === LifeStage.Adult && o.hh !== c.hh && Math.abs(ageOf(o, w.tick) - age) <= LIFE.partnerAgeGap) { this.pair(c, o); return; }
     }
     if (c.par && age <= LIFE.moveOutMaxAge && hh && hh.ids.includes(c.par) && Math.random() < LIFE.moveOutPerDay) {
-      const b = w.bestBuiltNear(c.hx, c.hy, [Zone.Residential], LIFE.moveOutRadius, 6,
+      const scored = this.motive.moveOutHome(c, this.motiveHost); // by what they care about (sim/motivation.ts); undefined when off
+      const b = scored !== undefined ? scored : w.bestBuiltNear(c.hx, c.hy, [Zone.Residential], LIFE.moveOutRadius, 6,
         (b, d) => (b !== home && b.id !== CAMP_KIND && b.occupants < capacityOf(b.id, b.level) ? 6 * Math.random() - d : null), (b) => w.hasRoadAccess(b.x, b.y)); // not into the tents
       if (b) { this.moveHome(c, b, w.nextId++); this.lifeEvents.movedOut++; }
     }
@@ -1813,6 +1863,7 @@ export class Simulation {
     const c = this.makeCitizen(id, home, 0, 85 + 12 * hash2(id, 212));
     c.money = 0; c.car = false; c.stage = LifeStage.Child;
     c.hh = parent.hh; c.sn = w.households.get(parent.hh)?.sn ?? parent.sn; c.par = parent.id;
+    c.vals = inheritValues(id, [parent, w.citizens.get(parent.partner)]); // children take after their parents (sim/motivation.ts)
     w.addCitizen(c);
     home.occupants++;
     this.lifeEvents.births++;

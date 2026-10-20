@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, eduDefaults, isPolicyId, type TransitLine, type SeaGate } from '@msimcity/shared';
+import { CHUNK_SIZE, seededValues, u16ToB64, b64ToU16, i32ToB64, b64ToI32, u8ToB64, b64ToU8, chunkKey, tileKey, parseKey, zoneOf, levelOf, isRoad, kindIdOf, Zone, LifeStage, eduDefaults, isPolicyId, type TransitLine, type SeaGate } from '@msimcity/shared';
 import { World, emptyProgress, lifeDefaults, citizenLater, type Citizen, type Parcel, type Player, type Site } from './world';
 import { LIFE, seededAge, ageOf } from './sim/life';
 import { rehire } from './sim/skills';
@@ -143,6 +143,8 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
     const c = { id: saved.id, ...lifeDefaults(saved.id, w.tick, seededAge(saved.id, LIFE.legacyMin, LIFE.legacyMax), 80), ...citizenLater(), ...(saved as Partial<Citizen>) } as Citizen;
     // citizens saved before education (docs/education.md): levels seeded from the id and their age, studying nowhere
     if (c.edu === undefined) Object.assign(c, eduDefaults(c.id, ageOf(c, w.tick)));
+    // citizens saved before motivation (docs/motivation.md): values from the id, the same on every load
+    if (!c.vals) c.vals = seededValues(c.id);
     c.errand = 0;
     const home = w.buildings.get(tileKey(c.hx, c.hy));
     if (!home) continue;

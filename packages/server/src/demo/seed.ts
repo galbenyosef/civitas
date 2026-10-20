@@ -6,6 +6,7 @@ import {
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, type Building, type Citizen } from '../world';
 import { ageOf, stageFor } from '../sim/life';
+import { inheritValues } from '../sim/motivation';
 import { seedCity } from '../loadtest/cities';
 import { settleInteriors, GARDEN_KIND } from '../sim/blocks';
 import { seedLondon } from './london';
@@ -298,6 +299,7 @@ export function seedDemoFamilies(w: World, sim: Simulation, sections: DemoSectio
     for (let i = 0; i < kids; i++) {
       const k = add(rnd() < DEMO_FAMILIES.babies ? rnd() * 3 : DEMO_FAMILIES.ages[0] + rnd() * (DEMO_FAMILIES.ages[1] - DEMO_FAMILIES.ages[0]));
       k.stage = stageFor(k.id, ageOf(k, w.tick)); k.car = false; k.money = 0; k.par = a.id; k.sn = a.sn;
+      k.vals = inheritValues(k.id, [a, b]); // children take after their parents (sim/motivation.ts)
       w.setHousehold(k, a.hh);
       children++;
     }

@@ -911,6 +911,8 @@ export class Net {
     if (info && fire) info.fire = fire;
     const media = info && this.news?.describe(b!);
     if (info && media) info.media = media;
+    // Focus groups (Culture tier 2, docs/motivation.md): what the people of a home's parcel care about, for a viewer who has it
+    if (info && b!.zone === Zone.Residential && c.player && hasFeature(c.player.tech, 'focusgroups')) info.focus = this.sim.focusAt(dx, dy);
     this.send(c, { t: 'building', x, y, info });
   }
 
