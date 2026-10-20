@@ -178,41 +178,51 @@ export function leisureDay(c: Citizen, parkValue: number) {
  * coverage: distinct services in reach; parks: the summed leisure value of parks in reach of home; kids: a parent's
  * children at school (sim/families.ts homeParts): school 1 every one has a place, -1 one has none; meals: free school meals
  */
-export interface HappyInputs { coverage: number; tick: number; parks?: number; kids?: { school: number; meals: boolean } }
+export interface HappyInputs {
+  coverage: number; tick: number; parks?: number; kids?: { school: number; meals: boolean };
+  /** motivation (sim/motivation.ts bend): a multiplier per value (Value order) for the parts that value cares about; 1 for all when absent */
+  bend?: readonly number[];
+}
+/** Value indices (shared/src/motivation.ts Value) the parts of happiness belong to */
+const MONEY = 0, FAMILY = 1, STATUS = 2, ROOTS = 3, TIME = 4, ADVENTURE = 5;
 /** Contributions to happiness (points around a neutral 50), each with a label for the panel. */
 export function happinessParts(c: Citizen, h: HappyInputs): { label: string; delta: number }[] {
   const parts: { label: string; delta: number }[] = [];
-  const add = (label: string, delta: number) => { if (Math.abs(delta) >= 0.5) parts.push({ label, delta: Math.round(delta) }); };
+  // a part a citizen's values care about counts for more, one they don't for less (docs/motivation.md section 5)
+  const add = (label: string, delta: number, v = -1) => {
+    if (v >= 0 && h.bend) delta *= h.bend[v];
+    if (Math.abs(delta) >= 0.5) parts.push({ label, delta: Math.round(delta) });
+  };
   const adult = c.stage !== LifeStage.Child;
   if (c.job && c.commuteTicks > 0) {
     const min = (c.commuteTicks * 60) / TICKS_PER_HOUR;
-    add(min <= 20 ? 'short commute' : `long commute (${Math.round(min)} min)`, min <= 20 ? 3 : -Math.min(15, (min - 20) / 5));
+    add(min <= 20 ? 'short commute' : `long commute (${Math.round(min)} min)`, min <= 20 ? 3 : -Math.min(15, (min - 20) / 5), TIME);
   }
   if (adult) {
-    add(c.money < 15 ? 'short of money' : c.money < 60 ? 'money is tight' : c.money > 300 ? 'comfortable savings' : 'gets by', c.money < 15 ? -10 : c.money < 60 ? -3 : c.money > 300 ? 6 : 2);
+    add(c.money < 15 ? 'short of money' : c.money < 60 ? 'money is tight' : c.money > 300 ? 'comfortable savings' : 'gets by', c.money < 15 ? -10 : c.money < 60 ? -3 : c.money > 300 ? 6 : 2, MONEY);
     const wk = week(c, h.tick);
-    if (wk.income + wk.spend > 0) add(wk.income >= wk.spend ? 'earning more than spending' : 'spending more than earning', wk.income >= wk.spend ? 2 : -3);
+    if (wk.income + wk.spend > 0) add(wk.income >= wk.spend ? 'earning more than spending' : 'spending more than earning', wk.income >= wk.spend ? 2 : -3, MONEY);
   }
   add(c.health >= 70 ? 'good health' : c.health >= 45 ? 'so-so health' : 'poor health', (c.health - 70) * 0.25);
   if (c.cond & ACUTE) add('unwell right now', -4);
-  add(['no services nearby', 'some services nearby', 'good services nearby', 'every service nearby'][Math.min(3, h.coverage)], [-6, 0, 4, 8][Math.min(3, h.coverage)]);
+  add(['no services nearby', 'some services nearby', 'good services nearby', 'every service nearby'][Math.min(3, h.coverage)], [-6, 0, 4, 8][Math.min(3, h.coverage)], FAMILY);
   const fun = Math.max(0, Math.min(1, c.leisure));
-  add(fun >= 0.65 ? 'good times out' : fun >= 0.35 ? 'the odd outing' : 'nothing to do', fun >= 0.65 ? Math.min(6, (fun - 0.5) * 16) : fun >= 0.35 ? 1 : -Math.min(6, (0.35 - fun) * 18 + 1));
-  if (h.parks && h.parks > 0) add('park nearby', Math.min(5, 1 + h.parks * 0.6));
+  add(fun >= 0.65 ? 'good times out' : fun >= 0.35 ? 'the odd outing' : 'nothing to do', fun >= 0.65 ? Math.min(6, (fun - 0.5) * 16) : fun >= 0.35 ? 1 : -Math.min(6, (0.35 - fun) * 18 + 1), ADVENTURE);
+  if (h.parks && h.parks > 0) add('park nearby', Math.min(5, 1 + h.parks * 0.6), TIME);
   if (c.stage === LifeStage.Adult && !c.job) {
-    if (SKILLS.on && c.study) add('studying', 2); else add('out of work', -8);
+    if (SKILLS.on && c.study) add('studying', 2, STATUS); else add('out of work', -8, MONEY);
   }
   // education (sim/skills.ts): a graduate in a place far below their level, and the first days after graduating
-  if (overQualified(c)) add('over-qualified', -2);
-  if (SKILLS.on && c.grad !== undefined && h.tick / DAY - c.grad < EDU.drainDays) add('graduated', 5);
+  if (overQualified(c)) add('over-qualified', -2, STATUS);
+  if (SKILLS.on && c.grad !== undefined && h.tick / DAY - c.grad < EDU.drainDays) add('graduated', 5, STATUS);
   // a parent's children at school (docs/education.md section 7), and free school meals (the E6 policy)
-  if (h.kids?.school) add(h.kids.school > 0 ? 'good school nearby' : 'no school place', h.kids.school > 0 ? 3 : -4);
-  if (h.kids?.meals) add('free school meals', POLICY.mealsMood);
+  if (h.kids?.school) add(h.kids.school > 0 ? 'good school nearby' : 'no school place', h.kids.school > 0 ? 3 : -4, FAMILY);
+  if (h.kids?.meals) add('free school meals', POLICY.mealsMood, FAMILY);
   if (c.stage === LifeStage.Retired) add('retired', 3);
   const social = Math.min(6, c.friends.length * 2) + (c.partner ? 4 : 0);
-  add(social > 0 ? (c.partner ? 'partner and friends' : 'friends') : 'lonely', social > 0 ? social : -3);
+  add(social > 0 ? (c.partner ? 'partner and friends' : 'friends') : 'lonely', social > 0 ? social : -3, ROOTS);
   const trafficMin = (c.trafficTicksLife * 60) / TICKS_PER_HOUR;
-  if (trafficMin > 20) add('stuck in traffic', -Math.min(6, trafficMin / 10));
+  if (trafficMin > 20) add('stuck in traffic', -Math.min(6, trafficMin / 10), TIME);
   parts.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   return parts;
 }

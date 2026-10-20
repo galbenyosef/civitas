@@ -9,6 +9,7 @@ import { METRO, isTunnel, isPlatform, underMask } from '../metro';
 import { placedFromDoor, footprintOf, FRONT, FRONT_NAMES, type Placed } from '../structures';
 import { kindManifest, CIVIC_COST } from '../tile';
 import { techFor, TRACK_NAMES } from '../tech';
+import { VALUE_NAMES, VALUE_COUNT, topValues, valuesOf } from '../motivation';
 import { RUNWAY_COST, RUNWAY_MIN, RUNWAY_MAX, TERMINAL_ROW } from '../airport';
 import { RAIL_COST, CROSSING_COST } from '../rail';
 import { ROUNDABOUT_COST, FLYOVER_COST } from '../junctions';
@@ -323,7 +324,11 @@ export const SECTIONS: DemoSection[] = [
         how: 'Nothing to build. Zone a block all homes and own its middle: once every home round it stands, the residents plant it. It costs nothing and has no upkeep.' },
     ],
     // mobile jobs (docs/mobile-jobs.md): roles of grown lots picked by tile hash, so these doors are where the hashes put them
-    spots: MOBILE_SPOTS.map(([id, x, y, name]): DemoSpot => ({ id, spot: id, name, rect: [x, y, 1, 1], inspect: [x, y] })),
+    spots: [
+      ...MOBILE_SPOTS.map(([id, x, y, name]): DemoSpot => ({ id, spot: id, name, rect: [x, y, 1, 1], inspect: [x, y] })),
+      // focus groups (docs/motivation.md): a home in the residential block, whose tooltip shows its parcel's value mix
+      { id: 'focus-groups', spot: 'focus-groups', name: 'Focus groups', rect: block(1, 1, 1, 1), inspect: [-5, -4] },
+    ],
   },
   {
     id: 'high-street', name: 'High Street',
@@ -619,7 +624,7 @@ export const SECTIONS: DemoSection[] = [
 /** Tour order: placement, block, runway, track, junction and line ids, plus 'welcome' (the whole town). */
 export const TOUR: string[] = [
   'welcome',
-  'block-residential', 'block-commercial', 'high-street', 'big-screens', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
+  'block-residential', 'focus-groups', 'block-commercial', 'high-street', 'big-screens', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
   'cab-office', 'takeaway', 'waste-depot', 'parcel-depot',
   'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
@@ -735,7 +740,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'cab-office': {
     title: 'Cab office',
@@ -790,6 +795,12 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     what: `A town works its way up from ${RANKS.map((r) => r.name).join(' to ')}. Each rank has needs measured on the player's own land (residents, jobs filled, shops, a park, police and fire cover, two-storey streets, days in the black, schools or a bus line), pays a charter grant when it is reached and, on a frontier, grows the free charter by a ring of land. The rank chip in the top bar shows the next rank's progress; its card lists the needs and a milestone feed, and each rank reached is celebrated with fireworks over the town, every shell its own. This stop plays a celebration over the town: the showcase is a sandbox, so it has no ranks of its own.`,
     how: 'Play a live world or a local game: the rank chip appears beside the treasury. Follow the goals card for the first hour; the rank card takes its place once the chain is done.',
     facts: RANKS.slice(1).map((r): [string, string] => [r.name, `${r.needs.map((q) => `${q.target.toLocaleString('en-GB')}${q.frontier ? ` (${q.frontier.toLocaleString('en-GB')} on a frontier)` : ''} ${q.label}`).join(', ')}; $${r.grant.toLocaleString('en-GB')}, ${r.side}×${r.side} on a frontier`]),
+  },
+  'focus-groups': {
+    title: 'Focus groups',
+    what: `What the people of a parcel care about (docs/motivation.md). Every citizen has six values, ${VALUE_NAMES.join(', ')}: a blend of one or two characters (the grafter, the homemaker, the climber, the local, the easygoing, the free spirit), drawn toward the people already living where they move in, and passed on to their children. Values decide the jobs they take (pay, getting on, a short commute, friends at work), the homes they move to, the nights out they choose and how much each part of life weighs in their happiness. Now and then someone changes job or moves house of their own accord. The citizen panel says it in words; with focus groups a home's tooltip shows its parcel's mix in percentages.`,
+    how: 'Click a citizen: the Life section opens with what they care most about ("Cares most about family; restless") and any recent change of job or home. Hover a home once you have focus groups for its parcel\'s mix.',
+    facts: [['Values', VALUE_NAMES.join(', ')], ['Technology', techLine('focusgroups')], ['Changes of their own accord', 'under 1% of workers and households a day']],
   },
   'world-map': {
     title: 'The world map',
@@ -1079,6 +1090,9 @@ export interface SeededDemo {
   children: readonly { x: number; y: number; age: number }[];
   /** the trunk links the seeder laid (docs/utilities.md) */
   utilLinks?: readonly { mode: LinkMode; a: readonly [number, number]; b: readonly [number, number] }[];
+  /** motivation (docs/motivation.md): every citizen's packed values and, for a child, their parent's; and the Focus groups finding at a tile */
+  values?: readonly { vals: number; parent?: number }[];
+  focusAt?: (x: number, y: number) => { people: number; pct: readonly number[] } | undefined;
   /** ad slots (docs/adverts.md): how many open slots of each size stand in the town, and the wear of every rented poster */
   ads?: { slots: Partial<Record<AdSize, number>>; wears: readonly number[]; screensRented?: number };
 }
@@ -1181,6 +1195,17 @@ const schoolRun = (stages: readonly number[]) => (d: SeededDemo) => stages.every
     return !!spec && schoolTakes(spec, stage) && d.children.some((c) => c.age >= from && c.age < to && (spec.catchment === 0 || Math.abs(c.x - s.x) + Math.abs(c.y - s.y) <= spec.catchment));
   });
 });
+/**
+ * Children share their parent's first value half as often again as two strangers would (chance: the sum of the squared
+ * shares of each first value in town), which inheritance gives (docs/motivation.md section 3).
+ */
+const takesAfter = (vs: readonly { vals: number; parent?: number }[]) => {
+  const top = (v: number) => topValues(valuesOf(v))[0], shares = new Array(VALUE_COUNT).fill(0);
+  for (const v of vs) shares[top(v.vals)] += 1 / vs.length;
+  let same = 0, kids = 0;
+  for (const v of vs) if (v.parent) { kids++; if (top(v.vals) === top(v.parent)) same++; }
+  return kids >= 10 && same / kids > 1.5 * shares.reduce((a, x) => a + x * x, 0);
+};
 /** Halls of residence stand within this many tiles of a university (students would walk). */
 const HALLS_WALK = 12;
 const studentQuarter = (d: SeededDemo) => d.schools.some((u) => SCHOOL_SPECS[u.kind]?.stage === Study.Degree
@@ -1297,6 +1322,15 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
     seeded: (d) => !!d.ads && d.ads.wears.some((w) => w < 0.15) && d.ads.wears.some((w) => w >= 0.35 && w < 0.8) && d.ads.wears.some((w) => w >= 0.8) },
   { id: 'advert-screens', caption: 'big screens turning through rented campaigns, house adverts and the news (a big screens corner with turns rented)', tour: 'big-screens',
     seeded: (d) => !!d.ads && (d.ads.slots.screen ?? 0) >= AD.screenTurns && (d.ads.screensRented ?? 0) > 0 && (d.ads.screensRented ?? 0) < (d.ads.slots.screen ?? 0) },
+  // ---- motivation (docs/motivation.md M1-M2): values for everyone, children taking after their parents, Focus groups on a home
+  { id: 'citizen-values', caption: 'citizens who care about different things (every value someone\'s first), children taking after their parents', tour: 'focus-groups',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'focus-groups')),
+    seeded: (d) => !!d.values?.length && d.values.every((v) => v.vals > 0) && new Set(d.values.map((v) => topValues(valuesOf(v.vals))[0])).size === VALUE_COUNT
+      && takesAfter(d.values) },
+  { id: 'focus-groups', caption: 'a home whose tooltip shows its parcel\'s value mix (Focus groups)', tour: 'focus-groups',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'focus-groups' && !!sp.inspect)),
+    // seeded before the fill: only the demo's families live in town, so ask where a child lives (the tour's home fills with the town)
+    seeded: (d) => d.children.some((k) => { const f = d.focusAt?.(k.x, k.y); return !!f && f.people > 0 && f.pct.reduce((a, b) => a + b, 0) === 100; }) },
   { id: 'advert-reach', caption: 'a seeded campaign reaching a showcase commuter', tour: 'high-street', todo: 'reach is adverts A4 (docs/adverts.md section 4): it needs citizens\' beliefs (docs/motivation.md)' },
   { id: 'school-bus', caption: 'a school bus on a round (a fleet unit of kind 9)', tour: 'secondary-school', todo: 'the school buses are E6 (docs/education.md section 10): they take over from the escorts and the missed days' },
   { id: 'london-school-run', caption: 'children living within reach of a primary and a secondary school in London', tour: 'primary-islington', demo: 'london',

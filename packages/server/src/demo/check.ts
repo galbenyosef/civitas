@@ -89,6 +89,8 @@ function seededOf(w: World, airports: Airports, sim: Simulation, harbours: Harbo
     seaGates: w.seaGates,
     schools: [...w.buildings.values()].filter((b) => SCHOOL_SPECS[b.id]).map((b) => ({ kind: b.id, x: b.x, y: b.y })),
     children: [...w.citizens.values()].map((c) => ({ x: c.hx, y: c.hy, age: ageOf(c, w.tick) })).filter((c) => c.age < 18),
+    values: [...w.citizens.values()].map((c) => ({ vals: c.vals, parent: c.par ? w.citizens.get(c.par)?.vals : undefined })),
+    focusAt: (x, y) => sim.focusAt(x, y),
     ads: adverts ? adsOf(w, adverts) : undefined,
     utilLinks: w.utilitiesLoaded?.links ?? [],
   };
