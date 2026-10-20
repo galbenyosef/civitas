@@ -10,7 +10,17 @@ import { roofAnchor } from './issues';
 const MAX_FIRES = 64;
 const FLAMES_MAX = 10, PUFFS_MAX = 18, DROPS_MAX = 36;
 /** explosions drawn at once (fires v2), and the pieces of each: the flash, the ring and the fireball; the smoke column and the debris */
-const BLASTS_MAX = 16, BLAST_GLOW_MAX = 12, BLAST_SMOKE_MAX = 56;
+const BLASTS_MAX = 16, BLAST_GLOW_MAX = 12, BLAST_SMOKE_MAX = 64;
+/**
+ * How each cause of explosion looks (shared BLAST_CAUSES, FireDTO.bc; index = cause code). flash: the flash's tint, 1 a
+ * warm white, -1 a blue-white (burning gas); ball: the fireball pieces (2 a works' deep orange, 3 burning gas, yellower);
+ * balls, bits: [least, spread] of the fireball's balls and the debris; column: the smoke column's height; soot: 0 black
+ * oily smoke, 1 pale; debris: 1 a works' steel and rust, 2 a house's brick, timber and slate; throw: how far it flies.
+ */
+const BLAST_LOOK = [
+  { flash: 1, ball: 2, balls: [6, 5], column: 1, soot: 0, debris: 1, bits: [14, 15], throw: 1 }, // industrial
+  { flash: -1, ball: 3, balls: [8, 5], column: 0.65, soot: 0.6, debris: 2, bits: [20, 14], throw: 1.3 }, // gas
+] as const;
 /** a blast this many ticks old when first seen is drawn as already over (a client joining later sees the aftermath, not the flash) */
 const BLAST_FRESH = 25;
 /** one wind for the town (smoke leans the same general way), each fire and each puff turned off it by its own hash */
@@ -192,8 +202,8 @@ void main() {
 
 /**
  * An explosion's light (fires v2, FireDTO.bx), additive: aS.w is the piece, 0 the flash, 1 the shockwave ring on the
- * ground, 2 a ball of the fireball. aS: seed, size, duration (s), piece; aO: a ball's heading (x, z), its throw, rise;
- * the flash's and the ring's tint in aO.w. aI.x is seconds since the blast (wall clock, from when the client saw it).
+ * ground, 2 a ball of the fireball (3 of a gas fireball). aS: seed, size, duration (s), piece; aO: a ball's heading (x, z), its throw, rise;
+ * the flash's and the ring's tint in aO.w (a flash's below 0: blue-white). aI.x is seconds since the blast (wall clock, from when the client saw it).
  */
 const BLAST_GLOW_VERT = /* glsl */ `
 attribute vec3 aP; attribute vec4 aO; attribute vec4 aS; attribute vec4 aI;
@@ -210,7 +220,7 @@ void main() {
     // the flash: a billboard that swells in a blink and is gone
     float s = size * (0.45 + 1.1 * sqrt(k));
     p = aP + vec3(0.0, 0.35, 0.0) + (right * position.x + up * position.y) * s;
-    vCol = mix(vec3(1.0, 0.98, 0.88), vec3(1.0, 0.72, 0.38), aO.w);
+    vCol = aO.w < 0.0 ? mix(vec3(0.8, 0.9, 1.0), vec3(1.0, 0.97, 0.9), 1.0 + aO.w) : mix(vec3(1.0, 0.98, 0.88), vec3(1.0, 0.72, 0.38), aO.w);
     vA *= (1.0 - k) * (1.0 - k);
   } else if (type < 1.5) {
     // the shockwave: a ring flat on the ground racing out and thinning
@@ -225,7 +235,9 @@ void main() {
     vec3 c = aP + vec3(0.0, 0.25, 0.0) + dir * aO.z * e + vec3(0.0, aO.w * e + 0.5 * k * k, 0.0);
     float s = size * (0.3 + 0.95 * e);
     p = c + (right * position.x + up * position.y) * s;
-    vCol = mix(vec3(1.0, 0.92, 0.6), mix(vec3(0.95, 0.32, 0.06), vec3(0.8, 0.18, 0.04), fract(seed * 7.1)), smoothstep(0.05, 0.75, k));
+    vec3 cool = type > 2.5 ? mix(vec3(1.0, 0.72, 0.18), vec3(0.97, 0.48, 0.1), fract(seed * 7.1)) // burning gas: yellower, brighter
+                           : mix(vec3(0.95, 0.32, 0.06), vec3(0.8, 0.18, 0.04), fract(seed * 7.1));
+    vCol = mix(type > 2.5 ? vec3(1.0, 0.97, 0.78) : vec3(1.0, 0.92, 0.6), cool, smoothstep(0.05, 0.75, k));
     vA *= 1.0 - smoothstep(0.35, 1.0, k);
   }
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
@@ -252,8 +264,9 @@ void main() {
 }`;
 
 /**
- * An explosion's smoke and wreckage (fires v2), normal blending: aS.w 0 a puff of the smoke column, 1 a piece of debris.
- * A puff: aO (x, z) its place over the ruin, aO.z the column's height; aS.z its period (s). A piece: aO.x its heading,
+ * An explosion's smoke and wreckage (fires v2), normal blending: aS.w 0 a puff of the smoke column, 1 a piece of a
+ * works, 2 of a house (brick, timber, slate). A puff: aO (x, z) its place over the ruin, aO.z the column's height, aO.w
+ * its paleness (0 black soot); aS.z its period (s). A piece: aO.x its heading,
  * aO.y how far it is thrown, aO.z how high, aO.w its colour; aS.z its time in the air (s). aI: seconds since the blast,
  * the column's strength, the debris's (it fades with the scorch).
  */
@@ -283,7 +296,7 @@ void main() {
     vec2 rp = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * position.xy;
     p = c + (right * rp.x + up * rp.y) * s;
     vA = aI.y * pow(sin(3.14159 * life), 0.8) * (1.0 - 0.4 * life) * smoothstep(0.0, 0.5, age);
-    vCol = mix(vec3(0.08, 0.075, 0.07), vec3(0.3, 0.28, 0.26), fract(seed * 7.7));
+    vCol = mix(mix(vec3(0.08, 0.075, 0.07), vec3(0.3, 0.28, 0.26), fract(seed * 7.7)), vec3(0.62, 0.6, 0.58), aO.w);
   } else {
     // a piece of wreckage on a ballistic arc, tumbling; once down it lies flat where it fell
     float k = clamp(age / rate, 0.0, 1.0);
@@ -299,7 +312,9 @@ void main() {
       p = vec3(c.x + rp.x, 0.05 + 0.01 * fract(seed * 13.0), c.z + rp.y);
     }
     vA = age >= 0.0 ? aI.z : 0.0;
-    vCol = mix(vec3(0.09, 0.075, 0.065), vec3(0.42, 0.27, 0.18), aO.w);
+    vCol = type > 1.5
+      ? (aO.w < 0.45 ? mix(vec3(0.5, 0.2, 0.14), vec3(0.62, 0.3, 0.2), aO.w / 0.45) : aO.w < 0.8 ? vec3(0.48, 0.36, 0.22) : vec3(0.24, 0.26, 0.3)) // brick, timber, slate
+      : mix(vec3(0.09, 0.075, 0.065), vec3(0.42, 0.27, 0.18), aO.w);
   }
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
 }`;
@@ -439,33 +454,35 @@ export class FiresView {
   private get pools() { return [this.flames, this.glows, this.smoke, this.scorch, this.spray, this.blastGlow, this.blastSmoke]; }
 
   /**
-   * An explosion's pieces (FireDTO.bx). The organic rule: every blast has its own flash size, tint and length, its own
+   * An explosion's pieces (FireDTO.bx), drawn the way its cause looks (BLAST_LOOK by FireDTO.bc). The organic rule: every blast has its own flash size, tint and length, its own
    * ring's reach, speed, tint and ragged front, its own count of fireball balls each with its own heading, throw, rise,
    * size and life, its own column (height, count and the clocks, places and sizes of its puffs) and its own debris (count,
    * and each piece's heading, throw, height, time in the air, size and colour), and a wider scorch of its own outline,
    * all from hashes of the door and the tick it blew.
    */
   private blast(f: FireDTO, fi: number, roof: readonly number[], hx: number, hz: number) {
-    const bx = f.bx!, foot = Math.max(hx, hz), h = (i: number, j: number) => hash2(f.x * 7919 + bx * 31 + i * 101, f.y * 104729 + bx + j * 37);
+    const bx = f.bx!, foot = Math.max(hx, hz), sd = Math.floor(f.s * 9973);
+    const h = (i: number, j: number) => hash2(f.x * 7919 + bx * 31 + i * 101 + sd, f.y * 104729 + bx + j * 37);
+    const look = BLAST_LOOK[f.bc ?? 0] ?? BLAST_LOOK[0];
     const base = [roof[0], roof[1] * 0.6, roof[2]];
-    const tint = h(1, 1);
+    const tint = look.flash > 0 ? h(1, 1) : -(0.3 + 0.7 * h(1, 1));
     this.put(this.blastGlow, fi, base, [0, 0, 0, tint], [h(2, 1), 4.5 + 2 * h(2, 2) + 1.5 * foot, 0.3 + 0.25 * h(2, 3), 0]);
     this.put(this.blastGlow, fi, [roof[0], 0, roof[2]], [0, 0, 0, h(3, 4)], [h(3, 1), 3.2 + 1.8 * h(3, 2) + foot, 0.9 + 0.7 * h(3, 3), 1]);
-    const balls = 6 + Math.floor(h(4, 1) * 5);
+    const balls = look.balls[0] + Math.floor(h(4, 1) * look.balls[1]);
     for (let i = 0; i < balls; i++) {
       const a = h(10 + i, 1) * Math.PI * 2, r = 0.4 + 1.0 * h(10 + i, 2);
-      this.put(this.blastGlow, fi, base, [Math.cos(a), Math.sin(a), r * (0.6 + foot), 0.8 + 1.4 * h(10 + i, 3)], [h(10 + i, 4), 1.1 + 0.9 * h(10 + i, 5) + 0.4 * foot, 1.2 + 1.2 * h(10 + i, 6), 2]);
+      this.put(this.blastGlow, fi, base, [Math.cos(a), Math.sin(a), r * (0.6 + foot), 0.8 + 1.4 * h(10 + i, 3)], [h(10 + i, 4), 1.1 + 0.9 * h(10 + i, 5) + 0.4 * foot, 1.2 + 1.2 * h(10 + i, 6), look.ball]);
     }
-    const height = 5 + 4 * h(5, 1) + foot, puffs = 18 + Math.floor(h(5, 2) * 9);
+    const height = (5 + 4 * h(5, 1) + foot) * look.column, puffs = 18 + Math.floor(h(5, 2) * 9);
     for (let i = 0; i < puffs; i++) {
-      this.put(this.blastSmoke, fi, base, [(h(40 + i, 1) - 0.5) * hx * 0.9, (h(40 + i, 2) - 0.5) * hz * 0.9, height * (0.8 + 0.4 * h(40 + i, 3)), 0],
+      this.put(this.blastSmoke, fi, base, [(h(40 + i, 1) - 0.5) * hx * 0.9, (h(40 + i, 2) - 0.5) * hz * 0.9, height * (0.8 + 0.4 * h(40 + i, 3)), look.soot * (0.6 + 0.4 * h(40 + i, 7))],
         [h(40 + i, 4), 1.3 + 1.1 * h(40 + i, 5) + 0.4 * foot, 4 + 3 * h(40 + i, 6), 0]);
     }
-    const bits = 14 + Math.floor(h(6, 1) * 15), spread = h(6, 2) * Math.PI * 2, lop = 0.4 + 0.5 * h(6, 3); // the debris thrown more one way than the others
+    const bits = look.bits[0] + Math.floor(h(6, 1) * look.bits[1]), spread = h(6, 2) * Math.PI * 2, lop = 0.4 + 0.5 * h(6, 3); // the debris thrown more one way than the others
     for (let i = 0; i < bits && i + puffs < BLAST_SMOKE_MAX; i++) {
       const a = h(80 + i, 1) * Math.PI * 2, bias = Math.cos(a - spread) * lop;
-      this.put(this.blastSmoke, fi, base, [a, foot + (1 + 2.5 * h(80 + i, 2)) * (1 + bias * 0.5), 0.8 + 1.4 * h(80 + i, 3), h(80 + i, 4)],
-        [h(80 + i, 5), 0.12 + 0.16 * h(80 + i, 6), 0.7 + 0.9 * h(80 + i, 7), 1]);
+      this.put(this.blastSmoke, fi, base, [a, foot + (1 + 2.5 * h(80 + i, 2)) * (1 + bias * 0.5) * look.throw, 0.8 + 1.4 * h(80 + i, 3), h(80 + i, 4)],
+        [h(80 + i, 5), 0.12 + 0.16 * h(80 + i, 6), 0.7 + 0.9 * h(80 + i, 7), look.debris]);
     }
     // a wider scorch than the fire's own: the blast's reach, its outline its own
     const reach = foot + FIRE.blastReach * (0.45 + 0.25 * h(7, 1));

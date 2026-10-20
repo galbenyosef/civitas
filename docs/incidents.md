@@ -144,6 +144,41 @@ v2 block of `FIRE`), the drawing in `client/src/render/fires.ts` (`blast`).
 6. **Fairness.** The warning fire never spreads or blows up. A covered town rarely sees either: the engine is there in
    about half an hour, before the ramp has started.
 
+### Explosions: one entry point for any cause
+
+Every explosion goes through `Fires.explode(x, y, { cause, radius?, damage?, costShare?, seed? })` (sim/fires.ts):
+the works' hourly roll, the demo's blast drill, and later causes. The gas utility (card 968d0d2f, "full drama": gas
+explosions destroy buildings) is meant to call it from its leak roll and needs no change here. The call works like this:
+
+- `cause` picks the defaults in `BLAST_CAUSES` (shared/src/fires.ts) and the look in the client (`BLAST_LOOK`,
+  render/fires.ts, keyed by `FireDTO.bc`). Each option passed overrides its default:
+  - `radius`: every burnable building whose lot is within this many tiles catches light (2 for a works, 1 for gas);
+  - `damage`: the share of the source wrecked there and then. 0.7 for a works, whose fire carries on from there. At 1,
+    as for gas, the building is destroyed outright: it is cleared to an empty lot of its zone (a merged one breaks
+    back into lots), its people leave, it is billed as burnt out under 'fire', and its aftermath (scorch, debris,
+    smoke) is drawn over the empty lot;
+  - `costShare`: the blast's own bill, a share of the source's book value under 'blast' (0.25 for a works, 0.5 for
+    gas);
+  - `seed`: the drawing's variation, when the blast starts the fire. Otherwise it is hashed from the tile and the tick.
+- The building at (x, y), or the structure that tile belongs to, must be a home or works that can burn. One that is not
+  burning catches light with the blast, quietly: the blast's own toast says what happened. A fire blows up at most once.
+  Where no such building stands (a road, a civic building, a lot with builders on it), `explode` returns false and
+  nothing happens.
+- Neighbours light inside the spread caps and the fairness rule, as spread fires do, and are marked `from` 2. Each is
+  dispatched to and billed like any other fire.
+- The toast and the milestone feed line name the cause by its `label` ("Explosion", "Gas explosion"), with "destroyed"
+  when `damage` is 1. The building's panel reads "Destroyed by a gas explosion".
+- The look by cause:
+  - a works: a warm white flash, a deep orange fireball, a tall black oily column, steel and rust debris;
+  - gas: a blue-white flash, a yellower and bigger fireball, a shorter pale grey column, and more brick, timber and
+    slate debris thrown further.
+
+  A new cause adds an entry to `BLAST_CAUSES` (with the next `code`) and a row to `BLAST_LOOK`.
+
+The gas card still has to decide the provisional gas numbers in `BLAST_CAUSES.gas`, and what makes gas leak and blow.
+A blast with no building to anchor it (a main under a road) would need its own wire entry. Today a blast is drawn on the
+fire it leaves (`FireDTO.bx`, `bc`).
+
 ### What the player sees
 
 The fire itself is drawn as before. An explosion (`FireDTO.bx`, the tick it blew) adds a white-yellow flash, a ragged
@@ -160,7 +195,7 @@ blast is in the list. The building's panel says how it caught ("On fire, caught 
 
 ### Wire and save
 
-`FireDTO.bx` (optional). The saved fires carry `next`, `from`, `bx`, `blastCost`, `hold` and `round`, all optional: a
+`FireDTO.bx` and `bc` (optional; `bc` absent means a works). The saved fires carry `next`, `from`, `bx`, `blastCost`, `cause`, `levelled`, `hold` and `round`, all optional: a
 save from before v2 loads, its fires take their next roll on the hour from when they lit. Snapshot version unchanged.
 Ledger category `blast` ("Explosion damage", `LEDGER_LABELS`), milestone kind `incident`.
 
@@ -211,7 +246,7 @@ other fire in the grace day. A 2×2 Commons over two days has a few fires, and t
 
 ## Measurements, v2 (2026-10-20)
 
-- **Probe** (`loadtest/fires.ts`, seeds 1, 2, 3): 33/33 each (sections 1-4 as before).
+- **Probe** (`loadtest/fires.ts`, seeds 1, 2, 3): 38/38 each (sections 1-4 as before). 5e (`explode`): a gas blast destroyed a home and lit all 4 burnable buildings touching it, $65 under `blast`; nothing happened on a road; a works blew on demand, once.
   - Uncovered town (5a), every fire building mothballed, hand-lit one at a time: 18, 15 and 20 fires lit. From these, 44, 45 and 36 spread fires, with 11-14 of the hand-lit fires setting light to a neighbour.
   - Every spread fire touched a lot that was burning when it caught.
   - 7, 7 and 1 explosions, all at works, setting 19, 24 and 4 alight. They cost $288, $324 and $54 under `blast`.

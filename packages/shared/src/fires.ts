@@ -111,9 +111,33 @@ export interface FireDTO {
   bk?: number;
   /** the structure's footprint (1×1 lots: 1, 1), so the flames spread over a merged building */
   w: number; h: number;
-  /** the tick the building blew up (an explosion at a burning works, FIRE.blastMax): the client's flash, shockwave, debris and smoke column */
+  /** the tick the building blew up (Fires.explode: a burning works, a gas leak): the client's flash, shockwave, debris and smoke column */
   bx?: number;
+  /** what blew up (BLAST_CAUSES code; absent: industrial): the client draws each cause its own way */
+  bc?: number;
 }
+
+/**
+ * Explosions (docs/incidents.md "Explosions"): `Fires.explode` is the one entry point, whatever the cause. Each cause has
+ * its defaults here (a caller may override them) and its own look in the client (render/fires.ts BLAST_LOOK).
+ * - radius: every building whose lot is this many tiles or less from the source's catches light (roads are no break);
+ * - damage: the share of the source wrecked there and then (1: destroyed outright, the lot cleared);
+ * - costShare: the owner pays this share of the source's book value for the blast itself (ledger 'blast');
+ * - label: how the toast and the milestone feed name it.
+ */
+export type BlastCause = 'industrial' | 'gas';
+export interface BlastSpec { radius: number; damage: number; costShare: number; label: string }
+export const BLAST_CAUSES: Record<BlastCause, BlastSpec & { code: number }> = {
+  /** a burning works (FIRE.blastMax): heavy damage, the fire carries on from there */
+  industrial: { code: 0, radius: FIRE.blastReach, damage: FIRE.blastDamage, costShare: FIRE.blastCostShare, label: 'Explosion' },
+  /**
+   * a gas leak (the gas utility, card 968d0d2f, not built yet): the building is destroyed and its neighbours catch.
+   * Provisional numbers for that card to tune.
+   */
+  gas: { code: 1, radius: 1, damage: 1, costShare: 0.5, label: 'Gas explosion' },
+};
+/** BlastCause by its wire code (FireDTO.bc) */
+export const BLAST_CAUSE_OF_CODE: readonly BlastCause[] = (Object.keys(BLAST_CAUSES) as BlastCause[]).sort((a, b) => BLAST_CAUSES[a].code - BLAST_CAUSES[b].code);
 
 /** The share burnt `ticks` after a fire caught light, unattended (FIRE.growth: slow, then fast). */
 export const burntShare = (ticks: number, burn: number) => Math.pow(Math.max(0, Math.min(1, ticks / Math.max(1, burn))), FIRE.growth);

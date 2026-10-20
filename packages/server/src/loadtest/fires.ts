@@ -16,10 +16,13 @@
  * 5. fires v2: in the same town with every fire building mothballed, hand-lit homes and works (no background fires):
  *    fires spread, and only to lots touching a burning one; explosions only at works, billed under 'blast'; the spread
  *    caps hold; warning fires never spread or blow up; a fire saved before v2 loads and rolls; a second run gives the
- *    same fires, spreads and blasts at the same ticks; and with the fire post staffed, hand-lit covered fires rarely spread.
+ *    same fires, spreads and blasts at the same ticks; and with the fire post staffed, hand-lit covered fires rarely spread;
+ * 6. (5e) explode(), the entry point for any cause: a gas blast destroys a home there and then and lights every burnable
+ *    building touching it, billed under 'blast' and drawn as gas; nothing happens where no building stands; a works
+ *    not yet burning catches light with its blast and blows only once.
  * Prints pass/fail counts; exits 1 on any failure.
  */
-import { TICKS_PER_DAY, TICKS_PER_HOUR, FIRE, FirePhase, FireOutcome, Issue, Zone, subFor, tileKey, KIND_ID } from '@msimcity/shared';
+import { TICKS_PER_DAY, TICKS_PER_HOUR, FIRE, FirePhase, FireOutcome, Issue, Zone, subFor, tileKey, KIND_ID, BLAST_CAUSES, leisureAt } from '@msimcity/shared';
 import { World, type Building } from '../world';
 import { seedCity } from './cities';
 import { createGame, type Game } from '../game';
@@ -323,6 +326,37 @@ ok(runs5[0] === runs5[1] && runs5[0].length > 0, 'the same fires, spreads and bl
   const spread = r.seen.filter((f) => f.from === 1).length, blasts = r.seen.filter((f) => f.bx !== undefined).length;
   log(`     ${r.lit} covered fires: ${spread} spread, ${blasts} explosions; uncovered (5a): ${uncoveredSpread} from ${uncoveredSeeds}`);
   ok(r.lit >= 10 && spread <= Math.max(1, Math.round(r.lit * 0.1)), `spread is rare under cover: ${spread} spread from ${r.lit} fires (at most 10%)`);
+}
+
+{
+  console.log('5e. explode(), the one entry point for any cause: a gas blast destroys the home and lights its neighbours; a works blows on demand');
+  const { w, g } = city('sys', seed + 50);
+  g.fires.enabled = true;
+  const perDay = FIRE.perDay;
+  (FIRE as { perDay: number }).perDay = 0;
+  // the homes and works touching a home that can burn (not a civic building, a venue or a lot with builders on it); the home with most
+  const roundOf = (home: Building) => [...new Set([-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => w.buildings.get(tileKey(...w.doorOf(home.x + dx, home.y + dy))))))].filter((b) => b && b !== home && b.level > 0
+    && [Zone.Residential, Zone.Commercial, Zone.Industrial, Zone.Office].includes(b.zone as 1) && !w.sites.has(tileKey(b.x, b.y)) && !leisureAt(b.id, b.level, b.x, b.y));
+  const home = crowded(w, [Zone.Residential], 4).sort((a, b) => roundOf(b).length - roundOf(a).length || a.x - b.x || a.y - b.y)[0];
+  const round = roundOf(home);
+  let blastLedger = 0;
+  const credit = w.credit.bind(w);
+  w.credit = (id, amount, cat) => { if (cat === 'blast') blastLedger += amount; credit(id, amount, cat); };
+  const fired = g.fires.explode(home.x, home.y, { cause: 'gas' });
+  const dto = g.fires.dtos().find((f) => f.x === home.x && f.y === home.y);
+  const lit = round.filter((b) => g.fires.burningAt(b!.x, b!.y)).length;
+  ok(fired && (w.buildings.get(tileKey(home.x, home.y))?.level ?? 0) === 0 && dto?.ph === FirePhase.Out && dto.bc === 1 && dto.bx === w.tick,
+    `a gas explosion destroys the home at (${home.x},${home.y}) there and then (level ${w.buildings.get(tileKey(home.x, home.y))?.level ?? 0}, drawn as gas: bc ${dto?.bc})`);
+  ok(lit === round.length && lit > 0, `and sets light to every building touching it (${lit}/${round.length}, radius ${BLAST_CAUSES.gas.radius})`);
+  ok(blastLedger < 0, `billed under 'blast': $${-blastLedger}`);
+  const road = [...Array(40).keys()].map((i) => [home.x + i - 20, home.y] as const).find(([x, y]) => !w.buildings.has(tileKey(x, y)) && !w.auxAt(x, y));
+  ok(!!road && !g.fires.explode(road[0], road[1], { cause: 'gas' }), 'nothing to blow up where no building stands');
+  const works = crowded(w, [Zone.Industrial], 3)[0];
+  const first = g.fires.explode(works.x, works.y, { cause: 'industrial' }), again = g.fires.explode(works.x, works.y, { cause: 'industrial' });
+  const wf = g.fires.dtos().find((f) => f.x === works.x && f.y === works.y);
+  ok(first && !again && wf?.ph === FirePhase.Burning && wf.bc === undefined && (w.buildings.get(tileKey(works.x, works.y))?.level ?? 0) > 0,
+    `a works not yet burning catches light with its blast, is left standing at ${Math.round(FIRE.blastDamage * 100)}% burnt, and blows once (a second call: ${again})`);
+  (FIRE as { perDay: number }).perDay = perDay;
 }
 
 console.log(`\nfires probe: ${checks - fails}/${checks} passed${fails ? `, ${fails} FAILED` : ''}`);
