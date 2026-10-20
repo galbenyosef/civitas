@@ -497,6 +497,8 @@ export class Fires {
     if (f.ph === FirePhase.Fighting) {
       f.d = Math.max(f.d, FIRE.blastDamage);
       f.t1 = Math.max(f.t1, now + Math.round(FIRE.fightHours * TPH * (0.4 + f.d) * 0.5));
+      const v = f.engine !== null ? this.w.vehicles.get(f.engine) : undefined;
+      if (v) v.until = Math.max(v.until, f.t1); // the crew stay on
     } else if (burntShare(now - f.t0, f.burn) < FIRE.blastDamage) {
       f.t0 = now - Math.round(f.burn * Math.pow(FIRE.blastDamage, 1 / FIRE.growth)); // the client reads the jump off the clock (fireProgress)
     }

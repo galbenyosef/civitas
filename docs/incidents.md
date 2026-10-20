@@ -105,6 +105,82 @@ The showcase's civic district has a fire drill: the level-3 house at (-29, -31),
 home stands with a fire building in reach. `demoFireDrills(id)` reads the scenario's `house-fire` spots; index.ts hands
 them to the Fires module.
 
+## Fires v2: spread and explosions
+
+Card eca21a7a, from Rich's note on the audit card: "Fires that aren't put out or at least attended to have increasing
+chance over time of spreading to neighboring buildings. Fires at industrial locations have a chance of exothermic
+explosions." Code: `sim/fires.ts` (`hourly`, `spreadTo`, `blast`, `neighbours`), tuning in `shared/src/fires.ts` (the
+v2 block of `FIRE`), the drawing in `client/src/render/fires.ts` (`blast`).
+
+1. **The hourly roll.** A fire rolls once a game hour, on the hour from when it lit (`next`, saved), with a hash of the
+   tiles, the fire's id, the hour and the world seed. The warning fire and the demo's drills never roll.
+2. **Spread.** Each building whose lot touches the burning one's (corners included) may catch. The chance an hour is
+   `spreadMax` (0.3) x ramp x catch with no engine crew on scene (an engine still on its way counts as no crew); the ramp
+   is `((u - 0.2) / 0.8) ^ 1.6` on u, the share of the fire's burn time gone: 0 in the first hour of a four-hour burn,
+   about 6% at half time, 16% at three quarters, 30% near burn-out. Under a crew's hoses it is `spreadAttended` (1%)
+   x catch. Catch (`catchByLevel`) is 0.7 for a level-1 lot (a detached cottage), 0.85, 1, 1.1, 1.2 at level 5, and 1.2
+   for a merged building (a terrace, a block of flats, a works); a building touching only at a corner catches at half
+   (`diagonal`). Roads, parks and empty lots hold no building, so a lot across a road (two tiles off) never catches: they
+   are the firebreaks. An unattended level-3 fire with a lot on each side sets light to each with about a 45% chance
+   before it burns out.
+3. **Who pays.** A spread fire is the owner of the building it lands on: dispatched (the 14-tile rule), burnt and billed
+   like any other, with a toast that says it came from next door. It is lit only when that owner could have a fire (the
+   Commons always; a player after their warning fire and grace day, as `ownerBurns`).
+4. **Caps.** Ordinary fires keep `maxPerOwner` (2) and `maxWorld` (12). A fire caught from another, or from a blast, may
+   light up to `spreadPerOwner` (6) burning in that owner's parcels and `spreadWorld` (20) in the world; past them the
+   catch is held back (`stats.capped`). A block can burn down in an uncovered town, a few lots at a time; the world never
+   goes up.
+5. **Explosions.** A burning industrial building (zone Industrial: the industrial lots, which include the waste and
+   parcel depots, and the merged workshop row, warehouse, factory and heavy plant) rolls for a blast before it rolls to
+   spread: `blastMax` (0.16) x `((u - 0.1) / 0.9) ^ 1.5` an hour unattended, `blastAttended` (1.5%) under a crew, once per
+   fire. About a third of unattended works fires blow up. The blast:
+   - wrecks the works: an unattended fire jumps to `blastDamage` (70%) burnt (its clock is wound on, so the client reads
+     the jump), one being put out is held at 70% and the crew take longer;
+   - sets light to every building whose lot is within `blastReach` (2) tiles, across a road too (spread caps and the
+     fairness rule apply);
+   - bills the owner `blastCostShare` (25%) of the works' book value under **Explosion damage** (ledger `blast`), on top
+     of the fire's own bill;
+   - tells the owner (a toast) and puts a line in their milestone feed (`Ranks.incident`, kind `incident`, ✸).
+6. **Fairness.** The warning fire never spreads or blows up. A covered town rarely sees either: the engine is there in
+   about half an hour, before the ramp has started.
+
+### What the player sees
+
+The fire itself is drawn as before. An explosion (`FireDTO.bx`, the tick it blew) adds a white-yellow flash, a ragged
+shockwave ring racing out over the ground, a fireball of five to nine balls thrown out and up, cooling from yellow to
+deep orange, a dark smoke column that punches up from the ruin and then rises four to eight tiles, leaning downwind, for
+as long as the fire burns and fades through the aftermath, debris thrown on arcs that tumble and then lie where they fell
+until the scorch fades, and a scorch twice as wide. Under the organic-effects rule every blast is its own: the flash's size, tint and
+length, the ring's reach, speed, tint and front, the count of fireball balls and each one's heading, throw, rise and size,
+the column's height and every puff's clock, place and size, the count of debris and each piece's heading (thrown more one
+way than the others), distance, height, time in the air, size and colour, and the scorch's outline, all hashed from the
+door and the tick. The flash, ring, fireball and debris flight run on the wall clock from when the client saw the blast
+(a client that joins later sees the aftermath only). Two more instanced passes, one draw call each, drawn only while a
+blast is in the list. The building's panel says how it caught ("On fire, caught from next door", "Blown up and on fire").
+
+### Wire and save
+
+`FireDTO.bx` (optional). The saved fires carry `next`, `from`, `bx`, `blastCost`, `hold` and `round`, all optional: a
+save from before v2 loads, its fires take their next roll on the hour from when they lit. Snapshot version unchanged.
+Ledger category `blast` ("Explosion damage", `LEDGER_LABELS`), milestone kind `incident`.
+
+### The demo
+
+Two staged drills, run only in a demo (`Fires.rows`, `Fires.blastDrills`, from the scenario's `fire-spread` and
+`fire-blast` spots; index.ts):
+- **Fire spreading** (tour stop after House fire): the four homes along the south edge of the civic district's
+  north-west block, (-31, -31) to (-34, -31). The lead catches light with nobody called (`drillHoldHours`, 1.6 h); each
+  house still burning with no crew on it lights the next `drillSpreadHours` (0.5 h, ten seconds at 1×) later, so the
+  fire runs along the row, then the engines from the civic stations turn out and it stops where they get there. A new
+  round `drillGapHours` after the row is out.
+- **Explosion at the works** (tour stop after the industrial estate): the works at (-31, 27) catches light, blows
+  `drillBlastHours` (0.6 h) later as a real blast does (everything within two tiles alight), and the district's fire
+  station's engines turn out; again `drillBlastGapHours` (1.5 h) after its fires are out.
+
+Drill fires cost nothing, roll for nothing, and never burn a building down: one the engines cannot reach in time is
+saved by the bucket chain at 90% burnt. The features `fire-spread` and `fire-blast` in `SHOWCASE_FEATURES` check the row
+stands as touching homes in a fire station's reach and the works has at least six buildings within the blast's reach.
+
 ## Checks
 
 `npx tsx packages/server/src/loadtest/fires.ts [--seed 1] [--n 24]`: a 1×1 Commons with its fire station swapped for a

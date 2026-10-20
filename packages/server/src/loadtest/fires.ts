@@ -12,7 +12,11 @@
  *    within warnMinHours + warnSpanHours, which loses nothing even with the station mothballed (the bucket chain), and
  *    no ordinary fire in the grace day after it;
  * 4. the background rate in a 2×2 Commons over two days, the same fires on a second run (hash-seeded), and a save with a
- *    fire burning loads with it still burning.
+ *    fire burning loads with it still burning;
+ * 5. fires v2: in the same town with every fire building mothballed, hand-lit homes and works (no background fires):
+ *    fires spread, and only to lots touching a burning one; explosions only at works, billed under 'blast'; the spread
+ *    caps hold; warning fires never spread or blow up; a fire saved before v2 loads and rolls; a second run gives the
+ *    same fires, spreads and blasts at the same ticks; and with the fire post staffed, hand-lit covered fires rarely spread.
  * Prints pass/fail counts; exits 1 on any failure.
  */
 import { TICKS_PER_DAY, TICKS_PER_HOUR, FIRE, FirePhase, FireOutcome, Issue, Zone, subFor, tileKey, KIND_ID } from '@msimcity/shared';
