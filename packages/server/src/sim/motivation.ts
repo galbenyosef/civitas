@@ -64,6 +64,8 @@ export class Motivation {
   /** parcel id -> residents and the sum of their stored weights, re-counted once a game day on first use */
   private area = new Map<number, { ids: number[]; s: number[] }>();
   private areaDay = -1;
+  /** citizens in town when the area count was made: it is made again once the town has grown by a quarter (a fill) */
+  private areaPop = 0;
   /** game day of each citizen's last move or job change of their own accord (not saved: one early look after a load at most) */
   private settledDay = new Map<number, number>();
   private wbuf = new Array(VALUE_COUNT).fill(0);
@@ -99,8 +101,8 @@ export class Motivation {
   private areaOf(pid: number) {
     if (pid < 0) return undefined;
     const day = Math.floor(this.w.tick / DAY_TICKS);
-    if (day !== this.areaDay) {
-      this.areaDay = day;
+    if (day !== this.areaDay || this.w.citizens.size > 1.25 * this.areaPop + 8) {
+      this.areaDay = day; this.areaPop = this.w.citizens.size;
       this.area.clear();
       const parcelOfHome = new Map<number, number>();
       const wts = this.wbuf;
@@ -158,14 +160,19 @@ export class Motivation {
   /** The citizen panel's line: "Cares most about family; restless". */
   describe(c: Citizen): string { return describeValues(this.weightsOf(c)); }
 
-  /** Focus groups (Culture tier 2): the grown-ups living on a parcel and their value mix in whole percentages. */
+  /**
+   * Focus groups (Culture tier 2): the grown-ups living on a parcel now and their value mix in whole percentages.
+   * O(citizens), with one parcel lookup per home, like the other tooltips (Simulation.describe).
+   */
   focus(pid: number, name: string): FocusInfo {
-    const a = this.areaOf(pid);
-    const s = new Array(VALUE_COUNT).fill(0), wts = this.wbuf;
+    const s = new Array(VALUE_COUNT).fill(0), wts = this.wbuf, homes = new Map<number, boolean>();
     let people = 0;
-    for (const id of a?.ids ?? []) {
-      const c = this.w.citizens.get(id);
-      if (!c || c.stage === LifeStage.Child) continue;
+    for (const c of this.w.citizens.values()) {
+      if (c.stage === LifeStage.Child || c.mig) continue;
+      const hk = c.hx * 65536 + c.hy;
+      let here = homes.get(hk);
+      if (here === undefined) { here = this.w.parcelIdAt(c.hx, c.hy) === pid; homes.set(hk, here); }
+      if (!here) continue;
       this.weightsOf(c, wts);
       for (let i = 0; i < VALUE_COUNT; i++) s[i] += wts[i];
       people++;
