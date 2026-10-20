@@ -46,7 +46,7 @@ export const MOTIVE = {
   /** job search: up to jobOptions vacancies, within jobSlack road steps of the first, at most jobExtraNodes more nodes */
   jobOptions: 5, jobSlack: 12, jobExtraNodes: 400,
   /** what every extra jobSlack road steps costs a job's score, whatever the citizen's values (so choice adds little traffic) */
-  commuteCost: 0.25,
+  commuteCost: 0.5,
   /** score noise either way (the best option wins most of the time, not every time) */
   noise: 0.12,
   /**

@@ -13,7 +13,7 @@
  * ms per tick for both runs; the last line, "MOTIVATION {...}", is a JSON summary.
  */
 import {
-  TICKS_PER_DAY, LifeStage, Value, VALUE_COUNT, VALUE_NAMES, MOTIVE, ARCHETYPES, mulberry32,
+  TICKS_PER_DAY, LifeStage, Zone, Value, VALUE_COUNT, VALUE_NAMES, MOTIVE, ARCHETYPES, mulberry32,
   packValues, valueInts, valuesOf, seededValues, archetypeBlend, describeValues, topValues, wageOf, wageMul, tileKey,
 } from '@msimcity/shared';
 import { World, type Citizen } from '../world';
@@ -157,13 +157,21 @@ const switchRate = st.jobSwitches / d / meanWorkers, moveRate = st.moves / d / m
 console.log(`  of their own accord, days 2-${days}: ${st.jobLooks} job looks, ${st.jobSwitches} changes (${(100 * switchRate).toFixed(2)}% of workers a day); ${st.homeLooks} home looks, ${st.moves} moves of ${st.movedPeople} people (${(100 * moveRate).toFixed(2)}% of households a day)`);
 ok(st.jobSwitches > 0 && switchRate < 0.01, 'some workers change job of their own accord, under 1% a day');
 ok(st.moves > 0 && moveRate < 0.01, 'some households move of their own accord, under 1% a day');
-// homes: where the self-movers went, by what they care about
+// homes: where a household would move, by what it cares about (every home counted as having room, need 0)
 {
-  const movedNow = [...on.w.citizens.values()].filter((c) => c.stage !== LifeStage.Child && on.homesAt.has(c.id) && on.homesAt.get(c.id) !== tileKeyN(c.hx, c.hy));
-  const off2 = [...off.w.citizens.values()].filter((c) => c.stage !== LifeStage.Child && off.homesAt.has(c.id) && off.homesAt.get(c.id) !== tileKeyN(c.hx, c.hy));
-  console.log(`  grown-ups living somewhere else than at the start of day 2: ${off2.length} off, ${movedNow.length} on (of ${on.homesAt.size})`);
-  ok(movedNow.length > off2.length, 'on: more people change home (the households that chose to)');
-  for (const [day, id, what] of on.sim.motive.log.slice(-6)) {
+  const host = (on.sim as unknown as { motiveHost: Parameters<typeof on.sim.motive.bestHome>[1] }).motiveHost;
+  const adults = [...on.w.citizens.values()].filter((c) => c.stage === LifeStage.Adult && c.job).slice(0, 300);
+  const pure = (v: number) => { const w = new Array(VALUE_COUNT).fill(0.02); w[v] = 0.9; return w; };
+  const pickD = (w: number[]) => mean(adults.map((c) => { const r = on.sim.motive.bestHome(c, host, 0, w); return r ? Math.abs(r.b.x - c.hx) + Math.abs(r.b.y - c.hy) : 0; }));
+  const toWork = (w: number[]) => mean(adults.map((c) => { const r = on.sim.motive.bestHome(c, host, 0, w); return r ? Math.abs(r.b.x - c.wx) + Math.abs(r.b.y - c.wy) : 0; }));
+  const level = (w: number[]) => mean(adults.map((c) => on.sim.motive.bestHome(c, host, 0, w)?.b.level ?? 0));
+  // as on main: the move-out's near-and-random scorer
+  const mainD = mean(adults.map((c) => { const b = on.w.bestBuiltNear(c.hx, c.hy, [Zone.Residential], 30, 6, (b, d) => (b.x !== c.hx || b.y !== c.hy ? 6 * Math.random() - d : null)); return b ? Math.abs(b.x - c.hx) + Math.abs(b.y - c.hy) : 0; }));
+  const dRoots = pickD(pure(Value.Roots)), dAdv = pickD(pure(Value.Adventure)), wTime = toWork(pure(Value.Time)), wAdv = toWork(pure(Value.Adventure));
+  const lStatus = level(pure(Value.Status)), lMoney = level(pure(Value.Money));
+  console.log(`  a home to move to, ${adults.length} workers: tiles from home ${f2(dRoots)} for Roots, ${f2(dAdv)} for Adventure (main's near-and-random ${f2(mainD)}); tiles to work ${f2(wTime)} for Time, ${f2(wAdv)} for Adventure; level ${f2(lStatus)} for Status, ${f2(lMoney)} for Money`);
+  ok(dAdv > dRoots + 5 && wTime < wAdv - 3, 'on: the homes chosen follow values (Adventure goes further than Roots, Time lives nearer work)');
+  for (const [day, id, what] of on.sim.motive.log.slice(-5)) {
     const c = on.w.citizens.get(id);
     console.log(`    day ${day}: #${id} ${what}${c ? ` (${describeValues(on.sim.motive.weightsOf(c))})` : ''}`);
   }
