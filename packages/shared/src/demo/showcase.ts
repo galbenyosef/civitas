@@ -76,6 +76,8 @@ export interface DemoPlacement {
   name?: string;
   /** the hour of the day the tour shows this stop at (the client pins the light while the stop is up): 21.5 for the Lights at night */
   hour?: number;
+  /** how far round from straight in front of the door the tour's camera stands (radians, + to the right; default 0.45): towards a big screen's curve */
+  aside?: number;
 }
 /** `level`: what the lots stand at (default the town's, DEMO_TOWN.built) */
 export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 'office'; rect: DemoRect; level?: number }
@@ -311,7 +313,7 @@ export const SECTIONS: DemoSection[] = [
       { id: 'hs-parking-south', kind: 'parking', door: [HS.south.parking, HS.road + 1] },
       { id: 'hs-bus-stop', kind: 'bus-stop', door: [HS.north.busStop, HS.road - 1] }, // its panel looks onto the building site
       // the big screens corner on the corner with the perimeter road, its screens turned to the junction; toured at night
-      { id: 'big-screens', kind: 'big-screens', door: [HS.north.corner + 1, HS.road - 1], rot: 0, hour: 21 },
+      { id: 'big-screens', kind: 'big-screens', door: [HS.north.corner + 1, HS.road - 1], rot: 0, hour: 21, aside: 0.8 },
     ],
     spots: [{ id: 'high-street', spot: 'high-street', name: 'High Street', rect: HS.rect, inspect: [-47, -16] }],
   },
@@ -835,10 +837,10 @@ function kindCaption(k: KindManifest, door: DemoXY, rot: number, level?: number)
 }
 
 /** Where the camera stands for a footprint: in front of the door, a little to the side, far enough to see it whole. */
-function framing(x: number, y: number, w: number, h: number, rot = 0, far = 1): Pick<TourStop, 'focus' | 'dist' | 'yaw' | 'pitch'> {
+function framing(x: number, y: number, w: number, h: number, rot = 0, far = 1, aside = 0.45): Pick<TourStop, 'focus' | 'dist' | 'yaw' | 'pitch'> {
   const [fx, fy] = FRONT[rot & 3];
   const size = Math.max(w, h);
-  return { focus: [x + w / 2, y + h / 2], dist: Math.min(150, Math.max(13, (9 + size * 2.6) * far)), yaw: Math.atan2(fx, fy) + 0.45, pitch: size > 12 ? 0.95 : 0.72 };
+  return { focus: [x + w / 2, y + h / 2], dist: Math.min(150, Math.max(13, (9 + size * 2.6) * far)), yaw: Math.atan2(fx, fy) + aside, pitch: size > 12 ? 0.95 : 0.72 };
 }
 const bbox = (pts: readonly DemoXY[]): DemoRect => {
   const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
@@ -871,7 +873,7 @@ export function demoTour(id: DemoId): TourStop[] {
         const tall = Math.max(...k.levels.flatMap((l) => l.designs.map((dz) => dz.height)));
         const c = kindCaption(k, p.door, rot, p.level);
         const shown: [string, string][] = p.hour === undefined ? [] : [['Shown at', `${Math.floor(p.hour)}:${String(Math.round((p.hour % 1) * 60)).padStart(2, '0')}, ${p.hour >= 19 || p.hour < 6 ? 'after dark' : 'by day'}`]];
-        out.push({ id: sid, ...base, ...c, facts: [...c.facts, ...shown], title: p.name ? `${c.title}: ${p.name}` : c.title, ...framing(area[0], area[1], area[2], area[3], rot, tall > 3 ? tall / 3 : 1), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door, ...(p.hour !== undefined ? { hour: p.hour } : {}) });
+        out.push({ id: sid, ...base, ...c, facts: [...c.facts, ...shown], title: p.name ? `${c.title}: ${p.name}` : c.title, ...framing(area[0], area[1], area[2], area[3], rot, tall > 3 ? tall / 3 : 1, p.aside), kind: kid, placed, rect: placed ? undefined : area, inspect: p.door, ...(p.hour !== undefined ? { hour: p.hour } : {}) });
         continue;
       }
       const b = s.blocks?.find((q) => q.id === sid);

@@ -540,7 +540,7 @@ void main() {
   vec4 r = adCellRect(adRingCode(aRing, tt.x));
   vec3 c = textureLod(uMap, r.xy + r.zw * 0.5, 5.0).rgb * 0.6 + textureLod(uMap, r.xy + r.zw * vec2(0.25, 0.5), 5.0).rgb * 0.2 + textureLod(uMap, r.xy + r.zw * vec2(0.75, 0.5), 5.0).rgb * 0.2;
   float k = (0.12 + 0.88 * uNight) * (0.85 + 0.3 * fract(aGlow.x * 17.0)) * smoothstep(0.0, 0.45, tt.z);
-  vCol = (c * 0.75 + 0.25 * max(c.r, max(c.g, c.b))) * k;
+  vCol = c * k * 1.1;
   vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
@@ -554,8 +554,10 @@ varying float vPool;
 void main() {
   vec2 q = abs(vUv - 0.5) * 2.0;
   float a;
-  if (vPool < 0.5) { vec2 d = max(q - vec2(0.42, 0.36), 0.0) / vec2(0.58, 0.64); a = exp(-dot(d, d) * 5.0) * 0.32 * (1.0 - smoothstep(0.9, 1.0, max(q.x, q.y))); }
-  else { a = (1.0 - smoothstep(0.2, 1.0, q.x)) * pow(1.0 - vUv.y, 1.5) * 0.55 * (1.0 - smoothstep(0.92, 1.0, vUv.y)); }
+  // the halo spills above and below its panel only (over the panel itself, or a neighbour's, it would wash the picture
+  // out); the pool is brightest at the wall and fades out across the street
+  if (vPool < 0.5) { float dy = max(q.y - ${(1 / 2.6).toFixed(3)}, 0.0) / ${(1 - 1 / 2.6).toFixed(3)}; a = step(${(1 / 2.6).toFixed(3)}, q.y) * exp(-dy * 3.5) * 0.24 * (1.0 - smoothstep(0.6, 1.0, q.x)); }
+  else { a = (1.0 - smoothstep(0.25, 1.0, q.x)) * pow(vUv.y, 1.4) * 0.42 * (1.0 - smoothstep(0.94, 1.0, vUv.y)); }
   vec3 c = vCol * a;
   if (max(c.r, max(c.g, c.b)) < 0.002) discard;
   #ifdef USE_FOG
@@ -681,16 +683,16 @@ void main() {
         if (screen >= 0) {
           // its halo, a little in front and bigger than the panel, and its pool of light on the ground before it
           local.makeRotationY(slots[o + 7]);
-          local.scale(tmpV.set(slots[o + 5] * 2.1, slots[o + 6] * 2.3, 1));
+          local.scale(tmpV.set(slots[o + 5], slots[o + 6] * 2.6, 1));
           const nx = Math.sin(slots[o + 7]), nz = Math.cos(slots[o + 7]);
           local.setPosition(slots[o + 2] + nx * 0.03, slots[o + 3], slots[o + 4] + nz * 0.03);
           gm.push(...tmpM.multiplyMatrices(it.matrix, local).elements);
           gr.push(...rect); ga.push(seed, 0);
-          const reach = 0.25 + slots[o + 3] * 0.9;
+          const reach = 0.5 + slots[o + 3] * 1.6;
           local.makeRotationY(slots[o + 7]);
           flat.makeRotationX(-Math.PI / 2);
           local.multiply(flat);
-          local.scale(tmpV.set(slots[o + 5] * 1.5, reach, 1));
+          local.scale(tmpV.set(slots[o + 5] * 2.2, reach, 1));
           local.setPosition(slots[o + 2] + nx * (reach / 2 + 0.01), 0.026 + i * 0.0004, slots[o + 4] + nz * (reach / 2 + 0.01));
           gm.push(...tmpM.multiplyMatrices(it.matrix, local).elements);
           gr.push(...rect); ga.push(seed, 1);
