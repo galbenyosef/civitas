@@ -83,7 +83,7 @@ export function signSource(kind: { family: string; name: string; kindId?: number
       const c = kind.attrs.commerceType;
       return pool(c === 'department store' ? 'store' : c === 'mall' ? 'mall' : c === 'hotel' ? 'hotel' : 'shop');
     }
-    case 'office': return pool('office');
+    case 'office': return kind.attrs.title ? { text: cap(kind.attrs.title) } : pool('office'); // a broadcaster's own board (buildings/media.ts)
     case 'industrial': return kind.kindId !== undefined && isWasteDepot(kind.kindId, x, y) ? pool('waste') : pool('industry');
     case 'leisure': {
       const v = kind.attrs.venueType;

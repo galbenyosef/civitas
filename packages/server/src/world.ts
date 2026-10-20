@@ -11,6 +11,7 @@ import type { GoalState } from './goals';
 import type { RankState } from './ranks';
 import type { FireSave } from './sim/fires';
 import type { AdvertsSave } from './sim/adverts';
+import type { NewsSave } from './sim/news';
 
 export interface Chunk {
   cx: number; cy: number;
@@ -261,6 +262,11 @@ export class World {
   /** adverts (sim/adverts.ts): what to save and what the goals and ranks read, set by the Adverts module; and what a loaded snapshot carried */
   adverts: { save(): AdvertsSave; counts(owner: string): { campaigns: number; rentals: number; posted: boolean } } | null = null;
   advertsLoaded: AdvertsSave | null = null;
+  /** the news (sim/news.ts): what to save, set by the News module; and what a loaded snapshot carried, taken once by it */
+  newsSave: (() => NewsSave) | null = null;
+  newsLoaded: NewsSave | null = null;
+  /** fired when builders finish a site (completeSite), after the tile shows the finished building: the news reports openings */
+  onSiteCompleted: ((site: Site) => void) | null = null;
   /** merged lots since start (zones.ts): sites opened, lots absorbed, people moved, sites completed, people evicted at completion, structures broken back into lots */
   mergeStats = { opened: 0, absorbed: 0, residents: 0, workers: 0, completed: 0, evicted: 0, brokenUp: 0 };
 
@@ -865,6 +871,7 @@ export class World {
     const t = this.getTile(site.x, site.y);
     this.setTile(site.x, site.y, withProgress(withPriority(withConstruction(withLevel(t, site.target), false), 0), 0));
     if (site.merge) { this.mergeStats.completed++; this.mergeStats.evicted += Math.max(0, before - (this.buildings.get(key)?.occupants ?? 0)); }
+    this.onSiteCompleted?.(site);
   }
   leaveSite(c: Citizen) {
     if (!c.site) return;

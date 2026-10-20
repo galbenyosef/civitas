@@ -46,6 +46,8 @@ export const GROUPS: GroupDef[] = [
   { id: 'library', label: 'Libraries', section: 'Leisure', color: '#a8875a', holds: 'visitors' },
   // education (docs/education.md section 3): nursery to research institute, sub-kinds of the library family (code 14)
   { id: 'education', label: 'Education', section: 'Services', color: '#d8b25a', holds: 'pupils', stages: true },
+  // broadcasters (docs/media.md): a local TV studio, a broadcast centre and a media centre with a news helipad (buildings/media.ts)
+  { id: 'media', label: 'Media', section: 'Services', color: '#c8463c', holds: 'staff' },
   // landmarks (docs/buildings.md "Landmarks"): real buildings, one picker per city; buildings/landmarks-london.ts
   { id: 'london', label: 'London', section: 'Landmarks', color: '#c8102e', holds: 'staff', collection: true },
   // reserved for other cards

@@ -47,3 +47,4 @@ export * from './issues';
 export * from './ranks';
 export * from './fires';
 export * from './adverts';
+export * from './news';

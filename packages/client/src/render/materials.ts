@@ -32,7 +32,7 @@ export const sceneUniforms = {
 export const nightUniform = sceneUniforms.uNight;
 
 /** Window schedule classes carried in the `aWin` vertex attribute. */
-export const Win = { None: 0, Home: 1, Shop: 2, Office: 3, Civic: 4, Factory: 5, Venue: 6, Fire: 7 } as const;
+export const Win = { None: 0, Home: 1, Shop: 2, Office: 3, Civic: 4, Factory: 5, Venue: 6, Fire: 7, Beacon: 8, Sign: 9 } as const;
 
 const HASH = /* glsl */ `float mscHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`;
 
@@ -192,7 +192,22 @@ float mscLitShare(float cls, float t, float bld) {
  * mirrors the layouts below for buildings:check; keep the two in step.
  */
 const WINDOWS = /* glsl */ `
-if (vWin > 6.5) {
+if (vWin > 8.5) {
+  // Win.Sign: a lit logo or screen (shared buildings/media.ts). It comes on at a dusk time of its own per building and
+  // breathes a little on a slow phase of its own per part, so no two broadcasters' signs light or pulse together
+  float hs = mscHash(floor(vOrigin * 4.0) + 9.1);
+  float on = smoothstep(0.12 + 0.3 * hs, 0.3 + 0.3 * hs, uNight);
+  float br = 0.9 + 0.1 * sin(uTime * (0.6 + hs) + dot(floor(vLocal.xz * 10.0), vec2(2.3, 5.9)));
+  totalEmissiveRadiance += diffuseColor.rgb * br * (0.25 + 1.25 * on);
+} else if (vWin > 7.5) {
+  // Win.Beacon: a red aviation light on a mast or a roof corner (shared buildings/media.ts). Each building and each light
+  // blinks on its own period and phase, a short flash with a soft tail, brighter after dark
+  float hb = mscHash(floor(vOrigin * 4.0) + floor(vLocal.xz * 9.0 + vLocal.y * 3.0) * 0.37 + 2.1);
+  float per = 1.1 + 0.9 * hb;
+  float ph = fract(uTime / per + hb * 7.3);
+  float flash = smoothstep(0.0, 0.04, ph) * (1.0 - smoothstep(0.14 + 0.1 * hb, 0.32 + 0.1 * hb, ph));
+  totalEmissiveRadiance += diffuseColor.rgb * (0.08 + flash * (0.5 + 2.4 * min(1.0, uNight * 1.6)));
+} else if (vWin > 6.5) {
   // Win.Fire: a camp fire or a lantern (shared buildings/camp.ts). The whole box glows, faintly by day and fully from
   // dusk, and flickers on a phase of its own per building and per part, so no two camps (or lamps) pulse together
   float ph = mscHash(floor(vOrigin * 4.0) + 5.3) * 40.0 + dot(floor(vLocal.xz * 12.0), vec2(3.1, 7.7));

@@ -10,6 +10,7 @@ import { Finance } from './sim/finance';
 import { Issues } from './sim/issues';
 import { Fires } from './sim/fires';
 import { Adverts } from './sim/adverts';
+import { News } from './sim/news';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
 import { TickWindow } from './tickstats';
@@ -43,6 +44,8 @@ export interface Game {
   fires: Fires;
   /** campaigns, rented ad slots and their rent (sim/adverts.ts, docs/adverts.md) */
   adverts: Adverts;
+  /** the news story log (sim/news.ts, docs/media.md): stories from fires, ranks, openings and new lines, and who covers them */
+  news: News;
   net: Net;
   /** tick time over the last minute (300 loops), for the stats message, /healthz and the client's perf readout */
   tickWin: TickWindow;
@@ -99,13 +102,19 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const adverts = new Adverts(world); // campaigns and rented ad slots (sim/adverts.ts): the `ads` message, rent at midnight
   adverts.cover = (x, y) => sim.areaCover(x, y);
   net.adverts = adverts;
+  // the news (sim/news.ts): fed by the fires, the ranks, finished sites and new lines; nothing of its own per tick
+  const news = new News(world);
+  fires.onStory = (e) => news.fire(e);
+  if (net.ranks) net.ranks.onStory = (e) => news.rank(e);
+  world.onSiteCompleted = (s) => news.opened(s);
+  net.news = news;
   const tickWin = new TickWindow(300);
   let slow = 0, loops = 0;
   // city history for the charts (history.ts): one sample per game hour, pushed to the clients that have the panel open
   const hist = historyOf(world);
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, finance, issues, fires, adverts, net, tickWin, steps,
+    world, sim, airports, rail, metro, ferry, harbours, finance, issues, fires, adverts, news, net, tickWin, steps,
     step() { sim.tick(); airports.tick(); harbours.tick(); finance.tick(); issues.tick(); fires.tick(); adverts.tick(); net.flush(); sampleHistory(); },
     loop() {
       const t0 = performance.now();

@@ -7,6 +7,7 @@ import { MANIFEST, LEDGER_LABELS, ECONOMY_TUNING, spendableMoney, type KindToolI
 import { FLEET_LABEL } from '@msimcity/shared';
 import { WEEKDAY_NAMES } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
+import { mediaHtml } from './news';
 import { POLICIES } from '@msimcity/shared';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
@@ -511,6 +512,7 @@ export class UI {
     }
     if (info.mothballed) html += row('Mothballed', '<span class="bad">no staff, no upkeep, no cover</span>');
     if (info.fire) html += row('Fire', `<span class="bad">${info.fire}</span>`);
+    if (info.media) html += mediaHtml(info.media, row);
     if (info.airport) html += airportHtml(info.airport, row);
     if (info.rail) html += railStationHtml(info.rail, row);
     if (info.metro) html += metroStationHtml(info.metro, row);

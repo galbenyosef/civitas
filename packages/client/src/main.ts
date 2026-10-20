@@ -42,6 +42,7 @@ import { ContextMenu } from './contextmenu';
 import { Onboarding } from './onboarding';
 import { CameraMoment } from './moment';
 import { RanksUI } from './ranks';
+import { NewsUI } from './news';
 import { Fireworks } from './render/fireworks';
 import { LinesPanel } from './lines';
 import { ChartsPanel } from './charts';
@@ -375,6 +376,8 @@ ui.onHint = (id) => onboarding.hint(id);
 const fireworks = new Fireworks(); scene.add(fireworks.group);
 const ranks = new RanksUI({ net, world, liveTick, fireworks, moment: (x, y, caption, o) => { if (!tour && !mapMode.on) moment.play(x, y, caption, o); } });
 scene.add(ranks.group);
+// the news (news.ts, docs/media.md): the news chip and panel, the ticker of breaking stories, a media centre's channel
+new NewsUI({ net, world, liveTick, flyTo: (x, y) => flyTo(x, y), headline: (h) => buildings.adverts.setNewsHeadline(h) });
 net.on('railLines', (m) => { trains.setLines(m.lines); rail.setLines(m.lines); });
 // underground lines (docs/underground.md): their trains run in the bores, and the bores take the lines' colours
 const metroMeta = new Map<number, MetroLineDTO>(); // the metro lines as sent, for station names on a cab ride

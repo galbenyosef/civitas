@@ -48,7 +48,7 @@ import { AD } from '../adverts';
  * would click (the door) and its rotation (FRONT order: 0 the door faces +y/south, 1 east, 2 north, 3 west).
  */
 
-export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street'
+export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media'
   | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-rail' | 'london-buses' | 'london-river' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
@@ -454,6 +454,16 @@ export const SECTIONS: DemoSection[] = [
     ],
   },
   {
+    id: 'media', name: 'Media',
+    blurb: 'A local TV studio, a broadcast centre and a media centre with the news helicopter\'s pad on its tower, on the north row of district B3: the town\'s channel, reporting the fire drill and the town\'s big days in the News panel (docs/media.md).',
+    clear: [block(2, 1, 0, 0), block(2, 1, 1, 0)],
+    placements: [
+      { kind: 'broadcast-centre', door: [14, -7], rot: 0 },
+      { kind: 'tv-studio', door: [17, -7] },
+      { kind: 'media-centre', door: [20, -7], rot: 0 },
+    ],
+  },
+  {
     id: 'airport', name: 'Airport',
     blurb: 'An airport terminal facing the east perimeter road, with a 20-tile runway five rows behind it: a flight an hour, every type from the business jet to the jumbo, landing fees for the owner.',
     land: [{ name: 'Airfield', rect: [35, -12, 15, 24] }],
@@ -586,6 +596,7 @@ export const TOUR: string[] = [
   'studio-theatre', 'theatre', 'opera-house',
   'sports', 'leisure-centre', 'arena', 'stadium',
   'library', 'central-library', 'museum',
+  'tv-studio', 'broadcast-centre', 'media-centre',
   'nursery', 'primary-school', 'secondary-school', 'sixth-form', 'fe-college', 'university', 'halls', 'research-institute',
   'airport', 'runway',
   'block-estate', 'fire-blast', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
@@ -596,7 +607,7 @@ export const TOUR: string[] = [
 ];
 
 export const DEMOS: DemoDef[] = [
-  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'education', 'airport', 'industry', 'riverside', 'harbour'],
+  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'media', 'education', 'airport', 'industry', 'riverside', 'harbour'],
     blurb: 'A lived-in town with one of every large building and every merged lot, buses, trains, an underground and river buses, an airport every plane type flies to, helicopters, a river with every style of bridge, and a harbour with every kind of boat, all running. Take the guided tour.' },
   { id: 'transport', name: 'Transport demo', slot: 91, sections: ['downtown', 'transport', 'rail', 'airport', 'industry'],
     blurb: 'Buses, parking, rail, freight and the airport, in the same town.' },
@@ -1047,12 +1058,13 @@ const JUNCTION_TOUR: Record<DemoJunction['tool'], string> = { roundabout: 'round
 const PLANE_CAPTIONS: Record<PlaneType, string> = {
   turboprop: 'a turboprop', regional: 'a regional jet', narrowbody: 'a narrow-body jet', widebody: 'a wide-body jet', jumbo: 'a jumbo jet', bizjet: 'a business jet',
 };
-const HELI_SERVICES: Record<PadKind, Pick<ShowcaseFeature, 'caption' | 'tour' | 'demo' | 'rule'>> = {
+const HELI_SERVICES: Record<PadKind, Pick<ShowcaseFeature, 'caption' | 'tour' | 'demo' | 'rule' | 'todo'>> = {
   medical: { caption: 'air ambulances (a hospital helipad)', tour: 'helipads' },
   police: { caption: 'the police helicopter (police headquarters)', tour: 'helipads' },
   corporate: { caption: 'executive helicopters (a tall office with a rooftop pad)', tour: 'off-hq' },
   royal: { caption: 'the royal flight (Buckingham Palace)', tour: 'buckingham-palace', demo: 'london',
     rule: 'only Buckingham Palace has a royal pad, and landmarks stand in their own city\'s demo (the London landmarks in London), not the showcase' },
+  news: { caption: 'the news helicopter (a media centre\'s roof pad)', tour: 'media-centre', todo: 'its pad stands in the showcase; it flies once N3 sends it to stories (docs/media.md)' },
 };
 
 /**
@@ -1163,6 +1175,9 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
     id: spot, caption: `a ${name.toLowerCase()} at (${x}, ${y}) (a mobile-job base)`, tour: spot,
     seeded: (d) => anyTile(d, (tx, ty, t, a) => tx === x && ty === y && mobileRoleAt(spot, x, y, t, a)),
   })),
+  // ---- the news (docs/media.md N2): the media centre's channel reports the fire drill, so the News panel has stories
+  { id: 'news', caption: 'the news: the media centre\'s channel reporting the fire drill in the News panel', tour: 'media-centre',
+    scenario: (ss) => placedKind('media-centre')(ss) && ss.some((s) => s.spots?.some((sp) => sp.spot === 'house-fire')) },
   // ---- settlement ranks (docs/ranks.md): a sandbox has none, so the tour stop plays the celebration over the town
   { id: 'settlement-ranks', caption: 'settlement ranks (a rank-up celebration over the town)', tour: 'ranks',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'ranks' && sp.view === 'ranks')) },

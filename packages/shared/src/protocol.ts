@@ -10,6 +10,7 @@ import type { BoatHarbour } from './boats';
 import type { SeaGate } from './waterways';
 import type { FireDTO } from './fires';
 import type { AdTarget, AdsDTO } from './adverts';
+import type { StoryDTO } from './news';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
 export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | KindToolId;
 
@@ -205,6 +206,8 @@ export interface BuildingInfo {
   mothballable?: boolean;
   /** on fire, being put out, or the aftermath of one (server sim/fires.ts), in words */
   fire?: string;
+  /** a media centre (docs/media.md): its channel, what it reaches and what it has reported */
+  media?: MediaInfo;
   visitors?: number;
   visitorCapacity?: number;
   /** builders' yard: sites its crews are on right now */
@@ -621,7 +624,26 @@ export type ServerMsg =
   /** per chunk: the overlay you asked for, base64 Uint8Array(CHUNK_SIZE^2) (overlayByte; 0 no data), sent when it changes */
   | { t: 'overlay'; ch: number; cx: number; cy: number; d: string }
   /** every campaign and rented ad slot (shared/src/adverts.ts AdsDTO), on join and whenever they change (rare: intents and midnight) */
-  | ({ t: 'ads' } & AdsDTO);
+  | ({ t: 'ads' } & AdsDTO)
+  /** the news (shared/src/news.ts): stories new or changed since the last, or with `all` the newest NEWS.helloSend on joining; the client keeps them by id */
+  | { t: 'news'; s: StoryDTO[]; all?: boolean };
+
+/** A broadcaster in the building panel (server sim/news.ts describe). */
+export interface MediaInfo {
+  /** the channel's name and owner */
+  channel: string; owner: string;
+  /** tiles it reaches (square, from the door); 0 the whole map */
+  radius: number;
+  tier: number;
+  /** staffed: only a centre with staff on the payroll reports */
+  staffed: boolean;
+  /** other players' channels whose centres reach this one's door */
+  rivals: string[];
+  /** stories this channel has run in the log, and the newest headlines */
+  stories: number; latest: string[];
+  /** news helicopters based on its roof (N3 flies them) */
+  helicopters: number;
+}
 
 /**
  * A harbour on the wire (server sim/harbours.ts): what the boat schedule reads (boats.ts BoatHarbour: id, kind, the

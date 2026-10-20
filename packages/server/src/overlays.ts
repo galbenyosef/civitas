@@ -5,6 +5,7 @@ import {
 import type { World } from './world';
 import type { Simulation } from './sim/simulation';
 import type { Issues } from './sim/issues';
+import type { News } from './sim/news';
 import { LEISURE } from './sim/life';
 
 const N = CHUNK_SIZE * CHUNK_SIZE;
@@ -19,6 +20,9 @@ const N = CHUNK_SIZE * CHUNK_SIZE;
 export class Overlays {
   private best = new Float32Array(KIND_COUNT * N);
   private sum = new Float32Array(N);
+  private reach = new Uint8Array(N);
+  /** the news log (sim/news.ts), for the news overlay; set by Net */
+  news: News | null = null;
 
   constructor(private w: World, private sim: Simulation, private issues: Issues) {}
 
@@ -31,6 +35,7 @@ export class Overlays {
       case Overlay.Leisure: return this.leisure(cx, cy, ch0.tiles);
       case Overlay.Happiness: return this.happiness(cx, cy, ch0.tiles, ch0.aux);
       case Overlay.JobsHomes: return this.jobsHomes(cx, cy, ch0.tiles);
+      case Overlay.News: return this.newsReach(cx, cy, ch0.tiles);
       default: return null;
     }
   }
@@ -77,6 +82,15 @@ export class Overlays {
     });
     const out = new Uint8Array(N);
     for (let i = 0; i < N; i++) if (this.land(tiles[i])) out[i] = overlayByte(Math.min(LEISURE.coverageCap, sum[i]) / LEISURE.coverageCap);
+    return out;
+  }
+
+  /** How many media centres' channels reach each land tile: none, one (half way up the ramp) or rival channels (the top). */
+  private newsReach(cx: number, cy: number, tiles: Uint16Array) {
+    const out = new Uint8Array(N);
+    if (!this.news) return out;
+    this.news.channelsOver(cx * CHUNK_SIZE, cy * CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE, this.reach);
+    for (let i = 0; i < N; i++) if (this.land(tiles[i])) out[i] = overlayByte(this.reach[i] / 2);
     return out;
   }
 

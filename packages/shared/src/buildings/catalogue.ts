@@ -24,6 +24,7 @@ import { BLOCK_INTERIOR } from './block-interior';
 import { LONDON_LANDMARKS } from './landmarks-london';
 import { bigScreens } from './bigscreens';
 import { EDUCATION } from './education';
+import { MEDIA } from './media';
 
 /**
  * Every building kind. This is source data: only the compile step
@@ -45,6 +46,8 @@ const BASE: KindDef[] = [residential, commercial, industrial, office, police, fi
   ...BLOCK_INTERIOR,
   // education (docs/education.md section 3): kind ids 101-108
   ...EDUCATION,
+  // broadcasters (docs/media.md N1): kind ids 130-132, placed sub-kinds of the office family
+  ...MEDIA,
   // landmarks (docs/buildings.md "Landmarks"): real buildings in a city's collection, placed only where their locked tech is given
   ...LONDON_LANDMARKS];
 

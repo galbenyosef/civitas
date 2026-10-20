@@ -5,6 +5,7 @@ import { rehire } from './sim/skills';
 import { historyOf, type HistoryJSON } from './history';
 import type { FireSave } from './sim/fires';
 import type { AdvertsSave } from './sim/adverts';
+import type { NewsSave } from './sim/news';
 
 /**
  * v8: the per-chunk under layer (tunnels and platforms, docs/underground.md), stored only where it is not all zero,
@@ -43,6 +44,8 @@ export interface Snapshot {
   fires?: FireSave;
   /** campaigns and rented ad slots (sim/adverts.ts, docs/adverts.md); optional, absent in older saves and while there are none */
   adverts?: AdvertsSave;
+  /** the news story log (sim/news.ts, docs/media.md); optional, absent in older saves and while there are no stories */
+  news?: NewsSave;
 }
 
 /**
@@ -74,11 +77,15 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.mothballed.size ? { mothballed: [...w.mothballed].map((k) => parseKey(k) as [number, number]) } : {}),
     ...(w.firesSave ? { fires: w.firesSave() } : {}),
     ...(w.adverts ? advertsField(w.adverts.save()) : {}),
+    ...(w.newsSave ? newsField(w.newsSave()) : {}),
   };
 }
 
 /** The adverts field, left out while nobody has run a campaign (so a save without adverts is as before). */
 const advertsField = (a: AdvertsSave) => (a.campaigns.length || a.posted.length ? { adverts: a } : {});
+
+/** The news field, left out while the log is empty (so a save without news is as before). */
+const newsField = (n: NewsSave) => (n.stories.length ? { news: n } : {});
 
 /** Whether this build can read a snapshot of that format (the current one, or one it upgrades in place). */
 export const readableVersion = (version: number | undefined) => version === VERSION || UPGRADES_FROM.includes(version as number);
@@ -127,6 +134,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   for (const m of snap.mothballed ?? []) if (Array.isArray(m) && w.buildings.has(tileKey(m[0], m[1]))) w.mothballed.add(tileKey(m[0], m[1]));
   if (snap.fires && typeof snap.fires === 'object') w.firesLoaded = snap.fires;
   if (snap.adverts && typeof snap.adverts === 'object') w.advertsLoaded = snap.adverts;
+  if (snap.news && typeof snap.news === 'object') w.newsLoaded = snap.news;
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {
     // citizens saved before lives existed: hash-seeded adult ages, health 80, their own household, no links
