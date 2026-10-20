@@ -136,7 +136,12 @@ The client keeps stories by id.
   - **Watched:** at home in the evening with a TV, on a story whose `ch` reaches the home.
   - Salience `s` is the memory's starting strength. `who`, `pc` and `b` give the people involved: the residents of the building at the door tile.
 - **N6, conversations.** Lines come from templates keyed by `k` and fill from `h`'s words. The client keeps the stories, so nothing new goes on the wire.
-- **The Piccadilly Lights' news turn.** The client reads `news.latest(1)[0]?.h` (client/src/news.ts). `news.latest(n, ch)` gives one channel's stories.
+- **The Piccadilly Lights' news turn** (branch piccadilly). Every 'news' turn samples one picture, `AdvertsView.setNewsFeed(tex)` in render/adverts.ts, kept for N4's helicopter render target. For text, piccadilly is adding `AdvertsView.setNewsHeadline(text)`, which redraws only the news cell and cuts the text at about 60 characters. Whichever branch merges second calls it from NewsUI's `onNews` with `news.latest(1)[0]?.h` (client/src/news.ts). `news.latest(n, ch)` gives one channel's stories.
+- **Fires v2** (branch fires-2). Whichever branch merges second wires two calls to `Fires.onStory`:
+  - In `ignite()`, the 'lit' call sends phase `'spread'` when `opts.from` is set (1 caught from next door, 2 lit by a blast).
+  - In the private `blast()` that every `Fires.explode()` ends in, one `'explosion'` call goes after the neighbours are lit: `{ phase: 'explosion', id: f.id, x: f.x, y: f.y, owner: f.owner, kind: b.id }`.
+
+  A blast that levels a building is folded into `burnt`, so its 'out' story reads "burns down".
 
 ## 5. Measured
 
