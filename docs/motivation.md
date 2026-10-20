@@ -415,5 +415,48 @@ entries so the tour can show it: `job-switch` (within `FEATURE_DAYS` a showcase 
 
 ### Measured
 
-Numbers to fill from the final runs are in the hand-off report; `loadtest/motivation.ts` prints them. It runs the same
-test city with motivation off and then on, under one seeded `Math.random`.
+- **The probe** (`npx tsx packages/server/src/loadtest/motivation.ts`, 28 of 28) runs a 1×1 test city for 5 days,
+  with motivation off and then on, under one seeded `Math.random`.
+  - **Jobs.** Top-Money workers' jobs pay 1.011 of the mean wage with motivation off and 1.070 with it on.
+    Top-Time workers' commutes are 0.984 of the mean off and 0.822 on. Top-Status workers hold skilled places
+    4.6 points above the average off and 22 points above it on.
+  - **Hires.** 62% of scored hires are not the nearest vacancy.
+  - **Homes.** Choosing a home, a pure Roots household lands 3 tiles from home and a pure Adventure one 25 (main's
+    near-and-random scorer gives 2). A pure Time household lands 4 tiles from work and a pure Adventure one 22.
+  - **Changes of their own accord.** Job changes are 0.02-0.13% of workers a day and moves 0.06% of households a
+    day, both under Rich's 1%.
+  - **Inheritance.** Children in town correlate with their parents at r 0.7-0.8, and every citizen is seeded the same
+    on a second run.
+  - **Old saves.** A save without `vals` loads with values from the id.
+- **Tick cost.** These are motivation-off against motivation-on runs; `MOTIVE=0` plays exactly as main.
+
+  | City | Measure | Off | On | Change |
+  | --- | --- | --- | --- | --- |
+  | 2×2, `run.ts --days 3` | average tick | 2.59 ms | 2.67 ms | +3.1% |
+  | | simulation only | 2.05 ms | 2.13 ms | +3.9% |
+  | | p95 | 4.90 ms | 5.00 ms | |
+  | London, `jobsearch.ts --demo london` | average fill tick | 20.39 ms | 20.55 ms | +0.8% |
+  | | next day, run 1 | 26.82 ms | 26.40 ms | |
+  | | next day, run 2 | 25.29 ms | 27.37 ms | |
+
+  The two London next-day pairs move in opposite directions, so the difference is run-to-run noise. In London,
+  `findJob` costs 0.13 ms a call against 0.05 (190 against 77 ms over a day), and `moveVehicles` rises up to 12%:
+  the commutes people choose are a little longer.
+- **First hours: bot F, seeds 1-8, rank-up minutes.**
+
+  | Rank | Median off | Median on |
+  | --- | --- | --- |
+  | Hamlet | 18.6 | 18.6 |
+  | Village | 43.1 | 42.6 |
+  | Town | 95.4 | 84.1 |
+  | City | 158 | 146 |
+
+  Single seeds swing about 20% either way under any change. Two seeds (5 and 7) miss City inside three hours
+  with motivation on; one (8) does with it off. The ranks probe's seed 1 gives 18.5 / 41.5 / 84.4 / 162.2 against
+  18 / 43.7 / 92.2 / 153 on main.
+- **Side effects.**
+  - The dense test city ends day 5 with about 3% fewer people (1,374 against 1,416 over seeds 1-4). Commutes are
+    about 10% longer and the share driving is 0.42 against 0.38.
+  - Without the essential-jobs rule the yards emptied; with it they stay full.
+  - The fires probe's spread check now counts apart a fire that catches during its unwatched wait between seeds:
+    the different town exposed that gap.
