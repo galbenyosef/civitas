@@ -48,6 +48,9 @@ export const GROUPS: GroupDef[] = [
   { id: 'education', label: 'Education', section: 'Services', color: '#d8b25a', holds: 'pupils', stages: true },
   // broadcasters (docs/media.md): a local TV studio, a broadcast centre and a media centre with a news helipad (buildings/media.ts)
   { id: 'media', label: 'Media', section: 'Services', color: '#c8463c', holds: 'staff' },
+  // death and remembrance (docs/remembrance.md): churchyard, municipal and garden cemetery, crematorium (buildings/remembrance.ts);
+  // `stages`: the crematorium, last, is smaller and cheaper than the garden cemetery and takes in more
+  { id: 'remembrance', label: 'Cemeteries', section: 'Services', color: '#5d7a52', holds: 'plots', stages: true },
   // landmarks (docs/buildings.md "Landmarks"): real buildings, one picker per city; buildings/landmarks-london.ts
   { id: 'london', label: 'London', section: 'Landmarks', color: '#c8102e', holds: 'staff', collection: true },
   // reserved for other cards

@@ -25,6 +25,7 @@ import { LONDON_LANDMARKS } from './landmarks-london';
 import { bigScreens } from './bigscreens';
 import { EDUCATION } from './education';
 import { MEDIA } from './media';
+import { REMEMBRANCE } from './remembrance';
 
 /**
  * Every building kind. This is source data: only the compile step
@@ -48,6 +49,8 @@ const BASE: KindDef[] = [residential, commercial, industrial, office, police, fi
   ...EDUCATION,
   // broadcasters (docs/media.md N1): kind ids 130-132, placed sub-kinds of the office family
   ...MEDIA,
+  // death and remembrance (docs/remembrance.md): kind ids 150-154, the funeral director (office family) and the resting places (park family)
+  ...REMEMBRANCE,
   // landmarks (docs/buildings.md "Landmarks"): real buildings in a city's collection, placed only where their locked tech is given
   ...LONDON_LANDMARKS];
 
