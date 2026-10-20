@@ -313,7 +313,11 @@ export const SECTIONS: DemoSection[] = [
         how: 'Nothing to build. Zone a block all homes and own its middle: once every home round it stands, the residents plant it. It costs nothing and has no upkeep.' },
     ],
     // mobile jobs (docs/mobile-jobs.md): roles of grown lots picked by tile hash, so these doors are where the hashes put them
-    spots: MOBILE_SPOTS.map(([id, x, y, name]): DemoSpot => ({ id, spot: id, name, rect: [x, y, 1, 1], inspect: [x, y] })),
+    spots: [
+      ...MOBILE_SPOTS.map(([id, x, y, name]): DemoSpot => ({ id, spot: id, name, rect: [x, y, 1, 1], inspect: [x, y] })),
+      // focus groups (docs/motivation.md): a home in the residential block, whose tooltip shows its parcel's value mix
+      { id: 'focus-groups', spot: 'focus-groups', name: 'Focus groups', rect: block(1, 1, 1, 1), inspect: [-5, -4] },
+    ],
   },
   {
     id: 'high-street', name: 'High Street',
@@ -530,8 +534,6 @@ export const SECTIONS: DemoSection[] = [
       { id: 'level-crossing', spot: 'level-crossing', name: 'Level crossing', rect: [-20, 38, 1, 1], inspect: [-30, 35] },
       // the whole town from above, on the world map
       { id: 'world-map', spot: 'world-map', name: 'World map', rect: [-60, -60, 130, 140], view: 'map' },
-      // focus groups (docs/motivation.md): a home in the residential block, whose tooltip shows its parcel's value mix
-      { id: 'focus-groups', spot: 'focus-groups', name: 'Focus groups', rect: block(1, 1, 1, 1), inspect: [-5, -4] },
       // settlement ranks (docs/ranks.md): the stop plays a rank-up's fireworks over the middle of the town
       { id: 'ranks', spot: 'ranks', name: 'Settlement ranks', rect: [-14, -14, 28, 28], view: 'ranks' },
     ],

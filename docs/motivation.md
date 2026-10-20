@@ -357,3 +357,63 @@ entries so the tour can show it: `job-switch` (within `FEATURE_DAYS` a showcase 
 - **The deceased archive** (the death agent's `sim/death.ts`): a family with someone in the town's archive (buried or
   remembered here) holds stronger Roots: a Roots multiplier in `weightsOf` alongside the other life facts, and
   "Wouldn't leave: family is buried here" as a thought.
+
+## 14. Built: M1 and M2 (branch `motivation-1`, 2026-10-20)
+
+### What landed
+
+- **Values** (`shared/src/motivation.ts`, `server/src/sim/motivation.ts`). `Citizen.vals` packs six 0-15 numbers.
+  - `Simulation.makeCitizen` seeds every newcomer with `Motivation.seed` (the archetype blend, the parcel pull, the
+    jitter).
+  - `spawnChild`, `Families.join` and the demos' families (`demo/seed.ts`) use `inheritValues`.
+  - `snapshot.ts` gives a citizen saved without `vals` the values `seededValues(id)`.
+  - `weightsOf` applies the life multipliers of section 3 at each use, so nothing about them is stored.
+- **Happiness.** Each part of `happinessParts` (`sim/life.ts`) carries the value it belongs to:
+  - commute, parks and traffic: Time;
+  - money and out of work: Money;
+  - services, schools and school meals: Family;
+  - studying, over-qualified and graduated: Status;
+  - friends and partner: Roots;
+  - times out: Adventure.
+
+  The part's delta is multiplied by `1 + 0.35 x (6w - 1)`, clamped to 0.6-1.6. A weight of 1/6 is neutral.
+- **The job search** (`findJob`) keeps its one road search and its miss cache.
+  - `findPaths` returns up to 5 vacancies: the nearest of each kind and level, within 12 steps of the first and 400
+    more nodes.
+  - `Motivation.pickJob` scores them: Money by the wage the place would pay this citizen, Status by a skilled place
+    and the building's level, Time and Family by the extra steps, Roots by a friend working there, Adventure by a
+    hashed taste for the kind. Everyone also pays a commute cost (`MOTIVE.commuteCost`), and there is some noise.
+  - **Essential jobs.** Builders' yards and public services (`essentialJob`) are taken when they are the nearest
+    vacancy, and their staff never look for a better job. Without this rule the first run left the test city's yards
+    at 3 of 10 staff and the town stopped growing.
+- **Homes.**
+  - A grown child moving out scores homes (`Motivation.moveOutHome`) in place of `6 x random - d`: an even sample of
+    at most 12 of the homes with room within 30 tiles, scored by `homeScore`.
+  - Once a game day a household's lowest-id adult may look for a better home, with chance `0.01 x (1.2 - 2 Roots)`.
+    Everyone in the household must be at home. They move together if the best home beats staying by
+    `MOTIVE.moveMargin` (0.12).
+- **Job changes.** Once a game day an employed adult in a plain job looks for a better one, with chance
+  `0.012 x (0.5 + 1.5 (Money + Status + Time))`. They switch when a rival beats their job by 0.22. Nobody looks
+  again within 7 days of a move or a change.
+- **Leisure.** `pickLeisure` divides by distance as before, but Adventure stretches the reach, raises an event's pull
+  and lowers the bar yardstick; Money minds the ticket. The multipliers are 1 for an average citizen.
+- **Education.** `stayOnLift` multiplies `uniShare` and `postgradTake` (0.6-1.6 by Status + Adventure, mean 0.97) and
+  `stemShare` sets the sixth-form STEM share (0.2-0.8, mean 0.50). Both are in `sim/schools.ts`.
+- **What the player sees.**
+  - `CitizenLife.values` ("Cares most about family; restless") and `lately` ("changed job for the pay") in the
+    citizen panel (`client/src/ui.ts`).
+  - `BuildingInfo.focus` on a home's tooltip, for a viewer whose technology has `focusgroups`, the new unlock of
+    Cinemas and sports halls (`cul2`). It shows the parcel's grown-ups and their value mix in percentages
+    (`Motivation.focus`, counted fresh at each hover).
+- **Switches.** `MOTIVE=0` plays exactly as main: bot F seeds 1 and 5 give identical rank-up times and residents.
+  `MOTIVE_PARTS=jobs,homes,leisure,bend,daily,school` keeps only the parts named.
+- **Showcase.** The stop is `focus-groups`, after the homes block. It inspects the home at (-5, -4), whose tooltip
+  shows the Focus groups section. `SHOWCASE_FEATURES` adds two entries for `demo:check`:
+  - `citizen-values`: every value is someone's first, and children share a parent's first value more than 1.5 times
+    as often as chance;
+  - `focus-groups`: a tooltip's percentages add up to 100 where people live.
+
+### Measured
+
+Numbers to fill from the final runs are in the hand-off report; `loadtest/motivation.ts` prints them. It runs the same
+test city with motivation off and then on, under one seeded `Math.random`.

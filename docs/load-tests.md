@@ -349,3 +349,5 @@ adults employed before and 30,086 of 30,086 after, with 0–28 adults between jo
 Left as they are: `moveVehicles` (7–9 ms a tick) is now the largest cost in both cities, and the 8×8 worst fill tick
 (174 ms) has no slow simulation step under it (likely garbage collection). London parks with no road at the door are
 never visited. That is a seeding issue for the London map, not a performance one.
+| 2026-10-20 13:16 | 2×2 | 4968 | 9224 | 518 | 74% | 2.59 | 4.90 | 31.5 | 2.05 / 0.54 | 78.6 | 308.6 | 5778 | 1117 (1) | 5778 | 8.07 | 4.29 | 0.30 | ok | fill 1.17 d |
+| 2026-10-20 13:17 | 2×2 | 4930 | 9224 | 574 | 72% | 2.67 | 5.00 | 12.3 | 2.13 / 0.54 | 108.3 | 331.7 | 6125 | 1208 (1) | 6125 | 8.79 | 4.20 | 0.31 | ok | fill 1.25 d |
