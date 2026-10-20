@@ -1258,7 +1258,7 @@ export class Simulation {
       return false;
     };
     // motivation (sim/motivation.ts): a few vacancies from the same search, scored by what the citizen cares about
-    const rs = MOTIVATION.on ? findPaths(w, c.hx, c.hy, isGoal, undefined, MOTIVE.jobOptions, MOTIVE.jobSlack, MOTIVE.jobExtraNodes) : null;
+    const rs = MOTIVATION.on && MOTIVATION.jobs ? findPaths(w, c.hx, c.hy, isGoal, undefined, MOTIVE.jobOptions, MOTIVE.jobSlack, MOTIVE.jobExtraNodes) : null;
     const r = rs ? rs[this.pickJob(c, rs)] : findPath(w, c.hx, c.hy, isGoal);
     if (!r) { this.jobMisses.set(home, { x0: x0 - 2, y0: y0 - 2, x1: x1 + 2, y1: y1 + 2, edits: w.jobEdits, full: [...full] }); return false; }
     this.hire(c, w.buildings.get(tileKey(r.gx, r.gy))!, r.path);
@@ -1489,7 +1489,7 @@ export class Simulation {
       const taste = 0.35 + 1.3 * hash2(c.id, 301 + VENUE_TYPE_INDEX[sp.type]);
       const pull = this.eventNow(sp, b) ? EVENT_PULL * sp.eventSize : 1; // bigger venues, bigger nights
       const score = ((evening ? sp.evening : sp.day) * stage * taste * pull * (0.5 + sp.value / 8) * needMul * (0.6 + 0.8 * Math.random())) / (1 + d / 12)
-        * (MOTIVATION.on ? this.motive.leisure(c, d, sp.ticket, pull > 1) : 1); // Adventure goes further and loves an event, Money minds the ticket
+        * (MOTIVATION.on && MOTIVATION.leisure ? this.motive.leisure(c, d, sp.ticket, pull > 1) : 1); // Adventure goes further and loves an event, Money minds the ticket
       if (score > bestScore) { bestScore = score; best = b; }
     });
     return best;

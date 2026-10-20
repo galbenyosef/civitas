@@ -57,7 +57,7 @@ export const MOTIVE = {
    */
   lookJob: 0.012, switchMargin: 0.22, lookHome: 0.01, moveMargin: 0.12, settleDays: 7,
   /** how far a household looks for a new home (tiles), and how many candidates it compares at most */
-  moveRadius: 30,
+  moveRadius: 30, homeOptions: 12,
   /** happiness: each part's delta times 1 + bend x (6 x weight - 1), clamped to bendLo..bendHi (a weight of 1/6 is neutral) */
   bend: 0.35, bendLo: 0.6, bendHi: 1.6,
 };

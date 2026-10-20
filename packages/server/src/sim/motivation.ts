@@ -26,7 +26,10 @@ import { env } from '../env';
  * home, the old leisure score, unbent happiness), the A/B control for loadtest/motivation.ts. Values are still seeded,
  * so a save keeps them either way.
  */
-export const MOTIVATION = { on: env('MOTIVE') !== '0' };
+const PARTS = env('MOTIVE_PARTS')?.split(',');
+/** the parts, for A/B runs (MOTIVE_PARTS=jobs,homes,leisure,bend,daily,school: only those): all of them by default */
+const part = (k: string) => !PARTS || PARTS.includes(k);
+export const MOTIVATION = { on: env('MOTIVE') !== '0', jobs: part('jobs'), homes: part('homes'), leisure: part('leisure'), bend: part('bend'), daily: part('daily'), school: part('school') };
 
 const DAY_TICKS = TICKS_PER_DAY;
 
@@ -146,7 +149,7 @@ export class Motivation {
 
   /** Happiness multipliers per value (life.ts happinessParts): a weight of 1/6 is neutral; undefined when off. */
   bend(c: Citizen): number[] | undefined {
-    if (!MOTIVATION.on) return undefined;
+    if (!MOTIVATION.on || !MOTIVATION.bend) return undefined;
     const w = this.weightsOf(c);
     for (let i = 0; i < VALUE_COUNT; i++) w[i] = Math.max(MOTIVE.bendLo, Math.min(MOTIVE.bendHi, 1 + MOTIVE.bend * (6 * w[i] - 1)));
     return w;
@@ -187,7 +190,7 @@ export class Motivation {
    * friend there, Adventure a personal taste for the kind of work. Scores go in `scores` when given.
    */
   pickJob(c: Citizen, facts: JobFacts[], scores?: number[]): number {
-    if (facts.length <= 1 || !MOTIVATION.on || facts[0].essential) return 0;
+    if (facts.length <= 1 || !MOTIVATION.on || !MOTIVATION.jobs || facts[0].essential) return 0;
     const w = this.weightsOf(c, this.wbuf);
     let meanWage = 0, meanStatus = 0, minSteps = Infinity;
     for (const f of facts) { meanWage += f.wage; meanStatus += f.status; minSteps = Math.min(minSteps, f.steps); }
@@ -237,25 +240,33 @@ export class Motivation {
 
   /**
    * The best home in reach for c's household (beds for `need`), scored by `homeScore` plus noise, or null. Walks the
-   * built-building grid near home (World.eachBuiltNear), as the move-out's bestBuiltNear does; `accept` (road access)
-   * only for a would-be best.
+   * built-building grid near home (World.eachBuiltNear), as the move-out's bestBuiltNear does, and scores an even
+   * spread of at most MOTIVE.homeOptions of the homes with room (scoring reads services and parks, so not hundreds);
+   * road access only for a would-be best.
    */
   bestHome(c: Citizen, host: MotiveHost, need: number, w: readonly number[]): { b: Building; score: number } | null {
     const W = this.w, from = W.buildings.get(tileKey(c.hx, c.hy));
-    let best: Building | null = null, bestScore = -Infinity;
+    // the homes with room, nearest first (cheap), then a hashed sample of at most homeOptions of them to score
+    const room: [Building, number][] = [];
     W.eachBuiltNear(c.hx, c.hy, [Zone.Residential], MOTIVE.moveRadius, (b, d) => {
-      if (b === from || capacityOf(b.id, b.level) - b.occupants < need || (b.holdUntil ?? 0) > W.tick) return;
-      const sc = this.homeScore(c, w, host, from, b, d, need) + MOTIVE.noise * (2 * Math.random() - 1);
-      if (sc <= bestScore || !host.homeOk(b)) return;
-      best = b; bestScore = sc;
+      if (b !== from && capacityOf(b.id, b.level) - b.occupants >= need && (b.holdUntil ?? 0) <= W.tick) room.push([b, d]);
     });
+    if (!room.length) return null;
+    const step = Math.max(1, room.length / MOTIVE.homeOptions), off = Math.random() * step;
+    let best: Building | null = null, bestScore = -Infinity;
+    for (let k = off; k < room.length; k += step) {
+      const [b, d] = room[Math.floor(k)];
+      const sc = this.homeScore(c, w, host, from, b, d, need) + MOTIVE.noise * (2 * Math.random() - 1);
+      if (sc <= bestScore || !host.homeOk(b)) continue;
+      best = b; bestScore = sc;
+    }
     this.stats.scoredHomes++;
     return best ? { b: best, score: bestScore } : null;
   }
 
   /** A grown child's new home when they move out (Simulation.lifeFamily): the scored choice, or undefined to keep the old way. */
   moveOutHome(c: Citizen, host: MotiveHost): Building | null | undefined {
-    if (!MOTIVATION.on) return undefined;
+    if (!MOTIVATION.on || !MOTIVATION.homes) return undefined;
     return this.bestHome(c, host, 1, this.weightsOf(c))?.b ?? null;
   }
 
@@ -272,7 +283,7 @@ export class Motivation {
   }
   /** The bar yardstick's multiplier: adventurous people go somewhere new rather than the pub. */
   yardstick(c: Citizen): number {
-    if (!MOTIVATION.on) return 1;
+    if (!MOTIVATION.on || !MOTIVATION.leisure) return 1;
     const a = valuesOf(c.vals, this.wbuf)[Value.Adventure];
     return Math.max(0.7, Math.min(1.3, 1.25 - 1.5 * a));
   }
@@ -282,7 +293,7 @@ export class Motivation {
    * look for a better job, and the household's eldest-id adult may look for a better home. Slow by design.
    */
   daily(c: Citizen, host: MotiveHost) {
-    if (!MOTIVATION.on || c.stage !== LifeStage.Adult || c.mig) return;
+    if (!MOTIVATION.on || !MOTIVATION.daily || c.stage !== LifeStage.Adult || c.mig) return;
     const day = Math.floor(this.w.tick / DAY_TICKS);
     const last = this.settledDay.get(c.id);
     if (last !== undefined && day - last < MOTIVE.settleDays) return;
@@ -399,12 +410,12 @@ export function inheritValues(id: number, parents: (Citizen | undefined)[]): num
  * against Adventure (0.5 for the average). Off: 1 and 0.5, as before.
  */
 export function stayOnLift(c: Citizen): number {
-  if (!MOTIVATION.on || !c.vals) return 1;
+  if (!MOTIVATION.on || !MOTIVATION.school || !c.vals) return 1;
   const w = valuesOf(c.vals);
   return Math.max(0.6, Math.min(1.6, 1 + 1.5 * (w[Value.Status] + w[Value.Adventure] - 0.25)));
 }
 export function stemShare(c: Citizen): number {
-  if (!MOTIVATION.on || !c.vals) return 0.5;
+  if (!MOTIVATION.on || !MOTIVATION.school || !c.vals) return 0.5;
   const w = valuesOf(c.vals);
   return Math.max(0.2, Math.min(0.8, 0.5 + (w[Value.Status] + w[Value.Money] - w[Value.Adventure] - 0.27)));
 }
