@@ -40,7 +40,7 @@ import { FirstFive } from './firstfive';
 import { START_TUNING } from '@msimcity/shared';
 import { Families } from './families';
 import { Learning, ERRAND_CLASS } from './learning';
-import { Motivation, MOTIVATION, inheritValues, type MotiveHost } from './motivation';
+import { Motivation, MOTIVATION, inheritValues, essentialJob, type MotiveHost } from './motivation';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -123,6 +123,14 @@ const VEHICLE_LABEL: Record<number, string> = { [VehicleKind.Freight]: 'delivery
  */
 /** What a driver's leg was expected to take when it set off, and how many times it has been re-routed since. */
 interface LegTrack { leg: Leg | null; at0: number; exp0: number; at: number; exp: number; n: number; tripAt: number; trip: number; day: number; dayN: number }
+
+/** Whether b is the first workplace of its kind and level a search has offered (motivation's candidates differ); notes it. */
+function newKind(seen: Set<number>, b: Building): boolean {
+  const k = b.id * 16 + b.level;
+  if (seen.has(k)) return false;
+  seen.add(k);
+  return true;
+}
 
 export class Simulation {
   population = 0; jobs = 0; employed = 0; vacantJobs = 0;
@@ -209,7 +217,7 @@ export class Simulation {
     this.motive = new Motivation(w);
     this.motiveHost = {
       bestJob: (c, except) => this.jobOptions(c, except),
-      canSwitch: (c) => c.state === S.Home && !c.site && c.appr === undefined && !c.study && !this.mobile.roleOf(c),
+      canSwitch: (c) => c.state === S.Home && !c.site && c.appr === undefined && !c.study && !essentialJob(c.kind) && !this.mobile.roleOf(c),
       switchJob: (c, b, path) => { w.quitJob(c); this.hire(c, b, path); },
       cover: (x, y) => Math.floor(this.coverage(x, y) + 1e-6),
       parks: (x, y) => this.leisureCoverage(x, y).parks,
@@ -1237,7 +1245,7 @@ export class Simulation {
       this.jobMisses.delete(home);
     }
     let x0 = c.hx, y0 = c.hy, x1 = c.hx, y1 = c.hy;
-    const full = new Set<Building>();
+    const full = new Set<Building>(), kinds = new Set<number>();
     const isGoal = (x: number, y: number) => {
       if (x < x0) x0 = x; else if (x > x1) x1 = x;
       if (y < y0) y0 = y; else if (y > y1) y1 = y;
@@ -1245,7 +1253,7 @@ export class Simulation {
       if (t === undefined || isRoad(t) || !hasJobs(zoneOf(t))) return false; // most tiles looked at: no map lookup
       const b = w.buildings.get(tileKey(x, y));
       if (!b || !hasJobs(b.zone) || (w.mothballed.size && w.mothballed.has(tileKey(x, y)))) return false; // a mothballed service hires nobody (sim/finance.ts)
-      if (sk.placeFor(b, edu) !== Place.None) return true;
+      if (sk.placeFor(b, edu) !== Place.None) return newKind(kinds, b); // the nearest of each kind and level: the choices differ
       full.add(b);
       return false;
     };
@@ -1267,13 +1275,13 @@ export class Simulation {
    * workplace. No miss cache: a worker with a job is not a newcomer to a home with no work in reach.
    */
   private jobOptions(c: Citizen, except?: Building): { b: Building; path: number[]; place: number } | null {
-    const w = this.w, sk = this.skills, edu = c.edu;
+    const w = this.w, sk = this.skills, edu = c.edu, kinds = new Set<number>();
     const rs = findPaths(w, c.hx, c.hy, (x, y) => {
       const t = w.peekTile(x, y);
       if (t === undefined || isRoad(t) || !hasJobs(zoneOf(t))) return false;
       const b = w.buildings.get(tileKey(x, y));
       if (!b || b === except || !hasJobs(b.zone) || (w.mothballed.size && w.mothballed.has(tileKey(x, y)))) return false;
-      return sk.placeFor(b, edu) !== Place.None;
+      return sk.placeFor(b, edu) !== Place.None && newKind(kinds, b);
     }, undefined, MOTIVE.jobOptions, MOTIVE.jobSlack, MOTIVE.jobExtraNodes);
     if (!rs.length) return null;
     const r = rs[this.pickJob(c, rs)], b = w.buildings.get(tileKey(r.gx, r.gy))!;

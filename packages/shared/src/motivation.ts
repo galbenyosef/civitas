@@ -44,7 +44,9 @@ export const MOTIVE = {
   childOwn: 0.3,
   // ---- decisions (M2) ----
   /** job search: up to jobOptions vacancies, within jobSlack road steps of the first, at most jobExtraNodes more nodes */
-  jobOptions: 4, jobSlack: 10, jobExtraNodes: 300,
+  jobOptions: 5, jobSlack: 12, jobExtraNodes: 400,
+  /** what every extra jobSlack road steps costs a job's score, whatever the citizen's values (so choice adds little traffic) */
+  commuteCost: 0.25,
   /** score noise either way (the best option wins most of the time, not every time) */
   noise: 0.12,
   /**
@@ -53,7 +55,7 @@ export const MOTIVE = {
    * household looks at homes with chance lookHome x (1.2 - Roots) and moves if one beats theirs by moveMargin. Nobody
    * looks again within settleDays of a move or a new job.
    */
-  lookJob: 0.012, switchMargin: 0.22, lookHome: 0.01, moveMargin: 0.25, settleDays: 7,
+  lookJob: 0.012, switchMargin: 0.22, lookHome: 0.01, moveMargin: 0.12, settleDays: 7,
   /** how far a household looks for a new home (tiles), and how many candidates it compares at most */
   moveRadius: 30,
   /** happiness: each part's delta times 1 + bend x (6 x weight - 1), clamped to bendLo..bendHi (a weight of 1/6 is neutral) */

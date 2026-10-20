@@ -1,5 +1,5 @@
 import {
-  LifeStage, Zone, CitizenState, TICKS_PER_DAY, VALUE_COUNT, Value, MOTIVE, ARCHETYPES, capacityOf, hash2, tileKey, wageOf, wageMul, skillNeed,
+  LifeStage, Zone, CitizenState, TICKS_PER_DAY, VALUE_COUNT, Value, MOTIVE, ARCHETYPES, capacityOf, hash2, tileKey, isCivicId, familyOf, wageOf, wageMul, skillNeed,
   valuesOf, packWeights, archetypeBlend, jitterValues, seededValues, describeValues, type FocusInfo,
 } from '@msimcity/shared';
 import type { Building, Citizen, World } from '../world';
@@ -48,7 +48,14 @@ export interface MotiveHost {
 }
 
 /** One job candidate's facts, for scoring against the others. */
-interface JobFacts { wage: number; status: number; steps: number; friend: boolean; kind: number }
+interface JobFacts { wage: number; status: number; steps: number; friend: boolean; kind: number; essential: boolean }
+
+/**
+ * Builders' yards and public services (police, fire, health, schools, libraries): the jobs a town cannot do without.
+ * When one is the nearest vacancy it is taken as before motivation, and its staff do not leave it for a better job, so
+ * scoring never starves the crews that build the town or the stations that cover it (the first-hours guard).
+ */
+export const essentialJob = (kind: number) => isCivicId(kind) || familyOf(kind) === Zone.Yard;
 
 export class Motivation {
   /** parcel id -> residents and the sum of their stored weights, re-counted once a game day on first use */
@@ -171,7 +178,7 @@ export class Motivation {
     const wage = wageOf(b.id, b.level) * wageMul({ edu: c.edu, track: c.track, skill }, b.id);
     let friend = false;
     for (const id of c.friends) { const f = this.w.citizens.get(id); if (f && f.job && f.wx === b.x && f.wy === b.y) { friend = true; break; } }
-    return { wage, status: (skill ? 0.6 : 0) + 0.4 * Math.min(1, (b.level - 1) / 5), steps, friend, kind: b.id };
+    return { wage, status: (skill ? 0.6 : 0) + 0.4 * Math.min(1, (b.level - 1) / 5), steps, friend, kind: b.id, essential: essentialJob(b.id) };
   }
 
   /**
@@ -180,7 +187,7 @@ export class Motivation {
    * friend there, Adventure a personal taste for the kind of work. Scores go in `scores` when given.
    */
   pickJob(c: Citizen, facts: JobFacts[], scores?: number[]): number {
-    if (facts.length <= 1 || !MOTIVATION.on) return 0;
+    if (facts.length <= 1 || !MOTIVATION.on || facts[0].essential) return 0;
     const w = this.weightsOf(c, this.wbuf);
     let meanWage = 0, meanStatus = 0, minSteps = Infinity;
     for (const f of facts) { meanWage += f.wage; meanStatus += f.status; minSteps = Math.min(minSteps, f.steps); }
@@ -188,12 +195,13 @@ export class Motivation {
     let best = 0, bestScore = -Infinity;
     for (let i = 0; i < facts.length; i++) {
       const f = facts[i];
-      const sc = w[Value.Money] * clamp(2.5 * (f.wage - meanWage) / Math.max(1, meanWage))
+      const sc = w[Value.Money] * clamp(4 * (f.wage - meanWage) / Math.max(1, meanWage))
         + w[Value.Status] * clamp(2 * (f.status - meanStatus))
         + w[Value.Time] * clamp(-2 * (f.steps - minSteps) / MOTIVE.jobSlack)
         + w[Value.Family] * clamp(-(f.steps - minSteps) / MOTIVE.jobSlack)
         + w[Value.Roots] * (f.friend ? 0.6 : 0)
         + w[Value.Adventure] * (hash2(c.id * 131 + f.kind, 1620) - 0.5)
+        - MOTIVE.commuteCost * (f.steps - minSteps) / MOTIVE.jobSlack // nobody likes a longer trip
         + MOTIVE.noise * (2 * Math.random() - 1);
       if (scores) scores[i] = sc;
       if (sc > bestScore) { bestScore = sc; best = i; }

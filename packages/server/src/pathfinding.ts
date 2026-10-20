@@ -129,7 +129,7 @@ export function findPaths(
   }
   let expanded = 0, firstDepth = out.length ? 1 : -1, firstAt = 0;
   const found = (nx: number, ny: number, n: Node, a: number) => {
-    if (has(nx, ny)) return;
+    if (out.length >= take || has(nx, ny)) return;
     out.push({ path: unwind({ x: nx, y: ny, parent: n, depth: n.depth + 1, a }), gx: nx, gy: ny });
     if (firstDepth < 0) { firstDepth = n.depth + 1; firstAt = expanded; }
   };
