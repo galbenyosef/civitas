@@ -57,6 +57,7 @@ import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, ty
 import { MapMode } from './mapmode';
 import { IssuesView } from './render/issues';
 import { FiresView } from './render/fires';
+import { GravesView } from './render/graves';
 import { OverlayMap } from './render/overlayMap';
 import { ProblemsPanel, issueTipHtml } from './problems';
 import { OverlayMenu } from './overlays';
@@ -94,6 +95,8 @@ const issuesView = new IssuesView(world);
 scene.add(issuesView.group);
 const firesView = new FiresView(world); // house fires (render/fires.ts): flames, smoke, glow and scorch
 scene.add(firesView.group);
+const gravesView = new GravesView(world); // headstones, plaques and funerals under way (render/graves.ts, docs/remembrance.md)
+scene.add(gravesView.group);
 const overlayMap = new OverlayMap();
 
 const hoverMesh = new Mesh(new PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false }));
@@ -320,6 +323,19 @@ net.on('traffic', (m) => world.applyTraffic(m.cx, m.cy, m.d, m.k));
 // issue bubbles, your problems list and the data overlays (render/issues.ts, problems.ts, overlays.ts)
 net.on('issues', (m) => world.applyIssues(m.cx, m.cy, m.d));
 net.on('fires', (m) => firesView.set(m.f));
+// death and remembrance (docs/remembrance.md): the graves and funerals; a headstone's panel
+net.on('graves', (m) => gravesView.set(m.list));
+net.on('deceased', (m) => { if (m.id === ui.deceasedFor || m.id === deceasedAsked) { deceasedAsked = 0; if (m.info) ui.showDeceased(m.info); else if (ui.deceasedFor === m.id) ui.hideCitizen(); } });
+/** a headstone or a remembered name was opened: the citizen or vehicle panel gives way to the deceased's */
+let deceasedAsked = 0;
+function openDeceased(id: number) {
+  if (selectedCitizen || selectedVehicle) selectCitizen(0);
+  deceasedAsked = id;
+  net.send({ t: 'inspectDeceased', id });
+}
+ui.onDeceased = (id) => openDeceased(id);
+ui.onGoto = (x, y) => flyTo(x, y);
+setInterval(() => { if (ui.deceasedFor && net.connected) net.send({ t: 'inspectDeceased', id: ui.deceasedFor }); }, 2000);
 net.on('problems', (m) => problems.set(m.p, m.r));
 net.on('overlay', (m) => world.applyOverlay(m.ch, m.cx, m.cy, m.d));
 const problems = new ProblemsPanel({
@@ -609,6 +625,8 @@ const input = new Input(canvas, rig, {
     if (id) { selectCitizen(id); return; }
     const badge = issuesView.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight); // a click on an issue badge opens its building
     if (badge) { selectTile(badge[0], badge[1], 'building'); return; }
+    const grave = gravesView.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight); // a headstone opens its panel (docs/remembrance.md)
+    if (grave !== null) { openDeceased(grave); return; }
     // trains and planes (vehicles.ts): picked from what was drawn last frame
     const tr = trains.pick(px, py, rig.camera, canvas.clientWidth, canvas.clientHeight);
     if (tr) { selectVehicle({ kind: 'train', ...tr }); return; }
@@ -1257,6 +1275,8 @@ function frame(now: number) {
   issuesView.frame(now, rig.camera);
   firesView.group.visible = underground.level < 0.5;
   firesView.frame(liveTickF());
+  gravesView.group.visible = underground.level < 0.5;
+  gravesView.frame(liveTick(), now);
   citizens.frame(now, dt);
   lines.frame();
   if (routeView.active) routeView.frame(citizens.positionOf(selectedCitizen), now);
@@ -1337,7 +1357,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { power, tv, tvDebug, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { power, tv, tvDebug, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, gravesView, openDeceased, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

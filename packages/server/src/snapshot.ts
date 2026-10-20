@@ -6,6 +6,7 @@ import { historyOf, type HistoryJSON } from './history';
 import type { FireSave } from './sim/fires';
 import type { AdvertsSave } from './sim/adverts';
 import type { NewsSave } from './sim/news';
+import type { DeathSave } from './sim/death';
 import type { UtilitiesSave } from '@msimcity/shared';
 
 /**
@@ -47,6 +48,8 @@ export interface Snapshot {
   adverts?: AdvertsSave;
   /** the news story log (sim/news.ts, docs/media.md); optional, absent in older saves and while there are no stories */
   news?: NewsSave;
+  /** the archive of the dead, bodies and funerals in hand, the grieving (sim/death.ts, docs/remembrance.md); optional, absent in older saves and while nobody has died */
+  death?: DeathSave;
   /** utilities (sim/utilities.ts, docs/utilities.md): trunk links, open faults, protected nodes, grid import and tariffs; optional, absent in older saves and while there are none */
   utilities?: UtilitiesSave;
 }
@@ -81,6 +84,7 @@ export function snapshotOf(w: World): Snapshot {
     ...(w.firesSave ? { fires: w.firesSave() } : {}),
     ...(w.adverts ? advertsField(w.adverts.save()) : {}),
     ...(w.newsSave ? newsField(w.newsSave()) : {}),
+    ...(w.deathSave ? deathField(w.deathSave()) : {}),
     ...(w.utilitiesSave ? utilitiesField(w.utilitiesSave()) : {}),
   };
 }
@@ -91,6 +95,8 @@ const advertsField = (a: AdvertsSave) => (a.campaigns.length || a.posted.length 
 /** The news field, left out while the log is empty (so a save without news is as before). */
 const newsField = (n: NewsSave) => (n.stories.length ? { news: n } : {});
 
+/** The death field, left out while nobody has died (so a save without deaths is as before). */
+const deathField = (d: DeathSave) => (d.dead.length || d.grief.length || Object.keys(d.first).length ? { death: d } : {});
 /** The utilities field, left out while there are no links, faults or settings (so a save without them is as before). */
 const utilitiesField = (u: UtilitiesSave | null) => (u ? { utilities: u } : {});
 
@@ -142,6 +148,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
   if (snap.fires && typeof snap.fires === 'object') w.firesLoaded = snap.fires;
   if (snap.adverts && typeof snap.adverts === 'object') w.advertsLoaded = snap.adverts;
   if (snap.news && typeof snap.news === 'object') w.newsLoaded = snap.news;
+  if (snap.death && typeof snap.death === 'object') w.deathLoaded = snap.death;
   if (snap.utilities && typeof snap.utilities === 'object') w.utilitiesLoaded = snap.utilities;
   for (const s of snap.sites ?? []) w.sites.set(tileKey(s.x, s.y), { ...s, priority: s.priority ?? 0, created: s.created ?? 0, assigned: 0 });
   for (const saved of snap.citizens) {

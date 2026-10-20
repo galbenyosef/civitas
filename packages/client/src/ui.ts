@@ -8,12 +8,14 @@ import { FLEET_LABEL } from '@msimcity/shared';
 import { WEEKDAY_NAMES } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
 import { mediaHtml } from './news';
+import { deceasedHtml, remembranceHtml, mourningHtml } from './remembrance';
+import type { DeceasedInfo } from '@msimcity/shared';
 import { utilitiesHtml } from './utilities';
 import { UTIL } from '@msimcity/shared';
 import { POLICIES } from '@msimcity/shared';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
-const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌', 'repair van': '🚐' };
+const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌', 'repair van': '🚐', hearse: '⚰️' };
 
 /** Tool bar groups: land and roads first, then the catalogue kinds by what they are, bulldoze last. */
 const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable || k.family === 'residential' ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
@@ -131,6 +133,10 @@ export interface UICallbacks {
 /** Plain-DOM overlay. Keeps three.js code free of UI concerns. */
 export class UI {
   private panelFor = 0;
+  /** a headstone or a remembered name was clicked (data-did, client/src/remembrance.ts): open that deceased person's panel */
+  onDeceased: ((id: number) => void) | null = null;
+  /** a resting place named in a panel was clicked (data-goto): look at it */
+  onGoto: ((x: number, y: number) => void) | null = null;
   /** The name a building shows on its front (render/signs.ts) by the tile it is known by, for the tooltip and panel titles. */
   nameOf: (x: number, y: number) => string | null = () => null;
   constructor(private cb: UICallbacks) {
@@ -528,6 +534,7 @@ export class UI {
     if (info.mothballed) html += row('Mothballed', '<span class="bad">no staff, no upkeep, no cover</span>');
     if (info.fire) html += row('Fire', `<span class="bad">${info.fire}</span>`);
     if (info.media) html += mediaHtml(info.media, row);
+    if (info.remembrance) html += remembranceHtml(info.remembrance, row);
     if (info.utilities) html += utilitiesHtml(info.utilities, row, !!info.parcel && this.mineByName?.(info.parcel.owner) === true);
     if (info.airport) html += airportHtml(info.airport, row);
     if (info.rail) html += railStationHtml(info.rail, row);
@@ -616,6 +623,8 @@ export class UI {
     const moth = document.getElementById('bMoth');
     if (moth) moth.onclick = () => this.onMothball?.(info.x, info.y, !info.mothballed);
     panel.onclick = (e) => {
+      const dead = (e.target as HTMLElement).closest<HTMLElement>('[data-did]');
+      if (dead) { this.onDeceased?.(Number(dead.dataset.did)); return; }
       const ub = (e.target as HTMLElement).closest<HTMLElement>('[data-util]'); // a node's protect or grid import switch (utilities.ts)
       if (ub) { this.onUtil?.(info.x, info.y, ub.dataset.util as 'protect' | 'import', ub.dataset.on === '1'); return; }
       const row = (e.target as HTMLElement).closest<HTMLElement>('[data-cid]');
@@ -753,6 +762,7 @@ export class UI {
     html += others.length ? others.map(person).join('') : `<div class="pempty">lives alone</div>`;
     html += `<div class="sect">Friends (${life.friends.length})</div>`;
     html += life.friends.length ? life.friends.map(person).join('') : `<div class="pempty">no friends yet</div>`;
+    html += mourningHtml(life.mourning ?? [], life.grieving); // the dead they remember (docs/remembrance.md)
     return html;
   }
   showCitizenTip(info: CitizenInfo) {
@@ -777,11 +787,14 @@ export class UI {
     // household members and friends are clickable: select that person instead
     panel.onpointerdown = null;
     panel.onclick = (e) => {
+      const dead = (e.target as HTMLElement).closest<HTMLElement>('[data-did]');
+      if (dead) { this.onDeceased?.(Number(dead.dataset.did)); return; }
       const row = (e.target as HTMLElement).closest<HTMLElement>('[data-cid]');
       if (row) this.cb.onSelectCitizen(Number(row.dataset.cid));
     };
     this.citizenPanelFor = info.id;
     this.vehiclePanelFor = '';
+    this.deceasedFor = 0;
   }
   /** The selected train's or plane's panel (vehicles.ts builds the body); same buttons as the citizen panel, roster names select that citizen. */
   private vehiclePanelFor = '';
@@ -813,7 +826,28 @@ export class UI {
     document.getElementById('cFpv')?.classList.toggle('on', mode === 'inset');
     document.getElementById('cFpvFull')?.classList.toggle('on', mode === 'full');
   }
-  hideCitizen() { $('cpanel').classList.add('hidden'); this.citizenPanelFor = 0; this.vehiclePanelFor = ''; }
+  hideCitizen() { $('cpanel').classList.add('hidden'); this.citizenPanelFor = 0; this.vehiclePanelFor = ''; this.deceasedFor = 0; }
+  /** the deceased whose panel is open (a headstone, docs/remembrance.md), 0 none */
+  deceasedFor = 0;
+  /** A deceased person's panel in the citizen panel's place: the headstone, the funeral, the family tree. */
+  showDeceased(info: DeceasedInfo) {
+    const panel = $('cpanel');
+    const scroll = this.deceasedFor === info.id ? panel.scrollTop : 0;
+    panel.classList.remove('hidden');
+    panel.innerHTML = `<div class="chead"><button class="chip" id="cClose">✕</button></div>${deceasedHtml(info)}`;
+    $('cClose').onclick = () => { this.hideCitizen(); };
+    panel.scrollTop = scroll;
+    panel.onpointerdown = null;
+    panel.onclick = (e) => {
+      const t = e.target as HTMLElement;
+      const dead = t.closest<HTMLElement>('[data-did]'), live = t.closest<HTMLElement>('[data-cid]'), go = t.closest<HTMLElement>('[data-goto]');
+      if (dead) this.onDeceased?.(Number(dead.dataset.did));
+      else if (live) this.cb.onSelectCitizen(Number(live.dataset.cid));
+      else if (go) { const [x, y] = go.dataset.goto!.split(',').map(Number); this.onGoto?.(x, y); }
+    };
+    this.citizenPanelFor = 0; this.vehiclePanelFor = '';
+    this.deceasedFor = info.id;
+  }
 
   // ---- technology tree -------------------------------------------------------
 

@@ -3,6 +3,7 @@ import {
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
   isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux, isMetroStationKind, SCHOOL_SPECS, capacityOf, Study, EduLevel, LifeStage, CitizenState, ALL_TECH_IDS, TECH_BY_ID,
+  demoGraves, plotCapacity,
   demoUtilLinks, UTIL_ROLE_OF, UtilRole, MOTORWAY_KIND, tileKey, type UtilLinkDTO,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, type Building, type Citizen } from '../world';
@@ -357,6 +358,23 @@ export const DEMO_STUDENTS = { perCampus: 60, ages: [18, 23] as const, years: 14
  * week). They go in through `Schools.enrolAt`, so only as many as the university's staffing allows. Deterministic (ids in
  * order, a hash for the year); returns how many were enrolled.
  */
+/**
+ * A demo's resting places with their long dead (docs/remembrance.md): each placement's share of its plots laid with people
+ * who died years before the town began, so headstones stand on every churchyard and cemetery (and plaques in a
+ * crematorium's garden) on the first visit. London's go back further (its cemeteries opened in the 1830s). Returns how
+ * many were laid.
+ */
+export function seedDemoGraves(w: World, sim: Simulation, id: DemoId): number {
+  let n = 0;
+  for (const [i, g] of demoGraves(id).entries()) {
+    const s = w.structureAt(g.door[0], g.door[1]);
+    const b = w.buildings.get(`${g.door[0]},${g.door[1]}`);
+    if (!s || !b) continue;
+    n += sim.death.seedGraves(b.x, b.y, Math.round(g.share * plotCapacity(b.id, s.ax, s.ay)), 101 + i * 17, id === 'london' ? 180 : 90);
+  }
+  return n;
+}
+
 export function seedDemoStudents(w: World, sim: Simulation, id: DemoId): number {
   const unis = demoSections(id).flatMap((s) => s.placements ?? []).flatMap((p) => {
     const spec = SCHOOL_SPECS[kindId(p.kind)], b = w.buildings.get(`${p.door[0]},${p.door[1]}`);

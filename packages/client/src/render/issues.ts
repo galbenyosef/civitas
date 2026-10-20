@@ -8,7 +8,7 @@ import { variant } from './models';
 import { SIGN_MAX_DIST } from './signs';
 import { sceneUniforms } from './materials';
 
-const CELL = 128, CODES = 7;
+const CELL = 128, CODES = 8;
 const MAX_ICONS = 4096;
 /** icons start to fade this far from the camera (past the name boards, render/signs.ts), each a hashed few tiles either way, over FADE_LEN */
 export const ICON_FADE_START = SIGN_MAX_DIST * 2.4, ICON_FADE_JITTER = 14, ICON_FADE_LEN = 26;
@@ -23,7 +23,7 @@ export const GROUP_TILES = 4, ON_SCREEN = 5;
 /** Ring colour per code: distinct hues that stay apart for colour-blind eyes, and every glyph has its own shape anyway. */
 export const ISSUE_COLOUR: Record<number, string> = {
   [Issue.NoRoad]: '#ff8a3d', [Issue.NoBuilders]: '#ffd23f', [Issue.Unstaffed]: '#b98cff',
-  [Issue.ParkingFull]: '#4fa3ff', [Issue.NoCustomers]: '#3ddbd9', [Issue.Unhappy]: '#ff5a7a', [Issue.Fire]: '#ff3418',
+  [Issue.ParkingFull]: '#4fa3ff', [Issue.NoCustomers]: '#3ddbd9', [Issue.Unhappy]: '#ff5a7a', [Issue.Fire]: '#ff3418', [Issue.NoBurial]: '#9fc46a',
 };
 
 /** Draw one badge (a dark disc in its code's ring, a white glyph, a point underneath) into a CELL×CELL box at (ox, 0). */
@@ -86,6 +86,15 @@ function drawBadge(g: CanvasRenderingContext2D, ox: number, code: number) {
       g.fill();
       g.fillStyle = c;
       g.beginPath(); g.moveTo(0, 24); g.bezierCurveTo(-10, 24, -12, 12, -6, 4); g.bezierCurveTo(-2, 10, 4, 6, 4, 0); g.bezierCurveTo(10, 8, 12, 14, 10, 18); g.bezierCurveTo(8, 22, 4, 24, 0, 24); g.fill();
+      break;
+    }
+    case Issue.NoBurial: { // a headstone with nowhere to stand: a stone over a struck-through plot (docs/remembrance.md)
+      g.beginPath(); g.moveTo(-14, 16); g.lineTo(-14, -10); g.arc(0, -10, 14, Math.PI, 0); g.lineTo(14, 16); g.closePath(); g.fill();
+      g.fillStyle = '#1a1f29'; g.fillRect(-7, -8, 14, 3); g.fillRect(-5, -1, 10, 3);
+      g.strokeStyle = '#ffffff'; g.lineWidth = 4;
+      g.beginPath(); g.moveTo(-26, 24); g.lineTo(26, 24); g.stroke();
+      g.strokeStyle = c; g.lineWidth = 7;
+      g.beginPath(); g.moveTo(-24, -26); g.lineTo(24, 26); g.stroke();
       break;
     }
     case Issue.Unhappy: { // a frowning face

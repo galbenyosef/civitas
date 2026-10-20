@@ -13,10 +13,10 @@ import { TICKS_PER_DAY, TICKS_PER_HOUR } from './constants';
  * The record is shaped for what comes next: N3's `newsFlights(pads, stories, tick)` flies the news helicopter to a
  * covered story's place while it is live (`t` to `end`) above a salience; N4's live TV shows the stories of the
  * channel covering the home; N5's citizens remember a story they passed (`x`, `y` while live) or watched (`ch`) by its
- * `id`; the Piccadilly Lights' news turn reads the newest headline (client news.ts `latest`).
+ * `id`, and a death story names the deceased (`dead`, docs/remembrance.md); the Piccadilly Lights' news turn reads the newest headline (client news.ts `latest`).
  */
 
-export type StoryKind = 'fire' | 'explosion' | 'rank' | 'milestone' | 'opening' | 'line';
+export type StoryKind = 'fire' | 'explosion' | 'rank' | 'milestone' | 'opening' | 'line' | 'death';
 
 /** One story as the server keeps and sends it (message `news`). Ticks are world ticks. */
 export interface StoryDTO {
@@ -45,6 +45,11 @@ export interface StoryDTO {
   ch?: string;
   /** rival channels whose centres also reached it (they ran it second) */
   rv?: string[];
+  /**
+   * a death story (docs/remembrance.md): the deceased it is about, ids of the server's archive (sim/death.ts), so N5's
+   * memories can name them ("my grandad died in the Brixton fire") and open their headstone
+   */
+  dead?: number[];
 }
 
 export const NEWS = {
@@ -56,7 +61,7 @@ export const NEWS = {
    * game hours a story stays live: it gets its end when it breaks, t plus these, except a fire and an explosion whose fire
    * still burns, which are live until the fire is out (their hours are then only a guard for an end that never came)
    */
-  liveHours: { fire: 12, explosion: 6, rank: 4, milestone: 2, opening: 3, line: 3 } as Record<StoryKind, number>,
+  liveHours: { fire: 12, explosion: 6, rank: 4, milestone: 2, opening: 3, line: 3, death: 8 } as Record<StoryKind, number>,
   /** the showcase's fire drill relights every hour or so: one story per drill home a game day, not one per drill */
   drillDedupeTicks: TICKS_PER_DAY,
 };
@@ -174,6 +179,19 @@ export const HEADLINES = {
   ],
   levelled: [
     (w: StoryWords) => `${cap(w.b!)} destroyed by ${w.what === 'Gas explosion' ? 'a gas explosion' : 'an explosion'} in ${w.place}`,
+  ],
+  /** deaths in an incident (docs/remembrance.md, server sim/death.ts): `what` the first to die ("Ada Patel (34)"), `n` how many died */
+  deathFire: [
+    (w: StoryWords) => (w.n! > 1 ? `${w.n} die in fire at ${w.b} in ${w.place}` : `${w.what} dies in fire at ${w.b} in ${w.place}`),
+    (w: StoryWords) => (w.n! > 1 ? `Fire at ${w.b} in ${w.place} claims ${w.n} lives` : `Fire at ${w.b} in ${w.place} claims a life: ${w.what}`),
+  ],
+  deathBlast: [
+    (w: StoryWords) => (w.n! > 1 ? `${w.n} killed in explosion at ${w.b} in ${w.place}` : `${w.what} killed in explosion at ${w.b} in ${w.place}`),
+    (w: StoryWords) => (w.n! > 1 ? `Explosion at ${w.b} leaves ${w.n} dead in ${w.place}` : `Explosion at ${w.b} in ${w.place} claims a life`),
+  ],
+  deathAccident: [
+    (w: StoryWords) => `Worker killed in accident at ${w.b} in ${w.place}`,
+    (w: StoryWords) => `${w.what} dies in accident at ${w.b} in ${w.place}`,
   ],
   rank: [
     (w: StoryWords) => `${w.town} becomes a ${w.what}`,

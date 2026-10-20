@@ -8,7 +8,7 @@ import {
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
   isBridgeAux, planBridge, joinsBridgeSide, BRIDGE_STYLE_NAMES, type BridgePlan,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
-  isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction,
+  isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction, Cause, nameFor,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -70,7 +70,7 @@ export interface GameConfig {
  * What a spectator may still ask: looking, never changing. A whitelist, so an intent added to ClientMsg later is refused in
  * spectate mode until it is listed here. (hello and ping are answered before this, as for everyone.)
  */
-const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map', 'inspectBoat', 'overlay']);
+const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map', 'inspectBoat', 'overlay', 'inspectDeceased']);
 const SPECTATE_REFUSAL = 'Read-only showcase: you can look around, but nothing can be changed here';
 const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) => k.tool!.id));
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
@@ -166,6 +166,8 @@ export class Net {
   private playerDTOs(ledger = false) { return [...this.w.players.values()].map((p) => this.w.playerDTO(p, this.isOnline(p.id), ledger)); }
   /** game hour of the last players message that carried the ledgers */
   private ledgerHour = -1;
+  /** tick of the last graves message (sim/death.ts) */
+  private gravesAt = -Infinity;
 
   // ---- inbound ---------------------------------------------------------------
 
@@ -189,6 +191,12 @@ export class Net {
       case 'inspectCitizen': {
         const info = this.sim.describeCitizen(Number(m.id), m.route === true), atSea = info && this.harbours?.atSea(Number(m.id));
         if (info && atSea) info.atSea = atSea; // a fishing crew member out on their trawler (sim/harbours.ts)
+        const cz = info?.life && this.w.citizens.get(Number(m.id));
+        if (cz && info?.life) { // the dead they mourn (sim/death.ts): headstones to open from the panel
+          const mourning = this.sim.death.mourningOf(cz), grieving = this.sim.death.grievingFor(cz);
+          if (mourning.length) info.life.mourning = mourning;
+          if (grieving) info.life.grieving = grieving;
+        }
         return this.send(c, { t: 'citizen', id: Number(m.id), info });
       }
       case 'unlock': return this.unlock(c, String(m.id));
@@ -203,6 +211,7 @@ export class Net {
       case 'hist': return this.histOpen(c, m.open === true);
       case 'goals': case 'hint': this.onboarding?.command(c.player, m); return this.goals(c);
       case 'inspectBoat': return this.send(c, { t: 'boat', id: Number(m.id), info: this.harbours?.inspectBoat(Number(m.id)) ?? null });
+      case 'inspectDeceased': return this.send(c, { t: 'deceased', id: Number(m.id), info: this.sim.death.info(Number(m.id)) });
       case 'overlay': return this.setOverlay(c, Number(m.ch));
       case 'adCampaign': case 'adRent': case 'adEnd': return this.advert(c, m);
       case 'utilLink': case 'utilNode': return this.utility(c, m);
@@ -245,6 +254,14 @@ export class Net {
       this.w.playersDirty = true;
       return this.toast(c, 'Every technology unlocked', 'info');
     }
+    if (action === 'die' && typeof amount === 'number') { // a citizen dies of old age where they are (docs/remembrance.md); -1: someone at home with a partner and children
+      const v = amount >= 0 ? this.w.citizens.get(amount)
+        : [...this.w.citizens.values()].find((o) => o.state === CitizenState.Home && o.partner && this.w.citizens.has(o.partner) && [...this.w.citizens.values()].some((k) => k.par === o.id));
+      if (!v) return this.toast(c, 'Nobody of that id', 'info');
+      this.sim.death.die(v, Cause.OldAge);
+      return this.toast(c, `${nameFor(v.id, v.sn)} has died (#${v.id})`, 'info');
+    }
+    if (action === 'funeralSoon') return this.toast(c, `${this.sim.death.hurry()} funeral(s) moved to within the hour`, 'info');
     if (action === 'fire' && this.fires && Number.isInteger(x) && Number.isInteger(y)) {
       const [dx, dy] = this.w.doorOf(x!, y!), b = this.w.buildings.get(`${dx},${dy}`);
       return this.toast(c, b && this.fires.ignite(b) ? `Set the ${KIND_NAMES[b.id]} at (${b.x}, ${b.y}) on fire` : 'Nothing there that can burn', 'info');
@@ -281,6 +298,7 @@ export class Net {
     if (this.fires) this.send(c, { t: 'fires', f: this.fires.dtos() });
     if (this.adverts) this.send(c, { t: 'ads', ...this.adverts.dto() });
     if (this.news) this.send(c, { t: 'news', s: this.news.recent(), all: true });
+    this.send(c, { t: 'graves', list: this.sim.death.graves() });
     if (this.utilities) { this.send(c, this.utilities.linksMsg()); this.send(c, this.utilities.stateMsg()); }
     c.goalsSig = undefined; this.goals(c);
     c.rankSig = undefined; this.rankTo(c);
@@ -948,6 +966,8 @@ export class Net {
     if (info && util) info.utilities = util;
     const media = info && this.news?.describe(b!);
     if (info && media) info.media = media;
+    const rem = info && this.sim.death.panel(b!);
+    if (info && rem) info.remembrance = rem;
     // Focus groups (Culture tier 2, docs/motivation.md): what the people of a home's parcel care about, for a viewer who has it
     if (info && b!.zone === Zone.Residential && c.player && hasFeature(c.player.tech, 'focusgroups')) info.focus = this.sim.focusAt(dx, dy);
     this.send(c, { t: 'building', x, y, info });
@@ -1157,6 +1177,16 @@ export class Net {
     if (this.adverts?.changed) { this.adverts.changed = false; this.broadcast({ t: 'ads', ...this.adverts.dto() }); }
     // the news (sim/news.ts): stories new or changed since the last frame
     if (this.news?.fresh.size) this.broadcast({ t: 'news', s: this.news.drain() });
+    // graves and funerals under way (sim/death.ts): the whole list when it changed, at most every 25 ticks
+    if (this.sim.death.changed && w.tick - this.gravesAt >= 25) { this.sim.death.changed = false; this.gravesAt = w.tick; this.broadcast({ t: 'graves', list: this.sim.death.graves() }); }
+    // deaths (sim/death.ts): a town's first is an advisor line and brings in the burial goal; no burial space is a hint, the rest toasts
+    if (this.sim.death.notices.length) {
+      for (const n of this.sim.death.notices.splice(0)) {
+        const p = w.players.get(n.owner);
+        if (n.first && p) this.onboarding?.due(p, 'burial');
+        for (const c of this.clients) if (c.player?.id === n.owner) { if (n.hint) this.hint(c, n.hint, n.msg); else this.toast(c, n.msg, 'info'); }
+      }
+    }
     // utilities (sim/utilities.ts): every node's state after each hourly solve or a fault; the links when one changed; owners' notices
     const ut = this.utilities;
     if (ut?.stateChanged) { ut.stateChanged = false; this.broadcast(ut.stateMsg()); }

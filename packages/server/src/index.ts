@@ -14,9 +14,9 @@ import { seedCommons, seedFrontier } from './seed';
 import { seedCity } from './loadtest/cities';
 import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, stopsChildrenOn } from './testcities';
 import { fillCity } from './fill';
-import { seedDemoTown, seedDemoNetwork, seedDemoStudents, fillDemo, seededRandom, worldHash } from './demo/seed';
+import { seedDemoTown, seedDemoNetwork, seedDemoStudents, seedDemoGraves, fillDemo, seededRandom, worldHash } from './demo/seed';
 import { seedDemoAdverts } from './demo/adverts';
-import { demoFireDrills, demoFireRows, demoFireBlasts, demoBlackouts } from '@msimcity/shared';
+import { demoFireDrills, demoFireRows, demoFireBlasts, demoBlackouts, demoFunerals } from '@msimcity/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 8080);
@@ -98,6 +98,8 @@ if (DEMO) {
   game.utilities.drills = demoBlackouts(DEMO).map(([x, y]) => [x, y]);
   game.fires.rows = demoFireRows(DEMO).map((row) => row.map(([x, y]): [number, number] => [x, y]));
   game.fires.blastDrills = demoFireBlasts(DEMO).map(([x, y]) => [x, y]);
+  // the funeral drill (docs/remembrance.md): a hearse and mourners from the funeral director to the churchyard every couple of hours
+  sim.death.drills = demoFunerals(DEMO).map((f) => ({ fd: [f.from[0], f.from[1]], rest: [f.to[0], f.to[1]] }));
 }
 if (DEMO && needsFill) { // the second half of seeding needs the simulation: bus stops, track and every line
   const problems = seedDemoNetwork(world, sim, rail, DEMO);
@@ -185,6 +187,8 @@ http.listen(PORT, HOST, async () => {
     const r = await fillDemo(world!, game.step, (p) => { fillProgress = p; });
     game.fires.enabled = fires;
     const students = seedDemoStudents(world!, sim, DEMO); // the universities' first students (a campus would stand empty for days)
+    const graves = seedDemoGraves(world!, sim, DEMO); // the resting places' long dead: headstones on the first visit (docs/remembrance.md)
+    if (graves) console.log(`demo ${DEMO}: ${graves} graves seeded`);
     for (const p of seedDemoAdverts(world!, game.adverts, DEMO)) console.warn(`demo ${DEMO}: ${p}`); // the high street's posters (docs/adverts.md)
     Math.random = realRandom;
     startHash = worldHash(world!);

@@ -83,6 +83,16 @@ export interface FireStoryEvent {
 }
 
 /**
+ * The people in a building when its fire is out or it blows up (sim/death.ts harm), before the damage is done: `burnt`
+ * it burnt down with no crew, `crew` an engine crew put it out with `d` of it burnt when they came, `levelled` the blast
+ * flattened it. The warning fire and the drills say so, and harm nobody.
+ */
+export interface FireHarm {
+  kind: 'fire' | 'blast'; id: number; x: number; y: number; owner: string; building: number;
+  burnt?: boolean; crew?: boolean; d?: number; levelled?: boolean; cause?: BlastCause; warning?: boolean; drill?: boolean;
+}
+
+/**
  * House fires with real dispatch (docs/incidents.md, docs/audit-2026-10.md card 3).
  *
  * Every home and works is rolled once a game hour (a slice of the built-building lists each tick, the way the dispatcher
@@ -124,6 +134,8 @@ export class Fires {
   onChange: ((x: number, y: number) => void) | null = null;
   /** fired when a fire starts and when it goes out, for the news (game.ts points it at News.fire) */
   onStory: ((e: FireStoryEvent) => void) | null = null;
+  /** fired when a fire is out or a building blows up, before the damage, for the people inside (game.ts points it at Death.harm) */
+  onHarm: ((e: FireHarm) => void) | null = null;
 
   private fires = new Map<string, Fire>();
   private born = new Map<number, number>();
@@ -552,6 +564,7 @@ export class Fires {
       f.t0 = now - Math.round(f.burn * Math.pow(Math.min(0.99, spec.damage), 1 / FIRE.growth)); // the client reads the jump off the clock (fireProgress)
     }
     const round = this.neighbours(f, spec.radius); // before the source goes (a destroyed merged building breaks back into lots)
+    this.onHarm?.({ kind: 'blast', id: f.id, x: f.x, y: f.y, owner: f.owner, building: b.id, levelled, cause, ...(f.drill ? { drill: true } : {}), ...(f.warning ? { warning: true } : {}) });
     const cost = f.drill ? 0 : Math.round(spec.costShare * buildingValue(b.id, b.level));
     if (cost > 0) { this.w.credit(f.owner, -cost, 'blast'); f.blastCost = cost; this.stats.blastCost += cost; }
     if (levelled) this.finish(f, now, b);
@@ -605,6 +618,7 @@ export class Fires {
     if (f.drill) this.drillOut.set(tileKey(f.x, f.y), now);
     if (!b) { f.out = FireOutcome.Saved; f.lost = 0; this.stats.gone++; this.onStory?.({ phase: 'out', id: f.id, x: f.x, y: f.y, owner: f.owner, kind: f.kind, outcome: f.out, lost: 0 }); this.touch(f); return; }
     const burnt = (f.levelled && !f.drill) || (f.d >= 1 && !f.crew && !f.warning && !f.drill);
+    this.onHarm?.({ kind: 'fire', id: f.id, x: f.x, y: f.y, owner: f.owner, building: b.id, burnt, crew: f.crew, d: f.d, ...(f.levelled ? { levelled: true } : {}), ...(f.drill ? { drill: true } : {}), ...(f.warning ? { warning: true } : {}) });
     const lost = f.drill || f.warning ? 0 : burnt ? b.level : Math.floor(b.level * f.d);
     const cost = f.drill ? 0 : Math.round(FIRE.costShare * buildingValue(b.id, b.level) * (burnt ? 1 : f.d));
     f.out = burnt ? FireOutcome.Burnt : lost > 0 ? FireOutcome.Partial : FireOutcome.Saved;

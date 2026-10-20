@@ -12,6 +12,7 @@ import type { RankState } from './ranks';
 import type { FireSave } from './sim/fires';
 import type { AdvertsSave } from './sim/adverts';
 import type { NewsSave } from './sim/news';
+import type { DeathSave } from './sim/death';
 import type { UtilitiesSave } from '@msimcity/shared';
 
 export interface Chunk {
@@ -269,6 +270,9 @@ export class World {
   /** the news (sim/news.ts): what to save, set by the News module; and what a loaded snapshot carried, taken once by it */
   newsSave: (() => NewsSave) | null = null;
   newsLoaded: NewsSave | null = null;
+  /** death and remembrance (sim/death.ts): what to save, set by the Death module; and what a loaded snapshot carried, taken once by it */
+  deathSave: (() => DeathSave) | null = null;
+  deathLoaded: DeathSave | null = null;
   /** utilities (sim/utilities.ts, docs/utilities.md): what to save, set by the Utilities module; and what a loaded snapshot carried, taken once by it */
   utilitiesSave: (() => UtilitiesSave | null) | null = null;
   utilitiesLoaded: UtilitiesSave | null = null;

@@ -10,7 +10,7 @@ import { ECONOMY_TUNING } from './tuning';
 const OD = `$${ECONOMY_TUNING.overdraftLimit.toLocaleString('en-GB')} overdraft at ${Math.round(ECONOMY_TUNING.overdraftInterestPerDay * 100)}% interest a day`;
 
 export type GoalId =
-  | 'plot' | 'road' | 'camp' | 'homes' | 'yard' | 'res12' | 'shops' | 'res50' | 'masonry' | 'cover' | 'leisure' | 'adverts' | 'books' | 'res250' | 'busline';
+  | 'plot' | 'road' | 'camp' | 'homes' | 'yard' | 'res12' | 'shops' | 'res50' | 'masonry' | 'cover' | 'leisure' | 'adverts' | 'books' | 'res250' | 'busline' | 'burial';
 
 /** Where "show me" points the camera: the open land beside the Commons, the player's own land, or the nearest free ad slot. */
 export type GoalFocus = 'commons' | 'plot' | 'slot';
@@ -30,6 +30,11 @@ export interface GoalDef {
   show: { tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin' | 'adverts'; focus?: GoalFocus };
   /** on a frontier (docs/first-five.md section 0; welcome.start): other words, and another tool to light */
   frontier?: { how?: string; why?: string; tool?: string };
+  /**
+   * Not part of the chain: an event brings it in (server goals.ts `due`), ahead of the chain's next goal, once the player
+   * can do it. The burial goal follows a town's first death (docs/remembrance.md) once Remembrance could be bought.
+   */
+  event?: boolean;
 }
 
 /**
@@ -87,6 +92,10 @@ export const GOALS: GoalDef[] = [
   { id: 'res250', title: 'A real town', how: 'Grow to 250 residents: more homes, jobs near them, and signals (T) when the crossroads clog.',
     why: 'Public transport (tier 5) opens at 200 residents; regional services at 300.',
     parts: [{ label: 'residents', target: 250 }], reward: { cash: 500 }, show: { tool: 'res', focus: 'plot' } },
+  // the first death in a player's town (docs/remembrance.md): brought in by the event, once Remembrance's condition is met
+  { id: 'burial', title: 'Lay them to rest', how: 'Unlock Remembrance (T), then place a funeral director and a churchyard, cemetery or crematorium in your town.',
+    why: 'Until your town can bury its dead, the county takes them away and their families grieve longer.',
+    parts: [{ label: 'Remembrance unlocked', target: 1 }, { label: 'funeral director', target: 1 }, { label: 'churchyard, cemetery or crematorium', target: 1 }], reward: { cash: 300 }, show: { tool: 'churchyard', panel: 'tech', focus: 'plot' }, event: true },
   { id: 'busline', title: 'First bus line', how: 'Unlock Public transport (T), place bus stops beside your roads and draw a line in the Lines panel.',
     why: 'A bus takes a dozen cars off a jammed street, and fares go to you.',
     parts: [{ label: 'bus line with 2+ stops', target: 1 }], reward: { cash: 400 }, show: { tool: 'busstop', panel: 'lines', focus: 'plot' } },
@@ -114,7 +123,7 @@ export interface GoalsDTO {
  * it. The server sends the ones only it can see (builders, the books, the jam, boredom, newcomers), the client raises the
  * rest (night, a refused build on an empty treasury); either way the client shows at most one per HINT_GAP ticks.
  */
-export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night' | 'fire' | 'power';
+export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night' | 'fire' | 'power' | 'death' | 'burial';
 /** `panel` 'admin': the overdraft and administration panel (client finance.ts) */
 export interface HintDef { kind: 'tip' | 'alert'; msg: string; tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin' }
 export const HINTS: Record<HintId, HintDef> = {
@@ -131,6 +140,10 @@ export const HINTS: Record<HintId, HintDef> = {
   bored: { kind: 'tip', tool: 'citypark', msg: 'Residents are bored, with nowhere to go: a park costs $120 and needs no technology.' },
   newcomers: { kind: 'tip', tool: 'motorway', panel: 'tech', msg: 'Newcomers are moving straight into your homes. Parking lots (T, $150) also brings the motorway connection: newcomers then drive in through it, and visitors and freight use it too.' },
   fire: { kind: 'alert', tool: 'firepost', panel: 'tech', msg: 'A fire has broken out. A staffed fire post or station sends its engine to fires within 14 tiles and keeps the damage down; without one a building burns down and you pay for it. Emergency services (T) brings the fire post.' },
+  // death and remembrance (docs/remembrance.md): the first death in a player's town (the server's message names them and says what
+  // happens next), and the dead waiting with no burial space
+  death: { kind: 'alert', tool: 'funeral', panel: 'tech', msg: 'Someone in your town has died. A funeral director collects them and arranges the service; a churchyard, cemetery or crematorium lays them to rest. Remembrance (T) brings all four.' },
+  burial: { kind: 'alert', tool: 'churchyard', msg: 'No burial space: the dead are waiting at the mortuary and their families grieve longer. Build a churchyard, cemetery or crematorium within 80 tiles.' },
   night: { kind: 'tip', msg: "It's night in the city. The light chip at the top right holds the view at mid-afternoon; click it again to follow the clock." },
   // utilities (docs/utilities.md section 3.4): growth to two storeys held back by power
   power: { kind: 'alert', tool: 'substation', panel: 'tech', msg: 'Buildings want power to grow to two storeys. Unlock Electrification (T) and place a substation beside your streets: its supply runs 12 road tiles along them, and the National Grid feeds it (at a price) while it is within 64 road tiles of a motorway connection.' },

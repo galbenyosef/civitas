@@ -111,6 +111,13 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   if (net.ranks) net.ranks.onStory = (e) => news.rank(e);
   world.onSiteCompleted = (s) => news.opened(s);
   net.news = news;
+  // death and remembrance (sim/death.ts, docs/remembrance.md): a fire or blast harms the people inside, an incident's dead make
+  // the news, the dead waiting for burial space badge their mortuary
+  fires.onHarm = (e) => sim.death.harm(e);
+  sim.death.onStory = (e) => news.death(e);
+  sim.death.look = (x, y) => issues.fireChanged(x, y);
+  issues.waiting = (x, y) => sim.death.noSpaceAt(x, y);
+  sim.death.sandbox = cfg.sandbox;
   // utilities (sim/utilities.ts): the growth gate, the hourly solve and the repair vans (a mobile service of sim.mobile)
   const utilities = new Utilities(world, sim.mobile);
   utilities.sandbox = cfg.sandbox;
