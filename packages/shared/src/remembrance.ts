@@ -247,6 +247,8 @@ export interface DeceasedInfo {
 /** A funeral director's, resting place's or mortuary's lines in the building panel. */
 export interface RemembranceInfo {
   role: 'funeral' | 'burial' | 'cremation' | 'mortuary';
+  /** its own name, when it has one (a scenario's: Highgate Cemetery) */
+  name?: string;
   /** plots: filled, free, booked for funerals to come */
   plots?: { used: number; free: number; booked: number };
   /** what it charges an estate */

@@ -41,7 +41,7 @@ export function deceasedHtml(d: DeceasedInfo): string {
 /** The building panel's remembrance lines: a resting place's plots and recent burials, a funeral director's work, a mortuary's dead. */
 export function remembranceHtml(r: RemembranceInfo, row: (k: string, v: string | number) => string): string {
   const title = r.role === 'funeral' ? 'Funeral director' : r.role === 'cremation' ? 'Crematorium' : r.role === 'mortuary' ? 'Mortuary' : 'Burial ground';
-  let html = `<div class="sect">${title}</div>`;
+  let html = `<div class="sect">${r.name ? `${esc(r.name)} · ${title.toLowerCase()}` : title}</div>`;
   if (r.plots) html += row(r.role === 'cremation' ? 'Memorial plaques' : 'Plots', `${r.plots.used} filled · ${r.plots.free} free${r.plots.booked ? ` · ${r.plots.booked} booked` : ''}${r.role === 'burial' && r.plots.free === 0 ? ' · <span class="bad">full</span>' : ''}`);
   if (r.fee) html += row(r.role === 'funeral' ? 'Fee per funeral' : r.role === 'cremation' ? 'Fee per cremation' : 'Fee per burial', `${money(r.fee)} (from the estate)`);
   if (r.waiting) html += row(r.role === 'funeral' ? 'In their care' : 'Waiting here', `${r.waiting}${r.noSpace ? ' · <span class="bad">no burial space in reach</span>' : ''}`);

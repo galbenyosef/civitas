@@ -737,8 +737,9 @@ export class Death implements FleetService {
       const used = pl ? pl.slots.filter((s) => s > 0).length : 0, booked = pl ? pl.slots.filter((s) => s < 0).length : 0;
       const recent = pl ? [...pl.slots].filter((s) => s > 0).map((id) => this.dead.get(id)).filter((d): d is Dead => !!d).sort((a, c) => (c.rested ?? 0) - (a.rested ?? 0)).slice(0, 5)
         .map((d) => ({ id: d.id, name: nameFor(d.id, d.sn), died: d.died, age: d.age })) : [];
+      const name = this.w.stopNames.get(key);
       return {
-        role: spec.type, fee: spec.fee, plots: { used, free: (pl?.slots.length ?? 0) - used - booked, booked }, recent,
+        role: spec.type, fee: spec.fee, ...(name ? { name } : {}), plots: { used, free: (pl?.slots.length ?? 0) - used - booked, booked }, recent,
         funerals: planned((d) => !!d.rest && tileKey(...d.rest) === key), held: pl?.held ?? 0,
       };
     }
@@ -816,6 +817,8 @@ export class Death implements FleetService {
   private named(x: number, y: number): string {
     const b = this.w.buildings.get(tileKey(x, y));
     if (!b) return `(${x}, ${y})`;
+    const own = this.w.stopNames.get(tileKey(x, y)); // a named place (a scenario's: Highgate Cemetery)
+    if (own) return own;
     if (b.zone === Zone.Residential) return `the house at (${x}, ${y})`;
     const n = KIND_NAMES[b.id] ?? 'building';
     return `the ${n} at (${x}, ${y})`;
@@ -859,7 +862,7 @@ export class Death implements FleetService {
    * Seed a resting place with the long dead (demos, London; docs/remembrance.md): `n` records laid to rest years before the
    * world began, mostly of old age, couples side by side under one surname. Returns how many were laid.
    */
-  seedGraves(x: number, y: number, n: number, seed: number): number {
+  seedGraves(x: number, y: number, n: number, seed: number, years = 90): number {
     this.placesAt = -Infinity;
     this.refresh();
     const pl = this.places.get(tileKey(x, y));
@@ -867,12 +870,12 @@ export class Death implements FleetService {
     let laid = 0;
     for (let i = 0; i < n; i++) {
       const slot = pl.slots.indexOf(0);
-      if (slot < 0 || pl.spec.type !== 'burial') break;
+      if (slot < 0) break; // a crematorium's plaques fill the same way, in the order its garden takes them
       const id = this.w.nextId++, h = hash2(seed * 131 + i, 661);
-      const couple = i > 0 && hash2(seed + i, 663) < 0.35 && laid > 0;
+      const couple = pl.spec.type === 'burial' && i > 0 && hash2(seed + i, 663) < 0.35 && laid > 0;
       const prev = couple ? this.dead.get(pl.slots[slot - 1]) : undefined;
       const sn = prev && !prev.partner ? prev.sn : id;
-      const age = Math.floor(58 + 38 * hash2(id, 665)), yearsAgo = 1 + 90 * h;
+      const age = Math.floor(58 + 38 * hash2(id, 665)), yearsAgo = 1 + years * h;
       const died = Math.round(this.w.tick - yearsAgo * 7 * DAY);
       const cause = hash2(id, 667) < 0.8 ? Cause.OldAge : hash2(id, 669) < 0.7 ? Cause.Illness : Cause.Accident;
       const d: Dead = { id, sn, born: died / DAY - age * 7, died, age, cause, par: 0, partner: 0, kids: [], owner: pl.owner, hx: pl.x, hy: pl.y, at: [pl.x, pl.y], where: 'at home', st: Body.Rested, since: died, estate: 0, rest: [pl.x, pl.y], restKind: pl.kind, slot, rested: died + 3 * DAY, held: true, fees: 0, heirs: [] };

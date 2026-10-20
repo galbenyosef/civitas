@@ -27,6 +27,7 @@ import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REF
 import { zoneOf, levelOf, Zone } from '../tile';
 import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
 import { FIRE } from '../fires';
+import { DEATH } from '../remembrance';
 import { AD_SIZE, AD_SIZES, type AdSize } from '../buildings/adslot';
 import { AD } from '../adverts';
 
@@ -48,7 +49,7 @@ import { AD } from '../adverts';
  * would click (the door) and its rotation (FRONT order: 0 the door faces +y/south, 1 east, 2 north, 3 west).
  */
 
-export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media'
+export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media' | 'remembrance'
   | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-rail' | 'london-buses' | 'london-river' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
@@ -76,6 +77,8 @@ export interface DemoPlacement {
   name?: string;
   /** the hour of the day the tour shows this stop at (the client pins the light while the stop is up): 21.5 for the Lights at night */
   hour?: number;
+  /** a resting place (docs/remembrance.md): this share of its plots seeded with the long dead after the fill (server demo/seed.ts seedDemoGraves) */
+  graves?: number;
   /** how far round from straight in front of the door the tour's camera stands (radians, + to the right; default 0.45): towards a big screen's curve */
   aside?: number;
   /** the tour's camera this much nearer (a factor on its distance, at least 13 tiles), for a low landmark among towers */
@@ -99,7 +102,8 @@ export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: 
 /** `view`: the tour turns the underground view ('under') or the world map ('map', docs/world-map.md) on at this stop */
 /** `view` 'ranks': the stop plays a rank-up celebration over the rect (client ranks.ts preview, docs/ranks.md) */
 /** `row`: a 'fire-spread' spot's homes, the lead first, which catch light one after another (server sim/fires.ts rows) */
-export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks'; row?: readonly DemoXY[] }
+/** `funeral`: a 'funeral' spot's funeral director and the resting place its pretend funerals go to (server sim/death.ts drills) */
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks'; row?: readonly DemoXY[]; funeral?: { from: DemoXY; to: DemoXY } }
 /** Land parcels (by their `land` names, any section's) combined into one estate by the players' rule (parcelops.ts planCombine) */
 export interface DemoEstate { name: string; lands: readonly string[] }
 export interface DemoLine {
@@ -464,6 +468,20 @@ export const SECTIONS: DemoSection[] = [
     ],
   },
   {
+    id: 'remembrance', name: 'Cemeteries',
+    blurb: 'The north row of district C3 (docs/remembrance.md): a garden cemetery, the municipal cemetery with the funeral director beside it, a churchyard and a crematorium facing the cross street. Their plots hold the town\'s dead, a headstone each, and a funeral goes from the funeral director to the churchyard every couple of hours.',
+    clear: [block(2, 2, 0, 0), block(2, 2, 1, 0), block(2, 2, 2, 0)],
+    placements: [
+      { kind: 'garden-cemetery', door: doorAt('garden-cemetery', 14, 14, 0), rot: 0, graves: 0.7 },
+      { kind: 'municipal-cemetery', door: doorAt('municipal-cemetery', 19, 15, 0), rot: 0, graves: 0.5 },
+      { kind: 'funeral-director', door: [22, 17] },
+      { kind: 'churchyard', door: doorAt('churchyard', 24, 16, 0), rot: 0, graves: 0.55 },
+      { kind: 'crematorium', door: doorAt('crematorium', 26, 15, 1), rot: 1, graves: 0.6 },
+    ],
+    // the funeral drill (sim/death.ts drills): a hearse from the funeral director to the churchyard, a few neighbours as mourners
+    spots: [{ id: 'funeral', spot: 'funeral', name: 'A funeral', rect: [21, 13, 8, 7], inspect: [24, 17], funeral: { from: [22, 17], to: [24, 17] } }],
+  },
+  {
     id: 'airport', name: 'Airport',
     blurb: 'An airport terminal facing the east perimeter road, with a 20-tile runway five rows behind it: a flight an hour, every type from the business jet to the jumbo, landing fees for the owner.',
     land: [{ name: 'Airfield', rect: [35, -12, 15, 24] }],
@@ -597,6 +615,7 @@ export const TOUR: string[] = [
   'sports', 'leisure-centre', 'arena', 'stadium',
   'library', 'central-library', 'museum',
   'tv-studio', 'broadcast-centre', 'media-centre',
+  'funeral-director', 'funeral', 'churchyard', 'municipal-cemetery', 'garden-cemetery', 'crematorium',
   'nursery', 'primary-school', 'secondary-school', 'sixth-form', 'fe-college', 'university', 'halls', 'research-institute',
   'airport', 'runway',
   'block-estate', 'fire-blast', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
@@ -607,13 +626,13 @@ export const TOUR: string[] = [
 ];
 
 export const DEMOS: DemoDef[] = [
-  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'media', 'education', 'airport', 'industry', 'riverside', 'harbour'],
+  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'media', 'remembrance', 'education', 'airport', 'industry', 'riverside', 'harbour'],
     blurb: 'A lived-in town with one of every large building and every merged lot, buses, trains, an underground and river buses, an airport every plane type flies to, helicopters, a river with every style of bridge, and a harbour with every kind of boat, all running. Take the guided tour.' },
   { id: 'transport', name: 'Transport demo', slot: 91, sections: ['downtown', 'transport', 'rail', 'airport', 'industry'],
     blurb: 'Buses, parking, rail, freight and the airport, in the same town.' },
   { id: 'leisure', name: 'Leisure demo', slot: 92, sections: ['downtown', 'leisure'],
     blurb: 'Parks, cinemas, theatres, sport and libraries, every size.' },
-  { id: 'civic', name: 'Civic demo', slot: 93, sections: ['downtown', 'civic'],
+  { id: 'civic', name: 'Civic demo', slot: 93, sections: ['downtown', 'civic', 'remembrance'],
     blurb: 'Health, police, fire and builders, every size.' },
   { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-education', 'london-rail', 'london-buses', 'london-river', 'london-tube'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
     blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, the Central, Northern and Jubilee lines underneath, and on the river the RB1 river buses, yachts through Tower Bridge and ships from the estuary.' },
@@ -686,7 +705,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'funeral' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'cab-office': {
     title: 'Cab office',
@@ -759,6 +778,12 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     what: 'Homes and works catch fire now and then, more often the bigger and older they are. The nearest staffed fire post or station in reach sends its engine on blue lights, through red signals and, when the traffic stops, down the middle of the road; once it is there the crew put it out, and the damage is what had burnt by then. With no engine in reach the building burns down and its people leave. Either way the owner pays, under "Fire damage" in the ledger. In this demo the house beside the fire post catches light every so often, so the engine is always about to turn out.',
     how: `Place a fire post or fire station (Emergency services) within ${FIRE.reach} tiles of your homes and keep it staffed. A town's first fire is a warning that never costs a building: the neighbours' bucket chain saves it when no engine comes.`,
     facts: [['Engine reach', `${FIRE.reach} tiles, or the station's own cover when wider`], ['Unattended', `burns down in about ${FIRE.burnHours} hours`], ['Bill', `${Math.round(FIRE.costShare * 100)}% of the building's value times the share burnt`], ['Technology', techLine('firepost')]],
+  },
+  funeral: {
+    title: 'A funeral',
+    what: `Citizens die of old age and illness, and in fires, explosions and accidents at work. The body is left where they died; a funeral director's hearse collects it, and ${DEATH.serviceDaysMin} to ${DEATH.serviceDaysMax} days later the hearse carries the coffin to a chapel or crematorium, the family and close friends gather (close family take the day off) and the grave is filled, a headstone of its own standing on it from then on, weathering and leaning with the years, with flowers on a new grave and on some anniversaries. Click a headstone for the person: their dates, how they died, the family tree. Partner, children and parents grieve for some days, longer while the body waits for a place; the estate pays the funeral director's and the resting place's fees and the rest goes to the partner, then the children. In this demo a funeral goes to the churchyard every couple of hours.`,
+    how: 'Unlock Remembrance (civic track, about the Village rank), then place a funeral director and a churchyard, cemetery or crematorium within 80 tiles of each other. With no space in reach the dead wait at the hospital mortuary under the No burial space badge.',
+    facts: [['Service', `${DEATH.serviceDaysMin}-${DEATH.serviceDaysMax} days after death, ${DEATH.serviceHours} hours`], ['Mourners', `close family and friends, up to ${DEATH.mournersMax}`], ['Fees', 'from the estate, to the owners (ledger "Funeral fees", "Burial and cremation fees")'], ['Technology', techLine('churchyard')]],
   },
   'fire-spread': {
     title: 'Fire spreading',
@@ -1217,6 +1242,11 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   { id: 'fire-blast', caption: 'a works with buildings round it within the blast\'s reach (the blast drill)', tour: 'fire-blast',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'fire-blast')),
     seeded: (d) => demoFireBlastsOf(d).length > 0 },
+  // ---- death and remembrance (docs/remembrance.md): a funeral on a loop to the churchyard, and every resting place with its dead
+  { id: 'funeral', caption: 'a funeral under way: the hearse at the chapel, mourners round an open grave (the funeral drill)', tour: 'funeral',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'funeral' && !!sp.funeral)) },
+  { id: 'headstones', caption: 'headstones on the plots of every resting place, and a crematorium\'s memorial plaques (the town\'s seeded dead)', tour: 'garden-cemetery',
+    scenario: (ss) => ['churchyard', 'municipal-cemetery', 'garden-cemetery', 'crematorium'].every((k) => ss.some((s) => s.placements?.some((p) => p.kind === k && (p.graves ?? 0) > 0))) },
   { id: 'student-quarter', caption: 'halls of residence within a short walk of the university', tour: 'halls', seeded: studentQuarter },
   // ---- adverts (docs/adverts.md): every frame size stands somewhere in the town, and the high street has posters at three ages
   { id: 'advert-slots', caption: 'an ad frame of every size (poster, billboard, shelter panel, hoarding, banner, big screen) open to the street', tour: 'high-street',
@@ -1335,6 +1365,14 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
 /** The homes a demo's fire drill burns (server sim/fires.ts `drills`, set by index.ts): the inspect tiles of its 'house-fire' spots. */
 export function demoFireDrills(id: DemoId): DemoXY[] {
   return demoSections(id).flatMap((s) => (s.spots ?? []).filter((sp) => sp.spot === 'house-fire' && sp.inspect).map((sp) => sp.inspect!));
+}
+/** A demo's funeral drills (server sim/death.ts `drills`, set by index.ts): its 'funeral' spots' funeral director and resting place. */
+export function demoFunerals(id: DemoId): { from: DemoXY; to: DemoXY }[] {
+  return demoSections(id).flatMap((s) => (s.spots ?? []).filter((sp) => sp.spot === 'funeral' && sp.funeral).map((sp) => sp.funeral!));
+}
+/** A demo's resting places to seed with the long dead (server demo/seed.ts seedDemoGraves): door and the share of plots. */
+export function demoGraves(id: DemoId): { door: DemoXY; share: number }[] {
+  return demoSections(id).flatMap((s) => (s.placements ?? []).filter((p) => (p.graves ?? 0) > 0).map((p) => ({ door: p.door, share: p.graves! })));
 }
 /** A demo's spread drill rows (server sim/fires.ts `rows`, set by index.ts): the rows of its 'fire-spread' spots. */
 export function demoFireRows(id: DemoId): DemoXY[][] {

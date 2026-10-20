@@ -102,12 +102,25 @@ const STRUCTURES: Spot[] = [
   ['secondary-hackney', 'secondary-school', 51.5520, -0.0500, 'S'],
   ['secondary-brixton', 'secondary-school', 51.4560, -0.1180, 'N'],
   ['secondary-hammersmith', 'secondary-school', 51.4950, -0.2200, 'S'],
+  // the Magnificent Seven's grandest (docs/remembrance.md): Highgate on its hill, Kensal Green on the Harrow Road, Brompton off the
+  // Old Brompton Road; and Golders Green Crematorium on Hoop Lane, all with their dead (STRUCTURE_EXTRA)
+  ['highgate-cemetery', 'garden-cemetery', 51.5670, -0.1470, 'S'],
+  ['kensal-green-cemetery', 'garden-cemetery', 51.5280, -0.2230, 'N'],
+  ['brompton-cemetery', 'garden-cemetery', 51.4847, -0.1897, 'N'],
+  ['golders-green-crematorium', 'crematorium', 51.5780, -0.1940, 'S'],
   ['victoria-garage', 'bus-depot', 51.4930, -0.1450, 'N'],
   ['stockwell-garage', 'bus-depot', 51.4740, -0.1180, 'E'],
   ['poplar-garage', 'bus-depot', 51.5110, -0.0050, 'N'],
 ];
 /** Landmarks the tour shows at an hour and from an angle of their own: the Piccadilly Lights after dark, from the front-left where the curve faces. */
 const TOUR_VIEWS: Record<string, Pick<DemoPlacement, 'hour' | 'aside' | 'zoom'>> = { 'piccadilly-circus': { hour: 21.5, aside: -0.6, zoom: 0.7 } };
+/** Structures with a name of their own (World.setStopName at the door) and resting places with their dead seeded (a share of the plots). */
+const STRUCTURE_EXTRA: Record<string, Pick<DemoPlacement, 'name' | 'graves'>> = {
+  'highgate-cemetery': { name: 'Highgate Cemetery', graves: 0.85 },
+  'kensal-green-cemetery': { name: 'Kensal Green Cemetery', graves: 0.8 },
+  'brompton-cemetery': { name: 'Brompton Cemetery', graves: 0.8 },
+  'golders-green-crematorium': { name: 'Golders Green Crematorium', graves: 0.9 },
+};
 /** 1×1 venues, on a frontage lot near the real one once the streets are laid. */
 const VENUES: Spot[] = [
   ['palladium', 'theatre', 51.5142, -0.1404, 'S'],
@@ -311,7 +324,7 @@ export function londonScenario(): LondonScenario {
     if (!best) { problems.push(`${id}: no room near (${Math.round(px)}, ${Math.round(py)})`); continue; }
     claim(best);
     keeps.push(best);
-    structures.push({ id, kind, door: [best.doorX, best.doorY], rot: best.r as 0 | 1 | 2 | 3, ...TOUR_VIEWS[id] });
+    structures.push({ id, kind, door: [best.doorX, best.doorY], rot: best.r as 0 | 1 | 2 | 3, ...TOUR_VIEWS[id], ...STRUCTURE_EXTRA[id] });
   }
 
   // ---- the river's harbours and piers: the back rows over the water a tile clear of every bridge deck, the front on
@@ -521,13 +534,15 @@ export function londonScenario(): LondonScenario {
     },
     {
       id: 'london-landmarks', name: 'Landmarks',
-      blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Piccadilly Circus and its Lights, Big Ben and the Houses of Parliament, the London Eye, Buckingham Palace, the Tower and Tower Bridge, UCL, King\'s College, LSE and Imperial College as universities, and the hospitals, museums, theatres, parks, stadiums and the arena that the real ones stand for.',
+      blurb: 'The Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, Piccadilly Circus and its Lights, Big Ben and the Houses of Parliament, the London Eye, Buckingham Palace, the Tower and Tower Bridge, UCL, King\'s College, LSE and Imperial College as universities, and the hospitals, museums, theatres, parks, stadiums, the arena, the great cemeteries and Golders Green Crematorium that the real ones stand for.',
       placements: [
         ...pick('new-scotland-yard', 'st-thomas', 'royal-london', 'lambeth-fire', 'british-museum', 'natural-history-museum', 'maritime-museum', 'british-library',
           'royal-opera-house', 'piccadilly-circus', 'gherkin', 'walkie-talkie', 'shard', 'one-canada-square', 'parliament', 'london-eye', 'buckingham-palace', 'tower-of-london',
           'ucl', 'kings', 'lse', 'imperial'),
         ...venues,
         ...pick('leicester-square', 'serpentine', 'regents-park-lake', 'kew-gardens', 'wembley', 'london-stadium', 'copper-box', 'o2-arena'),
+        // the cemeteries and the crematorium (docs/remembrance.md), their plots seeded with London's long dead
+        ...pick('highgate-cemetery', 'kensal-green-cemetery', 'brompton-cemetery', 'golders-green-crematorium'),
       ],
       // the street plan bridges every named crossing (londonMap.ts); Tower Bridge is the landmark among them
       bridges: [{ id: 'tower-bridge', name: 'Tower Bridge', from: towerFrom, to: towerTo, style: 'Bascule', landmark: 'tower-bridge' }],
@@ -612,7 +627,8 @@ export const LONDON_TOUR: string[] = [
   'area-canary-wharf', 'one-canada-square', 'tube-jubilee-canary-wharf', 'pier-canary-wharf', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'pier-greenwich', 'maritime-museum', 'o2-arena',
   'area-royal-docks', 'area-thames-gateway', 'london-port', 'thamesmead-quay', 'dagenham-yard', 'track-freight', 'barking-yard', 'line-freight',
   'royal-london', 'area-hackney', 'primary-hackney', 'secondary-hackney', 'area-islington', 'primary-islington', 'secondary-islington', 'kings-cross', 'british-library', 'line-east-coast', 'finsbury-park', 'british-museum', 'ucl',
-  'area-camden', 'primary-camden', 'regents-park-lake', 'lords', 'serpentine', 'area-kensington', 'primary-kensington', 'natural-history-museum', 'imperial',
+  'highgate-cemetery', 'golders-green-crematorium', 'kensal-green-cemetery',
+  'area-camden', 'primary-camden', 'regents-park-lake', 'lords', 'serpentine', 'area-kensington', 'primary-kensington', 'natural-history-museum', 'imperial', 'brompton-cemetery',
   'paddington', 'line-heathrow', 'ealing-broadway', 'track-great-western', 'wembley', 'area-hammersmith', 'secondary-hammersmith', 'kew-gardens',
   'heathrow', 'heathrow-runway', 'heathrow-station',
 ];
