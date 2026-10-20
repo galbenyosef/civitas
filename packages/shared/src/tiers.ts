@@ -60,10 +60,13 @@ export function tierSummary(k: KindManifest): TierSummary {
   const a = l.attrs;
   const holdsWhat = g?.holds ?? 'staff';
   // a park that grows shows what it grows into; venues hold visitors, lots hold cars, workplaces hold staff
-  const holds = holdsWhat === 'bays' ? l.parking.surface : (holdsWhat === 'visitors' || holdsWhat === 'seats') ? num(top.attrs.visitorCapacity, 0) : holdsWhat === 'pupils' ? num(a.pupilCapacity, 0) : l.capacity;
+  // a crematorium (docs/remembrance.md) holds services a day rather than plots
+  const cremations = holdsWhat === 'plots' && typeof a.cremations === 'number';
+  const holds = holdsWhat === 'bays' ? l.parking.surface : (holdsWhat === 'visitors' || holdsWhat === 'seats') ? num(top.attrs.visitorCapacity, 0) : holdsWhat === 'pupils' ? num(a.pupilCapacity, 0)
+    : cremations ? num(a.cremations, 0) : holdsWhat === 'plots' ? num(a.plotCount, 0) : l.capacity;
   const s: TierSummary = {
     kindId: k.kindId, tier: k.tier ?? 1, name: k.name, label: k.tool?.label ?? k.name, footprint: footprintLabel(k),
-    holds, holdsWhat, cost: l.cost, upkeep: l.upkeep, work: l.work,
+    holds, holdsWhat: cremations ? 'funerals a day' : holdsWhat, cost: l.cost, upkeep: l.upkeep, work: l.work,
   };
   if (k.flags.service) { s.radius = SERVICE_RADIUS_OF[k.kindId]; s.strength = SERVICE_STRENGTH_OF[k.kindId]; s.patrolRate = PATROL_RATE_OF[k.kindId]; }
   if (k.group === 'builders') s.workRate = WORK_RATE_OF[k.kindId];

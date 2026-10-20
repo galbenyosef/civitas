@@ -1,11 +1,12 @@
 import {
-  NEWS, NEWS_RADIUS_OF, NEWS_TIER_OF, NEWS_HELIS_OF, FireOutcome, BLAST_CAUSES, RANKS, TICKS_PER_HOUR, TICKS_PER_DAY, Zone,
+  NEWS, NEWS_RADIUS_OF, NEWS_TIER_OF, NEWS_HELIS_OF, FireOutcome, BLAST_CAUSES, RANKS, Cause, TICKS_PER_HOUR, TICKS_PER_DAY, Zone,
   kindManifest, signSource, signText, isMediaKind, isMergedKind, isMultiTile, coverStory, channelName, headline, reaches,
   type StoryDTO, type StoryKind, type StoryWords, type HeadlineSet, type Channel, type MediaInfo, type TransitLine,
 } from '@msimcity/shared';
 import type { World, Site, Building } from '../world';
 import type { FireStoryEvent } from './fires';
 import type { RankStoryEvent } from '../ranks';
+import type { DeathStoryEvent } from './death';
 
 /** A story as the log keeps it: the DTO and the key of what it is about (a fire's id), so a later event finds it. */
 interface Story extends StoryDTO { ref?: string }
@@ -21,7 +22,7 @@ const CENTRES_EVERY = TICKS_PER_HOUR / 4;
  * The news story log (docs/media.md N2, shared/src/news.ts). Events the simulation already produces come in through
  * hooks game.ts wires up: Fires.onStory (a fire lit and put out; Fires v2's spread and explosions), Ranks.onStory (a
  * rank reached, a milestone), World.onSiteCompleted (a notable building opening) and Net's line saves (a new line).
- * Each becomes a story with a headline from the shared templates filled with real names, a salience, and the channel
+ * Deaths in an incident come from Death.onStory (sim/death.ts). Each becomes a story with a headline from the shared templates filled with real names, a salience, and the channel
  * that covers its place (coverStory over the staffed media centres). Stories live in a bounded ring (NEWS.keep, at most
  * NEWS.keepDays old); Net sends the new and changed ones as `news` and the newest on joining.
  *
@@ -142,6 +143,19 @@ export class News {
       }
       this.add('explosion', e.x, e.y, (id) => headline(set, id, w2), s, { who: e.owner, b: e.kind }, e.levelled ? undefined : key);
     }
+  }
+
+  /**
+   * Death (sim/death.ts onStory): people killed in a fire, an explosion or an accident at work, one story for an incident's
+   * dead, naming the first; its `dead` lists them all (N5's memories, docs/remembrance.md). Returns the story's id.
+   */
+  death(e: DeathStoryEvent): number | undefined {
+    if (!e.dead.length) return undefined;
+    const n = e.dead.length, first = e.dead[0];
+    const words: StoryWords = { b: this.buildingName(e.kind, e.x, e.y), place: this.placeName(e.x, e.y), what: `${first.name}, ${first.age}`, n };
+    const set: HeadlineSet = e.cause === Cause.Explosion ? 'deathBlast' : e.cause === Cause.Accident ? 'deathAccident' : 'deathFire';
+    const st = this.add('death', e.x, e.y, (id) => headline(set, id, words), Math.min(95, 50 + 10 * n), { ...(e.owner ? { who: e.owner } : {}), b: e.kind, dead: e.dead.map((d) => d.id) });
+    return st.id;
   }
 
   /** Ranks (ranks.ts onStory): a town reaching a rank, or passing a milestone. */

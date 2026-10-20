@@ -108,6 +108,13 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   if (net.ranks) net.ranks.onStory = (e) => news.rank(e);
   world.onSiteCompleted = (s) => news.opened(s);
   net.news = news;
+  // death and remembrance (sim/death.ts, docs/remembrance.md): a fire or blast harms the people inside, an incident's dead make
+  // the news, the dead waiting for burial space badge their mortuary
+  fires.onHarm = (e) => sim.death.harm(e);
+  sim.death.onStory = (e) => news.death(e);
+  sim.death.look = (x, y) => issues.fireChanged(x, y);
+  issues.waiting = (x, y) => sim.death.noSpaceAt(x, y);
+  sim.death.sandbox = cfg.sandbox;
   const tickWin = new TickWindow(300);
   let slow = 0, loops = 0;
   // city history for the charts (history.ts): one sample per game hour, pushed to the clients that have the panel open

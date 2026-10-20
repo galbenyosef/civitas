@@ -1,5 +1,5 @@
 import {
-  GOALS, HINTS, TECH_BY_ID, Zone, TICKS_PER_DAY, CAMP_KIND, familyOf, isLeisure, isHintId, rewardText, tileKey,
+  GOALS, HINTS, TECH_BY_ID, Zone, TICKS_PER_DAY, CAMP_KIND, familyOf, isLeisure, isHintId, rewardText, tileKey, isFuneralKind, isRestKind,
   type GoalDef, type GoalId, type GoalsDTO, type HintId, type LedgerDTO, type ServerMsg,
 } from '@msimcity/shared';
 import type { World, Player } from './world';
@@ -18,19 +18,21 @@ export interface GoalState {
   settlers?: boolean;
   /** road tiles already on the player's land when the record began (a frontier charter's country road): "Lay a street" counts the ones after */
   roadBase?: number;
+  /** event goals an event has brought in (shared GoalDef.event: the burial goal after a town's first death), until done */
+  due?: GoalId[];
 }
 
 /** A server hint is sent again (unless dismissed) at most this often, tips less often than alerts; the client spaces whatever arrives. */
 const HINT_REPEAT = { alert: TICKS_PER_DAY, tip: TICKS_PER_DAY * 3 };
 /** Hints that say what a goal already says: quiet while that goal is the active one. */
-const SAID_BY_GOAL: Partial<Record<HintId, GoalId>> = { builders: 'yard', bored: 'leisure', deficit: 'books' };
+const SAID_BY_GOAL: Partial<Record<HintId, GoalId>> = { builders: 'yard', bored: 'leisure', deficit: 'books', burial: 'burial' };
 /** Where "Pitch camp" sits in the chain: a player saved past it (before the camp existed) is not sent back to it. */
 const CAMP_AT = GOALS.findIndex((g) => g.id === 'camp');
 /** Hourly samples of the world's queued share, and the share over a day of them that counts as jammed. */
 const JAM_HOURS = 24, JAM_SHARE = 0.5, JAM_MIN_VEHICLES = 40;
 
 /** What the goals measure on a player's own land. */
-interface Tally { land: number; camps: number; homePop: number; roads: number; resLots: number; comLots: number; shopJobs: number; yards: number; police: number; fire: number; leisure: number }
+interface Tally { land: number; camps: number; homePop: number; roads: number; resLots: number; comLots: number; shopJobs: number; yards: number; police: number; fire: number; leisure: number; funeral: number; rest: number }
 
 /**
  * Onboarding goals and the advisor's server-side hints (shared/src/goals.ts). Net calls `check` a few times a game hour
@@ -58,7 +60,28 @@ export class Onboarding {
     return s;
   }
 
-  private active(s: GoalState): GoalDef | null { return GOALS.find((g) => !s.done.includes(g.id)) ?? null; }
+  /**
+   * The goal being worked on: an event goal that is due and can be done now (its first part's technology could be bought:
+   * shared GoalDef.event), ahead of the chain; else the chain's first goal not done (event goals are not in the chain).
+   */
+  private active(s: GoalState, p?: Player): GoalDef | null {
+    for (const id of s.due ?? []) {
+      const g = GOALS.find((x) => x.id === id);
+      if (g && !s.done.includes(id) && (!p || this.doable(g, p))) return g;
+    }
+    return GOALS.find((g) => !g.event && !s.done.includes(g.id)) ?? null;
+  }
+  /** An event goal can be worked on once the technology it asks for could be bought (or is owned). */
+  private doable(g: GoalDef, p: Player): boolean {
+    const t = g.id === 'burial' ? TECH_BY_ID.get('rem1') : undefined;
+    return !t || p.tech.includes(t.id) || (p.progress[t.condition.counter] ?? 0) >= t.condition.min;
+  }
+  /** An event brings in an event goal (net.ts: a town's first death brings 'burial'). */
+  due(p: Player, id: GoalId) {
+    const s = this.state(p);
+    if (s.done.includes(id) || s.due?.includes(id)) return;
+    (s.due ??= []).push(id);
+  }
   private met(g: GoalDef, parts: number[]) { return g.parts.every((q, i) => parts[i] >= q.target); }
 
   /**
@@ -67,7 +90,7 @@ export class Onboarding {
    */
   check(p: Player): { msg: ServerMsg & { t: 'goals' }; sig: string } {
     const s = this.state(p);
-    let g = this.active(s);
+    let g = this.active(s, p);
     let completed: { id: string; reward: string } | undefined;
     let t: Tally | null = null;
     if (g && !s.skipped) {
@@ -75,7 +98,8 @@ export class Onboarding {
       if (this.met(g, this.measure(g, p, t))) {
         s.done.push(g.id);
         completed = { id: g.id, reward: this.pay(p, g) };
-        g = this.active(s);
+        if (s.due) s.due = s.due.filter((id) => id !== g!.id);
+        g = this.active(s, p);
         t = this.tally(p);
       }
     }
@@ -117,6 +141,7 @@ export class Onboarding {
       case 'adverts': { const a = this.w.adverts?.counts(p.id); return [p.tech.includes('adv1') ? 1 : 0, a?.campaigns ?? 0, a?.rentals ?? 0]; }
       case 'books': return [housed, this.inTheBlack(p) ? 1 : 0];
       case 'busline': return [[...this.w.transitLines.values()].filter((l) => l.owner === p.id && l.stops.length >= 2).length];
+      case 'burial': return [p.tech.includes('rem1') ? 1 : 0, t.funeral, t.rest];
     }
   }
 
@@ -128,7 +153,7 @@ export class Onboarding {
 
   private tally(p: Player): Tally {
     const w = this.w;
-    const t: Tally = { land: 0, camps: 0, homePop: 0, roads: 0, resLots: 0, comLots: 0, shopJobs: 0, yards: 0, police: 0, fire: 0, leisure: 0 };
+    const t: Tally = { land: 0, camps: 0, homePop: 0, roads: 0, resLots: 0, comLots: 0, shopJobs: 0, yards: 0, police: 0, fire: 0, leisure: 0, funeral: 0, rest: 0 };
     for (const q of w.parcels.values()) {
       if (q.owner !== p.id) continue;
       t.land += q.w * q.h;
@@ -142,6 +167,8 @@ export class Onboarding {
         if (b.zone === Zone.Residential && w.hasRoadAccess(x, y)) t.resLots++;
         else if (b.zone === Zone.Commercial) t.comLots++;
         if (b.level <= 0) continue;
+        if (isFuneralKind(b.id)) t.funeral++;
+        else if (isRestKind(b.id)) t.rest++;
         if (b.zone === Zone.Yard) t.yards++;
         else if (b.zone === Zone.Police) t.police++;
         else if (b.zone === Zone.Fire) t.fire++;
@@ -150,6 +177,8 @@ export class Onboarding {
     }
     // a yard still being built counts: the player has done their part
     for (const s of w.sites.values()) if (familyOf(s.kind) === Zone.Yard && w.parcelAt(s.x, s.y)?.owner === p.id) t.yards++;
+    // and a funeral director or resting place going up (docs/remembrance.md)
+    for (const s of w.sites.values()) if ((isFuneralKind(s.kind) || isRestKind(s.kind)) && w.parcelAt(s.x, s.y)?.owner === p.id) { if (isFuneralKind(s.kind)) t.funeral++; else t.rest++; }
     return t;
   }
 
@@ -159,7 +188,7 @@ export class Onboarding {
   hint(p: Player, id: HintId, msg?: string): ServerMsg | null {
     const s = this.state(p);
     if (s.dismissed?.includes(id) || (s.skipped && HINTS[id].kind === 'tip')) return null;
-    if (!s.skipped && SAID_BY_GOAL[id] && this.active(s)?.id === SAID_BY_GOAL[id]) return null;
+    if (!s.skipped && SAID_BY_GOAL[id] && this.active(s, p)?.id === SAID_BY_GOAL[id]) return null;
     const at = (s.hintAt ??= {})[id];
     if (at !== undefined && this.w.tick - at < HINT_REPEAT[HINTS[id].kind] && at <= this.w.tick) return null;
     s.hintAt[id] = this.w.tick;

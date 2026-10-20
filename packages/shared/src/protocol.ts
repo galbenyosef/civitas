@@ -11,6 +11,7 @@ import type { SeaGate } from './waterways';
 import type { FireDTO } from './fires';
 import type { AdTarget, AdsDTO } from './adverts';
 import type { StoryDTO } from './news';
+import type { GraveSiteDTO, DeceasedInfo, RemembranceInfo, FamilyRef } from './remembrance';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
 export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | KindToolId;
 
@@ -67,10 +68,10 @@ export interface PlayerDTO {
   fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'funeral' | 'burial' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', builders: "Builders' fees",
-  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advertising', other: 'Other',
+  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advertising', funeral: 'Funeral fees', burial: 'Burial and cremation fees', other: 'Other',
 };
 /**
  * Money that can run out (docs/start-from-zero.md B3): the overdraft line, the count of midnights below zero, and
@@ -208,6 +209,8 @@ export interface BuildingInfo {
   fire?: string;
   /** a media centre (docs/media.md): its channel, what it reaches and what it has reported */
   media?: MediaInfo;
+  /** a funeral director, resting place or mortuary (docs/remembrance.md): plots, fees, funerals planned, bodies waiting */
+  remembrance?: RemembranceInfo;
   visitors?: number;
   visitorCapacity?: number;
   /** builders' yard: sites its crews are on right now */
@@ -464,6 +467,8 @@ export interface CitizenLife {
   /** the moment of the game week they turn a year older (a game week is a year): weekday 0 = Monday, hour */
   birthday?: { weekday: number; hour: number };
   education?: CitizenEducation;
+  /** relatives and friends who have died (docs/remembrance.md): open a headstone from them; `grieving` while they mourn one */
+  mourning?: FamilyRef[]; grieving?: string;
 }
 /** A citizen's schooling for the panel (docs/education.md); level, track and stage are EduLevel, EduTrack and Study. */
 export interface CitizenEducation {
@@ -535,7 +540,7 @@ export type ClientMsg =
   /** dev servers only (ignored in production): unlimited funds toggle, a cash grant (`amount`, default $100,000; negative takes
    *  money away, for economy runs from a lower start), or every technology */
   /** `fire`: set the building at (x, y) on fire now (server sim/fires.ts), for testing and screenshots */
-  | { t: 'dev'; action: 'unlimited' | 'money' | 'tech' | 'fire'; on?: boolean; amount?: number; x?: number; y?: number }
+  | { t: 'dev'; action: 'unlimited' | 'money' | 'tech' | 'fire' | 'die'; on?: boolean; amount?: number; x?: number; y?: number }
   | { t: 'ping'; n: number }
   /** a train's tooltip (sim/rail.ts); `full` adds who and what is on board (the selected train's panel) */
   | { t: 'inspectTrain'; line: number; train: number; full?: boolean }
@@ -552,6 +557,8 @@ export type ClientMsg =
   | { t: 'hist'; open: boolean }
   /** a boat's panel (docs/boats.md section 7): what the server knows beyond the schedule; answered with 'boat' */
   | { t: 'inspectBoat'; id: number }
+  /** a headstone or a name in a family tree (docs/remembrance.md): answered with 'deceased' */
+  | { t: 'inspectDeceased'; id: number }
   // ---- issue bubbles and overlays (shared/src/issues.ts, server/src/sim/issues.ts) ----
   /** the data overlay to send for the subscribed chunks (Overlay: 1 coverage, 2 leisure, 3 happiness, 4 jobs/homes; 0 none) */
   | { t: 'overlay'; ch: number }
@@ -626,7 +633,11 @@ export type ServerMsg =
   /** every campaign and rented ad slot (shared/src/adverts.ts AdsDTO), on join and whenever they change (rare: intents and midnight) */
   | ({ t: 'ads' } & AdsDTO)
   /** the news (shared/src/news.ts): stories new or changed since the last, or with `all` the newest NEWS.helloSend on joining; the client keeps them by id */
-  | { t: 'news'; s: StoryDTO[]; all?: boolean };
+  | { t: 'news'; s: StoryDTO[]; all?: boolean }
+  /** every resting place's filled plots and the funerals under way (shared/src/remembrance.ts), on join and when they change */
+  | { t: 'graves'; list: GraveSiteDTO[] }
+  /** a deceased person's panel (answer to inspectDeceased); null when nobody of that id is remembered */
+  | { t: 'deceased'; id: number; info: DeceasedInfo | null };
 
 /** A broadcaster in the building panel (server sim/news.ts describe). */
 export interface MediaInfo {

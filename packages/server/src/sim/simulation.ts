@@ -18,7 +18,7 @@ import {
 import type { Building, Citizen, Leg, Mover, Vehicle, World, MergePlan } from '../world';
 import { noteTrail, resetTrail, tkey, untkey, lifeDefaults, citizenLater, hasJobs } from '../world';
 import {
-  LIFE, HEALTH, Cond, ACUTE, COND_NAMES, ageOf, stageFor, seededAge, fluWave, deathChance, healthTarget,
+  LIFE, HEALTH, Cond, ACUTE, COND_NAMES, ageOf, stageFor, seededAge, fluWave, healthTarget,
   noteIncome, noteSpend, week, today, happinessParts, happinessOf,
   LEISURE, leisureTier, leisureNeed, noteLeisureVisit, leisureDay,
 } from './life';
@@ -40,6 +40,7 @@ import { FirstFive } from './firstfive';
 import { START_TUNING } from '@msimcity/shared';
 import { Families } from './families';
 import { Learning, ERRAND_CLASS } from './learning';
+import { Death, ERRAND_FUNERAL } from './death';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 const GROWTH_EVERY = gameMin(24), SPAWN_EVERY = gameMin(24), STATS_EVERY = 5, JOB_SEARCH_EVERY = gameMin(60), SITE_SEARCH_EVERY = gameMin(24);
@@ -190,6 +191,8 @@ export class Simulation {
   /** families moving in with children (sim/families.ts), and higher and adult education (sim/learning.ts), docs/education.md section 18 */
   families: Families;
   learning: Learning;
+  /** death and remembrance (sim/death.ts, docs/remembrance.md): the dead, their funerals and graves, the grieving */
+  death: Death;
   /** the first five minutes (sim/firstfive.ts, docs/first-five.md): the camp's settlers, the starter crew, the first-settlers moment */
   start: FirstFive;
   /** adds the tiles growth must leave alone this pass (sim/fires.ts: buildings on fire), as tkeys; set by game.ts */
@@ -231,6 +234,10 @@ export class Simulation {
     this.learning = new Learning(w, this.schools, this.skills, this.gateways, {
       make, classTrip: (c, x, y) => this.classTrip(c, x, y), rehome: (c, b) => this.moveHome(c, b, c.hh), leave: (c) => this.leaveTown(c),
     }, this.lifeEvents);
+    this.death = new Death(w, this.mobile, {
+      funeralTrip: (c, x, y) => this.funeralTrip(c, x, y), hospitalNear: (x, y) => this.nearestHospital(x, y), covered: (x, y) => this.hasHospital(x, y),
+    }, this.lifeEvents);
+    this.mobile.register(this.death); // its hearses
     w.onCitizenRemoved = (c) => { this.traffic.leave(c); this.transit.drop(c); this.taxis.drop(c); this.mobile.forget(c); this.pool.forget(c); this.releaseParking(c); this.dropVenue(c); };
     this.start = new FirstFive(w, this.gateways, {
       spawn: (home) => this.spawnCitizen(home),
@@ -646,6 +653,7 @@ export class Simulation {
       case S.ToVenue: {
         if (c.errand === ERRAND_SCHOOL) return `${legWord()} to school with a child`;
         if (c.errand === ERRAND_CLASS) return `${legWord()} to an evening class`;
+        if (c.errand === ERRAND_FUNERAL) return `${legWord()} to a funeral`;
         if (c.errand) return `${legWord()} to the doctor`;
         const sp = this.venueSpecOf(c);
         return `${legWord()} ${sp ? VENUE_WORDS[sp.type].going : this.hour < 16 ? 'to a café' : 'out for the evening'}`;
@@ -653,6 +661,7 @@ export class Simulation {
       case S.AtVenue: {
         if (c.errand === ERRAND_SCHOOL) return 'at the school gate';
         if (c.errand === ERRAND_CLASS) return 'at an evening class';
+        if (c.errand === ERRAND_FUNERAL) return 'at a funeral';
         if (c.errand) return 'seeing a doctor at the hospital';
         const sp = this.venueSpecOf(c), b = sp && c.venue ? this.w.buildings.get(c.venue) : undefined;
         if (sp && b) return eventOn(sp, this.today) && Math.abs(this.hour - eventStartAt(sp, b.x, b.y) - 1) < 1.6 ? VENUE_WORDS[sp.type].event : VENUE_WORDS[sp.type].at;
@@ -669,7 +678,7 @@ export class Simulation {
     if (c.state === S.ToWork) return c.study && !c.job ? at(c.sx, c.sy, KIND_NAMES[w.buildings.get(tileKey(c.sx, c.sy))?.id ?? 0] ?? 'school') : at(c.wx, c.wy, `${KIND_NAMES[c.kind]} (work)`);
     if (c.state === S.ToHome) return at(c.hx, c.hy, 'home');
     if (c.state === S.ToSite && c.site) { const [x, y] = parseKey(c.site); return at(x, y, 'building site'); }
-    if (c.state === S.ToVenue && c.venue && c.errand) { const [x, y] = parseKey(c.venue); return at(x, y, c.errand === ERRAND_SCHOOL ? 'school (the school run)' : c.errand === ERRAND_CLASS ? 'college (evening class)' : 'hospital (doctor)'); }
+    if (c.state === S.ToVenue && c.venue && c.errand) { const [x, y] = parseKey(c.venue); return at(x, y, c.errand === ERRAND_SCHOOL ? 'school (the school run)' : c.errand === ERRAND_CLASS ? 'college (evening class)' : c.errand === ERRAND_FUNERAL ? 'a funeral' : 'hospital (doctor)'); }
     if (c.state === S.ToVenue && c.venue) {
       const [x, y] = parseKey(c.venue); const b = w.buildings.get(c.venue);
       const sp = b && leisureAt(b.id, b.level, b.x, b.y);
@@ -1330,6 +1339,7 @@ export class Simulation {
   }
 
   private depart(c: Citizen) {
+    if (this.death.staysHome(c)) { this.scheduleNext(c); return; } // a funeral in the family, or grief (sim/death.ts)
     if (this.staysOffSick(c)) {
       c.sickDays++; c.offSickDay = this.today; this.lifeEvents.sickDaysOff++;
       this.scheduleNext(c); // skip this shift; the next one is at least REST_TICKS away
@@ -1506,10 +1516,18 @@ export class Simulation {
     return true;
   }
 
+  /** A funeral (sim/death.ts): a trip to the chapel or crematorium, the service, then home. */
+  private funeralTrip(c: Citizen, x: number, y: number): boolean {
+    if (!this.plan(c, x, y)) return false;
+    c.venue = tileKey(x, y); c.venueThen = S.ToHome; c.errand = ERRAND_FUNERAL; c.state = S.ToVenue;
+    return true;
+  }
+
   private arriveVenue(c: Citizen) {
     const w = this.w;
     const b = c.venue ? w.buildings.get(c.venue) : undefined;
     if (!b) { this.leaveVenue(c); return; }
+    if (c.errand === ERRAND_FUNERAL) { c.state = S.AtVenue; c.venueUntil = this.death.serviceEnd(c); return; } // until the service ends
     if (c.errand === ERRAND_SCHOOL) { c.state = S.AtVenue; c.venueUntil = w.tick; return; } // the school gate: a wave, and on
     if (c.errand === ERRAND_CLASS) { c.state = S.AtVenue; c.venueUntil = this.learning.classEnd(c); return; } // until the class ends
     if (c.errand) { // a doctor's visit: no bill, a short wait
@@ -1616,13 +1634,7 @@ export class Simulation {
     }
     const covered = this.hasHospital(c.hx, c.hy);
     this.lifeHealth(c, age, covered, hh);
-    const pDeath = deathChance(age, c.health);
-    if (pDeath > 0 && Math.random() < pDeath) {
-      this.lifeEvents.deaths++;
-      if (c.health < HEALTH.poorHealthBelow) this.lifeEvents.deathsIllness++; else this.lifeEvents.deathsOldAge++;
-      w.removeCitizen(c); // frees the bed and any job; partner and friend links clear on their next step
-      return;
-    }
+    if (this.death.lifeRoll(c, age)) return; // old age, illness or an accident at work: the body, the funeral, the grief (sim/death.ts)
     if (c.stage === LifeStage.Retired) { c.money += LIFE.pension; noteIncome(c, LIFE.pension, tick); }
     if (c.stage !== LifeStage.Child && c.state === S.Home) this.lifeFamily(c, age, hh);
     if (c.state === S.Home) this.start.campStep(c); // a camp settler moves into a finished home nearby (sim/firstfive.ts)

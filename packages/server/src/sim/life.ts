@@ -175,6 +175,12 @@ export function leisureDay(c: Citizen, parkValue: number) {
 // ---- happiness -----------------------------------------------------------------------------------
 
 /**
+ * Moods other modules give a citizen for a while, read by happinessParts: sim/death.ts sets one on each mourner ("grieving",
+ * "waiting to bury a loved one") that answers null once the grief is over. Keyed by the citizen object, so every world keeps its own.
+ */
+export const MOODS = new WeakMap<Citizen, (tick: number) => { label: string; delta: number } | null>();
+
+/**
  * coverage: distinct services in reach; parks: the summed leisure value of parks in reach of home; kids: a parent's
  * children at school (sim/families.ts homeParts): school 1 every one has a place, -1 one has none; meals: free school meals
  */
@@ -213,6 +219,8 @@ export function happinessParts(c: Citizen, h: HappyInputs): { label: string; del
   add(social > 0 ? (c.partner ? 'partner and friends' : 'friends') : 'lonely', social > 0 ? social : -3);
   const trafficMin = (c.trafficTicksLife * 60) / TICKS_PER_HOUR;
   if (trafficMin > 20) add('stuck in traffic', -Math.min(6, trafficMin / 10));
+  const mood = MOODS.get(c)?.(h.tick); // grief (sim/death.ts)
+  if (mood) add(mood.label, mood.delta);
   parts.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   return parts;
 }
