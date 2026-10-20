@@ -23,7 +23,7 @@
  */
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, KIND_ID, Zone, DEFAULT_TAX, UTIL, UtilState, UTIL_STATE_WORDS, UTIL_RADIUS_OF, UTIL_IMPORT_OF,
-  UtilityField, utilityReach, solveNetwork, utilKey, packTile, terrainOf, subFor, tileKey, planStructure, workOf, mulberry32, isMultiTile,
+  UtilityField, utilityReach, solveNetwork, utilKey, packTile, terrainOf, subFor, tileKey, planStructure, workOf, mulberry32, isMultiTile, FleetKind,
   type UtilEnv, type UtilNode, type SolveNode,
 } from '@msimcity/shared';
 import { World, emptyStats, type Building } from '../world';
@@ -198,6 +198,12 @@ console.log('4. faults, vans and links');
   const depot = put(w, DEPOT, x0 + 1, y0 + 9, 0)!;
   steps(g, DAY);
   ok(depot.id === DEPOT && depot.occupants > 0, `the power depot has staff (${depot.occupants})`);
+  // a lineworker of the depot on shift: who gets hired (motivation's scored job search) decides whose rota it is, and a
+  // depot with one lineworker on rest days sends no van, so wait for a shift (at most three days) before the fault
+  const onShift = () => g.sim.mobile.onShift(FleetKind.UtilityVan).some((c) => c.wx === depot.x && c.wy === depot.y);
+  let wait = 0;
+  for (; wait < 3 * DAY && !onShift(); wait++) g.step();
+  ok(onShift(), `a lineworker of the depot is on shift (after ${(wait / TPH).toFixed(1)} game hours)`);
   const f = u.openFault('node', utilKey(sub.x, sub.y), 'ada', sub.x, sub.y);
   ok(stateOf(g, sub) === UtilState.Fault && !u.supplied([...w.buildings.values()].find((b) => b.level > 0 && u.field.serving('ada', b.x, b.y) === u.field.indexOf(utilKey(sub.x, sub.y)))!), 'a fault: the substation and its streets have no power at once');
   const sent0 = u.stats.vansSent, van0 = u.stats.byVan;

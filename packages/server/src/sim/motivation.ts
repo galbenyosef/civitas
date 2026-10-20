@@ -1,5 +1,5 @@
 import {
-  LifeStage, Zone, CitizenState, TICKS_PER_DAY, VALUE_COUNT, Value, MOTIVE, ARCHETYPES, capacityOf, hash2, tileKey, isCivicId, familyOf, wageOf, wageMul, skillNeed,
+  LifeStage, Zone, CitizenState, TICKS_PER_DAY, VALUE_COUNT, Value, MOTIVE, ARCHETYPES, capacityOf, hash2, tileKey, isCivicId, isUtilityKind, familyOf, wageOf, wageMul, skillNeed,
   valuesOf, packWeights, archetypeBlend, jitterValues, seededValues, describeValues, type FocusInfo,
 } from '@msimcity/shared';
 import type { Building, Citizen, World } from '../world';
@@ -54,11 +54,12 @@ export interface MotiveHost {
 interface JobFacts { wage: number; status: number; steps: number; friend: boolean; kind: number; essential: boolean }
 
 /**
- * Builders' yards and public services (police, fire, health, schools, libraries): the jobs a town cannot do without.
+ * Builders' yards, public services (police, fire, health, schools, libraries) and utilities (plants, nodes, the depot):
+ * the jobs a town cannot do without.
  * When one is the nearest vacancy it is taken as before motivation, and its staff do not leave it for a better job, so
  * scoring never starves the crews that build the town or the stations that cover it (the first-hours guard).
  */
-export const essentialJob = (kind: number) => isCivicId(kind) || familyOf(kind) === Zone.Yard;
+export const essentialJob = (kind: number) => isCivicId(kind) || isUtilityKind(kind) || familyOf(kind) === Zone.Yard;
 
 export class Motivation {
   /** parcel id -> residents and the sum of their stored weights, re-counted once a game day on first use */
