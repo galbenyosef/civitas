@@ -1,7 +1,7 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo,
+  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
@@ -42,7 +42,9 @@ import { ContextMenu } from './contextmenu';
 import { Onboarding } from './onboarding';
 import { CameraMoment } from './moment';
 import { RanksUI } from './ranks';
-import { NewsUI } from './news';
+import { NewsUI, news } from './news';
+import { TvGuide } from './render/tv';
+import { setTvSource } from './render/interiors';
 import { Fireworks } from './render/fireworks';
 import { LinesPanel } from './lines';
 import { ChartsPanel } from './charts';
@@ -378,6 +380,18 @@ const ranks = new RanksUI({ net, world, liveTick, fireworks, moment: (x, y, capt
 scene.add(ranks.group);
 // the news (news.ts, docs/media.md): the news chip and panel, the ticker of breaking stories, a media centre's channel
 new NewsUI({ net, world, liveTick, flyTo: (x, y) => flyTo(x, y), headline: (h) => buildings.adverts.setNewsHeadline(h) });
+// news helicopters (shared newsHelis.ts) and television (render/tv.ts, docs/media.md sections 6-8): the story log flies the
+// media centres' helicopters; the FPV's TV sets show the channels' programmes and, while one is over a story, its pictures
+helis.news = {
+  owner: (x, y) => world.parcelAt(x, y)?.owner,
+  channel: (o) => { const p = world.players.get(o); return { name: channelName(p?.name ?? o), color: p?.color ?? 0x888888 }; },
+  stories: () => news.all(), version: () => news.version,
+};
+const tvLiveOff = params.get('tvlive') === '0';
+const tv = new TvGuide({ world, helis, tick: liveTickF, setNewsFeed: (t) => buildings.adverts.setNewsFeed(t), lowPreset: () => tvLiveOff || lighting.quality === 0 });
+tv.tapNet((fn) => net.tap(fn));
+setTvSource(tv);
+ui.watching = (info) => tv.watching(info);
 net.on('railLines', (m) => { trains.setLines(m.lines); rail.setLines(m.lines); });
 // underground lines (docs/underground.md): their trains run in the bores, and the bores take the lines' colours
 const metroMeta = new Map<number, MetroLineDTO>(); // the metro lines as sent, for station names on a cab ride
@@ -1259,13 +1273,19 @@ function frame(now: number) {
     rm.opacity = okBuy ? 0.35 : 0.6; // a refused rectangle must read as red, not brown, over grass
     updateStatus();
   }
-  buildings.updateLod(fpv.mode === 'off' ? [rig.camera] : [rig.camera, fpv.camera], lighting.sun); // detail tiers and culling (render/buildings.ts)
-  fpv.render(renderer, scene, rig.camera, [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group]);
+  // the live TV feed's camera (render/tv.ts): asked for by a set on screen in the FPV, or by a big screen near the camera
+  const feedCam = tv.prepare(fpv.mode !== 'full' && rig.dist < 90 && buildings.adverts.bigScreenNear(rig.target.x, rig.target.z, 40));
+  const cams = fpv.mode === 'off' ? [rig.camera] : [rig.camera, fpv.camera];
+  if (feedCam) cams.push(feedCam);
+  buildings.updateLod(cams, lighting.sun); // detail tiers and culling (render/buildings.ts)
+  const overheadOnly = [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group];
+  tv.render(renderer, scene, overheadOnly);
+  fpv.render(renderer, scene, rig.camera, overheadOnly);
 }
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { tv, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

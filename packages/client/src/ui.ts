@@ -318,6 +318,8 @@ export class UI {
   onHint: ((id: 'night') => boolean) | null = null;
   /** charts.ts: open the charts panel on a chart (population and treasury figures link to theirs) */
   onOpenChart: ((id: string) => void) | null = null;
+  /** what a citizen at home or in the pub is watching ("Quiz Night on Civitas 1", render/tv.ts), for the citizen panel */
+  watching: ((info: CitizenInfo) => string | null) | null = null;
   /** the light chip's mode, and whether the clock has been shown yet (the first one may say it is night) */
   private lightMode: 'live' | 'fixed' = 'live';
   private clockSeen = false;
@@ -665,6 +667,8 @@ export class UI {
     const icon = info.role === 'citizen' ? (info.taxi ? '🚕' : info.mode === 'drive' ? '🚗' : info.mode === 'ride' ? '🚌' : '🚶') : FLEET_ICON[info.role] ?? (info.role === 'delivery truck' ? '🚚' : info.role === 'visitor' ? '🚘' : info.role === 'police patrol' ? '🚓' : info.role === 'fire engine' ? '🚒' : info.role === 'bus' ? '🚌' : '🚑');
     let html = `<h3>${icon} ${esc(info.name)}${info.role !== 'citizen' ? ` <span style="color:var(--muted);font-weight:400">${esc(info.role)}</span>` : ''}</h3>`;
     html += `<div class="sub">${esc(info.activity)}${info.status === 'queued' ? ` · <span class="bad">held up ${Math.round(info.waitTicks * 0.6)} min</span>` : ''}</div>`;
+    const tvOn = this.watching?.(info);
+    if (tvOn) html += row('Watching', esc(tvOn));
     if (info.bus) html += busHtml(info.bus, row);
     if (info.occupation) html += row('Works as', `${esc(info.occupation)}${info.fleet?.base ? `, ${esc(info.fleet.base)}` : info.employer ? ` at the ${esc(KIND_NAMES[info.employer.kind])}` : ''}`);
     if (info.employer?.parcel) html += row('Employer', esc(info.employer.parcel));

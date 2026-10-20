@@ -48,3 +48,5 @@ export * from './ranks';
 export * from './fires';
 export * from './adverts';
 export * from './news';
+export * from './newsHelis';
+export * from './tv';
