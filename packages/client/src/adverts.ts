@@ -27,8 +27,8 @@ export interface AdPanelDeps {
   nameAt(x: number, y: number): string | null;
   /** the ground point in the middle of the view */
   centre(): [number, number];
-  /** fly the camera to look at a poster on a wall: its point, height and the way it faces */
-  lookAt(x: number, y: number, height: number, dir: [number, number]): void;
+  /** fly the camera to look at a poster on a wall: its point, height and the way it faces; how far, how far round to one side (radians) and how steeply */
+  lookAt(x: number, y: number, height: number, dir: [number, number], dist?: number, side?: number, pitch?: number): void;
   openTech(): void;
   toast(kind: 'info' | 'error', msg: string): void;
   liveTick(): number;
@@ -116,6 +116,15 @@ export class AdPanel {
       }
     }
     return best;
+  }
+
+  /** Look at one slot (door x, y and its index) from in front of it, `side` radians round to one side (msc.adPanel.focusSlot). */
+  focusSlot(x: number, y: number, i: number, dist?: number, side?: number, pitch?: number): boolean {
+    const h = adHostAt(this.env, x, y);
+    if (!h || i * AD_STRIDE >= h.slots.length) return false;
+    const w = adSlotWorld(h, i);
+    this.d.lookAt(w.x, w.y, w.height, w.dir, dist, side, pitch);
+    return true;
   }
 
   /** The goal's "show me": the tech tree while Advertising is locked, else this panel, and the camera on the nearest free frame. */

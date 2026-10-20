@@ -354,12 +354,12 @@ const adPanel = new AdPanel(document.getElementById('adverts')!, document.getEle
   net, world, view: buildings.adverts, liveTick, nameAt: (x, y) => buildings.nameAt(...world.doorOf(x, y)) ?? null, toast: (k, msg) => ui.toast(k, msg),
   centre: () => [Math.floor(rig.target.x), Math.floor(rig.target.z)],
   openTech: () => { ui.toggleTech(true); ui.showTech(world.myPlayer); policies.toggle(false); },
-  lookAt: (x, y, height, dir) => {
+  lookAt: (x, y, height, dir, dist = 7.5, side = 0.35, pitch = 0.32) => {
     // street level, a little to one side of the poster, looking at it
     following = false;
     rig.target.set(x, Math.min(height, 1.2), y);
-    rig.yaw = Math.atan2(dir[0], dir[1]) + 0.35;
-    rig.pitch = 0.32; rig.dist = 7.5;
+    rig.yaw = Math.atan2(dir[0], dir[1]) + side;
+    rig.pitch = pitch; rig.dist = dist;
   },
 });
 buildings.adverts.owner = (id) => { const p = world.players.get(id); return { name: p?.name ?? id, color: p?.color ?? 0x888888 }; };

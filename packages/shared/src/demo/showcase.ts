@@ -74,7 +74,8 @@ export interface DemoPlacement {
    */
   name?: string;
 }
-export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 'office'; rect: DemoRect }
+/** `level`: what the lots stand at (default the town's, DEMO_TOWN.built) */
+export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 'office'; rect: DemoRect; level?: number }
 /** a runway dragged from `from` to `to` (shared/src/airport.ts planRunway) */
 export interface DemoRunway { id: string; from: DemoXY; to: DemoXY }
 /** railway track: each drag as a player makes it (rail.ts trackDragPath: the longer axis first, one corner) */
@@ -117,7 +118,11 @@ export interface DemoBlock {
 export interface DemoSection {
   id: SectionId; name: string; blurb: string;
   /** extra land outside the districts, owned by the town */
-  land?: { name: string; rect: DemoRect }[];
+  /**
+   * extra land outside the districts, owned by the town. `frozen`: its lots stay as seeded (no upgrades, no merging), as
+   * it is held by an owner of its own (`sys:<name>`) with every technology but the construction track
+   */
+  land?: { name: string; rect: DemoRect; frozen?: boolean }[];
   /** blocks cleared to bare ground before anything is placed */
   clear?: DemoRect[];
   /** blocks rezoned (built to the town's level) */
@@ -166,25 +171,26 @@ const block = (di: number, dj: number, bi: number, bj: number): DemoRect => [D(d
 const FIRE_DRILL: DemoXY = [-29, -31];
 const FIRE_DRILL_RECT: DemoRect = [-31, -33, 9, 6];
 /**
- * The high street (docs/adverts.md): a street west off the perimeter road at y = -15, shops on both sides with a gap here
- * and there (an alley, a car park, a bus shelter) so the posters on their flanks face open ground, two car parks with a
- * roadside billboard, a bus shelter with its panel and a building site behind a hoarding. The lots are picked by the
- * design hashes (designPick): the shops either side of each gap carry a poster on the wall facing it. The server's demo
- * seeder (server/src/demo/adverts.ts) opens the site and puts three campaigns up at three wear levels.
+ * The high street (docs/adverts.md): a street of two-storey shops west off the perimeter road at y = -15, with a gap here
+ * and there (an alley, a car park, a bus shelter) so the posters on the shops' flanks face open ground, two car parks with
+ * a roadside billboard, billboards on some flat roofs, a bus shelter with its panel and a building site behind a hoarding.
+ * The gaps are picked by the design hashes (designPick, level 2): the shop beside each one carries a poster on the wall
+ * facing it. The server's demo seeder (server/src/demo/adverts.ts) opens the site and puts three campaigns up at three
+ * wear levels.
  */
 export const HIGH_STREET = {
-  road: -15, x0: -59, x1: -36,
-  north: { gaps: [-57, -54, -51, -46, -44, -37, -36], parking: -59 },
-  south: { gaps: [-55, -54, -51, -46, -44, -36], parking: -55, busStop: -51 },
+  road: -15, x0: -59, x1: -36, level: 2,
+  north: { gaps: [-46, -44, -36], parking: -59, busStop: -45 },
+  south: { gaps: [-56, -36], parking: -46 },
   /** the lot left as a building site behind its hoarding */
   site: [-44, -16] as DemoXY,
   rect: [-59, -17, 24, 5] as DemoRect,
 };
 const HS = HIGH_STREET;
 /** the shop lots of one side of the high street: every x from x0 to x1 but the gaps and the car park */
-const hsLots = (y: number, gaps: number[], parking: number): DemoZone[] => {
+const hsLots = (y: number, gaps: readonly number[], parking: number, busStop?: number): DemoZone[] => {
   const out: DemoZone[] = [];
-  for (let x = HS.x0; x <= HS.x1; x++) if (!gaps.includes(x) && x !== parking) out.push({ zone: 'commercial', rect: [x, y, 1, 1] });
+  for (let x = HS.x0; x <= HS.x1; x++) if (!gaps.includes(x) && x !== parking && x !== busStop) out.push({ zone: 'commercial', rect: [x, y, 1, 1], level: HS.level });
   return out;
 };
 /** bus line 2's stops (x = -24, beside the x = -25 road): the civic district, the western suburb, the industrial estate */
@@ -292,15 +298,16 @@ export const SECTIONS: DemoSection[] = [
   {
     id: 'high-street', name: 'High Street',
     blurb: 'A shopping street with its ad frames rented: posters on the shops\' flanks, billboards over the car parks, a panel in the bus shelter and a hoarding round a building site, three campaigns at three ages.',
-    land: [{ name: 'High Street', rect: [HS.x0, HS.road - 1, HS.x1 - HS.x0 + 1, 3] }],
+    // frozen: the two-storey shops stay as the gaps were picked for (growth would raise them to towers and merge them)
+    land: [{ name: 'High Street', rect: [HS.x0, HS.road - 1, HS.x1 - HS.x0 + 1, 3], frozen: true }],
     roads: [[[HS.x1, HS.road], [HS.x0, HS.road]]],
-    zones: [...hsLots(HS.road - 1, HS.north.gaps, HS.north.parking), ...hsLots(HS.road + 1, HS.south.gaps, HS.south.parking)],
+    zones: [...hsLots(HS.road - 1, HS.north.gaps, HS.north.parking, HS.north.busStop), ...hsLots(HS.road + 1, HS.south.gaps, HS.south.parking)],
     placements: [
       { id: 'hs-parking-north', kind: 'parking', door: [HS.north.parking, HS.road - 1] },
       { id: 'hs-parking-south', kind: 'parking', door: [HS.south.parking, HS.road + 1] },
-      { id: 'hs-bus-stop', kind: 'bus-stop', door: [HS.south.busStop, HS.road + 1] },
+      { id: 'hs-bus-stop', kind: 'bus-stop', door: [HS.north.busStop, HS.road - 1] }, // its panel looks onto the building site
     ],
-    spots: [{ id: 'high-street', spot: 'high-street', name: 'High Street', rect: HS.rect, inspect: [-53, -16] }],
+    spots: [{ id: 'high-street', spot: 'high-street', name: 'High Street', rect: HS.rect, inspect: [-47, -16] }],
   },
   {
     id: 'transport', name: 'Buses and parking',

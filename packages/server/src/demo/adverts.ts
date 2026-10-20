@@ -12,8 +12,8 @@ import type { Adverts } from '../sim/adverts';
  * Runs after the fill (index.ts) and in demo:check; does nothing for a demo without a 'high-street' spot.
  */
 
-/** wear ages (shared adWear): fresh, tagged, wrecked, then a mix along the rest of the street */
-const AGES = [0.02, 1.0, 3.6, 0.02, 0.45, 0.02, 1.0, 0.15, 0.02, 2.2, 0.02, 0.6];
+/** wear ages (shared adWear) in street order: the two roof billboards and the poster west of the site are fresh, tagged and wrecked side by side; a mix along the rest */
+const AGES = [0.02, 0.02, 1.0, 3.6, 0.3, 0.02, 0.02, 0.02, 0.6, 0.02, 0.02, 1.4, 0.15];
 
 export function seedDemoAdverts(w: World, ads: Adverts, id: DemoId): string[] {
   const spot = demoSections(id).flatMap((s) => s.spots ?? []).find((sp) => sp.spot === 'high-street');
@@ -46,10 +46,10 @@ export function seedDemoAdverts(w: World, ads: Adverts, id: DemoId): string[] {
   }
   let poster = 0;
   frames.forEach((f, k) => {
-    const isPoster = f.size === 'poster' || f.size === 'banner';
-    const age = isPoster ? AGES[poster++ % AGES.length] : f.size === 'hoarding' ? 1.4 : 0.05; // hoardings get tagged; billboards and panels are kept up
+    // posters, banners and billboards take the ages in turn (fresh, tagged, wrecked first); hoardings get tagged, shelter panels are kept up
+    const age = f.size === 'panel' ? 0.05 : f.size === 'hoarding' ? 1.4 : AGES[poster++ % AGES.length];
     if (!ads.seed(DEMO_OWNER, campaigns[k % campaigns.length], f.x, f.y, f.i, age, true)) problems.push(`high street: could not put a poster up at (${f.x}, ${f.y}) #${f.i}`);
   });
-  if (poster < 3) problems.push(`high street: ${poster} poster frame(s) open, want at least 3 (fresh, tagged, wrecked)`);
+  if (poster < 3) problems.push(`high street: ${poster} poster or billboard frame(s) open, want at least 3 (fresh, tagged, wrecked)`);
   return problems;
 }

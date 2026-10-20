@@ -288,7 +288,7 @@ float adNoise(vec2 p) {
         .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>
 // one graffiti tag (crew c, tag t of four) laid over the poster at a seeded spot; returns its colour and cover
 vec4 adTag(vec2 uv, float crew, float t, float s) {
-  vec2 size = vec2(0.55 + 0.25 * fract(s * 7.3), 0.32 + 0.14 * fract(s * 3.1));
+  vec2 size = vec2(0.36 + 0.2 * fract(s * 7.3), 0.22 + 0.12 * fract(s * 3.1));
   vec2 pos = vec2(fract(s * 13.7) * (1.0 - size.x), 0.08 + fract(s * 5.9) * (0.84 - size.y));
   vec2 q = (uv - pos) / size;
   if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) return vec4(0.0);
@@ -304,8 +304,8 @@ vec4 adTag(vec2 uv, float crew, float t, float s) {
   vec3 col = diffuseColor.rgb;
   // the sun and rain: faded, yellowed, a little grey
   float age = smoothstep(0.05, 0.95, wear);
-  col = mix(col, col * 0.78 + vec3(0.13, 0.11, 0.03), age);
-  col = mix(col, vec3(dot(col, vec3(0.3, 0.59, 0.11))), 0.45 * age);
+  col = mix(col, col * 0.8 + vec3(0.12, 0.1, 0.03), 0.8 * age);
+  col = mix(col, vec3(dot(col, vec3(0.3, 0.59, 0.11))), 0.3 * age);
   // grime streaks from the top, each poster its own
   float streak = adNoise(vec2(uv.x * 9.0 + seed * 31.0, uv.y * 1.5)) * smoothstep(0.4, 1.0, uv.y + 0.2);
   col *= 1.0 - 0.25 * age * streak;
@@ -453,8 +453,9 @@ vec4 adTag(vec2 uv, float crew, float t, float s) {
     const im = this.mesh.instanceMatrix.array as Float32Array, ra = this.rect.array as Float32Array, aa = this.ad.array as Float32Array, ta = this.tint.array as Float32Array;
     let n = 0;
     for (const c of this.perChunk.values()) {
+      if (n >= MAX_ADS) break;
       const take = Math.min(c.n, MAX_ADS - n);
-      if (take <= 0) break;
+      if (!take) continue; // most chunks have no posters
       im.set(c.m.subarray(0, take * 16), n * 16);
       ra.set(c.r.subarray(0, take * 4), n * 4);
       aa.set(c.a.subarray(0, take * 4), n * 4);
