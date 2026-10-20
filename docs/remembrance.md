@@ -139,4 +139,4 @@ The archive holds 1,500 records. Beyond that the oldest go first, but never a re
 
 In the probe's dense test town only 1 of 5 services had the hearse at the chapel: its streets jam at midday, and the hearse cannot turn out of the driveway. The service goes ahead without it, and in the showcase the hearse comes.
 
-Tick cost: see the card's report (measured on the 2×2 test city against main).
+Tick cost: on a 2×2 test city (seedCity built 3, seed 1, 4,936 citizens), 1.1 game days' fill then 2,400 `Game.step`s, four interleaved pairs at nice 15 against main 7e7ea28 (scratchpad `bench.mts`): 1.956 ms on this branch against 1.957 ms on main, the medians of each side, **0.0%** (pairs +4.9, −1.0, −2.8, −0.4%: noise). Nothing runs per tick but a look at the bodies in hand every 10 ticks; the daily roll is the old one plus a hash for workers at a works.
