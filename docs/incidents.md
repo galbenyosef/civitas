@@ -208,3 +208,22 @@ other fire in the grace day. A 2×2 Commons over two days has a few fires, and t
   the measured day (two burnt out, one saved). An earlier build that let every vehicle on blue lights weave (call-outs
   and ambulances too) measured +6%; weaving is now for fire calls only, and the call step sits outside the ordinary
   drive step so vehicles keep one shape.
+
+## Measurements, v2 (2026-10-20)
+
+- **Probe** (`loadtest/fires.ts`, seeds 1, 2, 3): 33/33 each (sections 1-4 as before).
+  - Uncovered town (5a), every fire building mothballed, hand-lit one at a time: 18, 15 and 20 fires lit. From these, 44, 45 and 36 spread fires, with 11-14 of the hand-lit fires setting light to a neighbour.
+  - Every spread fire touched a lot that was burning when it caught.
+  - 7, 7 and 1 explosions, all at works, setting 19, 24 and 4 alight. They cost $288, $324 and $54 under `blast`.
+  - At most 6 fires burned at once (the per-owner spread cap; the Commons is one owner). Catches held back by the caps: 29, 26 and 3.
+  - Warning fires (5b): 9-10 lit unattended in the same town, with 0 spread and 0 explosions.
+  - A fire saved without the v2 fields loads, rolls on the hour and can blow up. A blast tick survives a save and load.
+  - The same fires, spreads and blasts come at the same ticks on a second run.
+  - Covered town (5d), 23-24 hand-lit fires within reach of the staffed post: 0, 0 and 2 spread, with no explosions.
+- **The 2×2 Commons over two days** (section 4) changes with spread where it has gaps in cover:
+  - seed 3 had 23 fires (18 burnt out), against 10 (2 burnt out) on main;
+  - seeds 1 and 2 had 2 and 7 fires, as before.
+- **Tick cost** (2×2 test city, seed 1, `seedCity` built 3, 1.25 days' fill with fires off, then 2,400 measured ticks of `Game.step`; main ee47163 against the branch, interleaved at nice 15, six pairs):
+  - 2.094 ms against 2.068 ms, the median of each side's medians, which is **-1.2%**. The pairs were -2.0, -9.7, +4.8, -2.4, -2.1 and +3.5%: noise.
+  - `Fires.tick` itself took 0.0143 ms against 0.0113 ms.
+  - The branch lit 8 fires in the measured day (5 of them spread), and main lit 3.
