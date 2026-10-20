@@ -385,7 +385,7 @@ goes to the parcel owner, homes carry no ads, claims come from the table, and va
   size, poster centre and size in model space). Server and client find a building's design from the same hash and road
   test as the chunk view, so neither sends anything about an empty slot.
 - **Default slots.** The compiler gives about one commercial or leisure design in three (hash-picked, landmarks
-  excluded) a slot where one fits: 42 of 172 designs. It is either:
+  excluded) a slot where one fits: 43 of 172 designs. It is either:
   - a poster in the side bay nearest the road, with the facade cells under it made plain wall like a real shop's blank
     flank, provided nothing stands in front of it; or
   - a billboard on legs over the front of a flat roof.
