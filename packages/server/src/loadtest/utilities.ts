@@ -23,7 +23,7 @@
  */
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, KIND_ID, Zone, DEFAULT_TAX, UTIL, UtilState, UTIL_STATE_WORDS, UTIL_RADIUS_OF, UTIL_IMPORT_OF,
-  UtilityField, utilityReach, solveNetwork, utilKey, packTile, terrainOf, subFor, tileKey, planStructure, workOf, mulberry32,
+  UtilityField, utilityReach, solveNetwork, utilKey, packTile, terrainOf, subFor, tileKey, planStructure, workOf, mulberry32, isMultiTile,
   type UtilEnv, type UtilNode, type SolveNode,
 } from '@msimcity/shared';
 import { World, emptyStats, type Building } from '../world';
@@ -56,8 +56,10 @@ function city(opts: { rnd?: number; owner?: string; days?: number; built?: numbe
 /** Put kind on the lot at (x, y) (cleared first), built and complete; a multi-tile kind with its door there, facing a road. */
 function put(w: World, kind: number, x: number, y: number, rot?: number, staff = 0): Building | null {
   const p = planStructure(kind, x, y, { tile: (a, b) => w.peekTile(a, b), aux: (a, b) => w.auxAt(a, b), sub: (a, b) => w.subAt(a, b), land: () => null }, rot);
-  if (p.ok && p.placed.w * p.placed.h > 1) w.placeStructure(p.placed, { work: workOf(kind, 1), priority: 0, built: true });
-  else w.setTile(x, y, packTile(terrainOf(w.getTile(x, y)), false, Zone.Hub, 1), subFor(kind));
+  if (isMultiTile(kind)) {
+    if (!p.ok) throw new Error(`cannot place ${kind} at (${x}, ${y}): ${p.reason}`);
+    w.placeStructure(p.placed, { work: workOf(kind, 1), priority: 0, built: true });
+  } else w.setTile(x, y, packTile(terrainOf(w.getTile(x, y)), false, Zone.Hub, 1), subFor(kind));
   const b = w.buildings.get(tileKey(x, y)) ?? null;
   if (b && staff) b.occupants = staff;
   return b;
@@ -90,17 +92,17 @@ console.log('1. reach follows the roads');
   const big = utilityReach(node, env, 40), bigAt = new Set<number>();
   for (let i = 0; i < big.dist.length; i++) bigAt.add(utilKey(big.tiles[i * 2], big.tiles[i * 2 + 1]));
   ok(bigAt.has(utilKey(24, 0)) && !bigAt.has(utilKey(25, 0)) && !bigAt.has(utilKey(28, 5)), 'with a long reach it stops at the edge of ada\'s land');
-  // the field: two nodes, either order, the same answer; the nearer serves, a tie to the lower key
-  const n2: UtilNode = { key: utilKey(20, 13), x: 20, y: 13, kind: SUB, owner: 'ada' };
+  // the field: two nodes half way down the teeth, either order, the same answer; the nearer serves, a tie to the lower key
+  const n1: UtilNode = { key: utilKey(11, 6), x: 11, y: 6, kind: SUB, owner: 'ada' }, n2: UtilNode = { key: utilKey(21, 6), x: 21, y: 6, kind: SUB, owner: 'ada' };
   const f1 = new UtilityField(), f2 = new UtilityField();
-  f1.rebuild([node, n2], env); f2.rebuild([n2, node], env);
+  f1.rebuild([n1, n2], env); f2.rebuild([n2, n1], env);
   const key = (f: UtilityField, x: number, y: number) => { const i = f.nodeIndexAt('ada', x, y); return i < 0 ? -1 : f.nodes[i].key; };
   let same = true;
   for (let x = 0; x <= 30; x++) for (let y = 0; y <= 13; y++) if (key(f1, x, y) !== key(f2, x, y) || f1.distAt('ada', x, y) !== f2.distAt('ada', x, y)) same = false;
   ok(same, 'the field is the same whatever order the nodes come in');
-  ok(key(f1, 14, 0) === node.key && key(f1, 16, 0) === n2.key && key(f1, 15, 0) === Math.min(node.key, n2.key), 'the nearer node serves a road tile, a tie goes to the lower key');
+  ok(key(f1, 14, 0) === n1.key && key(f1, 16, 0) === n2.key && key(f1, 15, 0) === Math.min(n1.key, n2.key), 'the nearer node serves a road tile, a tie goes to the lower key');
   ok(f1.adjacent.length === 2, `their reaches touch along the spine: one pair joined by the streets (${f1.adjacent.length / 2})`);
-  ok(f1.serving('ada', 11, 6) === f1.indexOf(node.key) && f1.serving('ada', 5, 6) === -1, 'a building beside the tooth is served by its node; one with no road in reach is not');
+  ok(f1.serving('ada', 9, 3) === f1.indexOf(n1.key) && f1.serving('ada', 5, 6) === -1, 'a building beside the tooth is served by its node; one with no road in reach is not');
 }
 
 // ---------------------------------------------------------------- 2. the solver
@@ -192,9 +194,10 @@ console.log('4. faults, vans and links');
   const u = g.utilities;
   const sub = w.buildings.get(tileKey(x0 + 9, y0 + 9))!;
   // a power depot by the substation's street, staffed by the town over a day
+  for (const x of [x0 + 1, x0 + 2]) w.setTile(x, y0 + 9, packTile(terrainOf(w.getTile(x, y0 + 9)), false, 0, 0));
   const depot = put(w, DEPOT, x0 + 1, y0 + 9, 0)!;
   steps(g, DAY);
-  ok(depot.occupants > 0, `the power depot has staff (${depot.occupants})`);
+  ok(depot.id === DEPOT && depot.occupants > 0, `the power depot has staff (${depot.occupants})`);
   const f = u.openFault('node', utilKey(sub.x, sub.y), 'ada', sub.x, sub.y);
   ok(stateOf(g, sub) === UtilState.Fault && !u.supplied([...w.buildings.values()].find((b) => b.level > 0 && u.field.serving('ada', b.x, b.y) === u.field.indexOf(utilKey(sub.x, sub.y)))!), 'a fault: the substation and its streets have no power at once');
   const sent0 = u.stats.vansSent, van0 = u.stats.byVan;
