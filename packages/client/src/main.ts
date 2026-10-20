@@ -377,7 +377,7 @@ const fireworks = new Fireworks(); scene.add(fireworks.group);
 const ranks = new RanksUI({ net, world, liveTick, fireworks, moment: (x, y, caption, o) => { if (!tour && !mapMode.on) moment.play(x, y, caption, o); } });
 scene.add(ranks.group);
 // the news (news.ts, docs/media.md): the news chip and panel, the ticker of breaking stories, a media centre's channel
-new NewsUI({ net, world, liveTick, flyTo: (x, y) => flyTo(x, y), feed: (tex) => buildings.adverts.setNewsFeed(tex) });
+new NewsUI({ net, world, liveTick, flyTo: (x, y) => flyTo(x, y), headline: (h) => buildings.adverts.setNewsHeadline(h) });
 net.on('railLines', (m) => { trains.setLines(m.lines); rail.setLines(m.lines); });
 // underground lines (docs/underground.md): their trains run in the bores, and the bores take the lines' colours
 const metroMeta = new Map<number, MetroLineDTO>(); // the metro lines as sent, for station names on a cab ride

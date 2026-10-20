@@ -13,6 +13,8 @@
  *    story at the celebration spot naming the rank;
  * 4. the ring: 250 more stories leave NEWS.keep, the newest, with ids still rising;
  * 5. determinism: the same seed gives the same stories (ids, ticks, places, headlines, channels) on a second run;
+ * 7. (run before 6) Fires v2: a gas explosion is one 'explosion' story named for its cause, its neighbours set
+ *    alight are live 'spread' stories that end when they are out, and the blast's own source has no fire story of its own;
  * 6. old saves: a snapshot without `news` loads with an empty log and saves without the field; one with stories loads
  *    them, keeps numbering after them, and a fire burning at the save still gets its end after loading.
  * `--bench`: ms per game step (sim, fires, adverts, news and the frame) on a test city of `--districts`², filled for a
@@ -183,6 +185,28 @@ console.log('5. determinism');
   ok(one.length > 0 && one.length === two.length, `${one.length} stories each run`);
   ok(one.every((s, i) => s === two[i]), 'the same stories: ids, ticks, places, headlines, salience, channels, ends');
   log(`    ${one.slice(0, 4).join('\n    ')}`);
+}
+
+// ---------------------------------------------------------------- 7. spread and explosions (Fires v2)
+console.log('7. spread and explosions');
+{
+  const { w, g } = cityA;
+  const skip = new Set([tileKey(A.x, A.y), tileKey(B.x, B.y)]);
+  const home = lotNear(w, A.x + 4, A.y - 3, skip)!;
+  const last = g.news.all()[g.news.all().length - 1]?.id ?? 0; // the ring is full by now: new stories by id, not by place
+  // explode() takes the tile as (x, y) or, after a follow-up, as [x, y]: call whichever this build has
+  const ex = g.fires.explode as unknown as (...a: unknown[]) => boolean;
+  const opts = { cause: 'gas' };
+  const went = ex.length >= 3 ? ex.call(g.fires, home.x, home.y, opts) : ex.call(g.fires, [home.x, home.y], opts);
+  const fresh = stories(g).filter((s) => s.id > last);
+  const boom = fresh.find((s) => s.k === 'explosion');
+  const spread = fresh.filter((s) => s.k === 'fire');
+  ok(went && !!boom && boom.x === home.x && boom.y === home.y, `a gas explosion at (${home.x}, ${home.y}) is one 'explosion' story: "${boom?.h}"`);
+  ok(!!boom && /gas explosion/i.test(boom.h) && boom.ch === 'ada' && boom.s >= 70, `named for its cause, on Ada's channel, salience ${boom?.s}`);
+  ok(spread.length > 0 && spread.every((s) => /spreads to/.test(s.h) && s.end === undefined), `${spread.length} neighbour${spread.length === 1 ? '' : 's'} alight, each a live 'spread' story ("${spread[0]?.h}")`);
+  ok(!fresh.some((s) => s.k === 'fire' && s.x === home.x && s.y === home.y), 'no separate fire story for the blast\'s own source');
+  for (let i = 0; i < 12 * TPH && spread.some((s) => s.end === undefined); i++) g.step();
+  ok(spread.every((s) => s.end !== undefined), 'the spread fires end when they are out');
 }
 
 // ---------------------------------------------------------------- 6. old saves

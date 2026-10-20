@@ -2,8 +2,8 @@
 
 Audit #4 (docs/audit-2026-10.md section 8, card 4; UTD 4d8038ef), built on start-from-zero option C
 (docs/start-from-zero.md) and the Frontier start of the first five minutes (docs/first-five.md section 0). The goal
-chain teaches the first hour; ranks are what the town works towards for the next three, pay the grants the Frontier's
-cash trough asked for, and on a frontier grow the charter by rings of land.
+chain teaches the first hour; ranks are what the town works towards for the next three, pay a grant at each step, and
+on a frontier grow the charter by rings of land.
 
 ## 1. What the player sees
 
@@ -32,13 +32,20 @@ cash trough asked for, and on a frontier grow the charter by rings of land.
 
 ## 2. The ladder
 
-| Rank | Needs (all on your own land) | Charter grant | Frontier charter | Bot F, frontier (r10) | Bot F, Commons (c1) |
-| --- | --- | --- | --- | --- | --- |
-| Camp | the start | - | 32×32 (seeded) | 0 | 0 |
-| Hamlet | 90 residents, 2 shops open, a park or venue | $2,500 | 48×48 | 18.0 min | 8.3 min |
-| Village | 340 residents, 270 jobs filled, police and fire cover | $4,000 | 64×64 | 43.0 min | 84.3 min |
-| Town | 560 residents, 460 jobs filled, 30 two-storey buildings, 3 days in the black in a row | $6,000 | 80×80 | 98.0 min | 106.6 min |
-| City | 880 residents, 740 jobs filled, pupils at school or a bus line | $10,000 | 96×96, then open land | 146.3 min | 141.6 min |
+| Rank | Needs, all on your own land (the Commons) | On a frontier | Charter grant | Frontier charter | Bot F, frontier: mean (range), seeds 1-12 | Bot F, Commons (c1) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Camp | the start | the same | - | 32×32 (seeded) | 0 | 0 |
+| Hamlet | 90 residents, 2 shops open, a park or venue | the same | $2,500 | 48×48 | 19.1 min (18.0-25.0) | 8.3 min |
+| Village | 340 residents, 270 jobs filled, police and fire cover | 400 residents, 320 jobs filled, cover | $4,000 | 64×64 | 43.6 min (35.7-50.9) | 84.3 min |
+| Town | 560 residents, 460 jobs filled, 30 two-storey buildings, 3 days in the black in a row | 800 residents, 650 jobs, 45 two-storey, 3 days | $6,000 | 80×80 | 96.0 min (74.2-114.9) | 106.6 min |
+| City | 880 residents, 740 jobs filled, pupils at school or a bus line | 1,300 residents, 1,100 jobs, pupils or a bus line | $10,000 | 96×96, then open land | 150.2 min (113.9-173.7; 11 of 12 runs within three hours) | 141.6 min |
+
+A frontier starts with $18,000 (`FRONTIER_MONEY`, shared/src/constants.ts) and measures its Village, Town and City by
+the bigger targets (one ladder in shared/src/ranks.ts, each need's `frontier` target beside its ordinary one, read
+through `rankNeeds`); the two were tuned together so
+that the treasury stays above $5,000 for the first three hours and the ranks keep their times (section 3, Money).
+Beside the Commons it is $20,000 and the ladder as written. The rank card shows the targets of the world it is on
+(`RankDTO.frontier`).
 
 The target was about 20, 45, 90 and 150 real minutes at 1× for bot F.
 
@@ -61,6 +68,12 @@ same); it places police and fire first when the goal or the rank card asks for c
 ring rather than buying land; it has a second and third column of blocks and one to the west; and it keeps each
 column's first tile unzoned, because a house there cut a later block's connector off (run r6, a bot layout bug the
 `buildersRoad` hint flagged).
+
+**Bot F in process** (server/src/loadtest/botf.ts, since the cash floor): the same player on a fake client and the game's
+own loop, ten ticks and a flush a loop as at `SIM_STEPS=10`, each of its waits run as game loops instead of real time.
+Three hours take about 30 seconds, and with `Math.random` seeded (mulberry32) a run is the same every time, so a
+setting is read from twelve runs (seeds 1-12) rather than one. Its treasury's low point is read after every loop, not
+once a game hour. On the same code it agrees with the WebSocket bot within the run-to-run spread (section 3, Money).
 
 **Tuning runs** (frontier, seed 424242, joined at the dawn start, three hours each):
 
@@ -86,16 +99,59 @@ the feed saying why and what to do ("Growth has paused at 849 residents with 46 
 builders' yard (Y) puts more crews on them"), at most three times a plateau.
 
 **Money.** On the Commons ($20,000 start) the treasury's low point over three hours was **$10,429** (minute 77) and
-it never went under $5,000: the acceptance test holds as written. On a frontier it cannot: the start is $5,000 and the
-opening a card-follower plays spends about $4,000 of it in the first two minutes (the street, six rows of homes at
-$400, the camp, the handyman, Parking lots), before any rank is reachable, so a $5,000 floor would mean handing the
-money straight back (a $10,000 start in disguise). The proposed frontier test: **never into the overdraft, and above
-$5,000 from Town on**. r10: low $300 at minute 8.6 (the opening and the first yard), $793 after Village, **$10,315
-from Town (minute 98) to the end**, $25,059 after City. The grants land where the trough was: before ranks the
-frontier bot sat at $750-1,300 from minute 2 to 20 waiting for Masonry and the second yard; with them the Hamlet's
-$2,500 at minute 18 pays for Masonry, cover and a yard within the game hour. A bot that spends down to a few hundred
-dollars whenever it can will always show a low point near that floor; minutes under $1,500 (51 of 180 in r10) is the
-better reading of the trough, and it ends at the Village grant.
+it never went under $5,000: the acceptance test holds as written.
+
+On a frontier the start was $5,000, and the opening a card-follower plays spends about $4,000 of it in the first two
+minutes (the street, six rows of homes at $400, the camp, the handyman, Parking lots). r10's low was $300 at minute 8.6,
+and in process on main (ee47163, seeds 1-12) the low averaged $362, with one run overdrawn to -$116 at minute 50.8.
+Rich's decision (2026-10-20, card 4d8038ef): **above $5,000 throughout the first three hours**.
+
+What the tuning found: bot F spends whenever it has $700 to spare, so a low point above $5,000 means money never holds
+it back. It then buys every technology and builders' yard the moment it is ready: offices and Steel frame at the
+Hamlet instead of the Village grant, and a yard every game day. More money alone made the ranks come sooner, and
+cutting early costs would do the same, since a dollar saved is a dollar spent. So the frontier gets both a bigger
+start and bigger Village, Town and City targets, which win the time back. The Commons keeps its ladder and its
+$20,000.
+
+| Frontier start | Village / Town / City targets (residents, jobs; Town's two-storey) | Runs | Hamlet | Village | Town | City | Cash low: mean (worst) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| $5,000 | 340, 270 / 560, 460, 30 / 880, 740 (before) | 12 seeded | 18.1 (17.4-20.4) | 44.9 (36.7-58.0) | 81.9 (66.2-93.9) | 122.5 (92.4-146.4) | $362 (-$116) |
+| $12,500 | the same | 6 | 19.0 (18.4-20.9) | 38.4 (34.9-41.9) | 68.0 (48.9-82.9) | 105.8 (81.2-133.9) | $3,576 ($2,585) |
+| $15,000 | the same | 6 | 18.6 (18.2-19.0) | 38.3 (33.9-42.4) | 61.1 (50.4-66.9) | 95.9 (76.2-106.9) | $6,023 ($5,015) |
+| $16,000 | the same | 5 | 19.1 (18.5-20.9) | 37.8 (34.5-42.7) | 62.6 (45.0-74.9) | 95.3 (81.4-109.5) | $7,521 ($7,191) |
+| $16,000 | 340, 270 / 700, 580, 40 / 1,100, 920 | 5 | 18.8 (18.5-19.0) | 39.9 (35.2-43.5) | 79.5 (73.0-92.0) | 118.6 (89.9-145.5) | $7,219 ($6,314) |
+| $16,000 | 420, 340 / 900, 740, 50 / 1,450, 1,220 | 6 | 19.7 (18.5-24.7) | 48.4 (43.0-60.4) | 112.7 or later | 142.2 (114.5-177.9; 5 of 6) | $6,710 ($5,091) |
+| $16,000 | 400, 320 / 800, 650, 45 / 1,300, 1,100 | 16 | 19.0 (18.2-25.4) | 43.5 (35.9-51.4) | 95.2 (75.7-132.4) | 141.6 (107.7-170.4; 14 of 16) | $7,121 ($5,588) |
+| $17,000 | the same | 10 | 18.5 (18.0-19.2) | 44.2 (41.9-51.5) | 84.2 (73.5-99.2) | 135.3 (108.7-170.0) | $7,952 ($5,798) |
+| $16,000 | the same | 12 seeded | 19.1 (18.0-25.0) | 43.6 (35.7-50.9) | 96.0 (74.2-114.9) | 150.2 (113.9-173.7; 11 of 12) | $7,173 ($6,219) |
+| **$18,000** | **the same (final)** | **12 seeded** | **19.1 (18.0-25.0)** | **43.6 (35.7-50.9)** | **96.0 (74.2-114.9)** | **150.2 (113.9-173.7; 11 of 12)** | **$9,173 ($8,219)** |
+
+Times are the mean and range, in real minutes at 1× after joining; a City not reached in three hours is left out of
+its mean. Rows without "seeded" were run before `Math.random` was seeded. Once money never binds, the start no longer
+changes the game at all: seeds 1-12 at $16,000 and at $18,000 play identically, rank for rank, and only the treasury
+differs, by the $2,000. The start sets the low point alone: the start less the most the bot has spent beyond its
+takings, $8,200-11,200 across the 38 runs with the final targets, reached just before the Village grant at minute
+27-48 (later when the Village is late). At $16,000 one of those runs, the $17,000 run whose Village came at minute 49,
+would have dipped to about $4,800; $18,000 keeps the worst of them near $6,800, and the twelve seeded runs at
+$8,219. So early choices still spend real money (half the start is gone by the Village) without emptying the till.
+
+**The first-five flow and the early goals on $18,000** (seeds 1-12 and f1). The opening is unchanged to the minute:
+street 0.0, camp 0.2, homes 0.4, the handyman 0.9, 12 residents 2.2. Nothing on the goals card or in the advisor asks
+the player to save up or wait for money: the money words are the yard's and park's prices, "Not enough money" on a
+tree node and the overdraft, administration and "nearly empty" hints (the last on a build refused for money), none of which bot F met at $18,000. What
+the money changes is order. Bot F can afford the fire post and the library at minute 3, and the library's building
+work holds the two handyman crews, so "Open the shops" (8 shop jobs filled) finishes at minute 17 instead of 8, and
+the chain then completes in a burst at minutes 17-18 (shops, a growing town, Masonry, cover, somewhere to go) with
+the Hamlet at about 19. The goals card and the rank card still show the next step all the while: f1's longest stretch
+without anything new in the first 30 minutes was 1.7 minutes, against 2.3 in f0. And "spending more than you earn,
+two days running" (the deficit hint) came up twice in f1, at minutes 13 and 21: the early services' wages run ahead
+of the taxes, as the "Balance the books" goal then teaches. The order is the player's choice here, which is the
+point. A player who wants shops first builds them first.
+
+The WebSocket bot (f0, f1: one run each, so the spread applies): before, on main at $5,000, 17.3 / 48.6 / 83.3 / 105.9
+with a low of $72 at minute 49.3 (its hourly sample); after, at $18,000 with the final targets, 18.3 / 42.0 / 83.0 / 146.3
+with a low of $9,328 at minute 30.6. The longest stretch without a next step was 7.3 minutes in f1 (from minute 162, after
+City, while the next residents mark was far off) and 7.4 in f0 (from 172.6), against 5.3 in r10.
 
 ## 4. How it fits
 
@@ -129,11 +185,15 @@ better reading of the trough, and it ends at the Village grant.
 
 ## 5. Checks
 
-- `npx tsx packages/server/src/loadtest/ranks.ts`: 38 passed, 0 failed. A frontier Camp with its charter and land
+- `npx tsx packages/server/src/loadtest/ranks.ts`: 43 passed, 0 failed, in about 30 seconds. A frontier Camp with its charter and land
   rule, the street goal counting the player's own roads, each rank-up with its grant through the ledger, the ring as
   parcels of at most 48 in one estate, the feed, no second grant, one rank a measurement to City, City's open land, the
   save round trip, an older save deriving its rank without a grant (and a snapshot with no rank records loading),
-  the Commons (ranks, no ring), a sandbox (none), a rank reached in administration, the growth-pause nudges.
+  the Commons (ranks, no ring), a sandbox (none), a rank reached in administration, the growth-pause nudges. Since the
+  cash floor: a frontier is measured with its own targets (the Commons' Village needs leave it a Hamlet), the Commons
+  with the ladder as written, and **the frontier cash floor**: bot F (botf.ts, seed 1) plays a frontier's first three
+  hours on the real simulation, and its treasury's low must stay above $5,000 (`CASH_FLOOR`). Seed 1: $9,378 at
+  minute 32.3, ranks at 18.0 / 43.7 / 92.2 / 147.4.
 - `npm run typecheck` (with `local:check`), `buildings:check`, `demo:check` (the showcase's `ranks` stop and feature
   `settlement-ranks`) and `finance:check` pass after merging main (Audit #3 fires).
 - Tick cost: `loadtest/ab.ts --hour 8 --ticks 3000 --seed 1` gives identical counts on main (aad4c0e) and this branch,
@@ -151,5 +211,10 @@ better reading of the trough, and it ends at the Village grant.
 - A "Charter grants" ledger line instead of "Other", and a sound for the rank-up (audio v1).
 - The second player on a shared frontier: they may not buy inside the first charter's City ring, and have no
   charter of their own; a second gate and charter would be the real answer.
-- The frontier's first twenty minutes still swing by ten minutes run to run on whether a second yard is affordable;
-  a cheaper first builders' yard or a Hamlet grant that comes with one would steady it.
+- A frontier has its own Village, Town and City targets, because a treasury that never runs short grows a town faster.
+  If the Commons should ever have a floor too, its ladder would want the same treatment.
+- On a rich start the library at minute 3 holds the handyman's crews and delays the shops goal by about nine minutes.
+  The goals card could say that a big building waits its turn behind the lots, or the handyman could take small lots
+  first.
+- The spread run to run is still wide (City 114-174 minutes in the final twelve). Most of it comes from when the town
+  fills its first jobs and when the Village's cover lands, not from money.

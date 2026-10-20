@@ -51,10 +51,10 @@ export const NEWS = {
   /** stories a client gets when it joins (the newest) */
   helloSend: 60,
   /**
-   * game hours a story stays live: it gets its end when it breaks, t plus these, except a fire, which is live until it is
-   * out (its hours are only a guard for one whose end never came, a save from before the fire went out)
+   * game hours a story stays live: it gets its end when it breaks, t plus these, except a fire and an explosion whose fire
+   * still burns, which are live until the fire is out (their hours are then only a guard for an end that never came)
    */
-  liveHours: { fire: 12, explosion: 3, rank: 4, milestone: 2, opening: 3, line: 3 } as Record<StoryKind, number>,
+  liveHours: { fire: 12, explosion: 6, rank: 4, milestone: 2, opening: 3, line: 3 } as Record<StoryKind, number>,
   /** the showcase's fire drill relights every hour or so: one story per drill home a game day, not one per drill */
   drillDedupeTicks: TICKS_PER_DAY,
 };
@@ -161,9 +161,17 @@ export const HEADLINES = {
   ],
   drill: [(w: StoryWords) => `Fire drill at ${w.b} in ${w.place}`],
   spread: [(w: StoryWords) => `Fire spreads to ${w.b} in ${w.place}`],
+  /** `what` is the blast's label (shared fires.ts BLAST_CAUSES: 'Explosion', 'Gas explosion'), `n` the buildings it set alight */
   explosion: [
-    (w: StoryWords) => `Explosion at ${w.b} in ${w.place}`,
-    (w: StoryWords) => `Blast rocks ${w.place}: ${w.b} hit`,
+    (w: StoryWords) => `${w.what} at ${w.b} in ${w.place}`,
+    (w: StoryWords) => `${w.what} rocks ${w.place}: ${w.b} hit`,
+  ],
+  explosionLit: [
+    (w: StoryWords) => `${w.what} at ${w.b} in ${w.place} sets ${w.n} building${w.n === 1 ? '' : 's'} alight`,
+    (w: StoryWords) => `${w.what} in ${w.place}: fire spreads from ${w.b} to ${w.n} building${w.n === 1 ? '' : 's'}`,
+  ],
+  levelled: [
+    (w: StoryWords) => `${cap(w.b!)} destroyed by ${w.what === 'Gas explosion' ? 'a gas explosion' : 'an explosion'} in ${w.place}`,
   ],
   rank: [
     (w: StoryWords) => `${w.town} becomes a ${w.what}`,

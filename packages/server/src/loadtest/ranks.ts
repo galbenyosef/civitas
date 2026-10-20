@@ -3,12 +3,15 @@
  * hand (counters and finished buildings set directly, no simulation runs). Checks the Camp start on a frontier and its
  * land rule, each rank-up with its grant, ring and feed, one rank per measurement, no grant paid twice, the City's open
  * land, the save round trip, an older save deriving its rank without a grant, the Commons (ranks, no ring), a sandbox
- * (none), and the frontier street goal counting only the player's own road tiles.
+ * (none), and the frontier street goal counting only the player's own road tiles. Last, the frontier cash floor: bot F
+ * (botf.ts) plays a frontier's first three hours on the real simulation, about half a minute, and its treasury must
+ * never fall under CASH_FLOOR.
  *
  *   npx tsx packages/server/src/loadtest/ranks.ts
  */
 import {
-  RANKS, TOP_RANK, KIND_ID, Zone, MAX_PARCEL_EDGE, charterRing, tileKey,
+  RANKS, TOP_RANK, KIND_ID, Zone, MAX_PARCEL_EDGE, FRONTIER_MONEY, charterRing, rankNeeds, tileKey, mulberry32,
+  type RankNeed,
   type ServerMsg, type ClientMsg,
 } from '@msimcity/shared';
 import { World, type Player } from '../world';
@@ -16,6 +19,10 @@ import { seedCommons, seedFrontier } from '../seed';
 import { createGame } from '../game';
 import { snapshotOf, worldFromSnapshot } from '../snapshot';
 import type { Conn } from '../transport';
+import { playF } from './botf';
+
+/** Rich's floor (2026-10-20): on a frontier the treasury stays above this through the first three hours */
+const CASH_FLOOR = 5000;
 
 let failed = 0, passed = 0;
 const ok = (cond: unknown, what: string) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${what}`); if (cond) passed++; else failed++; };
@@ -40,9 +47,9 @@ function setup(world: World, sandbox = false) {
 }
 /** A finished building of a family on a tile (what the needs read), no simulation. */
 const stand = (w: World, x: number, y: number, zone: number, id = zone, level = 1) => w.buildings.set(tileKey(x, y), { x, y, zone, id, level, occupants: 0 });
-/** Meet a rank's needs on the player's land, near (x, y). */
-function meet(w: World, p: Player, rank: number, x: number, y: number) {
-  for (const q of RANKS[rank].needs) {
+/** Meet a rank's needs (by default the targets where the town stands) on the player's land, near (x, y). */
+function meet(w: World, p: Player, rank: number, x: number, y: number, needs: RankNeed[] = rankNeeds(rank, w.start === 'frontier')) {
+  for (const q of needs) {
     if (q.id === 'residents') p.progress.housed = q.target;
     if (q.id === 'jobs') p.progress.jobs = q.target;
     if (q.id === 'shops') for (let i = 0; i < q.target; i++) stand(w, x + i, y, Zone.Commercial);
@@ -108,6 +115,13 @@ const ownedBy = (w: World, r: { x: number; y: number; w: number; h: number }, id
   ok(p.money - m0 === RANKS[1].grant && !a.last()?.up, 'measured again: no second grant, no second celebration');
   ok(a.ranks().length === 0 || !a.last()?.fresh, 'and nothing new in the feed');
 
+  // ---- a frontier measures against its own targets (shared rankNeeds): the Commons' Village is not enough here
+  ok(up?.rank.frontier === true && RANKS.every((r, i) => rankNeeds(i, false) === r.needs), 'a frontier is measured with its own targets; the Commons\' are the ladder as written');
+  meet(world, p, 2, ch.x + 2, ch.y + 13, RANKS[2].needs);
+  a.clear(); measure();
+  const v = rankNeeds(2, true);
+  ok(p.ranks?.rank === 1 && v.some((q, i) => q.target > RANKS[2].needs[i].target), `the Commons' ${RANKS[2].name} needs on a frontier: still a ${RANKS[1].name} (${v.map((q) => `${q.target} ${q.label}`).join(', ')} here)`);
+
   // ---- one rank per measurement, all the way to City
   for (let r = 2; r <= TOP_RANK; r++) meet(world, p, r, ch.x + 2, ch.y + 10 + r * 3);
   const ups: number[] = [];
@@ -142,7 +156,7 @@ const ownedBy = (w: World, r: { x: number; y: number; w: number; h: number }, id
   client('Old');
   const p = world.players.get('old')!, ch = world.charter!;
   meet(world, p, 1, ch.x + 2, ch.y + 2); meet(world, p, 2, ch.x + 2, ch.y + 8); // a village's town
-  p.progress.housed = RANKS[2].needs[0].target + 5;
+  p.progress.housed = rankNeeds(2, true)[0].target + 5;
   delete p.ranks; // as a save from before ranks has it
   world.tick += 5; // (a later tick: one tick's measurement is shared by all of a player's tabs)
   const m0 = p.money;
@@ -176,6 +190,7 @@ const ownedBy = (w: World, r: { x: number; y: number; w: number; h: number }, id
   const m0 = p.money;
   a.clear(); measure();
   ok(a.last()?.up?.rank === 1 && p.money - m0 === RANKS[1].grant && !a.last()?.up?.land, `a Hamlet beside the Commons: +$${p.money - m0}, no land`);
+  ok(!a.last()?.rank.frontier, 'measured with the ladder as written');
   // growth that pauses for half a game day gets a word in the feed, once a half day, at most three times a pause
   const words: string[] = [];
   for (let i = 0; i < 4 * 24 * 4; i++) { a.clear(); measure(); for (const f of a.last()?.fresh ?? []) if (/^Growth has paused/.test(f.text)) words.push(f.text); }
@@ -207,6 +222,21 @@ const ownedBy = (w: World, r: { x: number; y: number; w: number; h: number }, id
   meet(world, p, 1, ch.x + 3, ch.y + 3);
   measure();
   ok(p.ranks?.rank === 1 && p.money === -1200 + RANKS[1].grant, `in administration the Hamlet grant still lands: $${p.money}`);
+}
+
+// ---- the frontier cash floor: bot F's first three hours on the real simulation, ten ticks a loop as at SIM_STEPS=10.
+// Math.random seeded so the run is the same each time (docs/ranks.md section 3 has the spread over seeds 1-12).
+{
+  Math.random = mulberry32(1);
+  const world = new World(424242);
+  seedFrontier(world);
+  let accept: ((c: Conn) => void) | null = null;
+  const game = createGame(world, { onConnection: (fn) => { accept = fn; } }, { devTools: true, sandbox: false }, 10);
+  const t0 = performance.now();
+  const r = await playF(game, accept!, 180);
+  const usd = (n: number) => `$${n.toLocaleString('en-GB')}`;
+  ok(r.low > CASH_FLOOR, `bot F on a frontier (${usd(FRONTIER_MONEY)} start), three hours: the treasury's low is ${usd(r.low)} at minute ${r.lowAt}, over ${usd(CASH_FLOOR)}`);
+  ok(r.ups.length >= 3, `and it grows: ${r.ups.map((m, i) => `${RANKS[i + 1].name} ${m}`).join(', ')} min; ${r.residents} residents (${((performance.now() - t0) / 1000).toFixed(0)} s)`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

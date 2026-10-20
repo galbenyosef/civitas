@@ -1,6 +1,7 @@
 /**
- * Incidents v1: house fires with real dispatch (docs/incidents.md, server/src/sim/fires.ts, client/src/render/fires.ts).
- * Shared so the server's rules, the wire format and the client's drawing agree.
+ * Incidents: house fires with real dispatch (docs/incidents.md, server/src/sim/fires.ts, client/src/render/fires.ts);
+ * v2 adds fires spreading to the buildings next door and explosions at burning works. Shared so the server's rules, the
+ * wire format and the client's drawing agree.
  */
 
 /**
@@ -44,6 +45,38 @@ export const FIRE = {
   commons: true,
   /** a demo's fire drill (docs/incidents.md): the drill home catches light again this long after the last drill fire is out */
   drillGapHours: 0.6,
+
+  // ---- v2: spread and explosions (docs/incidents.md "Fires v2"). Each burning fire rolls once a game hour after it lit.
+  /**
+   * The chance an hour that a fire with no engine crew on scene sets light to one building next door (a lot touching
+   * its own, diagonals included): spreadMax x ramp x the neighbour's catch, ramp = ((u - spreadFrom) / (1 - spreadFrom))
+   * ^ spreadPow on u, the share of its burn time gone (0 before spreadFrom: nothing in the first hour; 0.3 near burn-out).
+   * Roads, parks and empty lots between are firebreaks: a lot a tile away does not touch.
+   */
+  spreadMax: 0.3, spreadFrom: 0.2, spreadPow: 1.6,
+  /** the same chance an hour once an engine crew is putting it out, times the neighbour's catch (a stray ember) */
+  spreadAttended: 0.01,
+  /**
+   * A neighbour's catch: by its level (1 to 5; a merged building as dense as the top), how readily it takes (a detached
+   * cottage less, a terrace or a tower more), times `diagonal` when it touches only at a corner.
+   */
+  catchByLevel: [0.7, 0.85, 1, 1.1, 1.2], diagonal: 0.5,
+  /** fires caught from another fire or a blast may burn at once to these caps (the ordinary rolls keep maxPerOwner and maxWorld) */
+  spreadPerOwner: 6, spreadWorld: 20,
+  /** an explosion at a burning works (an industrial building): blastMax x ((u - blastFrom) / (1 - blastFrom)) ^ blastPow an hour unattended */
+  blastMax: 0.16, blastFrom: 0.1, blastPow: 1.5,
+  /** the chance an hour of an explosion once an engine crew is on it */
+  blastAttended: 0.015,
+  /** a blast sets light to every building whose lot is this many tiles or less from the works' lot (roads are no break) */
+  blastReach: 2,
+  /** the share of the works the blast destroys there and then (the fire then carries on from there, or is put out at it) */
+  blastDamage: 0.7,
+  /** the owner pays this share of the works' book value for the blast itself (ledger 'blast'), on top of the fire's bill */
+  blastCostShare: 0.25,
+  /** a demo's spread drill: each house of the row catches this long after the one before; the engines are held this long after the first lit */
+  drillSpreadHours: 0.5, drillHoldHours: 1.6,
+  /** a demo's blast drill: the works blows this long after it caught light (the engines held till then), and lights again this long after its fire is out */
+  drillBlastHours: 0.6, drillBlastGapHours: 1.5,
 };
 export type FireTuning = typeof FIRE;
 
@@ -78,7 +111,33 @@ export interface FireDTO {
   bk?: number;
   /** the structure's footprint (1×1 lots: 1, 1), so the flames spread over a merged building */
   w: number; h: number;
+  /** the tick the building blew up (Fires.explode: a burning works, a gas leak): the client's flash, shockwave, debris and smoke column */
+  bx?: number;
+  /** what blew up (BLAST_CAUSES code; absent: industrial): the client draws each cause its own way */
+  bc?: number;
 }
+
+/**
+ * Explosions (docs/incidents.md "Explosions"): `Fires.explode` is the one entry point, whatever the cause. Each cause has
+ * its defaults here (a caller may override them) and its own look in the client (render/fires.ts BLAST_LOOK).
+ * - radius: every building whose lot is this many tiles or less from the source's catches light (roads are no break);
+ * - damage: the share of the source wrecked there and then (1: destroyed outright, the lot cleared);
+ * - costShare: the owner pays this share of the source's book value for the blast itself (ledger 'blast');
+ * - label: how the toast and the milestone feed name it.
+ */
+export type BlastCause = 'industrial' | 'gas';
+export interface BlastSpec { radius: number; damage: number; costShare: number; label: string }
+export const BLAST_CAUSES: Record<BlastCause, BlastSpec & { code: number }> = {
+  /** a burning works (FIRE.blastMax): heavy damage, the fire carries on from there */
+  industrial: { code: 0, radius: FIRE.blastReach, damage: FIRE.blastDamage, costShare: FIRE.blastCostShare, label: 'Explosion' },
+  /**
+   * a gas leak (the gas utility, card 968d0d2f, not built yet): the building is destroyed and its neighbours catch.
+   * Provisional numbers for that card to tune.
+   */
+  gas: { code: 1, radius: 1, damage: 1, costShare: 0.5, label: 'Gas explosion' },
+};
+/** BlastCause by its wire code (FireDTO.bc) */
+export const BLAST_CAUSE_OF_CODE: readonly BlastCause[] = (Object.keys(BLAST_CAUSES) as BlastCause[]).sort((a, b) => BLAST_CAUSES[a].code - BLAST_CAUSES[b].code);
 
 /** The share burnt `ticks` after a fire caught light, unattended (FIRE.growth: slow, then fast). */
 export const burntShare = (ticks: number, burn: number) => Math.pow(Math.max(0, Math.min(1, ticks / Math.max(1, burn))), FIRE.growth);
@@ -87,3 +146,6 @@ export function fireProgress(f: Pick<FireDTO, 'ph' | 't0' | 'burn' | 'd'>, now: 
   if (f.ph !== FirePhase.Burning) return f.d;
   return burntShare(now - f.t0, f.burn);
 }
+
+/** The ramp of the spread and blast chances: 0 until `from` of the burn time has gone, rising to 1 at burn-out. */
+export const fireRamp = (u: number, from: number, pow: number) => Math.pow(Math.max(0, Math.min(1, (u - from) / (1 - from))), pow);

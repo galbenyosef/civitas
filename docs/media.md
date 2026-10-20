@@ -77,7 +77,7 @@ Where the channels show:
 | Source | Hook | Story |
 |---|---|---|
 | a fire lit / put out | `Fires.onStory` (`FireStoryEvent`, phase `lit` / `out`) | `fire`, live until out. The headline changes with the outcome: saved, the bucket chain, floors lost, burnt down. The showcase's drill is one story a game day per drill home |
-| fire spread, explosions | the same hook, phases `spread` / `explosion` | `fire` ("Fire spreads to …") and `explosion`. **Fires v2 calls these where it spreads and explodes.** Until it lands, nothing sends them |
+| fire spread, explosions (Fires v2) | the same hook: `ignite()` sends `spread` when `opts.from` is set (caught from next door or from a blast); the private `blast()` that every `Fires.explode()` ends in sends `explosion` with its `cause`, the buildings it `lit` and whether it `levelled` the building | `fire` ("Fire spreads to …") and `explosion`, named for its cause ("Gas explosion at …", "… sets 3 buildings alight", "… destroyed by a gas explosion"). An explosion is one story: explode()'s fresh source sends `lit` as `quiet` and gets none of its own, and a burning building that blows up turns its fire story into the explosion. It is live until its fire is out. Drills make no spread or explosion stories |
 | a rank reached | `Ranks.onStory` (`RankStoryEvent`, kind `rank`) | `rank` at the celebration spot ("The Commons becomes a Hamlet") |
 | a milestone | the same hook, kind `milestone` (residents and jobs marks, firsts, research) | `milestone` ("Ada's town: 500 residents") |
 | a notable opening | `World.onSiteCompleted` | `opening`: a civic building costing $1,200 or more, or a landmark. A broadcaster finishing goes "on air" |
@@ -136,12 +136,7 @@ The client keeps stories by id.
   - **Watched:** at home in the evening with a TV, on a story whose `ch` reaches the home.
   - Salience `s` is the memory's starting strength. `who`, `pc` and `b` give the people involved: the residents of the building at the door tile.
 - **N6, conversations.** Lines come from templates keyed by `k` and fill from `h`'s words. The client keeps the stories, so nothing new goes on the wire.
-- **The Piccadilly Lights' news turn** (merged). Every 'news' turn on a big screen samples `AdvertsView.setNewsFeed(tex)` (render/adverts.ts). NewsUI's `drawCard` feeds it a 512×300 canvas card of the newest covered story: the channel's bug in its colour, LIVE while it goes on, the headline wrapped to four lines, and the time. The card is redrawn only when that story or its headline changes, and null puts the placeholder back while nothing has been reported. N4 swaps the card for the helicopter's render target. `news.latest(n, ch)` gives one channel's stories.
-- **Fires v2** (branch fires-2). Whichever branch merges second wires two calls to `Fires.onStory`:
-  - In `ignite()`, the 'lit' call sends phase `'spread'` when `opts.from` is set (1 caught from next door, 2 lit by a blast).
-  - In the private `blast()` that every `Fires.explode()` ends in, one `'explosion'` call goes after the neighbours are lit: `{ phase: 'explosion', id: f.id, x: f.x, y: f.y, owner: f.owner, kind: b.id }`.
-
-  A blast that levels a building is folded into `burnt`, so its 'out' story reads "burns down".
+- **The Piccadilly Lights' news turn** (built). NewsUI's `toScreens` puts the newest covered headline on the big screens' news card with `AdvertsView.setNewsHeadline(text)` (render/adverts.ts, docs/adverts.md "Turns"), only when it changes. That redraws the card's cell of the ad atlas and uploads it again. Measured on this Mac in Chrome, a frame takes 4.6 ms with or without a new headline. A sub-rectangle patch of the cell (`copyTextureToTexture` from a 256×128 canvas, checked pixel-exact by reading the texture back) was tried and dropped, because it is slower: 5.4 ms, or 244 ms under SwiftShader, as reading the cell out of the canvas and regenerating the mipmaps costs more than Chrome's own upload of a GPU canvas. `setNewsFeed(tex)` stays for N4's helicopter picture. `news.latest(n, ch)` gives one channel's stories.
 
 ## 5. Measured
 
@@ -150,7 +145,7 @@ The client keeps stories by id.
   - branch: 1.993, 1.853, 1.885, 1.863, 1.832 ms (mean 1.885)
 
   The same game on both: the same citizens and the same ticks. News runs only at events.
-- **The probe:** `npx tsx packages/server/src/loadtest/media.ts` passes 29 of 29. It checks coverage and overlap between two players, a tier-3 centre winning, the overlay counts, the building panel, a fire story and its end, a rank-up through `Ranks.check`, the ring bound, two runs giving the same stories, and old saves.
+- **The probe:** `npx tsx packages/server/src/loadtest/media.ts` passes 34 of 34. It checks coverage and overlap between two players, a tier-3 centre winning, the overlay counts, the building panel, a fire story and its end, a rank-up through `Ranks.check`, the ring bound, two runs giving the same stories, a gas explosion and the fires it spreads, and old saves.
 
 ## 6. The rest of the design (N3–N6, not built)
 

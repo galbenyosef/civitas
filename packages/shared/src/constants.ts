@@ -11,8 +11,12 @@ export const gameMin = (n: number) => Math.round(n * TICKS_PER_MINUTE);
 export const DAYS_PER_WEEK = 7;
 /** Starting treasury for a new player. */
 export const START_MONEY = 20000;
-/** A frontier start (docs/first-five.md section 0): the first player's treasury, and the free land charter round the road end (tiles per side). */
-export const FRONTIER_MONEY = 5000;
+/**
+ * A frontier start (docs/first-five.md section 0): the treasury, and the free land charter round the road end (tiles per
+ * side). The money is tuned with the frontier's rank targets (shared/src/ranks.ts, docs/ranks.md section 3): bot F's
+ * treasury stays above $5,000 for the first three hours, and the ranks keep their times.
+ */
+export const FRONTIER_MONEY = 18000;
 export const FRONTIER_CHARTER = 32;
 /** Price per tile when buying unclaimed land. */
 export const LAND_PRICE_PER_TILE = 10;

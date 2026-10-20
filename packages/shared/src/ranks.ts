@@ -9,7 +9,11 @@
 
 export type RankNeedId = 'residents' | 'jobs' | 'shops' | 'leisure' | 'cover' | 'black' | 'school' | 'busline' | 'level2';
 
-export interface RankNeed { id: RankNeedId; label: string; target: number }
+export interface RankNeed {
+  id: RankNeedId; label: string; target: number;
+  /** the target on a frontier, where it differs (rankNeeds): see the ladder's note */
+  frontier?: number;
+}
 
 export interface RankDef {
   name: string;
@@ -27,8 +31,14 @@ export interface RankDef {
 
 /**
  * The ladder, tuned with the frontier bot (docs/ranks.md section 3): a player who follows the goals card reaches Hamlet
- * at about 20 real minutes at 1×, Village at 45, Town at 90 and City at 150. The grants sit where the frontier's cash
- * trough was (docs/first-five.md: $750-1,300 from minute 2 to minute 20) and grow with what the next rank costs to build.
+ * at about 20 real minutes at 1×, Village at 45, Town at 90 and City at 150. The grants grow with what the next rank
+ * costs to build.
+ *
+ * A frontier's numbers differ in two places, both tuned together so that its treasury never falls under $5,000 in the
+ * first three hours (Rich, 2026-10-20) while the ranks keep their times: FRONTIER_MONEY (constants.ts) is the start, and
+ * the `frontier` targets below are the Village, Town and City needs there. A treasury that never runs short lets a
+ * player buy each technology and builders' yard the moment it is ready, so the town grows faster than one waiting for
+ * money, and the bigger targets give that time back. Beside the Commons the ordinary targets hold.
  */
 export const RANKS: RankDef[] = [
   { name: 'Camp', blurb: 'Tents round a fire pit at the end of the road, and a town to come.', needs: [], grant: 0, side: 32 },
@@ -36,16 +46,22 @@ export const RANKS: RankDef[] = [
     needs: [{ id: 'residents', label: 'residents', target: 90 }, { id: 'shops', label: 'shops open', target: 2 }, { id: 'leisure', label: 'park or venue', target: 1 }],
     grant: 2500, side: 48 },
   { name: 'Village', blurb: 'Its own jobs, a police box and a fire post: a village looks after itself.',
-    needs: [{ id: 'residents', label: 'residents', target: 340 }, { id: 'jobs', label: 'jobs filled on your land', target: 270 }, { id: 'cover', label: 'police and fire cover', target: 2 }],
+    needs: [{ id: 'residents', label: 'residents', target: 340, frontier: 400 }, { id: 'jobs', label: 'jobs filled on your land', target: 270, frontier: 320 }, { id: 'cover', label: 'police and fire cover', target: 2 }],
     grant: 4000, side: 64 },
   { name: 'Town', blurb: 'Two-storey streets, a working economy and books that balance: a market town.',
-    needs: [{ id: 'residents', label: 'residents', target: 560 }, { id: 'jobs', label: 'jobs filled on your land', target: 460 }, { id: 'level2', label: 'two-storey buildings', target: 30 }, { id: 'black', label: 'days in the black in a row', target: 3 }],
+    needs: [{ id: 'residents', label: 'residents', target: 560, frontier: 800 }, { id: 'jobs', label: 'jobs filled on your land', target: 460, frontier: 650 }, { id: 'level2', label: 'two-storey buildings', target: 30, frontier: 45 }, { id: 'black', label: 'days in the black in a row', target: 3 }],
     grant: 6000, side: 80 },
   { name: 'City', blurb: 'Schools or buses, and people coming from far off to work: a city, with the land rules of the wide world.',
-    needs: [{ id: 'residents', label: 'residents', target: 880 }, { id: 'jobs', label: 'jobs filled on your land', target: 740 }, { id: 'school', label: 'pupils at school, or a bus line', target: 1 }],
+    needs: [{ id: 'residents', label: 'residents', target: 880, frontier: 1300 }, { id: 'jobs', label: 'jobs filled on your land', target: 740, frontier: 1100 }, { id: 'school', label: 'pupils at school, or a bus line', target: 1 }],
     grant: 10000, side: 96, open: true },
 ];
 export const TOP_RANK = RANKS.length - 1;
+
+const FRONTIER_NEEDS = RANKS.map((r) => r.needs.map((q) => (q.frontier === undefined ? q : { ...q, target: q.frontier })));
+/** A rank's needs where the town stands: on a frontier world the `frontier` targets replace the ordinary ones. */
+export function rankNeeds(rank: number, frontier: boolean): RankNeed[] {
+  return (frontier ? FRONTIER_NEEDS[rank] : RANKS[rank]?.needs) ?? [];
+}
 
 /** What to do about a need: the rank card's "next step" line under the first one still short. */
 export const NEED_HOW: Record<RankNeedId, string> = {
@@ -77,8 +93,8 @@ export function charterRing(ch: { x: number; y: number; w: number; h: number }, 
 export interface Milestone {
   /** the world tick it happened */
   tick: number;
-  /** what kind of thing: a rank reached, a goal done, a need met, a population or jobs mark, a first of something, research, money */
-  kind: 'rank' | 'goal' | 'need' | 'people' | 'jobs' | 'first' | 'tech' | 'money' | 'land';
+  /** what kind of thing: a rank reached, a goal done, a need met, a population or jobs mark, a first of something, research, money, an incident (an explosion) */
+  kind: 'rank' | 'goal' | 'need' | 'people' | 'jobs' | 'first' | 'tech' | 'money' | 'land' | 'incident';
   text: string;
 }
 
@@ -88,6 +104,8 @@ export interface RankDTO {
   rank: number;
   /** the next rank's needs, current values in the order of RANKS[rank + 1].needs (empty at the top) */
   have: number[];
+  /** measured against a frontier's targets (rankNeeds) */
+  frontier?: boolean;
   /** the tick each rank was reached (index = rank; the starting rank's is when the record began) */
   at: number[];
   /** the latest milestones, newest first */

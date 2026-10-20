@@ -16,7 +16,7 @@ import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, sto
 import { fillCity } from './fill';
 import { seedDemoTown, seedDemoNetwork, seedDemoStudents, fillDemo, seededRandom, worldHash } from './demo/seed';
 import { seedDemoAdverts } from './demo/adverts';
-import { demoFireDrills } from '@msimcity/shared';
+import { demoFireDrills, demoFireRows, demoFireBlasts } from '@msimcity/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 8080);
@@ -91,7 +91,12 @@ const http = createServer((req, res) => void serve(req, res));
 const game = createGame(world, new WsSource(http), { devTools: process.env.NODE_ENV !== 'production', sandbox: CHILD, spectate: SPECTATE }, SIM_STEPS);
 const { sim, airports, rail, net, tickWin } = game;
 game.fires.enabled = process.env.FIRES !== '0'; // FIRES=0: nothing catches light (sim/fires.ts; an A/B control)
-if (DEMO) game.fires.drills = demoFireDrills(DEMO).map(([x, y]) => [x, y]); // the scenario's fire drill homes (docs/incidents.md)
+if (DEMO) {
+  // the scenario's fire drills (docs/incidents.md): a house on a loop, a row the fire runs along, a works that blows up
+  game.fires.drills = demoFireDrills(DEMO).map(([x, y]) => [x, y]);
+  game.fires.rows = demoFireRows(DEMO).map((row) => row.map(([x, y]): [number, number] => [x, y]));
+  game.fires.blastDrills = demoFireBlasts(DEMO).map(([x, y]) => [x, y]);
+}
 if (DEMO && needsFill) { // the second half of seeding needs the simulation: bus stops, track and every line
   const problems = seedDemoNetwork(world, sim, rail, DEMO);
   if (problems.length) { console.error(`demo ${DEMO}: the scenario's network does not build:\n  ${problems.join('\n  ')}`); process.exit(1); }

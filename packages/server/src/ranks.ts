@@ -1,5 +1,5 @@
 import {
-  RANKS, TOP_RANK, NEED_HOW, TICKS_PER_DAY, GOAL_BY_ID, TECH_BY_ID, Zone, CAMP_KIND, MAX_PARCEL_EDGE, DEFAULT_TAX, isLeisure, charterRing, rankRewardText,
+  RANKS, TOP_RANK, NEED_HOW, TICKS_PER_DAY, GOAL_BY_ID, TECH_BY_ID, Zone, CAMP_KIND, MAX_PARCEL_EDGE, DEFAULT_TAX, isLeisure, charterRing, rankNeeds, rankRewardText,
   type Milestone, type RankDTO, type RankNeedId, type RankUp, type ServerMsg,
 } from '@msimcity/shared';
 import { emptyStats, type World, type Player } from './world';
@@ -93,11 +93,20 @@ export class Ranks {
     return s;
   }
 
-  private met(rank: number, have: number[]) { return RANKS[rank].needs.every((q, i) => have[i] >= q.target); }
+  /** Something that happened to the player's town (an explosion, sim/fires.ts) as a line of the feed: news once, no key. */
+  incident(p: Player, text: string) {
+    const s = this.state(p);
+    s.feed.unshift({ tick: this.w.tick, kind: 'incident', text });
+    if (s.feed.length > FEED_KEEP) s.feed.length = FEED_KEEP;
+  }
 
+  private met(rank: number, have: number[]) { return this.needs(rank).every((q, i) => have[i] >= q.target); }
+
+  /** A rank's needs here: a frontier world's targets differ (shared rankNeeds). */
+  private needs(rank: number) { return rankNeeds(rank, this.w.start === 'frontier'); }
   /** Each need of `rank`, in the order of RANKS[rank].needs. `black` overrides the streak (derivation counts it met). */
   private measure(rank: number, p: Player, t: Tally, black?: number): number[] {
-    return RANKS[rank].needs.map((q) => this.need(q.id, p, t, black ?? p.ranks?.black ?? 0));
+    return this.needs(rank).map((q) => this.need(q.id, p, t, black ?? p.ranks?.black ?? 0));
   }
   private need(id: RankNeedId, p: Player, t: Tally, black: number): number {
     switch (id) {
@@ -144,7 +153,7 @@ export class Ranks {
     let up: RankUp | undefined;
     if (s.rank < TOP_RANK) {
       const next = s.rank + 1, have = this.measure(next, p, t);
-      RANKS[next].needs.forEach((q, i) => { const key = `need:${next}:${q.id}`; if (have[i] >= q.target && !seen.has(key)) note(key, 'need', `${RANKS[next].name}: ${q.label} ✓`); });
+      this.needs(next).forEach((q, i) => { const key = `need:${next}:${q.id}`; if (have[i] >= q.target && !seen.has(key)) note(key, 'need', `${RANKS[next].name}: ${q.label} ✓`); });
       if (this.met(next, have)) {
         s.rank = next; s.at[next] = w.tick;
         const def = RANKS[next];
@@ -175,6 +184,7 @@ export class Ranks {
     const mark = POP_STEPS.find((n) => n > p.progress.housed);
     const rank: RankDTO = {
       rank: s.rank, have: s.rank < TOP_RANK ? this.measure(s.rank + 1, p, t) : [], at: [...s.at], feed: s.feed.slice(0, FEED_SEND),
+      ...(this.w.start === 'frontier' ? { frontier: true } : {}),
       ...(mark ? { mark: [p.progress.housed, mark] as [number, number] } : {}),
       ...this.rings(p, s),
     };
@@ -185,8 +195,8 @@ export class Ranks {
     let waiting = 0;
     for (const q of this.w.sites.values()) if (this.w.parcelAt(q.x, q.y)?.owner === p.id) waiting++;
     if (waiting >= 15) return `Growth has paused at ${s.peak} residents with ${waiting} lots waiting for builders: another builders' yard (Y) puts more crews on them`;
-    const next = RANKS[s.rank + 1];
-    const short = next?.needs.find((q, i) => this.measure(s.rank + 1, p, this.tally(p))[i] < q.target);
+    const have = s.rank < TOP_RANK ? this.measure(s.rank + 1, p, this.tally(p)) : [];
+    const short = this.needs(s.rank + 1).find((q, i) => have[i] < q.target);
     return `Growth has paused at ${s.peak} residents: ${(NEED_HOW[short?.id ?? 'residents']).replace(/\.$/, '')}`;
   }
 

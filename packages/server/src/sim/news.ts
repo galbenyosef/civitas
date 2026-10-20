@@ -1,5 +1,5 @@
 import {
-  NEWS, NEWS_RADIUS_OF, NEWS_TIER_OF, NEWS_HELIS_OF, FireOutcome, RANKS, TICKS_PER_HOUR, TICKS_PER_DAY, Zone,
+  NEWS, NEWS_RADIUS_OF, NEWS_TIER_OF, NEWS_HELIS_OF, FireOutcome, BLAST_CAUSES, RANKS, TICKS_PER_HOUR, TICKS_PER_DAY, Zone,
   kindManifest, signSource, signText, isMediaKind, isMergedKind, isMultiTile, coverStory, channelName, headline, reaches,
   type StoryDTO, type StoryKind, type StoryWords, type HeadlineSet, type Channel, type MediaInfo, type TransitLine,
 } from '@msimcity/shared';
@@ -99,6 +99,7 @@ export class News {
     const now = this.w.tick, key = `fire:${e.id}`;
     const words: StoryWords = { b: this.buildingName(e.kind, e.x, e.y), place: this.placeName(e.x, e.y) };
     if (e.phase === 'lit') {
+      if (e.quiet) return; // explode()'s fresh source: the explosion's story follows at once
       if (e.drill) {
         // the showcase's drill home lights again and again: one story a game day, live while each drill burns
         const prev = this.byRef.get(`drill:${e.x},${e.y}`);
@@ -117,7 +118,7 @@ export class News {
       if (!st) return;
       this.byRef.delete(key);
       st.end = now;
-      if (!e.drill) {
+      if (!e.drill && st.k === 'fire') { // an explosion keeps its headline; it is live until its fire is out
         const set: HeadlineSet = e.outcome === FireOutcome.Burnt ? 'burnt' : e.lost ? 'damaged' : e.crew ? 'saved' : 'bucket';
         st.h = headline(set, st.id, { ...words, n: e.lost ?? 0 });
         if (e.outcome === FireOutcome.Burnt) st.s = Math.min(100, st.s + 20);
@@ -125,9 +126,21 @@ export class News {
       }
       this.touch(st);
     } else if (e.phase === 'spread') {
+      if (e.drill) return; // the drill's blast lights its neighbours too: the drill's own story covers it
       this.add('fire', e.x, e.y, (id) => headline('spread', id, words), Math.min(100, this.fireSalience(e) + 15), { who: e.owner, b: e.kind }, key);
     } else {
-      this.add('explosion', e.x, e.y, (id) => headline('explosion', id, words), 75, { who: e.owner, b: e.kind }, `boom:${e.id}`);
+      // explode()'s source, or a burning works blowing up: one story, live until the fire is out (a levelled building's fire
+      // is out already, so its story keeps the hours it broke with)
+      const w2: StoryWords = { ...words, what: BLAST_CAUSES[e.cause ?? 'industrial']?.label ?? 'Explosion', n: e.lit ?? 0 };
+      const set: HeadlineSet = e.levelled ? 'levelled' : e.lit ? 'explosionLit' : 'explosion';
+      const s = Math.min(100, 70 + 3 * (e.lit ?? 0) + (e.levelled ? 10 : 0));
+      const prev = this.byRef.get(key);
+      if (prev) {
+        prev.k = 'explosion'; prev.h = headline(set, prev.id, w2); prev.s = Math.max(prev.s, s);
+        this.touch(prev);
+        return;
+      }
+      this.add('explosion', e.x, e.y, (id) => headline(set, id, w2), s, { who: e.owner, b: e.kind }, e.levelled ? undefined : key);
     }
   }
 
@@ -178,7 +191,8 @@ export class News {
     const cover = coverStory(x, y, this.centresNow());
     const st: Story = {
       id, t: now, k, x, y, h: h(id), s: Math.max(0, Math.min(100, Math.round(s))),
-      ...(k === 'fire' ? {} : { end: now + Math.round(NEWS.liveHours[k] * TICKS_PER_HOUR) }),
+      // a fire, and an explosion whose fire still burns, are live until the fire is out; the rest for NEWS.liveHours
+      ...(k === 'fire' || (k === 'explosion' && ref) ? {} : { end: now + Math.round(NEWS.liveHours[k] * TICKS_PER_HOUR) }),
       ...(pc ? { pc } : {}), ...extra, ...cover, ...(ref ? { ref } : {}),
     };
     this.ring.push(st);

@@ -1,7 +1,7 @@
 import {
-  FIRE, FirePhase, FireOutcome, burntShare, TICKS_PER_HOUR, TICKS_PER_DAY, SERVICE_RADIUS_OF, PATROL_RATE_OF, KIND_NAMES, Zone, TECH_BY_ID,
+  FIRE, FirePhase, FireOutcome, burntShare, fireRamp, TICKS_PER_HOUR, TICKS_PER_DAY, SERVICE_RADIUS_OF, PATROL_RATE_OF, KIND_NAMES, Zone, TECH_BY_ID,
   hash2, tileKey, capacityOf, isGrowableId, isMergedKind, firstLevelOf, leisureAt, buildingValue, withLevel, withConstruction,
-  type FireDTO, type HintId,
+  BLAST_CAUSES, type BlastCause, type BlastSpec, type FireDTO, type HintId,
 } from '@msimcity/shared';
 import type { Building, World } from '../world';
 import { tkey, untkey } from '../world';
@@ -32,10 +32,23 @@ interface Fire {
   hose?: [number, number];
   /** the owner's warning fire: never worse than the bucket chain leaves it */
   warning?: boolean;
-  /** a demo's fire drill (FIRE.drillGapHours): it lights again after it is out, and costs nothing */
+  /** a demo's fire drill (FIRE.drillGapHours): it lights again after it is out, costs nothing and never burns down */
   drill?: boolean;
   out?: number; lost?: number; cost?: number;
   w: number; h: number;
+  // ---- v2 (all optional: a fire saved before them loads as an ordinary fire)
+  /** the tick of its next hourly roll to spread or blow up (FIRE.spreadMax, blastMax); absent in an older save: due on the hour from t0 */
+  next?: number;
+  /** caught from a fire next door (1) or a blast (2) */
+  from?: 1 | 2;
+  /** the tick it exploded (explode: a works, FIRE.blastMax; a gas leak), and what the blast itself cost */
+  bx?: number; blastCost?: number;
+  /** what blew up, when not a works (BLAST_CAUSES); and whether the blast destroyed the building outright (damage 1) */
+  cause?: BlastCause; levelled?: boolean;
+  /** a demo drill's engines are held until this tick (the row has to be seen to spread, the works to blow) */
+  hold?: number;
+  /** a demo's spread drill: the round it belongs to (the lead house's tick) */
+  round?: number;
 }
 interface PlayerFire {
   /** when the warning fire is due (absent until the owner first houses FIRE.warnHoused) and when it caught light */
@@ -50,17 +63,23 @@ export interface FireSave {
   nextId: number;
 }
 /** Something to tell one owner (net.ts sends a hint or a toast). */
-export interface FireNotice { owner: string; msg: string; hint?: HintId }
+export interface FireNotice {
+  owner: string; msg: string; hint?: HintId;
+  /** a line for the owner's milestone feed too (ranks.ts incident): an explosion */
+  feed?: string;
+}
 /**
  * A fire's news (sim/news.ts, docs/media.md): it caught light (`engine` when a crew was sent), went out (`outcome` a
- * FireOutcome, `lost` levels), spread to a neighbour (`from` the fire it came from) or blew up. Fires v2's spread and
- * explosions call `onStory` with 'spread' and 'explosion' where they happen.
+ * FireOutcome, `lost` levels), caught from a neighbour or a blast ('spread', ignite's `opts.from`), or blew up
+ * ('explosion', in blast(): its `cause`, the buildings it set alight and whether it levelled the building). `quiet` is
+ * explode()'s fresh source, whose story is the explosion's.
  */
 export interface FireStoryEvent {
   phase: 'lit' | 'out' | 'spread' | 'explosion';
   id: number; x: number; y: number; owner: string; kind: number;
   engine?: boolean; warning?: boolean; drill?: boolean; crew?: boolean;
-  outcome?: number; lost?: number; from?: [number, number];
+  outcome?: number; lost?: number; quiet?: boolean;
+  cause?: BlastCause; lit?: number; levelled?: boolean;
 }
 
 /**
@@ -93,10 +112,14 @@ export class Fires {
   enabled = true;
   /** a demo's fire drill homes (index.ts, from the scenario's 'house-fire' spots) */
   drills: [number, number][] = [];
+  /** a demo's spread drills: rows of homes, the lead first, that catch one after another (the scenario's 'fire-spread' spots) */
+  rows: [number, number][][] = [];
+  /** a demo's blast drills: works that catch light and blow up (the scenario's 'fire-blast' spots) */
+  blastDrills: [number, number][] = [];
   /** self-timing for the load test */
   ms = 0; ticks = 0;
   /** counters since start, for the probes: fires lit, by outcome, engines sent, engines that arrived */
-  stats = { lit: 0, warning: 0, saved: 0, partial: 0, burnt: 0, gone: 0, engines: 0, arrived: 0, cost: 0 };
+  stats = { lit: 0, warning: 0, saved: 0, partial: 0, burnt: 0, gone: 0, engines: 0, arrived: 0, cost: 0, spread: 0, blasts: 0, blastCost: 0, capped: 0 };
   /** fired after any fire starts, changes phase or goes out (game.ts points it at Issues.fireChanged) */
   onChange: ((x: number, y: number) => void) | null = null;
   /** fired when a fire starts and when it goes out, for the news (game.ts points it at News.fire) */
@@ -161,7 +184,8 @@ export class Fires {
     for (const f of this.fires.values()) {
       out.push({ x: f.x, y: f.y, s: f.seed, ph: f.ph, t0: f.t0, burn: f.burn, d: f.d, ta: f.ta, t1: f.t1, w: f.w, h: f.h,
         ...((f.engine !== null || f.onFoot !== undefined) && f.ph === FirePhase.Burning ? { eng: 1 } : {}), ...(f.out !== undefined ? { out: f.out } : {}),
-        ...(f.ph === FirePhase.Fighting ? (f.hose ? { hx: f.hose[0], hy: f.hose[1] } : f.crew ? {} : { bk: 1 }) : {}) });
+        ...(f.ph === FirePhase.Fighting ? (f.hose ? { hx: f.hose[0], hy: f.hose[1] } : f.crew ? {} : { bk: 1 }) : {}),
+        ...(f.bx !== undefined ? { bx: f.bx, ...(f.cause ? { bc: BLAST_CAUSES[f.cause].code } : {}) } : {}) });
     }
     return out;
   }
@@ -170,38 +194,44 @@ export class Fires {
   describe(x: number, y: number): string | null {
     const f = this.fires.get(tileKey(x, y));
     if (!f) return null;
-    if (f.ph === FirePhase.Burning) return f.station ? 'On fire: the fire crew are on their way' : f.warning ? 'On fire: the neighbours are fighting it with buckets' : 'On fire, with no engine in reach: it will burn down';
-    if (f.ph === FirePhase.Fighting) return f.crew ? 'On fire: the fire crew are putting it out' : 'On fire: the bucket chain has it under control';
+    const on = f.bx !== undefined ? 'Blown up and on fire' : f.from === 2 ? 'On fire from the explosion next door' : f.from ? 'On fire, caught from next door' : 'On fire';
+    if (f.ph === FirePhase.Burning) return f.station ? `${on}: the fire crew are on their way` : f.warning ? `${on}: the neighbours are fighting it with buckets`
+      : f.hold !== undefined && this.w.tick < f.hold ? `${on}: nobody has called the fire crew yet` : `${on}, with no engine in reach: it will burn down and may spread`;
+    if (f.ph === FirePhase.Fighting) return f.crew ? `${on}: the fire crew are putting it out` : `${on}: the bucket chain has it under control`;
+    if (f.levelled) return `Destroyed by ${f.cause ? `a ${BLAST_CAUSES[f.cause].label.toLowerCase()}` : 'an explosion'}`;
     return f.out === FireOutcome.Burnt ? 'Burnt out' : f.out === FireOutcome.Partial ? `Fire damage: ${f.lost} level${f.lost === 1 ? '' : 's'} lost` : 'A fire here was put out';
   }
 
   /** Start a fire at a building now (probes, the demo drill, a dev action). Returns false when it cannot burn. */
-  ignite(b: Building, opts: { warning?: boolean; drill?: boolean } = {}): boolean {
-    const w = this.w, key = tileKey(b.x, b.y);
-    if (this.fires.has(key) || b.level <= 0 || w.buildings.get(key) !== b) return false;
+  ignite(b: Building, opts: { warning?: boolean; drill?: boolean; from?: 1 | 2; hold?: number; round?: number; quiet?: boolean; seed?: number } = {}): boolean {
+    const w = this.w, key = tileKey(b.x, b.y), old = this.fires.get(key);
+    if ((old && !(opts.drill && old.ph === FirePhase.Out)) || b.level <= 0 || w.buildings.get(key) !== b) return false; // a drill may light again over its aftermath
     const owner = w.parcelAt(b.x, b.y)?.owner;
     if (!owner) return false;
-    const now = w.tick, seed = hash2(b.x * 31 + now % 9973, b.y * 17 + 3);
+    const now = w.tick, seed = opts.seed ?? hash2(b.x * 31 + now % 9973, b.y * 17 + 3);
     const s = w.structureAt(b.x, b.y);
     const f: Fire = {
       id: this.nextId++, x: b.x, y: b.y, owner, kind: b.id, level: b.level,
       t0: now, burn: Math.round(FIRE.burnHours * TPH * (0.85 + 0.35 * hash2(b.y * 7 + 1, b.x * 13 + now % 7919))), seed,
       ph: FirePhase.Burning, engine: null, station: null, tries: 0, d: 0, ta: 0, t1: 0, crew: false,
       ...(opts.warning ? { warning: true } : {}), ...(opts.drill ? { drill: true } : {}),
-      w: s ? s.w : 1, h: s ? s.h : 1,
+      w: s ? s.w : 1, h: s ? s.h : 1, next: now + TPH,
+      ...(opts.from ? { from: opts.from } : {}), ...(opts.hold !== undefined ? { hold: opts.hold } : {}), ...(opts.round !== undefined ? { round: opts.round } : {}),
     };
     this.fires.set(key, f);
     this.stats.lit++;
     if (opts.warning) this.stats.warning++;
+    if (opts.from) this.stats.spread++;
     this.dispatch(f);
     const what = this.name(b);
-    if (!opts.drill && owner !== 'sys') {
+    if (!opts.drill && !opts.quiet && owner !== 'sys') { // quiet: an explosion lit it, and says so itself
       const help = f.station ? `the crew from the ${KIND_NAMES[w.buildings.get(tileKey(...f.station!))?.id ?? Zone.Fire]} is on its way`
         : f.warning ? 'no engine is in reach, so the neighbours are fighting it with buckets. Next time there may be nobody to help: a fire post covers 14 tiles'
           : 'no staffed fire post or station is in reach: it will burn down';
-      this.notices.push({ owner, msg: `Fire at the ${what} at (${b.x}, ${b.y}): ${help}`, ...(f.warning ? { hint: 'fire' as const } : {}) });
+      const how = opts.from === 2 ? ', set alight by an explosion next door' : opts.from ? ', caught from the fire next door' : '';
+      this.notices.push({ owner, msg: `Fire at the ${what} at (${b.x}, ${b.y})${how}: ${help}`, ...(f.warning ? { hint: 'fire' as const } : {}) });
     }
-    this.onStory?.({ phase: 'lit', id: f.id, x: f.x, y: f.y, owner, kind: f.kind, engine: !!f.station, ...(f.warning ? { warning: true } : {}), ...(f.drill ? { drill: true } : {}) });
+    this.onStory?.({ phase: opts.from ? 'spread' : 'lit', id: f.id, x: f.x, y: f.y, owner, kind: f.kind, engine: !!f.station, ...(f.warning ? { warning: true } : {}), ...(f.drill ? { drill: true } : {}), ...(opts.quiet && !opts.from ? { quiet: true } : {}) });
     this.touch(f);
     return true;
   }
@@ -272,6 +302,50 @@ export class Fires {
       const b = w.buildings.get(key);
       if (b && this.burnable(b)) this.ignite(b, { drill: true });
     }
+    for (const row of this.rows) this.rowDrill(row, now);
+    for (const [x, y] of this.blastDrills) this.blastDrill(x, y, now);
+  }
+
+  /**
+   * A demo's spread drill: the lead house of the row catches light with its engines held (FIRE.drillHoldHours), and
+   * each house still burning with no crew on it lights the next one FIRE.drillSpreadHours later, once a round, so a
+   * visitor sees the fire run along the row and stop where the engines get there. A round starts again
+   * FIRE.drillGapHours after the whole row is out. Drill fires cost nothing and never burn a house down.
+   */
+  private rowDrill(row: [number, number][], now: number) {
+    const w = this.w, keys = row.map(([x, y]) => tileKey(...w.doorOf(x, y)));
+    const live = keys.map((k) => { const f = this.fires.get(k); return f && f.ph !== FirePhase.Out ? f : null; });
+    if (!live.some((f) => f)) {
+      const outAt = Math.max(-Infinity, ...keys.map((k) => this.drillOut.get(k) ?? -Infinity));
+      const b = w.buildings.get(keys[0]);
+      if (now - outAt >= FIRE.drillGapHours * TPH && b && this.burnable(b)) this.ignite(b, { drill: true, hold: now + Math.round(FIRE.drillHoldHours * TPH), round: now });
+      return;
+    }
+    for (let i = 0; i + 1 < keys.length; i++) {
+      const f = live[i];
+      if (!f || f.ph !== FirePhase.Burning || f.round === undefined || now - f.t0 < FIRE.drillSpreadHours * TPH) continue;
+      const nf = this.fires.get(keys[i + 1]);
+      if (nf && (nf.ph !== FirePhase.Out || nf.round === f.round)) continue; // burning, or already burnt this round
+      const b = w.buildings.get(keys[i + 1]);
+      if (b && this.burnable(b)) this.ignite(b, { drill: true, from: 1, hold: f.hold, round: f.round });
+    }
+  }
+
+  /**
+   * A demo's blast drill: the works catches light with its engines held, blows up FIRE.drillBlastHours later (setting
+   * light to everything within FIRE.blastReach, as a real blast does, as drill fires), and lights again
+   * FIRE.drillBlastGapHours after its fire and every fire the blast started are out.
+   */
+  private blastDrill(x: number, y: number, now: number) {
+    const w = this.w, key = tileKey(...w.doorOf(x, y)), f = this.fires.get(key);
+    const b = w.buildings.get(key);
+    if (f && f.ph !== FirePhase.Out) {
+      if (b && f.bx === undefined && f.ph === FirePhase.Burning && now - f.t0 >= FIRE.drillBlastHours * TPH) this.explode(f.x, f.y, { cause: 'industrial' });
+      return;
+    }
+    if (!b || !this.burnable(b) || now - (this.drillOut.get(key) ?? -Infinity) < FIRE.drillBlastGapHours * TPH) return;
+    for (const g of this.fires.values()) if (g.drill && g.from === 2 && g.ph !== FirePhase.Out && Math.max(Math.abs(g.x - b.x), Math.abs(g.y - b.y)) <= FIRE.blastReach + 4) return; // the last blast's fires still burning
+    this.ignite(b, { drill: true, hold: now + Math.round(FIRE.drillBlastHours * TPH) });
   }
 
   /** May this owner's buildings catch light now? The Commons always (FIRE.commons); a player after their warning and grace, once they could buy Emergency services. */
@@ -332,6 +406,7 @@ export class Fires {
 
   /** Send the nearest engine in reach that has a road to the fire; stations already tried are skipped. */
   private dispatch(f: Fire) {
+    if (f.hold !== undefined && this.w.tick < f.hold) return; // a demo drill: nobody has called them yet
     const tried = new Set<string>();
     while (f.tries < MAX_TRIES) {
       const s = this.stationFor(f.x, f.y, tried, true);
@@ -353,6 +428,7 @@ export class Fires {
     }
     const b = w.buildings.get(key);
     if (!b || b.level <= 0 || b.id !== f.kind) { this.finish(f, now, null); return; } // bulldozed, merged or rezoned meanwhile
+    if (now >= (f.next ??= f.t0 + TPH * Math.max(1, Math.ceil((now - f.t0) / TPH)))) { this.hourly(f, b, now); if (f.ph === FirePhase.Out) return; }
     const d = burntShare(now - f.t0, f.burn);
     if (f.ph === FirePhase.Burning) {
       if (f.onFoot !== undefined) {
@@ -377,8 +453,9 @@ export class Fires {
           this.touch(f);
           return;
         }
-      } else if (now % 25 === 0 && f.tries < MAX_TRIES) { this.dispatch(f); if (f.engine !== null || f.onFoot !== undefined) this.touch(f); } // a station staffed since (a shift came on)
-      if (f.engine === null && f.warning && d >= FIRE.bucketAt) {
+      } else if ((now % 25 === 0 || now === f.hold) && f.tries < MAX_TRIES) { this.dispatch(f); if (f.engine !== null || f.onFoot !== undefined) this.touch(f); } // a station staffed since (a shift came on), or a drill's engines called
+      // the warning fire with no engine: the neighbours' bucket chain; a drill fire the engines cannot reach in time likewise (a demo never loses a building)
+      if (f.engine === null && f.onFoot === undefined && ((f.warning && d >= FIRE.bucketAt) || (f.drill && d >= 0.9))) {
         f.ph = FirePhase.Fighting; f.ta = now; f.d = Math.max(d, FIRE.minDamage); f.t1 = now + Math.round(FIRE.fightHours * TPH); // buckets take a while
         this.touch(f);
         return;
@@ -389,13 +466,143 @@ export class Fires {
     if (now >= f.t1) this.finish(f, now, b);
   }
 
+  // ---- v2: spread and explosions (docs/incidents.md "Fires v2") ---------------------------------------------------
+
+  /**
+   * A burning fire's hourly roll, on the hour from when it lit: a works may blow up (FIRE.blastMax), then each building
+   * next door may catch (FIRE.spreadMax). Both chances rise with the time it has burned with no crew on it and drop to a
+   * stray ember's once an engine crew is putting it out. Hashes of the tiles, the fire, the hour and the world seed, so
+   * a run is the same for a given world. The warning fire and the demo's drills never roll (the drills are staged).
+   */
+  private hourly(f: Fire, b: Building, now: number) {
+    const at = f.next!;
+    f.next = at + TPH;
+    if (f.warning || f.drill || !this.enabled) return;
+    const crew = f.ph === FirePhase.Fighting && f.crew;
+    if (f.ph !== FirePhase.Burning && !crew) return;
+    const u = (now - f.t0) / Math.max(1, f.burn), mix = (this.w.seed * 2654435761) >>> 0, hr = Math.floor(at / TPH);
+    if (f.bx === undefined && b.zone === Zone.Industrial) {
+      const p = crew ? FIRE.blastAttended : FIRE.blastMax * fireRamp(u, FIRE.blastFrom, FIRE.blastPow);
+      if (p > 0 && hash2(f.x * 7907 + f.id * 31 + (hr ^ mix), f.y * 6151 + hr * 4099 + (mix & 0xffff)) < p) { this.explode(f.x, f.y, { cause: 'industrial' }); return; }
+    }
+    const base = crew ? FIRE.spreadAttended : FIRE.spreadMax * fireRamp(u, FIRE.spreadFrom, FIRE.spreadPow);
+    if (base <= 0) return;
+    for (const [nb, diag] of this.neighbours(f, 1)) {
+      const p = base * this.catchOf(nb) * (diag ? FIRE.diagonal : 1);
+      if (hash2(nb.x * 48611 + f.id * 131 + (hr ^ mix), nb.y * 96769 + hr * 7349 + (mix & 0xffff)) >= p) continue;
+      this.spreadTo(nb, 1);
+    }
+  }
+
+  /** Light a building from a fire or a blast next door, inside the spread caps and the fairness rules (its owner's warning and grace). */
+  private spreadTo(nb: Building, from: 1 | 2, drill = false): boolean {
+    const key = tileKey(nb.x, nb.y), old = this.fires.get(key);
+    if (!this.burnable(nb) || (old && old.ph !== FirePhase.Out)) return false;
+    const owner = this.w.parcelAt(nb.x, nb.y)?.owner;
+    if (!owner || (!drill && !this.ownerBurns(owner, this.w.tick))) return false;
+    if (this.active >= FIRE.spreadWorld || this.ownerActive(owner) >= FIRE.spreadPerOwner) { this.stats.capped++; return false; }
+    if (old && !drill) this.fires.delete(key); // over the aftermath of an earlier fire there (a drill lights over it by itself)
+    return this.ignite(nb, { from, ...(drill ? { drill: true } : {}) });
+  }
+
+  /**
+   * An explosion at the building at (x, y), whatever the cause (docs/incidents.md "Explosions"): the one entry point for
+   * a burning works' blast (the hourly roll, the demo's drill) and for later causes (a gas leak, card 968d0d2f). The
+   * cause's defaults (shared BLAST_CAUSES) can be overridden: `radius`, `damage` (1: destroyed outright), `costShare`;
+   * `seed` sets the drawing's variation when the blast starts the fire (else it comes of the tile and the tick). A
+   * building not already burning catches light with it. Returns false when nothing at (x, y) can burn, or it has blown
+   * up already. The client draws the cause its own way (FireDTO.bc).
+   */
+  explode(x: number, y: number, opts: { cause: BlastCause; radius?: number; damage?: number; costShare?: number; seed?: number }): boolean {
+    const w = this.w, key = tileKey(...w.doorOf(x, y)), b = w.buildings.get(key);
+    if (!b) return false;
+    let f = this.fires.get(key);
+    if (f && f.ph !== FirePhase.Out && f.bx !== undefined) return false; // one blast to a fire
+    if (!f || f.ph === FirePhase.Out) {
+      if (!this.burnable(b)) return false;
+      if (f) this.fires.delete(key); // over the aftermath of an earlier fire
+      if (!this.ignite(b, { quiet: true, ...(opts.seed !== undefined ? { seed: opts.seed } : {}) })) return false;
+      f = this.fires.get(key)!;
+    }
+    const d = BLAST_CAUSES[opts.cause];
+    this.blast(f, b, w.tick, opts.cause, { radius: opts.radius ?? d.radius, damage: opts.damage ?? d.damage, costShare: opts.costShare ?? d.costShare, label: d.label });
+    return true;
+  }
+
+  /**
+   * The blast itself (explode): damage there and then (`damage` of it: an unattended fire carries on from that share
+   * burnt, one being put out is held at it; 1 destroys the building and clears the lot), a bill of its own ('blast'),
+   * and every building whose lot is within `radius` tiles catches light. A toast and a line in the owner's milestone
+   * feed (net.ts). Drills cost nothing and destroy nothing.
+   */
+  private blast(f: Fire, b: Building, now: number, cause: BlastCause, spec: BlastSpec) {
+    f.bx = now;
+    if (cause !== 'industrial') f.cause = cause;
+    this.stats.blasts++;
+    const levelled = spec.damage >= 1 && !f.drill;
+    if (levelled) { f.d = 1; f.levelled = true; }
+    else if (f.ph === FirePhase.Fighting) {
+      f.d = Math.max(f.d, spec.damage);
+      f.t1 = Math.max(f.t1, now + Math.round(FIRE.fightHours * TPH * (0.4 + f.d) * 0.5));
+      const v = f.engine !== null ? this.w.vehicles.get(f.engine) : undefined;
+      if (v) v.until = Math.max(v.until, f.t1); // the crew stay on
+    } else if (burntShare(now - f.t0, f.burn) < spec.damage) {
+      f.t0 = now - Math.round(f.burn * Math.pow(Math.min(0.99, spec.damage), 1 / FIRE.growth)); // the client reads the jump off the clock (fireProgress)
+    }
+    const round = this.neighbours(f, spec.radius); // before the source goes (a destroyed merged building breaks back into lots)
+    const cost = f.drill ? 0 : Math.round(spec.costShare * buildingValue(b.id, b.level));
+    if (cost > 0) { this.w.credit(f.owner, -cost, 'blast'); f.blastCost = cost; this.stats.blastCost += cost; }
+    if (levelled) this.finish(f, now, b);
+    let lit = 0;
+    for (const [nb] of round) if (this.spreadTo(nb, 2, !!f.drill)) lit++;
+    if (!f.drill) this.onStory?.({ phase: 'explosion', id: f.id, x: f.x, y: f.y, owner: f.owner, kind: b.id, cause, lit, ...(levelled ? { levelled: true } : {}) });
+    if (!f.drill && f.owner !== 'sys') {
+      const what = this.name(b), set = lit ? `${lit} building${lit === 1 ? '' : 's'} round it caught light` : 'nothing round it caught light';
+      const at = `${spec.label} at the ${levelled ? '' : 'burning '}${what} at (${f.x}, ${f.y})`;
+      this.notices.push({ owner: f.owner, msg: `${at}: ${levelled ? 'destroyed, ' : ''}${set}${cost ? `, $${cost.toLocaleString('en-GB')} of blast damage` : ''}`,
+        feed: `${spec.label} at the ${what} at (${f.x}, ${f.y}): ${levelled ? 'destroyed, ' : ''}${set}` });
+    }
+    this.touch(f);
+  }
+
+  /**
+   * The buildings whose lots come within `reach` tiles of the fire's (1: touching it, corners included), each once, and
+   * whether it touches only at a corner. Roads, parks and empty lots hold no building: a lot across a road is two away.
+   */
+  private neighbours(f: Fire, reach: number): [Building, boolean][] {
+    const w = this.w, [ax, ay, fw, fh] = this.rect(f.x, f.y);
+    const out: [Building, boolean][] = [], seen = new Set<string>([tileKey(f.x, f.y)]);
+    for (let y = ay - reach; y < ay + fh + reach; y++) for (let x = ax - reach; x < ax + fw + reach; x++) {
+      if (x >= ax && x < ax + fw && y >= ay && y < ay + fh) continue;
+      const k = tileKey(...w.doorOf(x, y));
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const nb = w.buildings.get(k);
+      if (!nb || nb.level <= 0) continue;
+      const [bx, by, bw, bh] = this.rect(nb.x, nb.y);
+      const overlapX = bx < ax + fw && ax < bx + bw, overlapY = by < ay + fh && ay < by + bh;
+      out.push([nb, !overlapX && !overlapY]);
+    }
+    return out;
+  }
+  /** a building's footprint: x, y, width, height */
+  private rect(x: number, y: number): [number, number, number, number] {
+    const s = this.w.auxAt(x, y) ? this.w.structureAt(x, y) : null;
+    return s ? [s.ax, s.ay, s.w, s.h] : [x, y, 1, 1];
+  }
+  /** how readily a neighbour takes (FIRE.catchByLevel): by its level, a merged building (a terrace, a tower, a works) as the top */
+  private catchOf(b: Building) {
+    const c = FIRE.catchByLevel;
+    return isMergedKind(b.id) ? c[c.length - 1] : c[Math.max(0, Math.min(c.length - 1, b.level - 1))];
+  }
+
   /** The fire is out: the damage, the bill, the notice. `b` null: the building went some other way. */
   private finish(f: Fire, now: number, b: Building | null) {
     const w = this.w;
     f.ph = FirePhase.Out; f.t1 = now; f.engine = null; f.onFoot = undefined; f.hose = undefined;
     if (f.drill) this.drillOut.set(tileKey(f.x, f.y), now);
     if (!b) { f.out = FireOutcome.Saved; f.lost = 0; this.stats.gone++; this.onStory?.({ phase: 'out', id: f.id, x: f.x, y: f.y, owner: f.owner, kind: f.kind, outcome: f.out, lost: 0 }); this.touch(f); return; }
-    const burnt = f.d >= 1 && !f.crew && !f.warning;
+    const burnt = (f.levelled && !f.drill) || (f.d >= 1 && !f.crew && !f.warning && !f.drill);
     const lost = f.drill || f.warning ? 0 : burnt ? b.level : Math.floor(b.level * f.d);
     const cost = f.drill ? 0 : Math.round(FIRE.costShare * buildingValue(b.id, b.level) * (burnt ? 1 : f.d));
     f.out = burnt ? FireOutcome.Burnt : lost > 0 ? FireOutcome.Partial : FireOutcome.Saved;
@@ -417,7 +624,9 @@ export class Fires {
     // a fire put out with nothing lost tells nobody (the badge clears, the bill is in the ledger): the toasts stay few
     if (!f.drill && f.owner !== 'sys' && (burnt || f.lost || f.warning)) {
       const bill = cost > 0 ? `, $${cost.toLocaleString('en-GB')} of damage` : '';
-      this.notices.push({ owner: f.owner, msg: burnt
+      this.notices.push({ owner: f.owner, msg: f.levelled
+        ? `The ${what} at (${f.x}, ${f.y}) was destroyed${bill}; the lot will be rebuilt`
+        : burnt
         ? `The ${what} at (${f.x}, ${f.y}) burnt down${bill}: no engine came. A fire post covers 14 tiles; the lot will be rebuilt`
         : f.lost ? `Fire out at the ${what} at (${f.x}, ${f.y}): ${f.lost} level${f.lost === 1 ? '' : 's'} lost${bill}`
           : `Fire out at the ${what} at (${f.x}, ${f.y})${f.crew ? ' before it spread' : ': the bucket chain saved it'}${bill}` });

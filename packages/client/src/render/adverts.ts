@@ -45,6 +45,8 @@ const MAX_CELLS = COLS * ROWS;
 const TAG_W = 128, TAG_H = 64, TAG_Y = ROWS * BLOCK;
 /** the house adverts and the news card (big screens' unrented turns): a row of 256×128 cells under the tags */
 const HOUSE_Y = TAG_Y + TAG_H, NEWS_CELL = 7;
+/** the news card's ticker before any headline is set, and the longest headline it shows before cutting it with an ellipsis */
+const NEWS_TICKER = 'Traffic flowing on Piccadilly · Fountain drained for cleaning', NEWS_CHARS = 60;
 const MAX_ADS = 4096, MAX_GLOWS = 1024;
 /** flags (aAd.w): bit 0 lit at night, bit 1 a free slot highlighted while picking, bits 2-3 the area's crew, bit 4 a big screen */
 const LIT = 1, PICK = 2, SCREEN = 16;
@@ -250,15 +252,44 @@ class AdAtlas {
           word(name.toUpperCase(), W / 2, 50, 30, '#1d1d1d', '"Arial Black", Impact, sans-serif'); word('5G everywhere you go', W / 2, 92, 15, '#1d1d1d'); });
       }
     });
-    // the news: dark studio blue, a skyline with a helicopter over it, the LIVE bug and a ticker
-    card(NEWS_CELL, lin('#0c1a33', '#1b3a6b', true), () => {
-      g.fillStyle = '#26456f'; for (let k = 0; k < 16; k++) { const h = 18 + ((k * 29) % 44); g.fillRect(k * 16, 104 - h, 14, h); }
-      g.fillStyle = '#ffd23f'; for (let k = 0; k < 40; k++) g.fillRect(4 + ((k * 37) % 248), 100 - ((k * 23) % 50), 2, 3);
-      g.fillStyle = '#0a0a0a'; g.beginPath(); g.ellipse(178, 34, 14, 6, 0, 0, 7); g.fill(); g.fillRect(186, 32, 22, 3); g.fillRect(160, 25, 36, 2); g.fillRect(176, 27, 2, 4);
-      g.fillStyle = '#d42020'; g.fillRect(10, 10, 52, 22); word('LIVE', 36, 22, 16, '#ffffff');
-      word('Civitas News', 128, 58, 22, '#ffffff', SANS, 'center');
-      g.fillStyle = '#c8282e'; g.fillRect(0, 106, W, 22); word('Traffic flowing on Piccadilly · Fountain drained for cleaning', 6, 117, 11, '#ffffff', SANS, 'left');
-    });
+    this.drawNews(this.headline = NEWS_TICKER);
+  }
+
+  /** The headline on the news card's ticker now (setNewsHeadline). */
+  private headline = '';
+  /**
+   * The news card: dark studio blue, a skyline with a helicopter over it, the LIVE bug and the ticker with `ticker` on it,
+   * cut to NEWS_CHARS with an ellipsis and set as large as fits (12 px down to 8). Redraws only its own cell.
+   */
+  private drawNews(ticker: string) {
+    const g = this.g, H = 128, W = 256;
+    const word = (t: string, x: number, y: number, px: number, ink: string, align: CanvasTextAlign = 'center') => {
+      g.font = `bold ${px}px ${SANS}`; g.textAlign = align; g.textBaseline = 'middle'; g.fillStyle = ink; g.fillText(t, x, y);
+    };
+    g.save(); g.translate(NEWS_CELL * W, HOUSE_Y); g.beginPath(); g.rect(0, 0, W, H); g.clip();
+    const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#0c1a33'); sky.addColorStop(1, '#1b3a6b');
+    g.fillStyle = sky; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#26456f'; for (let k = 0; k < 16; k++) { const h = 18 + ((k * 29) % 44); g.fillRect(k * 16, 104 - h, 14, h); }
+    g.fillStyle = '#ffd23f'; for (let k = 0; k < 40; k++) g.fillRect(4 + ((k * 37) % 248), 100 - ((k * 23) % 50), 2, 3);
+    g.fillStyle = '#0a0a0a'; g.beginPath(); g.ellipse(178, 34, 14, 6, 0, 0, 7); g.fill(); g.fillRect(186, 32, 22, 3); g.fillRect(160, 25, 36, 2); g.fillRect(176, 27, 2, 4);
+    g.fillStyle = '#d42020'; g.fillRect(10, 10, 52, 22); word('LIVE', 36, 22, 16, '#ffffff');
+    word('Civitas News', 128, 58, 22, '#ffffff');
+    g.fillStyle = '#c8282e'; g.fillRect(0, 106, W, 22);
+    let t = ticker.length > NEWS_CHARS ? `${ticker.slice(0, NEWS_CHARS - 1).trimEnd()}…` : ticker;
+    let px = 12;
+    const fits = () => { g.font = `bold ${px}px ${SANS}`; return g.measureText(t).width <= W - 12; };
+    while (px > 8 && !fits()) px--;
+    while (t.length > 1 && !fits()) t = `${t.slice(0, -2).trimEnd()}…`;
+    word(t, 6, 117, px, '#ffffff', 'left');
+    g.restore();
+  }
+  /** Put a headline on the news card's ticker (empty: the card's own line). Skipped when it has not changed; a change re-uploads the atlas, so it should be rare. */
+  setNewsHeadline(text: string) {
+    const t = text.trim() || NEWS_TICKER;
+    if (t === this.headline) return;
+    this.headline = t;
+    this.drawNews(t);
+    this.texture.needsUpdate = true;
   }
   /** A house or news cell's rect, for the panel's preview (same layout as uv()). */
   houseRect(n: number): number[] { return this.uv(n * BLOCK, HOUSE_Y, 256, 128); }
@@ -586,9 +617,16 @@ void main() {
   }
 
   /**
-   * The news hook (docs/adverts.md section 9, shared screenTurns): every 'news' turn on every big screen shows this
-   * texture (the media centre's helicopter render target, UTD 90cd3857) instead of the "LIVE · Civitas News" card; null
-   * puts the card back. Costs nothing until set: the screens sample it only on their news turn.
+   * The news hooks (docs/adverts.md section 9, shared screenTurns). The headline: the latest story's text on the
+   * "LIVE · Civitas News" card's ticker (the media centre's story log calls it when the latest story changes; empty puts
+   * the card's own line back), cut at 60 characters; only the news cell is redrawn, and an unchanged text costs nothing.
+   */
+  setNewsHeadline(text: string) { this.atlas.setNewsHeadline(text); }
+
+  /**
+   * The picture: every 'news' turn on every big screen shows this texture (the news helicopter's render target, media
+   * N4, UTD 90cd3857) in place of the card; null puts the card back. Costs nothing until set: the screens sample it only
+   * on their news turn.
    */
   setNewsFeed(tex: Texture | null) {
     newsLiveUniform.value = tex ? 1 : 0;
