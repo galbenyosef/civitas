@@ -5,27 +5,57 @@ get a better job, better education, move areas etc." and, on the hidden motivato
 though? Say some are 100% money but some might be 30% money 70% family etc." Design 2026-10-19. **Nothing is built.**
 The advertising that uses it is `docs/adverts.md`.
 
-Code this touches: `shared/src/motivation.ts` (new: values, archetypes, tunables), `server/src/sim/motivation.ts` (new:
-weights, beliefs, scoring, word of mouth), hooks in `server/src/sim/simulation.ts` (`findJob`, `lifeStep`,
-`lifeFamily`, `payWage`, `payHomeTax`), `server/src/sim/schools.ts` (staying on, dropping out), `server/src/world.ts`
-(`Citizen`), `server/src/snapshot.ts`, `shared/src/protocol.ts` (`CitizenInfo.life`) and the citizen panel.
+Code this touches: `shared/src/motivation.ts` (new: values, archetypes, tunables, the words), `server/src/sim/motivation.ts`
+(new: seeding, inheritance, life-adjusted weights, scoring, the daily self-moves; later beliefs and word of mouth),
+`server/src/pathfinding.ts` (`findPaths`, a few goals from one search), thin hooks in `server/src/sim/simulation.ts`
+(`findJob`, `lifeStep`, `lifeFamily`, `pickLeisure`, `makeCitizen`, `spawnChild`, `describeLife`), `sim/life.ts`
+(`happinessParts`), `sim/families.ts` (children who arrive with a family), `sim/schools.ts` (staying on, the track),
+`server/src/world.ts` (`Citizen.vals`), `server/src/snapshot.ts` (old saves), `server/src/net.ts` (the Focus groups
+section of a home's tooltip), `shared/src/protocol.ts` (`CitizenLife.values`, `BuildingInfo.focus`), `shared/src/tech.ts`
+(the Focus groups feature) and `client/src/ui.ts`.
 
-## 1. Today
+## 1. Today (main 38272ae)
 
 Citizens already decide things, but every decision reads the same few numbers for everyone:
 
-- **Jobs.** `Simulation.findJob` takes the **first** vacancy the road search reaches (`findPath` with a goal test). Wage,
-  tier and occupation play no part. Adults out of work search every `JOB_SEARCH_EVERY` (60 game minutes). Nobody in
-  work ever looks for a better job; they only quit under high income tax (`payWage`: `rate > 0.2`).
-- **Staying on in education.** `schools.ts` decides by fixed shares on a hash: `hash2(c.id, 245) < EDU.uniShare` goes
-  to university, `hash2(c.id, 246) < EDU.postgradTake` to a postgrad course. The sixth-form track is `hash2(c.id, 233)`.
-  Drop-out is attendance driven (`EDU.dropOutBelow`, `dropOutPerDay`).
-- **Moving.** Grown children move out (`LIFE.moveOutPerDay`) to the best home `bestBuiltNear` finds, scored
-  `6 * Math.random() - d`: near and random. Couples move in together (`cohabit`). Nobody else ever moves house.
+- **Jobs.** `Simulation.findJob` (`simulation.ts` 1210) takes the **first** vacancy the road search reaches (`findPath`
+  with a goal test), after Education E4's skill gate (`Skills.placeFor`, `sim/skills.ts`: a skilled place the
+  citizen qualifies for, or an unskilled one). A search that finds nothing is remembered per home and level
+  (`jobMisses`, `docs/search-perf.md`) until a workplace or road edit could change it. Wage (`wageOf` x `wageMul` by
+  education, `shared/src/education.ts`), tier and occupation play no part in the choice. Adults out of work search
+  every `JOB_SEARCH_EVERY` (60 game minutes). Nobody in work ever looks for a better job; they only quit under high
+  income tax (`payWage` 3070: `rate > 0.2`), or a camp settler leaves a far-off job for the starter yard
+  (`sim/firstfive.ts` `starterYard`). Learning gives promotions in place (`Skills.promote`).
+- **Staying on in education.** `sim/schools.ts` decides by fixed shares on a hash: `hash2(c.id, 245) < EDU.uniShare`
+  (402) goes to university, `hash2(c.id, 246) < EDU.postgradTake` (403) to a postgrad course. The sixth-form track is
+  `hash2(c.id, 233) < 0.5` (390). Drop-out is attendance driven (359: `EDU.dropOutBelow`, `dropOutPerDay`). Adult
+  further education and evening classes (`sim/learning.ts` 214, 218) are flat take-up chances.
+- **Moving.** Grown children move out (`lifeFamily` 1725, `LIFE.moveOutPerDay`) to the best home `bestBuiltNear` finds,
+  scored `6 * Math.random() - d`: near and random. Couples move in together (`cohabit`). Camp settlers move into a
+  finished home nearby (`FirstFive.campStep`, the same near-and-random scorer). A fire that burns out a home sends its
+  people away (`sim/fires.ts`). Nobody else ever moves house.
+- **Leisure.** `pickLeisure` (1417) scores each open place by appeal at the hour, life stage, a hash-seeded taste per
+  venue type (`hash2(c.id, 301 + type)`), events, value and need, over `1 + d / 12`, against a bar yardstick.
 - **Leaving town.** People living alone leave at `LIFE.leaveBasePerDay` plus more when `happy` is below
-  `leaveUnhappyBelow`. Anyone leaves when home tax is over their tolerance (`payHomeTax`) or they can't pay it.
-- **Happiness** (`life.ts` `happinessParts`) is a sum of labelled parts: commute, money, health, services, leisure,
-  parks, work, friends, traffic. It is the same sum for everyone: a long commute hurts a Grafter as much as a parent.
+  `leaveUnhappyBelow`, times brain drain (`Skills.drainMul`) and tuition fees (`Schools.drainMul`). Anyone leaves when
+  home tax is over their tolerance (`payHomeTax` 3089) or they can't pay it.
+- **Happiness** (`sim/life.ts` 183 `happinessParts`) is a sum of labelled parts: commute, money, health, services,
+  leisure, parks, work, education, schools, friends, traffic. It is the same sum for everyone: a long commute hurts a
+  Grafter as much as a parent.
+
+Other systems since the first draft, and how they meet this one:
+
+- **First five** (`sim/firstfive.ts`, `docs/first-five.md`): the pioneer camp, the instant crew and the first settlers
+  use `findJob` and `moveHome` through `FirstFiveDeps`; the scored job choice reaches them with no change there.
+- **Ranks** (`shared/src/ranks.ts`, `docs/ranks.md`): needs are residents, jobs, shops, leisure, cover, school, a bus
+  line, level 2 (with lower frontier targets). None reads happiness or values, but residents and jobs filled do, so the
+  first-hours guard is the ranks probe and bot F (`loadtest/ranks.ts`, `loadtest/botf.ts`) within 15% of today.
+- **Fires v2** (`sim/fires.ts`): burnt-out homes empty; later, a household that lost a home is a long-term memory (N5)
+  and a Roots shock.
+- **Adverts** (`sim/adverts.ts`, `docs/adverts.md`): campaigns have a `theme` that is one of the six values
+  (`AD_THEMES`, the same order as `Value` here). Reach (A4) is deferred to motivation M4: it plants beliefs.
+- **Media centre** (`shared/src/news.ts`, `sim/news.ts`, `docs/media.md`): the story log; N5 memories and N6
+  conversations will feed M4's beliefs (bad news about a place lowers opinion of it).
 
 So citizens differ in their circumstances but not in what they care about. Two people in the same flat with the same job
 make the same choices with the same odds.
@@ -78,6 +108,21 @@ of one or two **archetypes**:
 to 0.9. A pure Grafter is the "100% money" person in all but name (0.70 is pure enough that no other value wins a
 decision on its own); a 0.5 Homemaker / 0.5 Grafter is "about 40% money, 35% family".
 
+### Stored as six small numbers (M1 as built)
+
+The first draft computed the blend from the id at every decision. As built, the blend is worked out **once** and stored
+as six small integers 0-15 packed into one number, `Citizen.vals` (4 bits a value, `packValues` / `valuesOf` in
+`shared/src/motivation.ts`; a weight is its number over the sum). That is what lets values be inherited and drawn by
+area, which a pure function of the id cannot be:
+
+- **Incomers** (`Motivation.seed`): the archetype blend from hashes 1601-1604, then pulled `MOTIVE.areaPull` (35%)
+  toward the mean values of the people already living on the parcel of their new home (when it has at least
+  `MOTIVE.areaMin` residents; the means are re-counted once a game day), then a hashed jitter per value
+  (`MOTIVE.jitter`). So a district of Homemakers draws more of them, and a new parcel takes the city's mix.
+- **Children** (`Motivation.inherit`): see below.
+- **Old saves** carry no `vals`: the load (`snapshot.ts`) seeds them from the id alone, the same for everyone on every
+  load. No version bump; `vals` is an optional number in the snapshot.
+
 ### Life reshapes values (computed, not stored)
 
 `valuesOf(c, tick)` = the archetype blend, then multipliers from facts the sim already has, then renormalised:
@@ -109,8 +154,9 @@ Drift decays toward 0 lazily: store `vdriftDay` and halve per `MOTIVE.driftHalfL
 
 ### Children inherit values
 
-`spawnChild` gives a child no archetype roll of its own. Its base is the mean of its parents' archetype blends (or the
-one parent's), plus its own hashed secondary at share 0.3. Values then pass down: a district of Locals raises Locals,
+`spawnChild` (and a family arriving together, `Families.join`) gives a child no archetype roll of its own. Its base is the
+mean of its parents' stored values (or the one parent's), blended with its own hashed archetype at share
+`MOTIVE.childOwn` (0.3), plus the jitter. Values then pass down: a district of Locals raises Locals,
 and over a few generations neighbourhoods take on a character. A child who grows up and moves away carries it.
 
 ## 4. Beliefs
@@ -177,12 +223,19 @@ already does for babies.
 Roots, leisure → Adventure). A Grafter barely minds the long commute to a well-paid job; an Easygoing citizen hates
 it. The panel's reasons then read true to the person.
 
-### Coordination with E4
+### Coordination with E4 (built)
 
-`docs/education.md` E4 (jobs, wages, migration: the skill gate in `findJob`, wage multipliers, brain drain) is not
-built and edits the same functions. Land E4 first. M2 (section 11) then turns E4's single candidate into the scored
-list; the skill gate stays a hard filter before scoring, and brain drain becomes a high-Adventure, high-Status leaver
-rather than a flat 0.5.
+E4 is merged (`sim/skills.ts`): the skill gate stays a hard filter before scoring (a candidate is only a place
+`placeFor` allows), and the wage a candidate offers is `wageOf(kind, level) x wageMul` for the place the citizen would
+take. Brain drain (`Skills.drainMul`) is untouched in M2; M3 makes it a high-Adventure, high-Status leaver.
+
+### Search cost (as built)
+
+`findJob` keeps one road search. `findPaths` (`pathfinding.ts`) is `findPath` that, once the first goal is found at
+depth `d`, keeps expanding until it has `MOTIVE.jobOptions` (4) goals, passes depth `d + MOTIVE.jobSlack` (10) or has
+expanded `MOTIVE.jobExtraNodes` (300) more nodes, whichever comes first. A search that finds nothing is the same search
+as before, so the `jobMisses` cache is unchanged. Home choice reuses `bestBuiltNear`'s cell grid; leisure reuses
+`pickLeisure`'s `eachBuiltNear` walk. There are no new full-map searches.
 
 ## 6. Word of mouth
 
@@ -222,7 +275,7 @@ Fixed per citizen from hashes, so nothing is stored except the cynicism above:
 
 ## 9. What the player sees
 
-Character, not numbers (question 3 covers showing numbers later):
+Character, not numbers (question 3: words in the panel, percentages only per parcel through Focus groups):
 
 - **The citizen panel** (`CitizenInfo.life`, `describeLife`) gains one line, "Cares about: family, then time", and a
   **thought** picked from the strongest belief or pending decision: "Thinking about university", "Heard Northgate's
@@ -230,7 +283,9 @@ Character, not numbers (question 3 covers showing numbers later):
   value and decision.
 - **The timeline** gets reasons: "Moved to Northgate (heard the schools are good)", "Took a job at Smith & Co for the
   pay", "Regrets moving: the commute".
-- **A Focus groups tech** (culture or civic track, see question 4) unlocks a parcel overlay of value mix and the
+- **Focus groups** (question 4: Culture tier 2, the `focusgroups` feature of Cinemas and sports halls, `cul2`) first
+  adds a section to a home's tooltip: the value mix of the people living on its parcel, as percentages. M6 adds
+  a parcel overlay of value mix and the
   strongest beliefs about each parcel: who lives here, what they care about, what they think of the place next door.
   This is what tells a player which message to run where.
 - **Charts** (`shared/src/history.ts`): city value mix, moves per day by reason, regrets per day.
@@ -259,12 +314,12 @@ Character, not numbers (question 3 covers showing numbers later):
 
 | # | Subtask | Files | Depends on | Size |
 | --- | --- | --- | --- | --- |
-| M1 | **Values.** `shared/src/motivation.ts` (values, archetypes, `MOTIVE`); `valuesOf`, temperament; `vdrift` fields; the panel line "Cares about"; values bend `happinessParts`; inheritance in `spawnChild`; `loadtest/motivation.ts` | motivation.ts (both), world.ts, life.ts, snapshot.ts, protocol.ts, simulation.ts (`describeLife`, `spawnChild`) | none | M |
-| M2 | **Scored decisions.** `truth`, `score`; the candidate list in `findJob`; the better-job check; staying on, track and drop-out lifts; tax tolerance; the `MOTIVE=0` switch | simulation.ts (`findJob`, `lifeStep`, `payWage`, `payHomeTax`), schools.ts | M1, education E4 | M |
+| M1 | **Values** (this branch). `shared/src/motivation.ts` (values, archetypes, `MOTIVE`); `valuesOf`, temperament; `vdrift` fields; the panel line "Cares about"; values bend `happinessParts`; inheritance in `spawnChild`; `loadtest/motivation.ts` | motivation.ts (both), world.ts, life.ts, snapshot.ts, protocol.ts, simulation.ts (`describeLife`, `spawnChild`) | none | M |
+| M2 | **Scored decisions** (this branch, with the self-moves of M3 at a slow rate). `truth`, `score`; the candidate list in `findJob`; the better-job check; the scored move-out and the household move check; leisure by values; staying on and track lifts; the `MOTIVE=0` switch | simulation.ts (`findJob`, `lifeStep`, `lifeFamily`, `pickLeisure`), schools.ts, pathfinding.ts | M1, education E4 (built) | M |
 | M3 | **Moving house.** The household move check, the scored `bestBuiltNear`, leaving town by values | simulation.ts (`lifeFamily`), world.ts | M2 | M |
 | M4 | **Beliefs and word of mouth.** `Belief`, experience, spreading, value drift, thoughts in the panel, reasons on the timeline | sim/motivation.ts, simulation.ts (`lifeStep`, `describeLife`) | M2 | M |
 | M5 | **Regret.** `lastCall`, the check, cynicism | sim/motivation.ts | M4 | S |
-| M6 | **Views.** Focus groups tech, the parcel overlay, chart series | tech.ts, history.ts, charts.ts, chunkView.ts | M4 | M |
+| M6 | **Views.** The parcel overlay of value mix and beliefs, chart series (the Focus groups section of a home's tooltip lands with M1) | tech.ts, history.ts, charts.ts, chunkView.ts | M4 | M |
 | A1-A5 | **Adverts**: `docs/adverts.md` | | M4 | |
 
 **Showcase** (`docs/demo.md`): M1-M5 add no kinds, so `demo:check` asks for nothing, but add `SHOWCASE_FEATURES`
@@ -289,3 +344,16 @@ entries so the tour can show it: `job-switch` (within `FEATURE_DAYS` a showcase 
 5. **Do children inherit values?**
    - **A. Yes, the parents' blend plus their own secondary** (recommended): neighbourhoods get a character over time.
    - B. No, everyone rolls their own.
+
+## 13. Hooks for later
+
+- **Advert reach** (`docs/adverts.md` section 4, A4): the nudge lands in M4's beliefs, scaled by susceptibility; until
+  then a campaign's `theme` can already be read against `valuesOf(c.vals)[theme]` to say who it speaks to. A4's
+  daily pass belongs in `Motivation.daily` (one call from `lifeStep`), which already visits every citizen.
+- **N5 memories and N6 opinions** (`docs/media.md` section 6): a memory of a story about a parcel (a fire, a closure)
+  becomes a belief about that parcel on the value it touches (a fire: Family and Roots; a closure: Money); a
+  conversation passes it on as section 6 here does, and bad news lowers opinion. The scorers read a belief through
+  one function, `perceived`, so N6 needs no change to the decisions.
+- **The deceased archive** (the death agent's `sim/death.ts`): a family with someone in the town's archive (buried or
+  remembered here) holds stronger Roots: a Roots multiplier in `weightsOf` alongside the other life facts, and
+  "Wouldn't leave: family is buried here" as a thought.
