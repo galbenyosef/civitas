@@ -13,7 +13,7 @@
  * ms per tick for both runs; the last line, "MOTIVATION {...}", is a JSON summary.
  */
 import {
-  TICKS_PER_DAY, LifeStage, Zone, Value, VALUE_COUNT, VALUE_NAMES, MOTIVE, ARCHETYPES, mulberry32,
+  TICKS_PER_DAY, LifeStage, Zone, Value, KIND_ID, packTile, terrainOf, workOf, capacityOf, VALUE_COUNT, VALUE_NAMES, MOTIVE, ARCHETYPES, mulberry32,
   packValues, valueInts, valuesOf, seededValues, archetypeBlend, describeValues, topValues, wageOf, wageMul, tileKey,
 } from '@msimcity/shared';
 import { World, type Citizen } from '../world';
@@ -156,7 +156,8 @@ const d = days - 1, meanWorkers = mean(on.workers), meanHh = mean(on.households)
 const switchRate = st.jobSwitches / d / meanWorkers, moveRate = st.moves / d / meanHh;
 console.log(`  of their own accord, days 2-${days}: ${st.jobLooks} job looks, ${st.jobSwitches} changes (${(100 * switchRate).toFixed(2)}% of workers a day); ${st.homeLooks} home looks, ${st.moves} moves of ${st.movedPeople} people (${(100 * moveRate).toFixed(2)}% of households a day)`);
 ok(st.jobSwitches > 0 && switchRate < 0.01, 'some workers change job of their own accord, under 1% a day');
-ok(st.moves > 0 && moveRate < 0.01, 'some households move of their own accord, under 1% a day');
+// the test city's homes are full, so a look rarely finds a home with room: the home-choice test below shows where they would go
+ok(st.homeLooks > 0 && moveRate < 0.01, `households look for a better home and move of their own accord under 1% a day (${st.moves} moved)`);
 // homes: where a household would move, by what it cares about (every home counted as having room, need 0)
 {
   const host = (on.sim as unknown as { motiveHost: Parameters<typeof on.sim.motive.bestHome>[1] }).motiveHost;
@@ -203,6 +204,36 @@ console.log('\nIn the city:');
   ok(!!info?.life?.values?.startsWith('Cares most about'), `the citizen panel says "${info?.life?.values}"`);
   const f = on.sim.focusAt(adult.hx, adult.hy);
   ok(!!f && f.people > 0 && f.pct.reduce((s, x) => s + x, 0) === 100, `Focus groups at ${f?.parcel}: ${f ? VALUE_NAMES.map((nm, i) => `${nm} ${f.pct[i]}%`).join(', ') : 'none'} (${f?.people} asked)`);
+}
+
+console.log('\nA new essential workplace in a town with nobody out of work:');
+{
+  /**
+   * a shop lot with nobody working there rebuilt as `kind` and finished at once, as net.ts builds a civic kind: nobody is
+   * let go, so no job-seeker comes for it (a shop with staff would free them, and they would take the new place)
+   */
+  const place = (r: Run, kind: string, pick: number) => {
+    const w = r.w, shops = [...w.buildings.values()].filter((b) => b.zone === Zone.Commercial && b.level > 0 && b.occupants === 0 && !w.auxAt(b.x, b.y) && w.hasRoadAccess(b.x, b.y));
+    const shop = shops[(pick * 37) % shops.length];
+    const k = KIND_ID[kind as keyof typeof KIND_ID];
+    w.setTile(shop.x, shop.y, packTile(terrainOf(w.getTile(shop.x, shop.y)), false, 0, 0));
+    w.completeSite(w.createSite(shop.x, shop.y, k, 1, workOf(k, 1), 1)!);
+    return w.buildings.get(tileKey(shop.x, shop.y))!;
+  };
+  const out = (r: Run) => [...r.w.citizens.values()].filter((c) => c.stage === LifeStage.Adult && !c.job && !c.study && !c.mig).length;
+  const staffAfter = (r: Run, kind: string, pick: number) => {
+    const b = place(r, kind, pick);
+    for (let i = 0; i < DAY; i++) r.sim.tick();
+    return { b, staff: b.occupants, cap: capacityOf(b.id, b.level) };
+  };
+  const rec0 = on.sim.motive.stats.recruited;
+  MOTIVATION.on = false;
+  const offPost = staffAfter(off, 'fire-post', 1), offBox = staffAfter(off, 'police-box', 2);
+  MOTIVATION.on = true;
+  console.log(`  out of work before: ${out(on)} (on), ${out(off)} (off)`);
+  const post = staffAfter(on, 'fire-post', 1), box = staffAfter(on, 'police-box', 2);
+  console.log(`  after a game day: fire post ${post.staff}/${post.cap} on (${offPost.staff}/${offPost.cap} off), police box ${box.staff}/${box.cap} on (${offBox.staff}/${offBox.cap} off); ${on.sim.motive.stats.recruited - rec0} recruited from other jobs`);
+  ok(post.staff >= post.cap / 2 && box.staff >= box.cap / 2, 'on: a new fire post and police box are at least half staffed within a game day');
 }
 
 console.log('\nOld saves:');

@@ -199,9 +199,11 @@ console.log('4. faults, vans and links');
   steps(g, DAY);
   ok(depot.id === DEPOT && depot.occupants > 0, `the power depot has staff (${depot.occupants})`);
   // a lineworker of the depot on shift: who gets hired (motivation's scored job search) decides whose rota it is, and a
-  // depot with one lineworker on rest days sends no van, so wait for a shift (at most three days) before the fault
+  // depot with one lineworker on rest days sends no van, so wait for a shift (at most three days) before the fault; and
+  // for one that is starting, not one in its last minutes (a fault then outlasts the shift and the contractor comes)
   const onShift = () => g.sim.mobile.onShift(FleetKind.UtilityVan).some((c) => c.wx === depot.x && c.wy === depot.y);
   let wait = 0;
+  for (; wait < DAY && onShift(); wait++) g.step();
   for (; wait < 3 * DAY && !onShift(); wait++) g.step();
   ok(onShift(), `a lineworker of the depot is on shift (after ${(wait / TPH).toFixed(1)} game hours)`);
   const f = u.openFault('node', utilKey(sub.x, sub.y), 'ada', sub.x, sub.y);

@@ -238,7 +238,9 @@ console.log('8. the news helicopter and the channel schedule');
   const s0 = over >= 0 ? at(over + 20)[0] : null;
   ok(over >= 0 && !!s0 && s0.news?.story === st!.id && Math.hypot(s0.x - st!.x - 0.5, s0.z - st!.y - 0.5) < 6,
     `Ada's helicopter is over it ${over >= 0 ? ((over - st!.t) / TPH).toFixed(2) : '?'} h after it broke, ${s0 ? Math.hypot(s0.x - st!.x - 0.5, s0.z - st!.y - 0.5).toFixed(1) : '?'} tiles out, ${s0?.y.toFixed(1)} up`);
-  ok(at(over + 20)[1].news?.doing === 'parked', 'Ben\'s helicopter stays on its roof (not his channel\'s story)');
+  // not his channel's story; he may be out on the schedule's traffic round at that hour (which hour depends on the town)
+  const ben = at(over + 20)[1].news;
+  ok(!!ben && ben.story !== st!.id && (ben.doing === 'parked' || !!ben.traffic), `Ben's helicopter leaves Ada's story alone (${ben?.doing}${ben?.traffic ? ', on its traffic round' : ''})`);
   // the same flight from the same stories, sampled every 3 ticks over the sortie
   const copy = JSON.parse(JSON.stringify(stories(g))) as StoryDTO[];
   let same = true;

@@ -1,5 +1,5 @@
 import {
-  LifeStage, Zone, CitizenState, TICKS_PER_DAY, VALUE_COUNT, Value, MOTIVE, ARCHETYPES, capacityOf, hash2, tileKey, isCivicId, isUtilityKind, familyOf, wageOf, wageMul, skillNeed,
+  LifeStage, Zone, CitizenState, TICKS_PER_DAY, TICKS_PER_HOUR, VALUE_COUNT, Value, MOTIVE, ARCHETYPES, capacityOf, hash2, tileKey, isCivicId, isUtilityKind, familyOf, wageOf, wageMul, skillNeed,
   valuesOf, packWeights, archetypeBlend, jitterValues, seededValues, describeValues, type FocusInfo,
 } from '@msimcity/shared';
 import type { Building, Citizen, World } from '../world';
@@ -41,6 +41,9 @@ export interface MotiveHost {
   canSwitch(c: Citizen): boolean;
   /** c leaves their job and takes a place at b, with this walking route */
   switchJob(c: Citizen, b: Building, path: number[]): void;
+  /** may c take a place at b now (room, and the skill gate), and the road from c's home to it */
+  canTake(c: Citizen, b: Building): boolean;
+  pathTo(c: Citizen, b: Building): number[] | null;
   /** services in reach of a tile (0-3) and parks' leisure value there */
   cover(x: number, y: number): number;
   parks(x: number, y: number): number;
@@ -73,7 +76,7 @@ export class Motivation {
   /** since the simulation started (probes, the demo check) */
   stats = {
     seeded: 0, byArea: 0, inherited: 0, scoredJobs: 0, notFirst: 0,
-    jobLooks: 0, jobSwitches: 0, homeLooks: 0, moves: 0, movedPeople: 0, scoredHomes: 0,
+    jobLooks: 0, jobSwitches: 0, recruited: 0, homeLooks: 0, moves: 0, movedPeople: 0, scoredHomes: 0,
   };
   /** the most recent self-initiated changes, for the showcase and the probe: [day, citizen id, what] */
   log: [number, number, string][] = [];
@@ -198,7 +201,8 @@ export class Motivation {
    * friend there, Adventure a personal taste for the kind of work. Scores go in `scores` when given.
    */
   pickJob(c: Citizen, facts: JobFacts[], scores?: number[]): number {
-    if (facts.length <= 1 || !MOTIVATION.on || !MOTIVATION.jobs || facts[0].essential) return 0;
+    if (facts.length <= 1 || !MOTIVATION.on || !MOTIVATION.jobs) return 0;
+    for (let i = 0; i < facts.length; i++) if (facts[i].essential) return i; // the nearest essential vacancy wins (essentialJob)
     const w = this.weightsOf(c, this.wbuf);
     let meanWage = 0, meanStatus = 0, minSteps = Infinity;
     for (const f of facts) { meanWage += f.wage; meanStatus += f.status; minSteps = Math.min(minSteps, f.steps); }
@@ -306,12 +310,53 @@ export class Motivation {
     const last = this.settledDay.get(c.id);
     if (last !== undefined && day - last < MOTIVE.settleDays) return;
     if (last !== undefined) this.settledDay.delete(c.id);
+    if (c.job && host.canSwitch(c) && this.recruit(c, host)) { this.settledDay.set(c.id, day); return; }
     const w = this.weightsOf(c);
     if (c.job && host.canSwitch(c) && Math.random() < MOTIVE.lookJob * (0.5 + 1.5 * (w[Value.Money] + w[Value.Status] + w[Value.Time]))) {
       this.stats.jobLooks++;
       if (this.betterJob(c, host)) { this.settledDay.set(c.id, day); return; }
     }
     if (Math.random() < MOTIVE.lookHome * Math.max(0.1, 1.2 - 2 * w[Value.Roots])) this.betterHome(c, host, day);
+  }
+
+  /**
+   * Essential workplaces under half staffed (builders' yards, public services, utilities), re-listed once a game hour.
+   * In a town where nobody is out of work no job-seeker comes for a new one, so they recruit (`recruit`).
+   */
+  private needy: Building[] = [];
+  private needyAt = -Infinity;
+  private needyNow(): Building[] {
+    const now = this.w.tick;
+    if (now - this.needyAt < TICKS_PER_HOUR) return this.needy;
+    this.needyAt = now;
+    this.needy = [];
+    for (const b of this.w.buildings.values()) {
+      if (b.level <= 0 || !essentialJob(b.id) || (this.w.mothballed.size && this.w.mothballed.has(tileKey(b.x, b.y)))) continue;
+      const cap = capacityOf(b.id, b.level);
+      if (cap > 0 && b.occupants < cap / 2) this.needy.push(b);
+    }
+    return this.needy;
+  }
+  /**
+   * A plain worker living within MOTIVE.recruitRadius of an essential workplace under half staffed takes a place there
+   * with chance MOTIVE.recruitChance a day, whatever their values: the station's hiring drive. Without it a new fire
+   * post in a town with nobody out of work stays empty, as no job-seeker comes for it.
+   */
+  private recruit(c: Citizen, host: MotiveHost): boolean {
+    const needy = this.needyNow();
+    if (!needy.length) return false;
+    let best: Building | null = null, bd = Infinity;
+    for (const b of needy) {
+      const d = Math.abs(b.x - c.hx) + Math.abs(b.y - c.hy);
+      if (d <= MOTIVE.recruitRadius && d < bd && host.canTake(c, b)) { best = b; bd = d; }
+    }
+    if (!best || Math.random() >= MOTIVE.recruitChance) return false;
+    const path = host.pathTo(c, best);
+    if (!path) return false;
+    host.switchJob(c, best, path);
+    this.stats.recruited++;
+    this.note(c, 'took a job where they were short of staff');
+    return true;
   }
 
   /** Score the current job against a fresh search; switch when a rival wins by switchMargin. */
