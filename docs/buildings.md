@@ -27,6 +27,7 @@ Every building kind is data. One file per kind family under `packages/shared/src
 | `bigscreens.ts` | The big screens corner (kind id 117): the cinema ladder's top rung, a corner block with six big screens round its curve, for any city (docs/adverts.md section 9) |
 | `adslot.ts` | Ad slots (docs/adverts.md): the `adslot` frames, the default slots, and `screenArc`, which the `screens` op expands into |
 | `media.ts` | The broadcasters (kind ids 130-132): the local TV studio, broadcast centre and media centre, placed sub-kinds of the office family whose `newsRadius`, `newsTier` and `newsHelicopters` the news reads (docs/media.md) |
+| `utilities.ts` | The power network (kind ids 160-166, docs/utilities.md): the substation, grid supply point and power depot (the `grid` ladder) and the wind turbine, solar farm, gas and coal power stations (the `power` ladder), placed civic sub-kinds of the transport-hub family whose `utility`, `supply`, `nodeRadius`, `nodeCapacity`, `importCap`, `fuel`, `availability`, `pollution` and `crews` shared/src/utilities.ts reads |
 | `catalogue.ts` | The list of kinds the compile step reads |
 | `validate.ts`, `compile.ts` | Validation and the pure catalogue-to-tables compiler |
 | `compiled.ts` | Generated: typed tables, tool maps and the manifest. Committed like source |
@@ -384,6 +385,8 @@ A building family can come in sizes. Kinds with the same `group` form a **ladder
 | Sport | sports hall (the original) · leisure centre with a pool (2×2) · arena (3×3) · stadium with floodlights (4×4) |
 | Libraries | library (the original) · central library (2×2) · museum (3×2) |
 | Media | local TV studio (1×1) · broadcast centre (2×2) · media centre with a news helipad and a dish array (3×2): placed sub-kinds of the office family, kind ids 130-132 (`media.ts`, docs/media.md) |
+| Power grid | substation (1×1) · grid supply point (2×2) · power depot (2×1): stages of the power network, kind ids 160-162 (`utilities.ts`, docs/utilities.md) |
+| Power stations | wind turbine (1×1) · solar farm (2×2) · gas power station (3×3) · coal power station (4×4): kind ids 163-166 |
 | Education (draft) | nursery (1×1) · primary school (2×2) · secondary school (3×3) · sixth-form college (2×2) · FE college (3×2) · university campus (6×6) · research institute (3×3) · halls of residence (2×2). A ladder of stages, not of sizes (see below) |
 | Harbours (draft) | jetty (1×2) · ferry pier (2×2) · marina (4×4) · fishing harbour (4×3) · cargo port (8×6), each with its back rows over water (docs/boats.md section 5) |
 

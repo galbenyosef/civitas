@@ -192,6 +192,8 @@ export class Simulation {
   learning: Learning;
   /** the first five minutes (sim/firstfive.ts, docs/first-five.md): the camp's settlers, the starter crew, the first-settlers moment */
   start: FirstFive;
+  /** utilities (sim/utilities.ts, docs/utilities.md): whether building b may grow to `target` (level 2 and up need power); set by game.ts */
+  powerGate: ((b: Building, target: number) => boolean) | null = null;
   /** adds the tiles growth must leave alone this pass (sim/fires.ts: buildings on fire), as tkeys; set by game.ts */
   held: ((into: Set<number>) => void) | null = null;
   /** messages for a parcel owner's screen (net.ts sends them as toasts and clears the list) */
@@ -905,6 +907,7 @@ export class Simulation {
       const need = levelFeature(target);
       if (need && !w.ownerHas(b.x, b.y, need, hasFeature)) continue; // the owner's builders can't raise anything taller yet
       if (b.zone === Zone.Residential && target >= 3 && cov === 0) continue; // the top tiers want services nearby
+      if (this.powerGate && !this.powerGate(b, target)) continue; // two storeys and up need power (sim/utilities.ts)
       w.createSite(b.x, b.y, b.id, target, workOf(b.id, target)); // the catalogue's work: a first house is a third of WORK_PER_LEVEL (docs/first-five.md)
     }
     if (merges.length) w.mergeLots(merges);
@@ -960,6 +963,7 @@ export class Simulation {
       if (b.zone === Zone.Residential && target >= 3 && cov === 0) continue;
       const need = levelFeature(target);
       if (need && !w.ownerHas(b.x, b.y, need, hasFeature)) continue;
+      if (this.powerGate && !this.powerGate(b, target)) continue; // a merge to two storeys and up needs power too
       const cap = capacityOf(f.kindId, target);
       const r0 = Math.floor(h2 * 4);
       for (let ri = 0; ri < 4; ri++) {

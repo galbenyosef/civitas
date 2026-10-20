@@ -199,7 +199,7 @@ export class FleetMeshes {
 
   /** The existing body whose beams, blinker positions and eye height fit a fleet kind (render/citizens.ts tables). */
   static body(kind: number): FleetBody {
-    return kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 'sedan' : kind === FleetKind.CourierVan || kind === FleetKind.TradesVan ? 'van' : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? 'truck' : kind === FleetKind.SchoolBus ? 'bus' : null;
+    return kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 'sedan' : kind === FleetKind.CourierVan || kind === FleetKind.TradesVan || kind === FleetKind.UtilityVan ? 'van' : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? 'truck' : kind === FleetKind.SchoolBus ? 'bus' : null;
   }
   /** Eye height for the first-person view, tile units. */
   static eye(kind: number): number { return kind === FleetKind.Bicycle || kind === FleetKind.Moped ? 0.14 : kind === FleetKind.BinLorry || kind === FleetKind.SchoolBus ? 0.24 : kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 0.16 : 0.21; }
@@ -271,6 +271,12 @@ export class FleetMeshes {
         body(this.schoolBus, tmpC.setScalar(0.86 + 0.14 * hash2(id, 5))); // some buses are fresher from the paint shop than others
         if (working) { this.flash(id, now, 0.27, 0.245, 0.07); this.flash(id + 1, now, -0.27, 0.245, -0.07); } // hazards while pupils get on
         return;
+      case FleetKind.UtilityVan: {
+        // a lineworkers' van (docs/utilities.md 4.4): white with a fresh or road-worn hi-vis stripe, its beacon on while it works a fault
+        body(this.van, tmpC.copy(WHITE).lerp(HIVIS, 0.18 + 0.12 * hash2(id, 5)));
+        if (working) { this.flash(id, now, 0.02, 0.2, 0); at(this.person, HIVIS, -0.05, 0, 0.2 + 0.03 * hash2(id, 13), Math.PI / 2); }
+        return;
+      }
       case FleetKind.Sweeper:
         body(this.sweeper, tmpC.setHex(hash2(id, 5) < 0.5 ? 0xf2a33a : 0xf5f5f0));
         this.flash(id, now, 0.1, 0.17, 0);

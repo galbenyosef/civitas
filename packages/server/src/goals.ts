@@ -41,6 +41,9 @@ export class Onboarding {
   /** the world's queued share, one sample a game hour (newest last) */
   private jam: number[] = [];
 
+  /** growths held back by power in the last game hour, by owner (sim/utilities.ts heldBack); set by game.ts */
+  powerHeld: ((owner: string) => number) | null = null;
+
   constructor(private w: World, private traffic: { lastQueued: number; lastVehicles: number }) {}
 
   /** The player's state, created on first use; goals a returning player has already met are marked done without a reward. */
@@ -199,6 +202,7 @@ export class Onboarding {
     if ((s.negStreak ?? 0) >= 2) add('deficit');
     if (p.progress.housed >= 30 && this.jam.length >= JAM_HOURS && this.jam.reduce((a, b) => a + b, 0) / this.jam.length > JAM_SHARE) add('jam');
     if (p.progress.housed >= 60 && this.tally(p).leisure === 0) add('bored');
+    if ((this.powerHeld?.(p.id) ?? 0) > 0) add('power');
     return out;
   }
 
@@ -211,4 +215,4 @@ export class Onboarding {
 }
 
 /** Taxes and fees less wages, upkeep and overdraft interest, for one day of a ledger. */
-export const running = (r: LedgerDTO['today']) => (r.tax ?? 0) + (r.fees ?? 0) + (r.wages ?? 0) + (r.upkeep ?? 0) + (r.interest ?? 0);
+export const running = (r: LedgerDTO['today']) => (r.tax ?? 0) + (r.fees ?? 0) + (r.wages ?? 0) + (r.upkeep ?? 0) + (r.interest ?? 0) + (r.bills ?? 0) + (r.fuel ?? 0);

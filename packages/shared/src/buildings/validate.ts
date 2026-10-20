@@ -6,7 +6,7 @@ import { MAX_KIND_CODE, MAX_LEVEL_CODE, MAX_FOOTPRINT, MAX_KIND_ID, FIRST_SUB_KI
 import { techFor } from '../tech';
 import { GROUP_BY_ID } from './groups';
 
-const FAMILIES = ['residential', 'commercial', 'industrial', 'office', 'civic', 'transport', 'leisure'];
+const FAMILIES = ['residential', 'commercial', 'industrial', 'office', 'civic', 'transport', 'leisure', 'utility'];
 const FLAG_NAMES = ['growable', 'civic', 'service', 'workplace', 'parking', 'leisureReady'];
 /** numeric args (after the op name) and the optional tail each primitive accepts */
 const PRIMS: Record<string, { nums: number; color: boolean; tail?: 'win' | 'bool' | 'seg' }> = {

@@ -28,6 +28,7 @@ import { zoneOf, levelOf, Zone } from '../tile';
 import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
 import { FIRE } from '../fires';
 import { AD_SIZE, AD_SIZES, type AdSize } from '../buildings/adslot';
+import { UTIL, type LinkMode } from '../utilities';
 import { AD } from '../adverts';
 
 /**
@@ -48,7 +49,7 @@ import { AD } from '../adverts';
  * would click (the door) and its rotation (FRONT order: 0 the door faces +y/south, 1 east, 2 north, 3 west).
  */
 
-export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media'
+export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media' | 'power'
   | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-rail' | 'london-buses' | 'london-river' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
@@ -87,6 +88,8 @@ export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 
 export interface DemoRunway { id: string; from: DemoXY; to: DemoXY }
 /** railway track: each drag as a player makes it (rail.ts trackDragPath: the longer axis first, one corner) */
 export interface DemoTrack { id: string; name: string; drags: readonly (readonly [DemoXY, DemoXY])[] }
+/** a power trunk link (docs/utilities.md section 4.2) dragged as the pylon or cable tool drags it (rail.ts trackDragPath), from a plant or node door to another */
+export interface DemoUtilLink { id: string; name: string; mode: LinkMode; from: DemoXY; to: DemoXY }
 /**
  * A road bridge (bridges.ts planBridge) whose deck runs from `from` to `to`, both water tiles in a line, with road on
  * the banks beyond them. `style` forces the style (else the tool's choice); `landmark` is the catalogue landmark a
@@ -99,7 +102,7 @@ export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: 
 /** `view`: the tour turns the underground view ('under') or the world map ('map', docs/world-map.md) on at this stop */
 /** `view` 'ranks': the stop plays a rank-up celebration over the rect (client ranks.ts preview, docs/ranks.md) */
 /** `row`: a 'fire-spread' spot's homes, the lead first, which catch light one after another (server sim/fires.ts rows) */
-export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks'; row?: readonly DemoXY[] }
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks'; row?: readonly DemoXY[]; /** the hour the stop is shown at (a blackout after dark) */ hour?: number }
 /** Land parcels (by their `land` names, any section's) combined into one estate by the players' rule (parcelops.ts planCombine) */
 export interface DemoEstate { name: string; lands: readonly string[] }
 export interface DemoLine {
@@ -144,6 +147,8 @@ export interface DemoSection {
   tracks?: DemoTrack[];
   junctions?: DemoJunction[];
   bridges?: DemoBridge[];
+  /** power trunk links (docs/utilities.md), laid after the placements they join */
+  utilLinks?: DemoUtilLink[];
   lines?: DemoLine[];
   blocks?: DemoBlock[];
   spots?: DemoSpot[];
@@ -175,6 +180,12 @@ export const DEMO_OWNER = 'sys';
 // district block helpers, for the rects below (the placements are literal tiles)
 const D = (i: number) => -35 + 24 * i;
 const block = (di: number, dj: number, bi: number, bj: number): DemoRect => [D(di) + 1 + 5 * bi, D(dj) + 1 + 5 * bj, 4, 4];
+/**
+ * The power district (docs/utilities.md): open land west of districts B1 and C1, its two roads joining the perimeter road at
+ * x = -35, and the two substations in town, on lots beside a street of C1 (the blackout drill's) and of B1.
+ */
+const POWER_LAND: DemoRect = [-58, 7, 23, 26];
+const POWER_SUB_A: DemoXY = [-33, 14], POWER_SUB_B: DemoXY = [-33, 8];
 /** the showcase's fire drill home: a level-3 house five tiles from the civic district's fire post (-24, -29), and the stop's frame */
 const FIRE_DRILL: DemoXY = [-29, -31];
 const FIRE_DRILL_RECT: DemoRect = [-31, -33, 9, 6];
@@ -464,6 +475,31 @@ export const SECTIONS: DemoSection[] = [
     ],
   },
   {
+    id: 'power', name: 'Power',
+    blurb: 'A power district west of the town (docs/utilities.md): a gas and a coal power station, a grid supply point by the road into town, a row of wind turbines, a solar farm and a power depot whose vans repair faults, joined to two substations in the town by streets, a pylon line and a buried cable. Every few game hours a fault blacks out the streets round one substation until the van has fixed it.',
+    land: [{ name: 'Power station', rect: POWER_LAND }],
+    roads: [[[-57, 10], [-36, 10]], [[-57, 20], [-36, 20]], [[-57, 11], [-57, 19]]],
+    // the in-town substations stand on lots of districts B1 and C1 beside the perimeter road
+    clear: [[POWER_SUB_A[0], POWER_SUB_A[1], 1, 1], [POWER_SUB_B[0], POWER_SUB_B[1], 1, 1]],
+    placements: [
+      { kind: 'gas-plant', door: [-52, 11], rot: 2 },
+      { kind: 'coal-plant', door: [-46, 11], rot: 2 },
+      { kind: 'grid-supply-point', door: [-40, 11], rot: 2 },
+      { kind: 'power-depot', door: [-39, 19], rot: 0 },
+      { id: 'wind-turbine', kind: 'wind-turbine', door: [-55, 21] }, { id: 'wind-2', kind: 'wind-turbine', door: [-53, 21] }, { id: 'wind-3', kind: 'wind-turbine', door: [-51, 21] },
+      { kind: 'solar-farm', door: [-47, 21], rot: 2 },
+      { kind: 'substation', door: POWER_SUB_A, name: 'Perimeter Road substation' },
+      { id: 'substation-b', kind: 'substation', door: POWER_SUB_B, name: 'Beacon Lane substation' },
+      // the wind row's own node: its supply runs along the turbines' road and on round to the grid supply point's
+      { id: 'substation-c', kind: 'substation', door: [-50, 21] },
+    ],
+    utilLinks: [
+      { id: 'power-pylons', name: 'The pylon line', mode: 'overhead', from: [-45, 13], to: POWER_SUB_A },
+      { id: 'power-buried', name: 'The buried cable', mode: 'buried', from: [-47, 22], to: POWER_SUB_B },
+    ],
+    spots: [{ id: 'power-blackout', spot: 'blackout', name: 'A blackout', rect: [POWER_SUB_A[0] - 4, POWER_SUB_A[1] - 2, 12, 9], inspect: POWER_SUB_A, hour: 21.6 }],
+  },
+  {
     id: 'airport', name: 'Airport',
     blurb: 'An airport terminal facing the east perimeter road, with a 20-tile runway five rows behind it: a flight an hour, every type from the business jet to the jumbo, landing fees for the owner.',
     land: [{ name: 'Airfield', rect: [35, -12, 15, 24] }],
@@ -597,6 +633,7 @@ export const TOUR: string[] = [
   'sports', 'leisure-centre', 'arena', 'stadium',
   'library', 'central-library', 'museum',
   'tv-studio', 'broadcast-centre', 'media-centre',
+  'gas-plant', 'coal-plant', 'wind-turbine', 'solar-farm', 'grid-supply-point', 'substation', 'power-pylons', 'power-buried', 'power-depot', 'power-blackout',
   'nursery', 'primary-school', 'secondary-school', 'sixth-form', 'fe-college', 'university', 'halls', 'research-institute',
   'airport', 'runway',
   'block-estate', 'fire-blast', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
@@ -607,7 +644,7 @@ export const TOUR: string[] = [
 ];
 
 export const DEMOS: DemoDef[] = [
-  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'media', 'education', 'airport', 'industry', 'riverside', 'harbour'],
+  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'media', 'power', 'education', 'airport', 'industry', 'riverside', 'harbour'],
     blurb: 'A lived-in town with one of every large building and every merged lot, buses, trains, an underground and river buses, an airport every plane type flies to, helicopters, a river with every style of bridge, and a harbour with every kind of boat, all running. Take the guided tour.' },
   { id: 'transport', name: 'Transport demo', slot: 91, sections: ['downtown', 'transport', 'rail', 'airport', 'industry'],
     blurb: 'Buses, parking, rail, freight and the airport, in the same town.' },
@@ -635,7 +672,7 @@ export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER |
  * tool fails the typecheck here until it is listed, and `demo:check` then fails until the showcase uses it.
  */
 type SurfaceTool = Exclude<Tool, 'road' | 'bulldoze' | KindToolId>;
-export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true };
+export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, pylons: true, cable: true };
 /** Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. */
 export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, ferry: true, freight: true };
 
@@ -670,6 +707,18 @@ const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
     how: 'Pick Flyover and click a crossroads whose road carries on straight both sides (the ramps go there). The east-west road goes over when it can; click the flyover again to put the other road on top. Bulldozing it leaves a crossroads.',
     facts: [['Tool', 'Flyover (no key), click a crossroads'], ['Footprint', 'the crossing tile, ramps on the tiles either side'], ['Needs', 'four roads meeting, plain straight road either side of the deck'], ['Technology', techLine('flyover')], ['Cost', `${money(FLYOVER_COST)}, swapping the deck is free`]],
   },
+  pylons: {
+    title: 'Pylons',
+    what: 'An overhead trunk line: lattice towers every few tiles with the wires sagging between them, joining a power station to a substation (or a substation to a motorway connection, for the National Grid). Cheap, and it passes over anything, but nobody wants to live under one.',
+    how: 'Pick Pylons in the Power grid group and drag from a power station, substation or grid supply point to another: the line runs along the longer axis, then turns once. Every tile must be your land or unowned. Click a line with the tool to take it down (half the cost comes back).',
+    facts: [['Tool', 'Pylons (no key), drag'], ['Needs', 'a plant or node of yours at each end'], ['Technology', techLine('pylons')], ['Cost', `${money(UTIL.overheadCost)} a tile`]],
+  },
+  cable: {
+    title: 'Buried cable',
+    what: 'A trunk line under the ground: nothing to see but the cable joint pits, and no blight on the land it crosses. It costs four times as much as pylons, and more under water.',
+    how: 'Pick Buried cable in the Power grid group and drag from a plant or node to another, as with pylons. Click a line with the tool to take it down.',
+    facts: [['Tool', 'Buried cable (no key), drag'], ['Needs', 'a plant or node of yours at each end'], ['Technology', techLine('cable')], ['Cost', `${money(UTIL.buriedCost)} a tile, ${money(UTIL.buriedWaterCost)} under water`]],
+  },
 };
 /** A bridge on the tour (not a tool of its own: the road tool lays it over water). */
 const BRIDGE_CAPTION: Caption = {
@@ -686,7 +735,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'cab-office': {
     title: 'Cab office',
@@ -729,6 +778,12 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     what: 'Helicopters land on the helipads drawn on buildings: air ambulances at the hospitals, the police helicopter at police headquarters, executive flights on the tallest offices (the headquarters and the office tower across the river), and the royal flight at Buckingham Palace in the London demo. The timetable is worked out from the pads alone, so everyone sees the same flights.',
     how: 'Nothing to build: a hospital, police headquarters or tall office whose design has a pad brings its service. Hover a helicopter for its callsign and errand, click it for its crew, and press I or O to ride in the cockpit.',
     facts: [['Air ambulance', '2-5 flights a pad a day, some go on to a second hospital'], ['Police', '2-3 a day, an hour or more on the pad'], ['Executive', '1-3 a day, some hop between towers'], ['Royal', 'Buckingham Palace (London demo)']],
+  },
+  blackout: {
+    title: 'Blackout',
+    what: 'A fault on a substation cuts the power to every street its supply runs along: the lamps go out, and the windows drop to a candle here and there, with the odd building on a generator burning bright. The nearest power depot sends a repair van; while the crew digs the streets stay dark, and when they are done the lights come back block by block. Homes in a cut do not grow. In this demo the substation by the perimeter road fails every six game hours, so its streets are dark about half the time.',
+    how: `Keep a power depot (Power stations) near the middle of your network: a fault stays dark while its van drives there and the crew works ${UTIL.repairHours} game hours. Without one a contractor takes ${UTIL.contractorHours}. A second substation whose streets overlap keeps a fault's patch on the network's other links.`,
+    facts: [['Faults', `about one per substation in 25 game days, none in the first ${UTIL.faultsFromDay} days of a world`], ['Repair', `${UTIL.repairHours} game hours on site`], ['Never cut', 'a patch with a hospital or police station, in rolling cuts']],
   },
   ranks: {
     title: 'Settlement ranks',
@@ -942,6 +997,12 @@ export function demoTour(id: DemoId): TourStop[] {
         out.push({ id: sid, ...base, ...SURFACE_CAPTIONS.rail, title: t.name, ...framing(box[0], box[1], box[2], box[3], 0, 0.75), rect: box, path: pts, inspect: station?.door });
         continue;
       }
+      const ul = s.utilLinks?.find((q) => q.id === sid);
+      if (ul) {
+        const pts = [ul.from, ul.to], box = bbox(pts);
+        out.push({ id: sid, ...base, ...SURFACE_CAPTIONS[ul.mode === 'overhead' ? 'pylons' : 'cable'], title: ul.name, ...framing(box[0], box[1], box[2], box[3], 0, 0.8), rect: box, path: pts, inspect: ul.to });
+        continue;
+      }
       const j = s.junctions?.find((q) => q.id === sid);
       if (j) {
         const area = [j.at[0] - 2, j.at[1] - 2, 5, 5] as const;
@@ -965,7 +1026,7 @@ export function demoTour(id: DemoId): TourStop[] {
         const [x, y, w, h] = sp.rect;
         // the map looks straight down, north up, from far enough to take in the rect (camera.ts MAP_PITCH)
         const cam = sp.view === 'map' ? { focus: [x + w / 2, y + h / 2] as [number, number], dist: Math.max(w, h) * 1.9, yaw: 0, pitch: 1.565 } : framing(x, y, w, h, 0, w * h === 1 ? 0.8 : 0.5);
-        out.push({ id: sid, ...base, ...SPOT_CAPTIONS[sp.spot], title: sp.name, ...cam, rect: sp.view === 'map' ? undefined : sp.rect, inspect: sp.inspect, view: sp.view });
+        out.push({ id: sid, ...base, ...SPOT_CAPTIONS[sp.spot], title: sp.name, ...cam, rect: sp.view === 'map' ? undefined : sp.rect, inspect: sp.inspect, view: sp.view, ...(sp.hour !== undefined ? { hour: sp.hour } : {}) });
         continue;
       }
       const l = s.lines?.find((q) => q.id === sid);
@@ -1016,6 +1077,8 @@ export interface SeededDemo {
   schools: readonly { kind: number; x: number; y: number }[];
   /** every child and young person under 18: the home tile and the age in years (server/src/demo/seed.ts seedDemoFamilies) */
   children: readonly { x: number; y: number; age: number }[];
+  /** the trunk links the seeder laid (docs/utilities.md) */
+  utilLinks?: readonly { mode: LinkMode; a: readonly [number, number]; b: readonly [number, number] }[];
   /** ad slots (docs/adverts.md): how many open slots of each size stand in the town, and the wear of every rented poster */
   ads?: { slots: Partial<Record<AdSize, number>>; wears: readonly number[]; screensRented?: number };
 }
@@ -1178,6 +1241,14 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   // ---- the news (docs/media.md N2): the media centre's channel reports the fire drill, so the News panel has stories
   { id: 'news', caption: 'the news: the media centre\'s channel reporting the fire drill in the News panel', tour: 'media-centre',
     scenario: (ss) => placedKind('media-centre')(ss) && ss.some((s) => s.spots?.some((sp) => sp.spot === 'house-fire')) },
+  // ---- utilities (docs/utilities.md): power stations, pylons and a buried cable to town, and the blackout drill
+  { id: 'power-plant', caption: 'a power station feeding the town', tour: 'gas-plant', scenario: placedKind('gas-plant'), seeded: (d) => (d.kinds.get(KIND_ID['gas-plant']) ?? 0) > 0 },
+  { id: 'power-pylons', caption: 'an overhead pylon line from a power station to a substation in town', tour: 'power-pylons',
+    scenario: (ss) => ss.some((s) => s.utilLinks?.some((l) => l.mode === 'overhead')), seeded: (d) => !!d.utilLinks?.some((l) => l.mode === 'overhead') },
+  { id: 'power-buried', caption: 'a buried cable from a plant to a substation in town', tour: 'power-buried',
+    scenario: (ss) => ss.some((s) => s.utilLinks?.some((l) => l.mode === 'buried')), seeded: (d) => !!d.utilLinks?.some((l) => l.mode === 'buried') },
+  { id: 'power-blackout', caption: 'a scripted blackout and the repair van that ends it', tour: 'power-blackout',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'blackout' && sp.inspect)) && placedKind('power-depot')(ss) },
   // ---- settlement ranks (docs/ranks.md): a sandbox has none, so the tour stop plays the celebration over the town
   { id: 'settlement-ranks', caption: 'settlement ranks (a rank-up celebration over the town)', tour: 'ranks',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'ranks' && sp.view === 'ranks')) },
@@ -1282,6 +1353,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
     for (const t of s.tracks ?? []) dup(t.id);
     for (const j of s.junctions ?? []) dup(j.id);
     for (const b of s.bridges ?? []) dup(b.id);
+    for (const u of s.utilLinks ?? []) dup(u.id);
     for (const l of s.lines ?? []) dup(l.id);
     for (const sp of s.spots ?? []) dup(sp.id);
   }
@@ -1307,7 +1379,9 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   }
   const all = (f: (s: DemoSection) => unknown[] | undefined) => sections.flatMap((s) => f(s) ?? []);
   for (const tool of Object.keys(SURFACE_TOOLS) as SurfaceTool[]) {
-    const n = tool === 'runway' ? all((s) => s.runways).length : tool === 'rail' ? all((s) => s.tracks).length : all((s) => s.junctions?.filter((j) => j.tool === tool)).length;
+    const n = tool === 'runway' ? all((s) => s.runways).length : tool === 'rail' ? all((s) => s.tracks).length
+      : tool === 'pylons' || tool === 'cable' ? all((s) => s.utilLinks?.filter((l) => l.mode === (tool === 'pylons' ? 'overhead' : 'buried'))).length
+        : all((s) => s.junctions?.filter((j) => j.tool === tool)).length;
     if (!n) out.push(`no ${tool} is painted in the showcase`);
   }
   const lines = all((s) => s.lines) as DemoLine[];
@@ -1331,6 +1405,13 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   }
   return out;
 }
+
+/** The substations a demo's blackout drill faults every few game hours (server sim/utilities.ts `drills`, set by index.ts): its 'blackout' spots' doors. */
+export function demoBlackouts(id: DemoId): DemoXY[] {
+  return demoSections(id).flatMap((s) => (s.spots ?? []).filter((sp) => sp.spot === 'blackout' && sp.inspect).map((sp) => sp.inspect!));
+}
+/** A demo's trunk links (docs/utilities.md), as the link tools would lay them: the seeder resolves their ends and writes them to the save. */
+export const demoUtilLinks = (id: DemoId): DemoUtilLink[] => demoSections(id).flatMap((s) => s.utilLinks ?? []);
 
 /** The homes a demo's fire drill burns (server sim/fires.ts `drills`, set by index.ts): the inspect tiles of its 'house-fire' spots. */
 export function demoFireDrills(id: DemoId): DemoXY[] {

@@ -43,6 +43,7 @@ import { Onboarding } from './onboarding';
 import { CameraMoment } from './moment';
 import { RanksUI } from './ranks';
 import { NewsUI } from './news';
+import { PowerClient } from './utilities';
 import { Fireworks } from './render/fireworks';
 import { LinesPanel } from './lines';
 import { ChartsPanel } from './charts';
@@ -193,6 +194,8 @@ scene.add(citizens.under);
 setPlatformCrowd((x0, y0, x1, y1) => citizens.platformCrowd(x0, y0, x1, y1));
 citizens.platformAlongX = (x, y) => underMask(world.underAt(x, y)) === 10; // a platform tile's axis (docs/underground.md section 1)
 const junctions = new JunctionView(world); scene.add(junctions.group); // roundabout islands, flyover decks and ramps
+// utilities (utilities.ts, docs/utilities.md): reach from the tiles, the hourly node states, blackouts, the power overlay, pylons
+const power = new PowerClient(world, (k) => views.get(k)); scene.add(power.group);
 const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks, piers, towers and ramps (render/bridges.ts)
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz); // cars and walkers on a flyover deck or a bridge and their ramps
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
@@ -300,6 +303,10 @@ const finance = new FinancePanel({
   send: (action) => net.send({ t: 'recover', action }), day: () => clock.day,
   restart: local ? () => local.restartFromAutosave().catch((e: Error) => ui.toast('error', e.message)) : undefined,
 });
+ui.onUtil = (x, y, what, on) => net.send({ t: 'utilNode', x, y, ...(what === 'protect' ? { protect: on } : { importOn: on }) });
+ui.mineByName = (name) => world.myPlayer?.name === name;
+net.on('utilState', (m) => power.setState(m));
+net.on('utilLinks', (m) => power.setLinks(m));
 ui.onMothball = (x, y, on) => net.send({ t: 'recover', action: on ? 'mothball' : 'unmothball', keys: [`${x},${y}`] });
 charts.me = () => world.myPlayer;
 lines.onLivery = (pairs, colours) => citizens.setLivery(pairs, colours);
@@ -321,6 +328,11 @@ const problems = new ProblemsPanel({
 });
 const overlayMenu = new OverlayMenu({
   setTraffic: (on) => setHeat(on),
+  setPower: (on) => {
+    const was = power.overlayOn;
+    power.setOverlay(on);
+    if (was && !on) for (const [key, v] of views) { v.heat = world.traffic.get(key); v.tintRoads(); } // the roads take the traffic bytes back
+  },
   setChannel: (ch) => {
     if (ch === world.overlayCh) return;
     world.setOverlayChannel(ch);
@@ -483,6 +495,7 @@ function dropView(key: string) {
   junctions.dropChunk(key);
   bridges.dropChunk(key);
   landmarks.dropChunk(key);
+  power.dropChunk(key);
   world.dropChunk(key);
 }
 setInterval(streamChunks, 300);
@@ -512,6 +525,8 @@ const input = new Input(canvas, rig, {
   ladderKey: (t) => ui.ladderKey(t), // 0, 8, 9, Y, P, G, V, B, L open their size picker on the size last used
   isWater: (x, y) => { const t = world.getTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water; }, // the road tool bridges water (render/bridges.ts)
   onBuild: (tool, tiles) => {
+    // a click (not a drag) with a link tool takes down the line through that tile (docs/utilities.md 4.2)
+    if ((tool === 'pylons' || tool === 'cable') && tiles.length < 2) { if (tiles[0]) net.send({ t: 'utilLink', op: 'remove', x: tiles[0][0], y: tiles[0][1] }); return; }
     const rot = structureTool(tool) ? input.rotationOf(tool) : undefined; // the orientation chosen with Z/C, else the server faces a road itself
     net.send({ t: 'build', tool: tool as Tool, tiles, ...(rot !== undefined ? { rot } : {}), ...(DEV_TOOLS ? { dev: true } : {}) });
   },
@@ -633,7 +648,7 @@ function applyTrafficUpdates() {
   if (!world.trafficDirty.size) return;
   for (const key of world.trafficDirty) {
     const v = views.get(key);
-    if (v) { v.heat = world.traffic.get(key); v.tintRoads(); }
+    if (v && !power.overlayOn) { v.heat = world.traffic.get(key); v.tintRoads(); } // the power overlay owns the roads' heat while it is on
   }
   parked.update(world.trafficDirty);
   world.trafficDirty.clear();
@@ -975,6 +990,8 @@ function updateStatus() {
       s += v.ok ? ` · click to place${facing}` : ` · ${v.reason}${facing}`;
     }
     if (input.tool === 'rail') s += rail.status(input.railPath);
+    if (input.tool === 'pylons' || input.tool === 'cable') s += power.status(input.tool, input.railPath);
+    else if (isRoad(t) && (power.overlayOn || structureTool(input.tool))) s += power.roadStatus(x, y);
     if (input.tool === 'road' && input.crossing) s += bridges.crossingStatus(input.crossing, DEV_TOOLS);
     else if (input.tool === 'road' && terr === Terrain.Water && !isRoad(t)) s += ' · drag a road straight across from a road on the bank to bridge the water';
     if (input.tool === 'roundabout' || input.tool === 'flyover') s += junctions.status(input.tool, x, y);
@@ -1182,7 +1199,7 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (eduDirty && eduHeat.on) { eduHeat.rebuild(world.parcels.values()); eduDirty = false; }
@@ -1211,6 +1228,7 @@ function frame(now: number) {
   trains.level = Math.max(underground.level, riding); citizens.underLevel = Math.max(underground.level, riding);
   trains.frame(vehTick);
   rail.frame(input.tool === 'rail' ? input.railPath : null);
+  power.frame(now, input.tool, input.railPath);
   airfield.frame();
   parks.frame(clock.day);
   landmarks.frame((vehTick * 24) / TICKS_PER_DAY);
@@ -1265,7 +1283,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { power, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

@@ -7,18 +7,22 @@ import { Overlay, OVERLAY_TEXT } from '@msimcity/shared';
  * happiness, jobs/homes, news, off; the chip opens a small menu to pick one. Ramps are colour-blind safe: viridis for the
  * sequential ones, blue against orange for jobs/homes (render/materials.ts).
  */
-export type OverlayMode = 'off' | 'traffic' | number;
-const CYCLE: OverlayMode[] = ['traffic', Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News, 'off'];
+export type OverlayMode = 'off' | 'traffic' | 'power' | number;
+const CYCLE: OverlayMode[] = ['traffic', Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News, 'power', 'off'];
 /** legend gradients matching the shaders (render/materials.ts mscViridis, mscDiverge, HEAT) */
 const VIRIDIS = 'linear-gradient(90deg, #440154, #3b528b, #21918c, #5ec962, #fde725)';
 const DIVERGE = 'linear-gradient(90deg, #e6750d, #eeebdb, #2166cc)';
 const TRAFFIC = 'linear-gradient(90deg, #4fd36a, #f2c230, #e8392b)';
+/** the power overlay's states (render/materials.ts HEAT, uHeatMode 1): supplied, brownout, cut or fault, no supply */
+const POWER = 'linear-gradient(90deg, #4fd36a 0 25%, #f2c230 25% 50%, #e8392b 50% 75%, #8c929e 75%)';
 
 export interface OverlayDeps {
   /** congestion on the roads on or off (main.ts setHeat) */
   setTraffic(on: boolean): void;
   /** a server overlay channel (0 none): ask the server, switch the shaders' ramp */
   setChannel(ch: number): void;
+  /** the power overlay (client utilities.ts): roads by their substation's state, on the congestion path */
+  setPower(on: boolean): void;
 }
 
 export class OverlayMenu {
@@ -38,7 +42,7 @@ export class OverlayMenu {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-mode]');
       if (!b) return;
       const m = b.dataset.mode!;
-      this.set(m === 'off' || m === 'traffic' ? m : Number(m));
+      this.set(m === 'off' || m === 'traffic' || m === 'power' ? m : Number(m));
     });
     document.addEventListener('pointerdown', (e) => { if (!this.menu.contains(e.target as Node) && e.target !== this.chip && !this.chip.contains(e.target as Node)) this.menu.classList.add('hidden'); });
     this.render();
@@ -49,14 +53,15 @@ export class OverlayMenu {
 
   set(mode: OverlayMode) {
     this.mode = mode;
-    this.d.setTraffic(mode === 'traffic');
+    this.d.setPower(mode === 'power');
+    this.d.setTraffic(mode === 'traffic' || mode === 'power');
     this.d.setChannel(typeof mode === 'number' ? mode : 0);
     this.render();
     this.renderMenu();
   }
 
-  private label(mode: OverlayMode) { return mode === 'off' ? 'off' : mode === 'traffic' ? 'traffic' : OVERLAY_TEXT[mode].name; }
-  private ramp(mode: OverlayMode) { return mode === 'traffic' ? TRAFFIC : typeof mode === 'number' && OVERLAY_TEXT[mode].ramp === 1 ? DIVERGE : VIRIDIS; }
+  private label(mode: OverlayMode) { return mode === 'off' ? 'off' : mode === 'traffic' ? 'traffic' : mode === 'power' ? 'power' : OVERLAY_TEXT[mode].name; }
+  private ramp(mode: OverlayMode) { return mode === 'traffic' ? TRAFFIC : mode === 'power' ? POWER : typeof mode === 'number' && OVERLAY_TEXT[mode].ramp === 1 ? DIVERGE : VIRIDIS; }
 
   private render() {
     const on = this.mode !== 'off';
@@ -78,6 +83,7 @@ export class OverlayMenu {
     let html = '<div class="ohead">Overlays <span>H cycles</span></div>';
     html += row('traffic', 'free flowing', 'jammed', 'Roads by congestion');
     for (const ch of [Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News]) { const t = OVERLAY_TEXT[ch]; html += row(ch, t.lo, t.hi, t.explain); }
+    html += row('power', 'supplied', 'no supply', 'Streets by their substation: supplied, brownout, cut or fault, or a substation with no supply (docs/utilities.md)');
     html += row('off', '', '', 'No overlay');
     this.menu.innerHTML = html;
   }

@@ -8,10 +8,12 @@ import { FLEET_LABEL } from '@msimcity/shared';
 import { WEEKDAY_NAMES } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
 import { mediaHtml } from './news';
+import { utilitiesHtml } from './utilities';
+import { UTIL } from '@msimcity/shared';
 import { POLICIES } from '@msimcity/shared';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
-const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌' };
+const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌', 'repair van': '🚐' };
 
 /** Tool bar groups: land and roads first, then the catalogue kinds by what they are, bulldoze last. */
 const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable || k.family === 'residential' ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
@@ -45,6 +47,12 @@ export const TOOLS: { id: ToolId; label: string; key: string; cost?: string; col
 {
   const i = TOOLS.findIndex((t) => t.id === 'railstation');
   if (i >= 0) TOOLS.splice(i + 1, 0, { id: 'rail', label: 'Railway track (drag)', key: '', cost: `$${RAIL_COST}/tile`, color: '#7d776c', group: TOOLS[i].group });
+}
+// power trunk links (docs/utilities.md 4.2) are dragged too: right after the power grid's rungs; every letter is taken, so no key
+{
+  const i = TOOLS.findIndex((t) => t.id === 'powerdepot');
+  if (i >= 0) TOOLS.splice(i + 1, 0, { id: 'pylons', label: 'Pylons (drag)', key: '', cost: `$${UTIL.overheadCost}/tile`, color: '#9aa1aa', group: TOOLS[i].group },
+    { id: 'cable', label: 'Buried cable (drag)', key: '', cost: `$${UTIL.buriedCost}/tile`, color: '#b5463a', group: TOOLS[i].group });
 }
 /** tool id -> kind code, for the swatch colour of a building's tooltip (every catalogue kind with a tool) */
 /** tool id -> kind id (BuildingInfo.kind and SiteDTO.kind are kind ids, docs/sub-kinds.md) */
@@ -300,7 +308,7 @@ export class UI {
     const cell = (v: number | undefined) => (v ? `<td class="${v < 0 ? 'bad' : ''}">${v < 0 ? '−' : '+'}${fmt(Math.abs(v))}</td>` : '<td class="z">·</td>');
     const netY = inY + outY;
     // days of cash left at yesterday's rate, counting only the running costs (building and buying are choices)
-    const running = (['wages', 'upkeep', 'interest'] as LedgerCat[]).reduce((a, k) => a + (L.yesterday[k] ?? 0), 0) + (L.yesterday.tax ?? 0) + (L.yesterday.fees ?? 0);
+    const running = (['wages', 'upkeep', 'interest', 'bills', 'fuel'] as LedgerCat[]).reduce((a, k) => a + (L.yesterday[k] ?? 0), 0) + (L.yesterday.tax ?? 0) + (L.yesterday.fees ?? 0);
     // the overdraft (server sim/finance.ts) is spendable too: days until the limit
     const limit = ECONOMY_TUNING.overdraftLimit;
     const left = running < 0 ? Math.max(0, Math.floor((money + limit) / -running)) : -1;
@@ -312,6 +320,10 @@ export class UI {
       <div class="note">${left < 0 ? 'Taxes and fees cover the running costs (wages, upkeep).'
         : `<span class="${left < 30 ? 'bad' : ''}">Running costs exceed taxes and fees${left < 30 ? `: about ${left} day${left === 1 ? '' : 's'} to the end of the ${fmt(limit)} overdraft at this rate` : ''}.</span> Raise the tax rate in a parcel, add homes, or hold off on services.`}</div>`;
   }
+  /** main.ts: a power node's switches (the `utilNode` message): protect it in rolling cuts, or the owner's grid import */
+  onUtil: ((x: number, y: number, what: 'protect' | 'import', on: boolean) => void) | null = null;
+  /** main.ts: whether a parcel owner's display name is the viewer (BuildingInfo.parcel carries the name) */
+  mineByName: ((ownerName: string) => boolean) | null = null;
   /** main.ts: mothball or reopen the building at (x, y) (the `recover` message with its door) */
   onMothball: ((x: number, y: number, on: boolean) => void) | null = null;
   /** onboarding.ts takes advisor hints (shared/src/goals.ts HINTS) and returns true; false: toast them as before */
@@ -513,6 +525,7 @@ export class UI {
     if (info.mothballed) html += row('Mothballed', '<span class="bad">no staff, no upkeep, no cover</span>');
     if (info.fire) html += row('Fire', `<span class="bad">${info.fire}</span>`);
     if (info.media) html += mediaHtml(info.media, row);
+    if (info.utilities) html += utilitiesHtml(info.utilities, row, !!info.parcel && this.mineByName?.(info.parcel.owner) === true);
     if (info.airport) html += airportHtml(info.airport, row);
     if (info.rail) html += railStationHtml(info.rail, row);
     if (info.metro) html += metroStationHtml(info.metro, row);
@@ -600,6 +613,8 @@ export class UI {
     const moth = document.getElementById('bMoth');
     if (moth) moth.onclick = () => this.onMothball?.(info.x, info.y, !info.mothballed);
     panel.onclick = (e) => {
+      const ub = (e.target as HTMLElement).closest<HTMLElement>('[data-util]'); // a node's protect or grid import switch (utilities.ts)
+      if (ub) { this.onUtil?.(info.x, info.y, ub.dataset.util as 'protect' | 'import', ub.dataset.on === '1'); return; }
       const row = (e.target as HTMLElement).closest<HTMLElement>('[data-cid]');
       if (row) this.cb.onSelectCitizen(Number(row.dataset.cid));
     };
