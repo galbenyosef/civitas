@@ -141,6 +141,7 @@ export class Net {
       conn.onMessage((data) => {
         let msg: ClientMsg;
         try { msg = JSON.parse(data); } catch { return; }
+        if (process.env.NET_DEBUG) console.log('msg', msg.t, c.player?.id ?? '-');
         try { this.handle(c, msg); } catch (e) { console.error('handler error', e); }
       });
       conn.onClose(() => { this.clients.delete(c); this.w.playersDirty = true; if (c.player) this.leave(c.player.id); });
@@ -250,11 +251,12 @@ export class Net {
       this.w.playersDirty = true;
       return this.toast(c, 'Every technology unlocked', 'info');
     }
-    if (action === 'die' && typeof amount === 'number') { // a citizen dies of old age where they are (docs/remembrance.md)
-      const v = this.w.citizens.get(amount);
+    if (action === 'die' && typeof amount === 'number') { // a citizen dies of old age where they are (docs/remembrance.md); -1: someone at home with a partner and children
+      const v = amount >= 0 ? this.w.citizens.get(amount)
+        : [...this.w.citizens.values()].find((o) => o.state === CitizenState.Home && o.partner && this.w.citizens.has(o.partner) && [...this.w.citizens.values()].some((k) => k.par === o.id));
       if (!v) return this.toast(c, 'Nobody of that id', 'info');
       this.sim.death.die(v, Cause.OldAge);
-      return this.toast(c, `${nameFor(v.id, v.sn)} has died`, 'info');
+      return this.toast(c, `${nameFor(v.id, v.sn)} has died (#${v.id})`, 'info');
     }
     if (action === 'fire' && this.fires && Number.isInteger(x) && Number.isInteger(y)) {
       const [dx, dy] = this.w.doorOf(x!, y!), b = this.w.buildings.get(`${dx},${dy}`);

@@ -178,7 +178,7 @@ export const HEADLINES = {
   levelled: [
     (w: StoryWords) => `${cap(w.b!)} destroyed by ${w.what === 'Gas explosion' ? 'a gas explosion' : 'an explosion'} in ${w.place}`,
   ],
-  /** deaths in an incident (docs/remembrance.md, server sim/death.ts): `what` the first to die ("Ada Patel, 34"), `n` how many died */
+  /** deaths in an incident (docs/remembrance.md, server sim/death.ts): `what` the first to die ("Ada Patel (34)"), `n` how many died */
   deathFire: [
     (w: StoryWords) => (w.n! > 1 ? `${w.n} die in fire at ${w.b} in ${w.place}` : `${w.what} dies in fire at ${w.b} in ${w.place}`),
     (w: StoryWords) => (w.n! > 1 ? `Fire at ${w.b} in ${w.place} claims ${w.n} lives` : `Fire at ${w.b} in ${w.place} claims a life: ${w.what}`),

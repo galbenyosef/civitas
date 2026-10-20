@@ -217,6 +217,13 @@ Drill fires cost nothing, roll for nothing, and never burn a building down: one 
 saved by the bucket chain at 90% burnt. The features `fire-spread` and `fire-blast` in `SHOWCASE_FEATURES` check the row
 stands as touching homes in a fire station's reach and the works has at least six buildings within the blast's reach.
 
+## Deaths (docs/remembrance.md)
+
+Since death and remembrance, fires kill. When a fire is out (or a building blows up), before the damage, `Fires.onHarm` gives
+sim/death.ts the people inside: 18% each die when it burnt down with no crew, 12% × (share burnt when the crew came)² when
+a crew put it out (about 0.2% when they come at once), 30% in a blast and 55% when it flattens the building. The warning
+fire and the drills never kill, nor anything in a player's first hour. An incident's dead are one news story naming them.
+
 ## Checks
 
 `npx tsx packages/server/src/loadtest/fires.ts [--seed 1] [--n 24]`: a 1×1 Commons with its fire station swapped for a

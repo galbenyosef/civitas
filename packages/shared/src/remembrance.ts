@@ -52,7 +52,7 @@ export const DEATH = {
   /** ticks the hearse stands at the door collecting a body */
   collectDwell: Math.round(TPH * 0.4),
   /** tiles (Manhattan) a funeral director serves, and a resting place takes funerals from its door */
-  funeralReach: 60, restReach: 80,
+  funeralReach: 80, restReach: 80,
   /** a body waiting for burial space: looked at again this often; after mortuaryMaxDays the county takes it */
   mortuaryCheckHours: 2, mortuaryMaxDays: 10,
   /** no funeral director in reach (or before Remembrance): the county takes the body out of town and buries it this long after, for countyFee */
@@ -160,8 +160,8 @@ export const plotCapacity = (kind: number, ax: number, ay: number) => plotSpots(
 
 /** Headstone shapes the client draws (render/graves.ts): a rounded tablet, a square one with shoulders, a cross, a pillar, a ledger slab, a plaque. */
 export const Stone = { Rounded: 0, Square: 1, Cross: 2, Pillar: 3, Ledger: 4, Plaque: 5 } as const;
-/** Stone colours: grey granite, sandstone, slate, marble, red granite, black granite. */
-export const STONE_TONES = [0xa7a7a2, 0xc9b48e, 0x5e646c, 0xe9e6df, 0x9b5a4e, 0x2e3136];
+/** Stone colours: grey granite, sandstone, slate, marble, red granite, black granite, limestone. */
+export const STONE_TONES = [0xb9b9b3, 0xd6c29a, 0x7a818a, 0xf0ede6, 0xa8665a, 0x45494f, 0xcfcfc8];
 export interface StoneLook {
   shape: number;
   /** height, width (tiles), lean back and side (radians), turn off square (radians), nudge on the plot */
@@ -193,7 +193,7 @@ export function stoneLook(id: number, buried: number, now: number, plaque = fals
     else if (hash2(id * 3 + 1, week) < DEATH.visitedFlowers) flowers = hash2(id, week + 5) < 0.6 ? 1 : 2;
   }
   const bloom = BLOOMS[Math.floor(h4 * BLOOMS.length)];
-  if (plaque) return { shape: Stone.Plaque, h: 0.008, w: 0.05 + 0.012 * h1, lean: 0, tilt: 0, yaw: (h2 - 0.5) * 0.08, tone: h3 < 0.5 ? 3 : h3 < 0.8 ? 5 : 1, weather: weather * 0.4, flowers, bloom };
+  if (plaque) return { shape: Stone.Plaque, h: 0.026 + 0.006 * h2, w: 0.055 + 0.012 * h1, lean: 0, tilt: 0, yaw: (h2 - 0.5) * 0.08, tone: h3 < 0.5 ? 3 : h3 < 0.8 ? 5 : 1, weather: weather * 0.4, flowers, bloom };
   const shape = h1 < 0.38 ? Stone.Rounded : h1 < 0.6 ? Stone.Square : h1 < 0.72 ? Stone.Cross : h1 < 0.84 ? Stone.Ledger : Stone.Pillar;
   const h = shape === Stone.Ledger ? 0.025 + 0.012 * h2 : shape === Stone.Pillar ? 0.1 + 0.05 * h2 : 0.055 + 0.04 * h2;
   const w = shape === Stone.Ledger ? 0.06 + 0.012 * h3 : shape === Stone.Pillar ? 0.026 + 0.006 * h3 : 0.042 + 0.018 * h3;

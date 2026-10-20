@@ -9,7 +9,10 @@ import { TICKS_PER_DAY, TICKS_PER_HOUR, CAUSE_NOUN, CAUSE_DIED, KIND_NAMES, year
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
-const when = (tick: number) => `day ${Math.floor(tick / DAY)}, ${String(Math.floor((tick % DAY) / TPH)).padStart(2, '0')}:${String(Math.floor(((tick % TPH) / TPH) * 60)).padStart(2, '0')}`;
+const when = (tick: number) => {
+  const day = Math.floor(tick / DAY), t = tick - day * DAY; // ticks into the day, also before day 0 (the long dead)
+  return day < 0 ? `${yearOfDay(day)}` : `day ${day}, ${String(Math.floor(t / TPH)).padStart(2, '0')}:${String(Math.floor(((t % TPH) / TPH) * 60)).padStart(2, '0')}`;
+};
 const money = (n: number) => '$' + Math.round(n).toLocaleString();
 
 /** One relative or friend: living ones select the citizen, the dead open their own panel. */

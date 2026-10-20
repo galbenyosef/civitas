@@ -152,7 +152,7 @@ export class News {
   death(e: DeathStoryEvent): number | undefined {
     if (!e.dead.length) return undefined;
     const n = e.dead.length, first = e.dead[0];
-    const words: StoryWords = { b: this.buildingName(e.kind, e.x, e.y), place: this.placeName(e.x, e.y), what: `${first.name}, ${first.age}`, n };
+    const words: StoryWords = { b: this.buildingName(e.kind, e.x, e.y), place: this.placeName(e.x, e.y), what: `${first.name} (${first.age})`, n };
     const set: HeadlineSet = e.cause === Cause.Explosion ? 'deathBlast' : e.cause === Cause.Accident ? 'deathAccident' : 'deathFire';
     const st = this.add('death', e.x, e.y, (id) => headline(set, id, words), Math.min(95, 50 + 10 * n), { ...(e.owner ? { who: e.owner } : {}), b: e.kind, dead: e.dead.map((d) => d.id) });
     return st.id;

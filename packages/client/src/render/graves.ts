@@ -144,7 +144,7 @@ export class GravesView {
       geo.setAttribute('iShape', shape);
       const stones = new InstancedMesh(geo, this.stoneMat, list.length);
       const posies = new InstancedMesh(this.posyGeo, this.plainMat, list.length);
-      stones.castShadow = true; stones.receiveShadow = true; posies.castShadow = false;
+      stones.castShadow = true; stones.receiveShadow = false; posies.castShadow = false; // small stones receiving shadows go dark with acne
       let n = 0, f = 0;
       for (const { site, i } of list) {
         const st = this.world.structureAt(site.x, site.y)!;
@@ -162,7 +162,7 @@ export class GravesView {
         this.m.compose(this.p, this.q, this.s);
         stones.setMatrixAt(n, this.m);
         const tone = this.c.setHex(STONE_TONES[look.tone]);
-        tone.lerp(MOSS, look.weather * 0.45).multiplyScalar(1 - 0.28 * look.weather);
+        tone.lerp(MOSS, look.weather * 0.3).multiplyScalar(1 - 0.16 * look.weather);
         stones.setColorAt(n, tone);
         shape.setX(n, look.shape);
         this.picks.push({ x: wx, y: 0.012 + look.h * 0.6, z: wz, id });
