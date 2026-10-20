@@ -65,7 +65,7 @@ let closedSlot: [number, number, number] | null = null;
 for (const b of w.buildings.values()) {
   const h = adHostAt(env, b.x, b.y);
   if (!h) continue;
-  if (b.zone === Zone.Residential) homes++;
+  if (b.zone === Zone.Residential && b.level > 0) homes++; // a home being built has its site's hoarding: that is fine
   for (let i = 0; i * AD_STRIDE < h.slots.length; i++) {
     const s = AD_SIZES[h.slots[i * AD_STRIDE + 1]];
     if (adSlotOpen(env, h, i, b.x, b.y)) { bySize[s] = (bySize[s] ?? 0) + 1; open.push({ x: b.x, y: b.y, i, owner: w.parcelAt(b.x, b.y)?.owner ?? '' }); } else { closed++; closedSlot ??= [b.x, b.y, i]; }
@@ -93,6 +93,9 @@ for (let k = 1; k < AD.maxCampaigns; k++) ads.create(p, { theme: 1, claim: AD_CL
 ok(typeof ads.create(p, { theme: 1, claim: AD_CLAIMS.findIndex((c) => c.needs === null), look: 0 }, false) === 'string', `at most ${AD.maxCampaigns} campaigns`);
 for (const c of ads.campaignList()) if (c.owner === p.id && c.id !== cid) ads.end(p, undefined, c.id, true);
 
+// the ranks record begins before the first poster, so the first poster is a milestone of its own
+const ranks = new Ranks(w);
+ranks.check(p);
 console.log('3. rent');
 const m1 = p.money, sys1 = sys.money;
 // a frame on the Commons' land (another owner) and one on the player's own
@@ -121,28 +124,30 @@ const gm = onb.check(p).msg;
 const goals = gm.t === 'goals' ? gm.goals : null;
 ok(!!goals && (goals.active === 'adverts' || gm.completed?.id === 'adverts'), `the goal after "Somewhere to go" is "Run your first campaign" (${goals?.active}${gm.completed ? `, completed ${gm.completed.id}` : ''})`);
 ok(!!gm.completed && gm.completed.id === 'adverts', `it completes with Advertising, a campaign and ${ads.list().length} frames rented`);
-const ranks = new Ranks(w);
+g.step(); // a rank check is measured once a tick
 const rk = ranks.check(p).msg;
 ok(rk.t === 'rank' && (rk.rank.feed.some((m) => /first poster/i.test(m.text)) || !!rk.fresh?.some((m) => /first poster/i.test(m.text))), 'the milestone feed has "Your first poster goes up"');
 
 console.log('4. wear over the days, and 8. cost');
 const rentals0 = ads.list().length;
 const ages0 = new Map(ads.list().map((r) => [`${r.x},${r.y}#${r.i}`, r.age]));
-const m3 = p.money;
+const paid0 = ads.stats.rentPaid, gone0 = ads.stats.gone;
+let expected = 0;
+const rentNow = () => ads.list().reduce((a, r) => a + [2, 3, 6, 10, 8][r.s], 0);
 let t0 = performance.now(), ticks = 0;
 const tickMs = { sum: 0 };
 const orig = ads.tick.bind(ads);
 ads.tick = () => { const a = performance.now(); orig(); tickMs.sum += performance.now() - a; };
 for (let d = 0; d < DAYS; d++) {
-  for (let i = 0; i < DAY; i++) { g.step(); ticks++; }
+  for (let i = 0; i < DAY; i++) { if (w.tick % DAY === DAY - 1) expected += rentNow(); g.step(); ticks++; }
   const ws = ads.list().map((r) => adWear(adAge(r.age, r.rate, r.at, w.tick), adSeed(r.x, r.y, r.i, r.c)));
   log(`  day ${w.day}: ${ws.length} posters, wear ${ws.map((x) => x.toFixed(2)).join(' ')}, rates ${ads.list().map((r) => r.rate.toFixed(3)).join(' ')}`);
 }
 const wall = performance.now() - t0;
-ok(ads.list().length === rentals0, `every poster still up after ${DAYS} days (${ads.list().length})`);
+ok(ads.stats.unpaid === 0 && ads.list().length === rentals0 - (ads.stats.gone - gone0), `every poster still up after ${DAYS} days but those whose building was rebuilt (${ads.list().length} up, ${ads.stats.gone - gone0} came down with their wall)`);
 ok(ads.list().every((r) => r.age > (ages0.get(`${r.x},${r.y}#${r.i}`) ?? 0)), 'every poster aged');
-const daily = ads.list().filter((r) => w.parcelAt(r.x, r.y)?.owner !== p.id).reduce((a, r) => a + { 0: 2, 1: 3, 2: 6, 3: 10, 4: 8 }[r.s]!, 0);
-ok(Math.abs(m3 - p.money - daily * DAYS) < daily + 1, `rent charged each midnight: $${(m3 - p.money).toFixed(0)} over ${DAYS} days (about $${daily} a day on others' frontage)`);
+const paid = ads.stats.rentPaid - paid0;
+ok(paid > 0 && Math.abs(paid - expected) <= 10, `rent charged each midnight: $${paid} over ${DAYS} days, $${expected} due on the posters up at each midnight`);
 const bad = adAreaRate(0.35, 0, 0, 'poster'), good = adAreaRate(0.02, 3, 2, 'poster');
 const after = (rate: number, days: number, s: number) => adWear(rate * days, s);
 ok(after(bad, 3, 0.5) > 0.6 && after(good, 3, 0.5) < 0.08, `a neglected area tags a poster within 3 days (wear ${after(bad, 3, 0.5).toFixed(2)}), a well-served one keeps it clean (${after(good, 3, 0.5).toFixed(2)}); weeks: ${after(good, 21, 0.5).toFixed(2)}`);
@@ -159,7 +164,7 @@ if (victim) {
   for (let i = 0; i < DAY; i++) g.step();
   ok(ads.list().length === n0 - 1, `the poster on a building pulled down came down at midnight (${n0} -> ${ads.list().length})`);
 } else ok(false, 'a rented frame on a Commons shop to pull down');
-p.money = -ECONOMY_TUNING.overdraftLimit - 100;
+p.money = -ECONOMY_TUNING.overdraftLimit - 1e6; // past the overdraft, whatever the day's taxes bring in
 for (let i = 0; i < DAY; i++) g.step();
 ok(ads.list().length === 0, `an unpaid renter's posters came down at midnight (${ads.list().length} left)`);
 p.money = 20000;
