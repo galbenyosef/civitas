@@ -15,7 +15,8 @@ path as first built and measured, which stays as it is.
 
 A valley from the seed's terrain, no town anywhere. One country road comes in from the west edge and stops in the
 middle of a free 32×32 land charter that is already theirs. At the road's far end stands the gate, the motorway
-connection the rest of the world arrives through. $5,000 in the treasury. The clock reads 06:00, dawn: a frontier
+connection the rest of the world arrives through. $18,000 in the treasury ($5,000 when this review was written; raised
+with the cash floor of docs/ranks.md section 3). The clock reads 06:00, dawn: a frontier
 always starts at dawn, so nobody meets the overnight lull in their first half hour. Times are real time at 1×; local
 mode's 4× makes every number a quarter and pause holds any of them.
 
@@ -44,12 +45,12 @@ What the blank sheet breaks, and the fix in this pass:
 
 | Problem on an empty map | Why | Fix (this branch) |
 | --- | --- | --- |
-| No world, no road, no gate, no land | `seedCommons` is the only seeder; a player buys land | `seedFrontier`: the gate (kind 21) on a country road from the west edge to the middle of a 32×32 charter; `World.start = 'frontier'` in the snapshot; the first player to join gets the charter and `FRONTIER_MONEY` ($5,000); `START=frontier` on the server, "Start from zero" in local mode's new-game form (the default) |
+| No world, no road, no gate, no land | `seedCommons` is the only seeder; a player buys land | `seedFrontier`: the gate (kind 21) on a country road from the west edge to the middle of a 32×32 charter; `World.start = 'frontier'` in the snapshot; the first player to join gets the charter and `FRONTIER_MONEY` ($5,000 then, $18,000 since the cash floor of docs/ranks.md section 3); `START=frontier` on the server, "Start from zero" in local mode's new-game form (the default) |
 | **The stuck remote start**: nothing grows because residential demand is `jobs − population + 6` over the world, and with eight settlers and two handyman jobs that is 0 | growth() is world-wide, and here the town is the world | a young town's floor: while fewer than 24 people live on an owner's land, their lots grow as if demand were 12 (`FirstFive.youngTown`, one line in growth()); with the followers rule (spawn) the first two dozen beds fill behind the handyman's wages; after that the ordinary loop runs, and on a one-town world it is per town by construction |
 | Nobody to staff the handyman | builders are residents; homes take newcomers only once built | the camp's eight settlers, through the gate, at once (built already) |
 | Joining at night; the lull after the first shift | a shared clock | the frontier starts at 06:00; the starter crew's rest rule (built already) covers evening joins on a server |
 | The goals talk about the Commons | copy and the "show me" focus | frontier copy for the street and yard goals, the charter pre-completes Claim your plot, focus falls on the road end (`welcome.home`) |
-| $20,000 makes every choice free | START_MONEY | $5,000 on a frontier; the money floor is Audit #5's card, and this budget leaves it room (the opening below costs about $1,200) |
+| $20,000 makes every choice free | START_MONEY | $5,000 on a frontier; the money floor is Audit #5's card, and this budget leaves it room (the opening below costs about $1,200). Since raised to $18,000, with bigger rank targets on a frontier, so the treasury stays above $5,000 (docs/ranks.md section 3) |
 
 What this pass leaves as hooks: appeal and prospects (B2: a per-town score and "looked and left"), visitors who stay,
 settlement ranks (Audit #4), the overdraft and administration (Audit #5), a country-road gate kind with a lower rate
