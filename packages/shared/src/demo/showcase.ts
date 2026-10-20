@@ -698,7 +698,7 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     title: 'Settlement ranks',
     what: `A town works its way up from ${RANKS.map((r) => r.name).join(' to ')}. Each rank has needs measured on the player's own land (residents, jobs filled, shops, a park, police and fire cover, two-storey streets, days in the black, schools or a bus line), pays a charter grant when it is reached and, on a frontier, grows the free charter by a ring of land. The rank chip in the top bar shows the next rank's progress; its card lists the needs and a milestone feed, and each rank reached is celebrated with fireworks over the town, every shell its own. This stop plays a celebration over the town: the showcase is a sandbox, so it has no ranks of its own.`,
     how: 'Play a live world or a local game: the rank chip appears beside the treasury. Follow the goals card for the first hour; the rank card takes its place once the chain is done.',
-    facts: RANKS.slice(1).map((r): [string, string] => [r.name, `${r.needs.map((q) => `${q.target.toLocaleString('en-GB')} ${q.label}`).join(', ')}; $${r.grant.toLocaleString('en-GB')}, ${r.side}×${r.side} on a frontier`]),
+    facts: RANKS.slice(1).map((r): [string, string] => [r.name, `${r.needs.map((q) => `${q.target.toLocaleString('en-GB')}${q.frontier ? ` (${q.frontier.toLocaleString('en-GB')} on a frontier)` : ''} ${q.label}`).join(', ')}; $${r.grant.toLocaleString('en-GB')}, ${r.side}×${r.side} on a frontier`]),
   },
   'world-map': {
     title: 'The world map',

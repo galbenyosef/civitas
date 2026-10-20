@@ -1,3 +1,4 @@
+import { FRONTIER_MONEY, START_MONEY } from '@msimcity/shared';
 import { LocalGame, type LocalState } from './client';
 import type { SaveMeta } from './host';
 import './local.css';
@@ -124,8 +125,8 @@ export class SavesDialog {
     const fresh = h('details', { class: 'fresh' }, h('summary', {}, 'New game…'),
       h('p', { class: 'dim' }, 'The map comes from the seed: the same seed is the same land.'),
       h('div', { class: 'row' }, seedInput),
-      h('label', { class: 'chk' }, startFrontier, ' From zero: an empty valley, one road in, a free charter and $5,000. Pitch camp and build a town'),
-      h('label', { class: 'chk' }, startCommons, ' Beside the Commons: a ready-made district to grow against, $20,000'),
+      h('label', { class: 'chk' }, startFrontier, ` From zero: an empty valley, one road in, a free charter and $${FRONTIER_MONEY.toLocaleString('en-GB')}. Pitch camp and build a town`),
+      h('label', { class: 'chk' }, startCommons, ` Beside the Commons: a ready-made district to grow against, $${START_MONEY.toLocaleString('en-GB')}`),
       h('label', { class: 'chk' }, sandbox, ' Sandbox: every technology, unlimited funds, no goals'),
       h('div', { class: 'row' }, h('button', { class: 'btn pri', onclick: () => void this.newGame(seedOf(seedInput.value), sandbox.checked, info, saves, startCommons.checked ? 'commons' : 'frontier') }, 'Start new game')));
     this.body.replaceChildren(now, list, fresh, await this.storage());

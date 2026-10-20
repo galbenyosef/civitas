@@ -1,6 +1,6 @@
 import { Group, Mesh, MeshBasicMaterial, BufferGeometry, Float32BufferAttribute, DoubleSide } from 'three';
 import {
-  RANKS, TOP_RANK, NEED_HOW, TICKS_PER_DAY, TICKS_PER_HOUR, hash2, rankRewardText,
+  RANKS, TOP_RANK, NEED_HOW, TICKS_PER_DAY, TICKS_PER_HOUR, hash2, rankNeeds, rankRewardText,
   type RankDTO, type RankUp, type Milestone, type ServerMsg,
 } from '@msimcity/shared';
 import type { NetClient } from './net';
@@ -80,21 +80,22 @@ export class RanksUI {
     const r = this.dto;
     if (!r) return;
     const def = RANKS[r.rank], next = r.rank < TOP_RANK ? RANKS[r.rank + 1] : null;
-    const met = next ? next.needs.filter((q, i) => (r.have[i] ?? 0) >= q.target).length : 0;
+    const needs = rankNeeds(r.rank + 1, !!r.frontier);
+    const met = needs.filter((q, i) => (r.have[i] ?? 0) >= q.target).length;
     this.chip.classList.remove('hidden');
     this.chip.classList.toggle('on', this.cardShown());
-    const chipHtml = `<i class="rcrest r${r.rank}">${ROMAN[r.rank] || '·'}</i>${esc(def.name)}${next ? `<span class="rnext"> → ${esc(next.name)} ${met}/${next.needs.length}</span>` : r.mark ? `<span class="rnext"> · ${r.mark[0].toLocaleString('en-GB')}/${r.mark[1].toLocaleString('en-GB')} residents</span>` : ''}`;
+    const chipHtml = `<i class="rcrest r${r.rank}">${ROMAN[r.rank] || '·'}</i>${esc(def.name)}${next ? `<span class="rnext"> → ${esc(next.name)} ${met}/${needs.length}</span>` : r.mark ? `<span class="rnext"> · ${r.mark[0].toLocaleString('en-GB')}/${r.mark[1].toLocaleString('en-GB')} residents</span>` : ''}`;
     if (this.chip.innerHTML !== chipHtml) this.chip.innerHTML = chipHtml;
-    this.chip.title = next ? `Settlement rank: ${def.name}. Next: ${next.name} (${next.needs.map((q) => q.label).join(', ')}). Click for the rank card and milestones` : `Settlement rank: ${def.name}, the top rank. Click for the milestones`;
+    this.chip.title = next ? `Settlement rank: ${def.name}. Next: ${next.name} (${needs.map((q) => q.label).join(', ')}). Click for the rank card and milestones` : `Settlement rank: ${def.name}, the top rank. Click for the milestones`;
     const show = this.cardShown();
     this.card.classList.toggle('hidden', !show);
     if (!show) { this.cardHtml = ''; return; }
     const frontier = !!r.ring;
-    const bars = next ? next.needs.map((q, i) => {
+    const bars = needs.map((q, i) => {
       const cur = Math.min(r.have[i] ?? 0, q.target), pct = Math.round((100 * cur) / q.target);
       return `<div class="gpart${cur >= q.target ? ' done' : ''}"><span>${esc(q.label)}</span><span>${cur.toLocaleString('en-GB')} / ${q.target.toLocaleString('en-GB')}</span></div><div class="gbar"><i style="width:${pct}%"></i></div>`;
-    }).join('') : '';
-    const short = next?.needs.find((q, i) => (r.have[i] ?? 0) < q.target);
+    }).join('');
+    const short = needs.find((q, i) => (r.have[i] ?? 0) < q.target);
     const feed = r.feed.slice(0, 6).map((f) => `<li class="k-${f.kind}"><span class="fi">${KIND_ICON[f.kind]}</span><span class="ft">${esc(f.text)}</span><span class="fw">${when(f.tick)}</span></li>`).join('');
     const html = `
       <div class="ghead"><span class="gnum">Settlement rank</span><button class="gx" id="rHide" title="Hide (the rank chip at the top brings it back)">–</button></div>
