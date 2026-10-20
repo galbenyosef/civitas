@@ -25,7 +25,7 @@ export function familyRow(f: FamilyRef): string {
 export function deceasedHtml(d: DeceasedInfo): string {
   const row = (k: string, v: string | number) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
   const born = yearOfDay(d.born), died = yearOfDay(d.died / DAY);
-  let html = `<div class="stone"><div class="sname">${esc(d.name)}</div><div class="syears">${born} – ${died}</div><div class="sline">${d.state === 'cremated' ? 'Remembered here' : 'At rest'}</div></div>`;
+  let html = `<div class="stone"><div class="sname">${esc(d.name)}</div><div class="syears">${born} – ${died}</div><div class="sline">${d.state === 'cremated' ? 'Remembered here' : d.state === 'buried' ? 'At rest' : 'Remembered'}</div></div>`;
   html += `<div class="sub">${esc(d.name.split(' ')[0])} ${esc(CAUSE_DIED[d.cause] ?? 'died')} at ${d.age}, ${esc(d.where)}</div>`;
   html += row('Died', when(d.died));
   html += row('Cause', esc(CAUSE_NOUN[d.cause] ?? '—'));

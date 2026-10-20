@@ -141,7 +141,6 @@ export class Net {
       conn.onMessage((data) => {
         let msg: ClientMsg;
         try { msg = JSON.parse(data); } catch { return; }
-        if (process.env.NET_DEBUG) console.log('msg', msg.t, c.player?.id ?? '-');
         try { this.handle(c, msg); } catch (e) { console.error('handler error', e); }
       });
       conn.onClose(() => { this.clients.delete(c); this.w.playersDirty = true; if (c.player) this.leave(c.player.id); });
@@ -258,6 +257,7 @@ export class Net {
       this.sim.death.die(v, Cause.OldAge);
       return this.toast(c, `${nameFor(v.id, v.sn)} has died (#${v.id})`, 'info');
     }
+    if (action === 'funeralSoon') return this.toast(c, `${this.sim.death.hurry()} funeral(s) moved to within the hour`, 'info');
     if (action === 'fire' && this.fires && Number.isInteger(x) && Number.isInteger(y)) {
       const [dx, dy] = this.w.doorOf(x!, y!), b = this.w.buildings.get(`${dx},${dy}`);
       return this.toast(c, b && this.fires.ignite(b) ? `Set the ${KIND_NAMES[b.id]} at (${b.x}, ${b.y}) on fire` : 'Nothing there that can burn', 'info');

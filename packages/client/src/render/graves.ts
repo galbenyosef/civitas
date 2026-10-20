@@ -54,11 +54,12 @@ function posyGeometry(): BufferGeometry {
 }
 /** An open grave and its mound of earth under a green cloth. */
 function openGraveGeometry(): BufferGeometry {
-  return new Kit().box(0.066, 0.004, 0.12, 0, 0.012, 0, 0x2a2018).box(0.078, 0.004, 0.13, 0, 0.011, 0, 0x6a5038).box(0.05, 0.034, 0.11, 0.075, 0.012, 0, 0x7a5c3e).box(0.056, 0.006, 0.116, 0.075, 0.042, 0, 0x4f7a3c).build();
+  return new Kit().box(0.1, 0.004, 0.19, 0, 0.012, 0, 0x2a2018).box(0.12, 0.004, 0.21, 0, 0.011, 0, 0x6a5038).box(0.08, 0.05, 0.17, 0.12, 0.012, 0, 0x7a5c3e).box(0.088, 0.008, 0.18, 0.12, 0.06, 0, 0x4f7a3c).build();
 }
 /** A mourner: a long coat (the instance's colour) and, on its own mesh, the head. */
-function coatGeometry(): BufferGeometry { return new Kit().box(0.034, 0.012, 0.022, 0, 0, 0, 0x222222).part(new CylinderGeometry(0.013, 0.019, 0.075, 6).translate(0, 0.012 + 0.0375, 0), 0xffffff).box(0.04, 0.012, 0.024, 0, 0.078, 0, 0xffffff).build(); }
-function headGeometry(): BufferGeometry { return new Kit().part(new CylinderGeometry(0.011, 0.011, 0.02, 6).translate(0, 0.098, 0), 0xffffff).build(); }
+/** sized as the city's walkers are (render/people.ts: an adult's head top at about 0.39 tiles) */
+function coatGeometry(): BufferGeometry { return new Kit().box(0.07, 0.04, 0.05, 0, 0, 0, 0x222222).part(new CylinderGeometry(0.04, 0.058, 0.26, 7).translate(0, 0.04 + 0.13, 0), 0xffffff).box(0.115, 0.035, 0.06, 0, 0.27, 0, 0xffffff).build(); }
+function headGeometry(): BufferGeometry { return new Kit().part(new CylinderGeometry(0.031, 0.033, 0.07, 7).translate(0, 0.33, 0), 0xffffff).build(); }
 
 const COATS = [0x1b1c20, 0x23262e, 0x2e2a2c, 0x1f2a3a, 0x3a3236, 0x2b2b2b, 0x3b3f46, 0x352a3a].map((c) => new Color(c));
 const SKIN = [0xf1c8a6, 0xd9a47c, 0xb57d54, 0x8a5a3a, 0x5e3b26, 0xe8b996].map((c) => new Color(c));
@@ -215,7 +216,7 @@ export class GravesView {
       // mourners: those there now, or a few as they arrive; the grave's family gather on its far side, each their own
       const n = Math.min(DEATH.mournersMax + 2, Math.max(f.n, tick >= 0 && tick < f.t0 + DAY / 48 ? 1 : 2) + 1);
       for (let i = 0; i < n && nm < MAX_MOURNERS; i++) {
-        const h = hash2(f.id * 13 + i, 71), a = (i - (n - 1) / 2) * 0.62 + (h - 0.5) * 0.3, r = 0.1 + 0.035 * hash2(f.id + i, 73);
+        const h = hash2(f.id * 13 + i, 71), a = (i - (n - 1) / 2) * 0.55 + (h - 0.5) * 0.3, r = 0.2 + 0.06 * hash2(f.id + i, 73);
         // around the grave, on the side away from the road; facing it
         const ang = yaw + Math.PI + a;
         const mx = cx + Math.sin(ang) * r, mz = cz + Math.cos(ang) * r;

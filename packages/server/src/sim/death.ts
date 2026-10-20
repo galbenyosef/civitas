@@ -148,6 +148,8 @@ export class Death implements FleetService {
       w.deathLoaded = null;
     }
     for (const [id] of this.grief) { const c = w.citizens.get(id); if (c) this.setMood(c); }
+    // the dead still waiting for burial space when the world was saved badge their mortuaries again
+    for (const d of this.dead.values()) if (d.st === Body.Mortuary && d.svc === undefined && d.mort) this.badged.add(tileKey(...d.mort));
     w.deathSave = () => this.save();
   }
 
@@ -811,6 +813,19 @@ export class Death implements FleetService {
    */
   memoriesOf(c: Citizen): { dead: number; relation: string; cause: number; died: number; story?: number }[] {
     return this.mourningOf(c).map((r) => { const d = this.dead.get(r.id)!; return { dead: d.id, relation: r.relation, cause: d.cause, died: d.died, ...(d.story !== undefined ? { story: d.story } : {}) }; });
+  }
+
+  /** Dev servers (net.ts dev 'funeralSoon'): every service booked moves to a little over an hour from now. Returns how many. */
+  hurry(): number {
+    const now = this.w.tick;
+    let n = 0;
+    for (const d of this.dead.values()) {
+      if (d.svc === undefined || d.held || (d.st !== Body.Parlour && d.st !== Body.Mortuary) || this.hearse.has(d.id)) continue;
+      d.svc = now + Math.round(1.2 * TPH); d.sent = false;
+      for (const id of [d.partner, ...d.kids, d.par]) if (id) this.dayOff.set(id, Math.floor(d.svc / DAY));
+      n++;
+    }
+    return n;
   }
 
   /** A building as the panels and notices name it. */

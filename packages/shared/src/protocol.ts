@@ -540,7 +540,7 @@ export type ClientMsg =
   /** dev servers only (ignored in production): unlimited funds toggle, a cash grant (`amount`, default $100,000; negative takes
    *  money away, for economy runs from a lower start), or every technology */
   /** `fire`: set the building at (x, y) on fire now (server sim/fires.ts), for testing and screenshots */
-  | { t: 'dev'; action: 'unlimited' | 'money' | 'tech' | 'fire' | 'die'; on?: boolean; amount?: number; x?: number; y?: number }
+  | { t: 'dev'; action: 'unlimited' | 'money' | 'tech' | 'fire' | 'die' | 'funeralSoon'; on?: boolean; amount?: number; x?: number; y?: number }
   | { t: 'ping'; n: number }
   /** a train's tooltip (sim/rail.ts); `full` adds who and what is on board (the selected train's panel) */
   | { t: 'inspectTrain'; line: number; train: number; full?: boolean }

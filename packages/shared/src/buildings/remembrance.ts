@@ -161,7 +161,7 @@ export const churchyard: KindDef = {
   footprint: { w: 2, h: 2, door: [0, 1] },
   attrs: { ...QUIET },
   levels: [{
-    capacity: 0, wage: 0, cost: 700, upkeep: 6, work: 360, parking: { surface: 2, underground: 2 },
+    capacity: 0, wage: 0, cost: 700, upkeep: 6, work: 360, parking: { surface: 0, underground: 0 },
     attrs: { title: 'churchyard', visitorCapacity: 6, leisureValue: 1.5, radius: 8, fee: 120, plotCount: Math.min(plotCount(CY_A), plotCount(CY_B)) },
     designs: [
       { name: 'flint chapel with a bell-cote, a lych-gate and old yews', height: 0.76, attrs: { plots: CY_A }, ops: [
@@ -203,7 +203,7 @@ export const municipalCemetery: KindDef = {
   footprint: { w: 3, h: 3, door: [1, 2] },
   attrs: { ...QUIET },
   levels: [{
-    capacity: 0, wage: 0, cost: 1400, upkeep: 12, work: 620, parking: { surface: 4, underground: 4 },
+    capacity: 0, wage: 0, cost: 1400, upkeep: 12, work: 620, parking: { surface: 0, underground: 0 },
     attrs: { title: 'municipal cemetery', visitorCapacity: 10, leisureValue: 2, radius: 10, fee: 150, plotCount: Math.min(plotCount(MC_A), plotCount(MC_B)) },
     designs: [
       { name: 'twin Victorian chapels under a spire, an avenue of limes and a memorial cross', height: 1.0, attrs: { plots: MC_A }, ops: [
@@ -247,7 +247,7 @@ export const gardenCemetery: KindDef = {
   footprint: { w: 4, h: 4, door: [1, 3] },
   attrs: { ...QUIET, retireeAppeal: 1.3, dayAppeal: 0.4 },
   levels: [{
-    capacity: 0, wage: 0, cost: 2600, upkeep: 22, work: 1150, parking: { surface: 4, underground: 4 },
+    capacity: 0, wage: 0, cost: 2600, upkeep: 22, work: 1150, parking: { surface: 0, underground: 0 },
     attrs: { title: 'garden cemetery', visitorCapacity: 16, leisureValue: 3, radius: 12, fee: 260, plotCount: Math.min(plotCount(GC_A), plotCount(GC_B)), plotJitter: 0.05 },
     designs: [
       { name: 'Egyptian avenue to a circle of catacombs under a cedar, winding paths and monuments', height: 0.7, attrs: { plots: GC_A }, ops: [
@@ -301,7 +301,7 @@ export const crematorium: KindDef = {
   footprint: { w: 3, h: 2, door: [1, 1] },
   attrs: { ...QUIET, rest: 'cremation', retireeAppeal: 0.8 },
   levels: [{
-    capacity: 0, wage: 0, cost: 2200, upkeep: 30, work: 560, parking: { surface: 6, underground: 8 },
+    capacity: 0, wage: 0, cost: 2200, upkeep: 30, work: 560, parking: { surface: 0, underground: 0 },
     attrs: { title: 'crematorium', visitorCapacity: 8, leisureValue: 1.5, radius: 12, fee: 180, cremations: 6, plotCount: Math.min(plotCount(CR_A), plotCount(CR_B)) },
     designs: [
       { name: 'red-brick Italianate chapels with a campanile chimney, a cloister and a garden of remembrance', height: 1.42, attrs: { plots: CR_A }, ops: [
