@@ -114,7 +114,7 @@ export interface GoalsDTO {
  * it. The server sends the ones only it can see (builders, the books, the jam, boredom, newcomers), the client raises the
  * rest (night, a refused build on an empty treasury); either way the client shows at most one per HINT_GAP ticks.
  */
-export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night' | 'fire';
+export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night' | 'fire' | 'power';
 /** `panel` 'admin': the overdraft and administration panel (client finance.ts) */
 export interface HintDef { kind: 'tip' | 'alert'; msg: string; tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin' }
 export const HINTS: Record<HintId, HintDef> = {
@@ -132,6 +132,8 @@ export const HINTS: Record<HintId, HintDef> = {
   newcomers: { kind: 'tip', tool: 'motorway', panel: 'tech', msg: 'Newcomers are moving straight into your homes. Parking lots (T, $150) also brings the motorway connection: newcomers then drive in through it, and visitors and freight use it too.' },
   fire: { kind: 'alert', tool: 'firepost', panel: 'tech', msg: 'A fire has broken out. A staffed fire post or station sends its engine to fires within 14 tiles and keeps the damage down; without one a building burns down and you pay for it. Emergency services (T) brings the fire post.' },
   night: { kind: 'tip', msg: "It's night in the city. The light chip at the top right holds the view at mid-afternoon; click it again to follow the clock." },
+  // utilities (docs/utilities.md section 3.4): growth to two storeys held back by power
+  power: { kind: 'alert', tool: 'substation', panel: 'tech', msg: 'Buildings want power to grow to two storeys. Unlock Electrification (T) and place a substation beside your streets: its supply runs 10 road tiles along them, and the National Grid feeds it (at a price) while it is within 64 road tiles of a motorway connection.' },
 };
 export const isHintId = (id: string): id is HintId => id in HINTS;
 

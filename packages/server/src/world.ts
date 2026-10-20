@@ -12,6 +12,7 @@ import type { RankState } from './ranks';
 import type { FireSave } from './sim/fires';
 import type { AdvertsSave } from './sim/adverts';
 import type { NewsSave } from './sim/news';
+import type { UtilitiesSave } from '@msimcity/shared';
 
 export interface Chunk {
   cx: number; cy: number;
@@ -265,6 +266,9 @@ export class World {
   /** the news (sim/news.ts): what to save, set by the News module; and what a loaded snapshot carried, taken once by it */
   newsSave: (() => NewsSave) | null = null;
   newsLoaded: NewsSave | null = null;
+  /** utilities (sim/utilities.ts, docs/utilities.md): what to save, set by the Utilities module; and what a loaded snapshot carried, taken once by it */
+  utilitiesSave: (() => UtilitiesSave | null) | null = null;
+  utilitiesLoaded: UtilitiesSave | null = null;
   /** fired when builders finish a site (completeSite), after the tile shows the finished building: the news reports openings */
   onSiteCompleted: ((site: Site) => void) | null = null;
   /** merged lots since start (zones.ts): sites opened, lots absorbed, people moved, sites completed, people evicted at completion, structures broken back into lots */

@@ -10,6 +10,17 @@ export const overlayTexture = (() => {
 })();
 
 /**
+ * The power map (client/src/utilities.ts, docs/utilities.md section 4.5): one byte a tile, wrapped like the overlay's, how
+ * dark the tile is for lack of power: 0 normal (supplied, or never connected), about 40 a brownout, 255 a cut or a fault.
+ * The window shader reads it under each building and the street-lamp shader under each lamp.
+ */
+export const powerTexture = (() => {
+  const t = new DataTexture(new Uint8Array(OVL_SIZE * OVL_SIZE), OVL_SIZE, OVL_SIZE, RedFormat, UnsignedByteType);
+  t.magFilter = t.minFilter = NearestFilter; t.wrapS = t.wrapT = RepeatWrapping; t.generateMipmaps = false; t.needsUpdate = true;
+  return t;
+})();
+
+/**
  * Uniforms shared by every scene material. uNight is 0 by day and 1 at night,
  * uHour is the game clock (0-24) and uTime is wall-clock seconds for flicker.
  * Everything driven by them is staggered per window / per lamp so nothing in
@@ -28,6 +39,11 @@ export const sceneUniforms = {
   /** the data overlay (client/src/overlays.ts): 0 off, 1 a sequential ramp, 2 a diverging one; ground and buildings read uOvlMap */
   uOvl: { value: 0 },
   uOvlMap: { value: overlayTexture as Texture },
+  /** 1 while the power map holds anything dark (utilities.ts): the shaders skip the read otherwise */
+  uPow: { value: 0 },
+  uPowMap: { value: powerTexture as Texture },
+  /** what the congestion path paints on the roads: 0 traffic, 1 the power overlay's states (utilities.ts) */
+  uHeatMode: { value: 0 },
 };
 export const nightUniform = sceneUniforms.uNight;
 
@@ -67,6 +83,12 @@ varying vec2 vOrigin;
 varying vec3 vSky;
 ${SKY}`;
 
+/** The power map's read (powerTexture): 0 normal, up to 1 dark, by tile; 0 without a read while nothing is dark. */
+const POW_PARS = /* glsl */ `
+uniform float uPow;
+uniform sampler2D uPowMap;
+float mscPowAt(vec2 tile) { return uPow > 0.5 ? texture2D(uPowMap, (mod(tile, ${OVL_SIZE}.0) + 0.5) / ${OVL_SIZE}.0).r : 0.0; }`;
+
 const FRAG_PARS = /* glsl */ `
 uniform float uNight;
 uniform float uHour;
@@ -81,6 +103,7 @@ varying vec3 vLocalN;
 varying vec2 vOrigin;
 varying vec3 vSky;
 ${HASH}
+${POW_PARS}
 // coverage of [a, b] at x for a pixel footprint of half-width w (soft edge, so panes do not crawl)
 float mscBand(float x, float a, float b, float w) { return smoothstep(a - w, a + w, x) - smoothstep(b - w, b + w, x); }
 float mscRect(vec2 f, vec2 a, vec2 b, vec2 w) { return mscBand(f.x, a.x, b.x, w.x) * mscBand(f.y, a.y, b.y, w.y); }
@@ -462,6 +485,16 @@ if (vWin > 8.5) {
         if (cls > 2.5 && cls < 4.5 && h7 > 0.975) flick *= 0.35 + 0.65 * step(0.3, fract(sin(floor(uTime * 9.0) + h4 * 77.0) * 4375.5));
         glow *= shade * lampK;
         float gain = lit * flick * (0.85 + 0.5 * h5) * min(1.0, uNight * 1.6) * 1.8 * litK * (litK < 0.99 ? 0.75 + 0.5 * clamp(pu.y, 0.0, 1.0) : 1.0);
+        // power (client utilities.ts, docs/utilities.md 4.5): in a cut a candle burns in a few rooms (warm, flickering on its own
+        // phase) and the odd building runs a generator (bright and steady); a brownout dims the rest and makes them flicker
+        float pk = mscPowAt(floor(vOrigin));
+        if (pk > 0.004) {
+          float gen = step(mscHash(bseed + 4.4), 0.06);
+          if (pk > 0.5) {
+            gain *= gen + (1.0 - gen) * step(h3, 0.12) * (0.28 + 0.12 * sin(uTime * 8.0 + h4 * 40.0) + 0.06 * sin(uTime * 17.0 + h2 * 20.0));
+            glow = mix(glow, vec3(1.0, 0.56, 0.22), 1.0 - gen);
+          } else gain *= 1.0 - pk * (0.75 + 0.25 * sin(uTime * 11.0 + h2 * 30.0));
+        }
         totalEmissiveRadiance += glow * gain * pane;
         // an open shop lights its signboard a little
         totalEmissiveRadiance += signC * gain * sgn * 0.35 * nr;
@@ -508,6 +541,12 @@ if (vWin > 8.5) {
         float lamp;
         vec3 glow = mscGlow(cls, k, fract(k * 7.3), fract(k * 11.9), lamp);
         if (cls < 1.5 && lamp < 0.5 && t > 22.0 + 2.5 * fract(k * 5.1) && fract(k * 3.7) > 0.45) { glow = vec3(1.0, 0.62, 0.32); lamp = 1.0; }
+        float pkf = mscPowAt(floor(vOrigin)); // power, as for the near panes
+        if (pkf > 0.004) {
+          float genf = step(mscHash(bseed + 4.4), 0.06);
+          lit *= pkf > 0.5 ? genf + (1.0 - genf) * step(mscHash(seed + 21.7), 0.12) * 0.3 : 1.0 - 0.75 * pkf;
+          if (pkf > 0.5) glow = mix(glow, vec3(1.0, 0.56, 0.22), 1.0 - genf);
+        }
         fe += glow * (lamp > 0.5 ? 0.42 : 1.0) * lit * 1.1 * min(1.0, uNight * 1.6) * 1.8 * lp.z * pane;
       }
       diffuseColor.rgb = mix(diffuseColor.rgb, fb, farK);
@@ -574,11 +613,13 @@ const GROUND_FRAG_PARS = /* glsl */ `
 uniform float uNight;
 uniform float uTime;
 uniform float uHeat;
+uniform float uHeatMode;
 uniform float uUnder;
 varying float vRoad;
 varying float vHeat;
 varying vec3 vWorldP;
 ${HASH}
+${POW_PARS}
 // Light pool from the lamp (if any) standing on road tile \`tile\`.
 vec3 mscLamp(vec2 tile, vec2 p) {
   float h = mscHash(tile * 0.731 + 2.3);
@@ -593,6 +634,9 @@ vec3 mscLamp(vec2 tile, vec2 p) {
   float on = smoothstep(onThr - 0.04, onThr + 0.04, uNight);
   if (h5 < 0.05) on = 0.0; // dead lamp
   else if (h5 < 0.11) on *= 0.35 + 0.65 * step(0.2, sin(uTime * 19.0 + h3 * 50.0) * sin(uTime * 6.3 + h4 * 20.0)); // sputtering
+  float pl = mscPowAt(tile); // power (utilities.ts): out in a cut, dimmed and flickering in a brownout
+  if (pl > 0.5) on = 0.0;
+  else if (pl > 0.004) on *= 1.0 - pl * (0.8 + 0.2 * sin(uTime * 12.0 + h3 * 30.0));
   return vec3(1.0, 0.78, 0.45) * pool * on * (0.7 + 0.6 * h3);
 }`;
 
@@ -654,7 +698,13 @@ if (uOvl > 0.5) {
 
 /** Congestion overlay: painted over the lit result so it reads the same by day and night. */
 const HEAT = /* glsl */ `
-if (uHeat > 0.5 && vRoad >= 16.0) {
+if (uHeat > 0.5 && vRoad >= 16.0 && uHeatMode > 0.5) {
+  // the power overlay (utilities.ts heat bytes): supplied green, brownout amber, cut or fault red, a dead node's streets grey
+  if (vHeat > 0.05) {
+    vec3 pc = vHeat < 0.375 ? vec3(0.31, 0.83, 0.42) : vHeat < 0.625 ? vec3(0.95, 0.76, 0.19) : vHeat < 0.875 ? vec3(0.91, 0.22, 0.17) : vec3(0.55, 0.57, 0.62);
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, pc, 0.72);
+  }
+} else if (uHeat > 0.5 && vRoad >= 16.0) {
   vec3 low = vec3(0.31, 0.83, 0.42), mid = vec3(0.95, 0.76, 0.19), high = vec3(0.91, 0.22, 0.17);
   vec3 heat = vHeat < 0.5 ? mix(low, mid, vHeat * 2.0) : mix(mid, high, (vHeat - 0.5) * 2.0);
   gl_FragColor.rgb = mix(gl_FragColor.rgb, heat, 0.55 + 0.35 * vHeat);

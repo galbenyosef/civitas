@@ -28,6 +28,7 @@ import type { Issues } from './sim/issues';
 import type { Fires } from './sim/fires';
 import type { Adverts } from './sim/adverts';
 import type { News } from './sim/news';
+import type { Utilities } from './sim/utilities';
 import { Overlays } from './overlays';
 import { ISSUE_TUNING, OVERLAY_COUNT, Issue } from '@msimcity/shared';
 
@@ -112,6 +113,8 @@ export class Net {
   adverts: Adverts | null = null;
   /** the news story log (sim/news.ts): the 'news' message, media centres' building panels, the news overlay; set by game.ts */
   news: News | null = null;
+  /** utilities (sim/utilities.ts): the power networks' state and links, the link tools, the node settings, the building panel; set by game.ts */
+  utilities: Utilities | null = null;
   /** server tick time over the last minute in ms, filled by index.ts's main loop and sent with the stats message */
   tickStats: { avg: number; p95: number; max: number } | null = null;
   /** game ticks per TICK_MS of wall time, sent with the stats message when it is not 1 so the client's clock follows a paused or
@@ -122,7 +125,7 @@ export class Net {
   /** false while a test city is still being filled: new sockets are closed so nobody joins a half-grown world */
   accepting = true;
   /** onboarding goals and advisor hints (goals.ts); none in test cities and demos */
-  private onboarding: Onboarding | null;
+  onboarding: Onboarding | null;
   /** settlement ranks and the milestone feed (ranks.ts); none in test cities and demos */
   readonly ranks: Ranks | null;
   /** spectate: player records made by a visitor's hello, removed when the last socket with that player closes */
@@ -202,6 +205,7 @@ export class Net {
       case 'inspectBoat': return this.send(c, { t: 'boat', id: Number(m.id), info: this.harbours?.inspectBoat(Number(m.id)) ?? null });
       case 'overlay': return this.setOverlay(c, Number(m.ch));
       case 'adCampaign': case 'adRent': case 'adEnd': return this.advert(c, m);
+      case 'utilLink': case 'utilNode': return this.utility(c, m);
     }
   }
 
@@ -277,6 +281,7 @@ export class Net {
     if (this.fires) this.send(c, { t: 'fires', f: this.fires.dtos() });
     if (this.adverts) this.send(c, { t: 'ads', ...this.adverts.dto() });
     if (this.news) this.send(c, { t: 'news', s: this.news.recent(), all: true });
+    if (this.utilities) { this.send(c, this.utilities.linksMsg()); this.send(c, this.utilities.stateMsg()); }
     c.goalsSig = undefined; this.goals(c);
     c.rankSig = undefined; this.rankTo(c);
     c.probSig = undefined; this.problemsTo(c);
@@ -426,6 +431,35 @@ export class Net {
     return techFor(feature)?.name ?? feature;
   }
 
+  /** Utilities (sim/utilities.ts, docs/utilities.md): take down a trunk link, pin a node, switch grid import. */
+  private utility(c: Client, m: Extract<ClientMsg, { t: 'utilLink' | 'utilNode' }>) {
+    const u = this.utilities, p = c.player!;
+    if (!u) return;
+    const x = Math.floor(Number(m.x)), y = Math.floor(Number(m.y));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (m.t === 'utilLink') {
+      const r = u.remove(p, x, y);
+      return typeof r === 'string' ? this.toast(c, r) : this.toast(c, `Trunk line taken down: ${r.tiles.length / 2} tiles, half the cost back`, 'info');
+    }
+    const r = u.setNode(p, x, y, { ...(typeof m.protect === 'boolean' ? { protect: m.protect } : {}), ...(typeof m.importOn === 'boolean' ? { importOn: m.importOn } : {}) });
+    if (r) this.toast(c, r, /^(That|Not)/.test(r) ? 'error' : 'info');
+  }
+
+  /** Pylons or buried cable (sim/utilities.ts lay): a drag from a plant or node to another. */
+  private trunk(c: Client, tool: 'pylons' | 'cable', tiles: [number, number][], dev: boolean) {
+    const p = c.player!, u = this.utilities;
+    if (!u) return this.toast(c, 'No utilities on this server');
+    if (!dev) { const need = this.locked(p, tool); if (need) return this.toast(c, `${need} is needed before you can lay a trunk line`); }
+    const path: [number, number][] = [];
+    for (const pair of tiles.slice(0, 2 * 160 + 1)) {
+      const x = Math.floor(Number(pair?.[0])), y = Math.floor(Number(pair?.[1]));
+      if (Number.isFinite(x) && Number.isFinite(y)) path.push([x, y]);
+    }
+    const r = u.lay(p, tool === 'pylons' ? 'overhead' : 'buried', path);
+    if (typeof r === 'string') return this.toast(c, r);
+    this.toast(c, `${tool === 'pylons' ? 'Pylons' : 'Buried cable'} laid: ${r.tiles.length / 2} tiles. The networks join at the next hour`, 'info');
+  }
+
   /** Adverts (sim/adverts.ts, docs/adverts.md): create a campaign, put it up on slots, take posters down. */
   private advert(c: Client, m: Extract<ClientMsg, { t: 'adCampaign' | 'adRent' | 'adEnd' }>) {
     const a = this.adverts, p = c.player!;
@@ -502,6 +536,7 @@ export class Net {
     if (DRAFT_TOOLS.has(tool) && !this.cfg.devTools) return this.toast(c, 'That building is still a draft');
     if (tool === 'runway') return this.runway(c, tiles, dev);
     if (tool === 'rail') return this.track(c, tiles, dev);
+    if (tool === 'pylons' || tool === 'cable') return this.trunk(c, tool, tiles, dev);
     if (tool === 'roundabout' || tool === 'flyover') return this.junction(c, tool, tiles, dev);
     let spent = 0, zoned = false;
     const recount = new Set<number>();
@@ -909,6 +944,8 @@ export class Net {
     if (info && mothballable(b!) && this.w.parcelAt(dx, dy)?.owner === c.player?.id) info.mothballable = true;
     const fire = info && this.fires?.describe(dx, dy);
     if (info && fire) info.fire = fire;
+    const util = info && this.utilities?.info(b!);
+    if (info && util) info.utilities = util;
     const media = info && this.news?.describe(b!);
     if (info && media) info.media = media;
     this.send(c, { t: 'building', x, y, info });
@@ -1118,6 +1155,11 @@ export class Net {
     if (this.adverts?.changed) { this.adverts.changed = false; this.broadcast({ t: 'ads', ...this.adverts.dto() }); }
     // the news (sim/news.ts): stories new or changed since the last frame
     if (this.news?.fresh.size) this.broadcast({ t: 'news', s: this.news.drain() });
+    // utilities (sim/utilities.ts): every node's state after each hourly solve or a fault; the links when one changed; owners' notices
+    const ut = this.utilities;
+    if (ut?.stateChanged) { ut.stateChanged = false; this.broadcast(ut.stateMsg()); }
+    if (ut?.linksChanged) { ut.linksChanged = false; this.broadcast(ut.linksMsg()); }
+    if (ut?.notices.length) for (const n of ut.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     if (this.adverts?.notices.length) for (const n of this.adverts.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed
