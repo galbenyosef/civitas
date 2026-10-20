@@ -83,6 +83,13 @@ export class Ranks {
     return s;
   }
 
+  /** Something that happened to the player's town (an explosion, sim/fires.ts) as a line of the feed: news once, no key. */
+  incident(p: Player, text: string) {
+    const s = this.state(p);
+    s.feed.unshift({ tick: this.w.tick, kind: 'incident', text });
+    if (s.feed.length > FEED_KEEP) s.feed.length = FEED_KEEP;
+  }
+
   private met(rank: number, have: number[]) { return this.needs(rank).every((q, i) => have[i] >= q.target); }
 
   /** A rank's needs here: a frontier world's targets differ (shared rankNeeds). */

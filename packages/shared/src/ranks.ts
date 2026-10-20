@@ -93,8 +93,8 @@ export function charterRing(ch: { x: number; y: number; w: number; h: number }, 
 export interface Milestone {
   /** the world tick it happened */
   tick: number;
-  /** what kind of thing: a rank reached, a goal done, a need met, a population or jobs mark, a first of something, research, money */
-  kind: 'rank' | 'goal' | 'need' | 'people' | 'jobs' | 'first' | 'tech' | 'money' | 'land';
+  /** what kind of thing: a rank reached, a goal done, a need met, a population or jobs mark, a first of something, research, money, an incident (an explosion) */
+  kind: 'rank' | 'goal' | 'need' | 'people' | 'jobs' | 'first' | 'tech' | 'money' | 'land' | 'incident';
   text: string;
 }
 
