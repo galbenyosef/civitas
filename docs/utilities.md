@@ -149,8 +149,8 @@ A node cut, faulted or overloaded is off for the hour: its buildings have no pow
 ### 3.5 Bills and costs (built)
 
 - **Bills are income:** a new `LedgerCat` `'bills'` (protocol.ts). Every supplied building pays its units at the
-  owner's tariff, collected hourly. The tariff is $0.05 a unit by default, a little under grid import's $0.06 and well
-  over a gas plant's fuel, so imported power costs a little and your own earns; a tariff slider (0.5× to 2×) is a hook.
+  owner's tariff, collected hourly. The tariff is $0.06 a unit by default, the same as grid import, so imported power
+  breaks even and your own (a gas plant's fuel is $0.02 a unit) earns; a tariff slider (0.5× to 2×) is a hook.
 - **Fuel and import are spending:** a new `LedgerCat` `'fuel'` for thermal plants' fuel per unit generated and grid
   import per unit imported.
 - Both count in the "days in the black" sum (`running`, server goals.ts), as taxes and wages do.
@@ -218,7 +218,8 @@ so a first substation can import at once.
 
 - **Faults** are deterministic, rolled each game hour from a hash of the node or link, the hour and the world seed, so
   demos replay. A node fails about once in 25 game days; a link about once per 40 tiles per game week. There are none
-  in the first 7 game days of a world, and none in a sandbox unless the sandbox opts in (`Utilities.faults`).
+  in the first 7 game days of a world, none for an owner without Power stations (ut2: no depot to send a van from), and
+  none in a sandbox (a demo's blackout drill aside, `Utilities.drills`).
 - A fault cuts its node (or removes its link from the network) at once.
 - **Repair vans** are a new fleet kind, `FleetKind.UtilityVan` (10; SchoolBus took 9). A power depot's lineworkers
   (40% of its staff) roll the road role. The nearest depot of the owner with a lineworker on shift sends a van; the
@@ -239,17 +240,29 @@ so a first substation can import at once.
   is read by the window shader and the street-lamp shader. In a cut, lamps go out and windows drop to a candle share:
   a few flicker warm and a few buildings (6%, by hash) are on generators, bright and steady. In a brownout lamps dim by
   15% and some flicker. When power returns the area comes back block by block (4×4-tile blocks) over 20 to 60 s.
-- **Pylons and cable:** `render/powerlines.ts` draws each overhead link's towers (each with its own lean and paint
-  fade) and the sagging wires between them; buried links show only in the link tool's preview.
+- **Pylons and cable:** `client/src/utilities.ts` draws each overhead link's towers (each with its own lean and paint
+  fade, a bird on some spans) and the sagging wires between them, red while the link is faulted. Buried links show as a
+  dashed red line while a link tool or the power overlay is on. A link drag shows green or red tiles and its cost.
 - **The building panel:** `BuildingInfo.utilities` (section 5) for every building: what it gets, from which node, its
   bill; a node, plant or depot shows its network's supply, demand, state, import and faults.
 - **The showcase:** a power district with a gas power station, two substations, a pylon run, a buried cable, a wind
-  row and a depot, and tour stops for the plant, the pylons and a scripted blackout at 21:00 (section 8).
+  row and a depot, and tour stops for the plant, the pylons and a scripted blackout (section 4.7).
 
 ### 4.6 Underground view
 
 The utility runs under the streets (section 6) are **not drawn in phase 1**. Drawing them is cheap only once the
 underground view's chips exist (U7): one merged mesh per chunk per utility, built lazily from the client's reach.
+
+### 4.7 The showcase
+
+The **Power** section (shared/src/demo/showcase.ts) is open land west of districts B1 and C1, its two roads joining the
+perimeter road at x = −35: a gas and a coal power station, a grid supply point by the road into town, three wind
+turbines, a solar farm and a power depot. Two substations stand on lots of B1 and C1 by the perimeter road. A pylon line
+runs from the coal station to the C1 substation and a buried cable from the solar farm to the B1 one (the seeder lays
+them as the tools would, `demoUtilLinks`, into the save's `utilities.links`). Every three game hours the C1 substation
+faults (`demoBlackouts`, `Utilities.drills`): its streets go dark, the depot's van drives round, and after its two hours
+on site they light up again block by block. Tour stops: each plant and node, the pylon line, the buried cable and the
+blackout (shown at 21:36). `SHOWCASE_FEATURES` has `power-plant`, `power-pylons`, `power-buried` and `power-blackout`.
 
 ## 5. Data and wire (built)
 

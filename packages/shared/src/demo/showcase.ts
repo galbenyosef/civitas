@@ -476,7 +476,7 @@ export const SECTIONS: DemoSection[] = [
   },
   {
     id: 'power', name: 'Power',
-    blurb: 'A power district west of the town (docs/utilities.md): a gas and a coal power station, a grid supply point by the road into town, a row of wind turbines, a solar farm and a power depot whose vans repair faults, joined to two substations in the town by streets, a pylon line and a buried cable. Every evening at 21:00 a fault blacks out the streets round one substation until the van has fixed it.',
+    blurb: 'A power district west of the town (docs/utilities.md): a gas and a coal power station, a grid supply point by the road into town, a row of wind turbines, a solar farm and a power depot whose vans repair faults, joined to two substations in the town by streets, a pylon line and a buried cable. Every few game hours a fault blacks out the streets round one substation until the van has fixed it.',
     land: [{ name: 'Power station', rect: POWER_LAND }],
     roads: [[[-57, 10], [-36, 10]], [[-57, 20], [-36, 20]], [[-57, 11], [-57, 19]]],
     // the in-town substations stand on lots of districts B1 and C1 beside the perimeter road
@@ -495,7 +495,7 @@ export const SECTIONS: DemoSection[] = [
       { id: 'power-pylons', name: 'The pylon line', mode: 'overhead', from: [-45, 13], to: POWER_SUB_A },
       { id: 'power-buried', name: 'The buried cable', mode: 'buried', from: [-47, 22], to: POWER_SUB_B },
     ],
-    spots: [{ id: 'power-blackout', spot: 'blackout', name: 'A blackout at 21:00', rect: [POWER_SUB_A[0] - 4, POWER_SUB_A[1] - 2, 12, 9], inspect: POWER_SUB_A, hour: 21.6 }],
+    spots: [{ id: 'power-blackout', spot: 'blackout', name: 'A blackout', rect: [POWER_SUB_A[0] - 4, POWER_SUB_A[1] - 2, 12, 9], inspect: POWER_SUB_A, hour: 21.6 }],
   },
   {
     id: 'airport', name: 'Airport',
@@ -779,7 +779,7 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   },
   blackout: {
     title: 'Blackout',
-    what: 'A fault on a substation cuts the power to every street its supply runs along: the lamps go out, and the windows drop to a candle here and there, with the odd building on a generator burning bright. The nearest power depot sends a repair van; while the crew digs the streets stay dark, and when they are done the lights come back block by block. Homes in a cut do not grow. In this demo the substation by the perimeter road fails every evening at 21:00.',
+    what: 'A fault on a substation cuts the power to every street its supply runs along: the lamps go out, and the windows drop to a candle here and there, with the odd building on a generator burning bright. The nearest power depot sends a repair van; while the crew digs the streets stay dark, and when they are done the lights come back block by block. Homes in a cut do not grow. In this demo the substation by the perimeter road fails every three game hours, so its streets are dark more often than not.',
     how: `Keep a power depot (Power stations) near the middle of your network: a fault stays dark while its van drives there and the crew works ${UTIL.repairHours} game hours. Without one a contractor takes ${UTIL.contractorHours}. A second substation whose streets overlap keeps a fault's patch on the network's other links.`,
     facts: [['Faults', `about one per substation in 25 game days, none in the first ${UTIL.faultsFromDay} days of a world`], ['Repair', `${UTIL.repairHours} game hours on site`], ['Never cut', 'a patch with a hospital or police station, in rolling cuts']],
   },
@@ -1239,13 +1239,13 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   // ---- the news (docs/media.md N2): the media centre's channel reports the fire drill, so the News panel has stories
   { id: 'news', caption: 'the news: the media centre\'s channel reporting the fire drill in the News panel', tour: 'media-centre',
     scenario: (ss) => placedKind('media-centre')(ss) && ss.some((s) => s.spots?.some((sp) => sp.spot === 'house-fire')) },
-  // ---- utilities (docs/utilities.md): power stations, pylons and a buried cable to town, and the evening blackout drill
+  // ---- utilities (docs/utilities.md): power stations, pylons and a buried cable to town, and the blackout drill
   { id: 'power-plant', caption: 'a power station feeding the town', tour: 'gas-plant', scenario: placedKind('gas-plant'), seeded: (d) => (d.kinds.get(KIND_ID['gas-plant']) ?? 0) > 0 },
   { id: 'power-pylons', caption: 'an overhead pylon line from a power station to a substation in town', tour: 'power-pylons',
     scenario: (ss) => ss.some((s) => s.utilLinks?.some((l) => l.mode === 'overhead')), seeded: (d) => !!d.utilLinks?.some((l) => l.mode === 'overhead') },
   { id: 'power-buried', caption: 'a buried cable from a plant to a substation in town', tour: 'power-buried',
     scenario: (ss) => ss.some((s) => s.utilLinks?.some((l) => l.mode === 'buried')), seeded: (d) => !!d.utilLinks?.some((l) => l.mode === 'buried') },
-  { id: 'power-blackout', caption: 'a scripted blackout at 21:00 and the repair van that ends it', tour: 'power-blackout',
+  { id: 'power-blackout', caption: 'a scripted blackout and the repair van that ends it', tour: 'power-blackout',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'blackout' && sp.inspect)) && placedKind('power-depot')(ss) },
   // ---- settlement ranks (docs/ranks.md): a sandbox has none, so the tour stop plays the celebration over the town
   { id: 'settlement-ranks', caption: 'settlement ranks (a rank-up celebration over the town)', tour: 'ranks',
@@ -1403,7 +1403,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   return out;
 }
 
-/** The substations a demo's blackout drill faults every evening at 21:00 (server sim/utilities.ts `drills`, set by index.ts): its 'blackout' spots' doors. */
+/** The substations a demo's blackout drill faults every few game hours (server sim/utilities.ts `drills`, set by index.ts): its 'blackout' spots' doors. */
 export function demoBlackouts(id: DemoId): DemoXY[] {
   return demoSections(id).flatMap((s) => (s.spots ?? []).filter((sp) => sp.spot === 'blackout' && sp.inspect).map((sp) => sp.inspect!));
 }

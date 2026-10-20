@@ -50,8 +50,8 @@ export const UTIL = {
   nightFrom: 22, nightTo: 6,
   /** a plant runs at full output with this share of its staff on the payroll */
   fullStaffShare: 0.5,
-  /** bills: the default tariff a unit; grid import a unit (about 2.5× a gas plant's) */
-  tariff: 0.05, importPrice: 0.06,
+  /** bills: the default tariff a unit, and grid import a unit (about 2.5× what a gas plant's fuel costs): imported power breaks even, your own earns */
+  tariff: 0.06, importPrice: 0.06,
   /** road steps from a node's door to a motorway connection's within which the network can take grid import */
   importReach: 64,
   /** links: dollars a tile, overhead and buried, and buried under water; towers every `pylonEvery` tiles */

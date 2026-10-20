@@ -1,6 +1,6 @@
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, Zone, FleetKind, MOTORWAY_KIND, KIND_NAMES,
-  capacityOf, tileKey, hash2, isRoad, terrainOf, Terrain, kindManifest, signSource, signText, chunkKey, chunkOf, trackDragPath,
+  capacityOf, tileKey, hash2, isRoad, hasFeature, terrainOf, Terrain, kindManifest, signSource, signText, chunkKey, chunkOf, trackDragPath,
   UTIL, UTIL_WEATHER, UtilRole, UtilState, UTIL_STATE_WORDS, UTIL_ROLE_OF, UTIL_SUPPLY_OF, UTIL_NODE_CAP_OF, UTIL_IMPORT_OF, UTIL_FUEL_OF,
   UtilityField, Unions, utilityReach, solveNetwork, powerDemand, availability, linkCost, chunkUtilSig, utilKey, isMotorwayAt,
   type UtilEnv, type UtilNode, type SolveNode, type UtilLinkDTO, type LinkMode, type UtilitiesSave, type FaultSave, type UtilityInfo, type NetworkInfo,
@@ -15,8 +15,9 @@ const SOLVE_AT = 41;
 const DISPATCH_EVERY = 10;
 /** a fault a van could not reach this many times is left to the contractor */
 const MAX_TRIES = 3;
-/** the hour a demo's blackout drill faults its substations (showcase 'blackout' spots) */
-const DRILL_HOUR = 21;
+/** a demo's blackout drill faults its substations every so many game hours (showcase 'blackout' spots): with the van's
+ *  drive and two hours' work the streets are dark most of the time, so the tour stop (lit for 21:36) nearly always shows it */
+const DRILL_EVERY = 3;
 const DX = [1, -1, 0, 0], DY = [0, 0, 1, -1];
 
 interface Fault extends FaultSave {
@@ -59,7 +60,7 @@ export class Utilities implements FleetService {
   faultsOn = true;
   /** switched off whole (loadtest/utilities.ts --bench: the tick cost without utilities) */
   off = false;
-  /** a demo's blackout drill (index.ts, showcase demoBlackouts): these substations' doors fault every evening at DRILL_HOUR */
+  /** a demo's blackout drill (index.ts, showcase demoBlackouts): these substations' doors fault every DRILL_EVERY game hours */
   drills: [number, number][] = [];
   /** the state of each node by door key after the last solve */
   readonly nodeState = new Map<number, { state: number; load: number }>();
@@ -270,7 +271,7 @@ export class Utilities implements FleetService {
       }
     }
     this.rollFaults(hourIndex);
-    if (this.drills.length && Math.floor(hour) === DRILL_HOUR) for (const [x, y] of this.drills) {
+    if (this.drills.length && hourIndex % DRILL_EVERY === 0) for (const [x, y] of this.drills) {
       const k = utilKey(x, y), i = this.field.indexOf(k);
       if (i >= 0 && !this.faultOn('node', k)) this.openFault('node', k, nodes[i].owner, x, y);
     }
@@ -409,13 +410,17 @@ export class Utilities implements FleetService {
     const w = this.w;
     if (!this.faultsOn || this.sandbox || w.day < UTIL.faultsFromDay) return;
     const tick = w.tick;
+    // faults come with the bigger grid: only an owner who can build a power depot (Power stations) has them, so a town
+    // on its first substations never sits dark waiting for a contractor it can do nothing about
+    const can = new Map<string, boolean>();
+    const able = (o: string) => { let v = can.get(o); if (v === undefined) can.set(o, v = hasFeature(w.players.get(o)?.tech ?? [], 'powerdepot')); return v; };
     for (const n of this.field.nodes) {
-      if (n.owner === 'sys' || this.faultOn('node', n.key)) continue;
+      if (n.owner === 'sys' || !able(n.owner) || this.faultOn('node', n.key)) continue;
       const p = UTIL.nodeFaultPerHour * UTIL_WEATHER.faultMul(n.x, n.y, tick, false);
       if (hash2((n.key % 1000003) * 3 + (w.seed % 977), hourIndex * 7 + 11) < p) this.openFault('node', n.key, n.owner, n.x, n.y);
     }
     for (const l of this.links) {
-      if (this.faultOn('link', l.id)) continue;
+      if (!able(l.owner) || this.faultOn('link', l.id)) continue;
       const p = UTIL.linkFaultPerTileHour * (l.tiles.length / 2) * UTIL_WEATHER.faultMul(l.a[0], l.a[1], tick, l.mode === 'overhead');
       if (hash2(l.id * 131 + (w.seed % 977), hourIndex * 13 + 5) < p) this.openFault('link', l.id, l.owner, l.a[0], l.a[1]);
     }
