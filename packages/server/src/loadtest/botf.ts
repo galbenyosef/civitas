@@ -11,6 +11,14 @@
  *
  * Used by loadtest/ranks.ts (the frontier cash floor). The treasury is read from the world after every loop, so the low
  * point is the true one, not an hourly sample.
+ *
+ * How it matches play.mts: the same blocks in the same order, the same thresholds ($700 spare for a technology or a
+ * yard, $900 for a row, cover first when the card asks, a yard a game day while 20 lots wait) and the same order of
+ * moves each game hour, on its FRONTIER=1 FOLLOW=1 RINGS=1 path only. What differs is time: a sleep of n ms is n/200
+ * loops (one loop is 200 ms on the server), and a reply arrives within the loop, so the bot never falls behind a busy
+ * server. Logging, screenshots, JOIN_HOUR and the Commons path are left out. On the same code the two agree within
+ * the run-to-run spread (docs/ranks.md section 3): before the cash floor, seeds 1-12 gave medians of 17.9 / 42.5 /
+ * 83.3 / 124.5 min against the WebSocket bot's 17.3 / 48.6 / 83.3 / 105.9.
  */
 import {
   CHUNK_SIZE, RANKS, TECH, rankNeeds, ZONE_COST, TICKS_PER_DAY, TICK_MS, isRoad, zoneOf,
@@ -32,6 +40,7 @@ class LocalBot {
   toasts: { kind: string; msg: string }[] = []; pendingToasts: { kind: string; msg: string }[] = [];
   goals: any = null; rank: any = null;
   rankUps: { t: number; rank: number; grant: number }[] = [];
+  done: { t: number; id: string }[] = [];
   private onMsg: ((d: string) => void) | null = null;
   /** called after every game loop (the cash watch) */
   afterLoop = () => {};
@@ -71,7 +80,7 @@ class LocalBot {
         break;
       }
       case 'rank': this.rank = m.rank; if (m.up) this.rankUps.push({ t: this.day + this.dayFrac, ...m.up }); break;
-      case 'goals': this.goals = m.goals; break;
+      case 'goals': this.goals = m.goals; if (m.completed) this.done.push({ t: this.day + this.dayFrac, id: m.completed.id }); break;
       case 'hint': { const o = { kind: 'hint:' + m.id, msg: m.msg ?? m.id }; this.toasts.push(o); this.pendingToasts.push(o); break; }
     }
   }
@@ -317,5 +326,6 @@ async function play(b: LocalBot, minutes: number, log?: (min: number, what: stri
   }
   const ups: number[] = [];
   for (const u of b.rankUps) { ups[u.rank - 1] = minOf(u.t - T0); log?.(ups[u.rank - 1], `rank ${u.rank} +$${u.grant}`); }
+  for (const g of b.done) log?.(minOf(g.t - T0), `goal ${g.id} done`);
   return { ups, low: Math.round(low.v), lowAt: low.at, hourly, residents: b.me.progress.housed ?? 0 };
 }
