@@ -126,6 +126,22 @@ function schoolBus(): BufferGeometry {
   for (const [x, z] of [[0.19, 0.1], [-0.17, 0.1], [0.19, -0.1], [-0.17, -0.1]]) k.wheel(0.045, 0.035, x, 0.045, z, 0x151515);
   return lampLenses(k.build());
 }
+/** a hearse (docs/remembrance.md): a long black estate, a glass rear compartment with a chrome rail, the coffin (its own part) inside when loaded */
+function hearse(): BufferGeometry {
+  const k = new Kit();
+  k.box(0.42, 0.085, 0.18, 0, 0.04, 0, 0xffffff)                                  // body, in the instance colour (black, or a deep grey or burgundy)
+    .box(0.12, 0.07, 0.16, 0.1, 0.125, 0, 0x2f3b4d)                               // the driver's cab glass
+    .box(0.24, 0.075, 0.166, -0.08, 0.125, 0, 0x3d4a5a)                           // the long glass of the coffin compartment
+    .box(0.24, 0.008, 0.168, -0.08, 0.2, 0, 0xffffff)                             // the roof, in the instance colour
+    .box(0.4, 0.006, 0.182, 0, 0.09, 0, 0xc9ccd2)                                 // a chrome rail along the side
+    .box(0.025, 0.02, 0.035, 0.21, 0.07, 0.06, 0xfff2b0, LAMP.head).box(0.025, 0.02, 0.035, 0.21, 0.07, -0.06, 0xfff2b0, LAMP.head)
+    .box(0.015, 0.02, 0.035, -0.21, 0.07, 0.06, 0xd62020, LAMP.tail).box(0.015, 0.02, 0.035, -0.21, 0.07, -0.06, 0xd62020, LAMP.tail);
+  for (const [x, z] of [[0.13, 0.095], [-0.14, 0.095], [0.13, -0.095], [-0.14, -0.095]]) k.wheel(0.04, 0.035, x, 0.04, z, 0x151515);
+  return lampLenses(k.build());
+}
+/** the coffin in a hearse's glass compartment, with flowers on its lid (the instance colour) */
+function coffin(): BufferGeometry { return new Kit().box(0.19, 0.035, 0.06, -0.08, 0.13, 0, 0x6a4428).box(0.07, 0.014, 0.04, -0.08, 0.165, 0, 0xffffff).build(); }
+
 /** an amber beacon on the roof of a sweeper or bin lorry, flashing in its own rhythm */
 function beacon(): BufferGeometry { return new Kit().box(0.022, 0.02, 0.022, 0, 0, 0, 0xffffff).build(); }
 
@@ -137,6 +153,9 @@ const COURIER = [0xd9302c, 0x2f5fb5, 0xf2b705, 0x4f2a7a, 0x2a8a4a].map((c) => ne
 const BINS = [0x2e7d32, 0x3a3a3a, 0x2a5db0, 0x6d4c2f, 0x8a8f96].map((c) => new Color(c));
 const SIGN_FREE = new Color(0xfffbe0), SIGN_HIRED = new Color(0x3a3833), BADGE = new Color(0xa88bff), HIVIS = new Color(0xf28c28), BEACON = new Color(0xffa31a), DIM = new Color(0x5a4a30);
 const WHITE = new Color(0xffffff);
+/** hearses: mostly black, some a deep grey, a few burgundy or silver; the wreath on the coffin */
+const HEARSE_PAINT = [0x111216, 0x111216, 0x16181d, 0x2a2c31, 0x3b1a22, 0x8d9096].map((c) => new Color(c));
+const WREATH = [0xf2f0ea, 0xd23a5a, 0xe7c13e, 0xb64d8a].map((c) => new Color(c));
 const tmpC = new Color();
 
 /** One model's instances, plus the selected vehicle's own copy on layer 1 (the first-person camera never sees it). */
@@ -171,7 +190,7 @@ export class FleetMeshes {
   private parts: Part[] = [];
   private cab: Part; private sign: Part; private badge: Part;
   private bike: Part; private moped: Part; private rider: Part; private box: Part; private person: Part;
-  private van: Part; private lorry: Part; private bin: Part; private sweeper: Part; private beacon: Part; private schoolBus: Part;
+  private van: Part; private lorry: Part; private bin: Part; private sweeper: Part; private beacon: Part; private schoolBus: Part; private hearse: Part; private coffin: Part;
   private m = new Matrix4(); private l = new Matrix4(); private q = new Quaternion(); private p = new Vector3(); private s = new Vector3(1, 1, 1);
   private axisY = new Vector3(0, 1, 0); private axisZ = new Vector3(0, 0, 1);
 
@@ -193,13 +212,15 @@ export class FleetMeshes {
     this.sweeper = add(sweeper(), vm, 300, true);
     this.beacon = add(beacon(), glow, 600);
     this.schoolBus = add(schoolBus(), vm, 300, true);
+    this.hearse = add(hearse(), vm, 120, true);
+    this.coffin = add(coffin(), vm, 120);
   }
   begin() { for (const p of this.parts) p.begin(); }
   end() { for (const p of this.parts) p.end(); }
 
   /** The existing body whose beams, blinker positions and eye height fit a fleet kind (render/citizens.ts tables). */
   static body(kind: number): FleetBody {
-    return kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 'sedan' : kind === FleetKind.CourierVan || kind === FleetKind.TradesVan ? 'van' : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? 'truck' : kind === FleetKind.SchoolBus ? 'bus' : null;
+    return kind === FleetKind.Taxi || kind === FleetKind.PrivateHire || kind === FleetKind.Hearse ? 'sedan' : kind === FleetKind.CourierVan || kind === FleetKind.TradesVan ? 'van' : kind === FleetKind.BinLorry || kind === FleetKind.Sweeper ? 'truck' : kind === FleetKind.SchoolBus ? 'bus' : null;
   }
   /** Eye height for the first-person view, tile units. */
   static eye(kind: number): number { return kind === FleetKind.Bicycle || kind === FleetKind.Moped ? 0.14 : kind === FleetKind.BinLorry || kind === FleetKind.SchoolBus ? 0.24 : kind === FleetKind.Taxi || kind === FleetKind.PrivateHire ? 0.16 : 0.21; }
@@ -208,6 +229,7 @@ export class FleetMeshes {
     if (kind === FleetKind.Taxi) return TAXI_PAINT[Math.floor(hash2(id, 3) * TAXI_PAINT.length)].getHex();
     if (kind === FleetKind.BinLorry) return 0xf2f2ee;
     if (kind === FleetKind.SchoolBus) return 0xf2b705;
+    if (kind === FleetKind.Hearse) return HEARSE_PAINT[Math.floor(hash2(id, 3) * HEARSE_PAINT.length)].getHex();
     return kind === FleetKind.PrivateHire ? CAR_PAINT[Math.floor(hash2(id, 3) * CAR_PAINT.length)].getHex() : 0xf4f4f2;
   }
 
@@ -270,6 +292,11 @@ export class FleetMeshes {
       case FleetKind.SchoolBus:
         body(this.schoolBus, tmpC.setScalar(0.86 + 0.14 * hash2(id, 5))); // some buses are fresher from the paint shop than others
         if (working) { this.flash(id, now, 0.27, 0.245, 0.07); this.flash(id + 1, now, -0.27, 0.245, -0.07); } // hazards while pupils get on
+        return;
+      case FleetKind.Hearse:
+        body(this.hearse, HEARSE_PAINT[Math.floor(hash2(id, 3) * HEARSE_PAINT.length)]);
+        if (loaded) at(this.coffin, WREATH[Math.floor(hash2(id, 5) * WREATH.length)], 0, 0, 0);
+        if (working) at(this.person, DIM.clone().multiplyScalar(0.3), -0.26, 0, 0.12 + 0.02 * hash2(id, 13), -Math.PI / 2); // the funeral director stands by the back door
         return;
       case FleetKind.Sweeper:
         body(this.sweeper, tmpC.setHex(hash2(id, 5) < 0.5 ? 0xf2a33a : 0xf5f5f0));

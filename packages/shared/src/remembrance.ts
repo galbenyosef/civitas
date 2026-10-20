@@ -263,6 +263,13 @@ export interface RemembranceInfo {
   held?: number;
 }
 
+/**
+ * The year a game day falls in, for headstones: a game week is a year of a citizen's life (server sim/life.ts LIFE.daysPerYear),
+ * and day 0 is EPOCH_YEAR, so someone who died at 81 on day 12 reads "1946 – 2027".
+ */
+export const EPOCH_YEAR = 2026;
+export const yearOfDay = (day: number) => EPOCH_YEAR + Math.floor(day / 7);
+
 /** The day and hour a service is due for someone whose body reached the funeral director at `tick` (hashed per person). */
 export function serviceTick(id: number, tick: number): number {
   const days = DEATH.serviceDaysMin + Math.floor(hash2(id, 621) * (DEATH.serviceDaysMax - DEATH.serviceDaysMin + 1));

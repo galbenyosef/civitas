@@ -100,7 +100,9 @@ export class Onboarding {
     if (!g) return;
     const def = g.active ? GOAL_BY_ID.get(g.active) : undefined;
     const skip = this.d.world.start === 'frontier' && g.done.includes('plot') ? 1 : 0; // a frontier's charter claims the plot before the card is seen
-    const n = g.done.length - skip, total = GOALS.length - skip;
+    // event goals (the burial goal after a first death, docs/remembrance.md) are not in the chain's count
+    const chain = GOALS.filter((x) => !x.event);
+    const n = g.done.filter((id) => !GOAL_BY_ID.get(id)?.event).length - skip, total = chain.length - skip;
     this.chip.classList.remove('hidden');
     this.chip.classList.toggle('on', !g.skipped && !this.collapsed && !!def);
     this.chip.textContent = g.skipped ? 'goals' : def ? `goals ${n}/${total}` : 'goals ✓';
@@ -108,7 +110,7 @@ export class Onboarding {
     const show = !g.skipped && !this.collapsed && !!def;
     this.card.classList.toggle('hidden', !show);
     if (!show || !def) return;
-    const next = GOALS.slice(GOALS.indexOf(def) + 1, GOALS.indexOf(def) + 1 + GOAL_PREVIEW);
+    const next = def.event ? chain.filter((x) => !g.done.includes(x.id)).slice(0, GOAL_PREVIEW) : chain.slice(chain.indexOf(def) + 1, chain.indexOf(def) + 1 + GOAL_PREVIEW);
     const bars = def.parts.map((p, i) => {
       const cur = Math.min(g.parts[i] ?? 0, p.target), pct = Math.round((100 * cur) / p.target);
       return `<div class="gpart"><span>${esc(p.label)}</span><span>${cur} / ${p.target}</span></div><div class="gbar"><i style="width:${pct}%"></i></div>`;
@@ -116,7 +118,7 @@ export class Onboarding {
     const reward = rewardText(def, techName);
     const fr = this.d.world.start === 'frontier' ? def.frontier : undefined; // a frontier's words (docs/first-five.md section 0)
     this.card.innerHTML = `
-      <div class="ghead"><span class="gnum">Goal ${n + 1} of ${total}</span><button class="gx" id="gHide" title="Hide (the goals chip at the top brings it back)">–</button></div>
+      <div class="ghead"><span class="gnum">${def.event ? 'A new goal' : `Goal ${n + 1} of ${total}`}</span><button class="gx" id="gHide" title="Hide (the goals chip at the top brings it back)">–</button></div>
       <div class="gtitle">${esc(def.title)}</div>
       <div class="ghow">${esc(fr?.how ?? def.how)}</div>
       <div class="gwhy">${esc(fr?.why ?? def.why)}</div>

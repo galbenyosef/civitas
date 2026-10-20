@@ -91,7 +91,8 @@ const T = town();
 {
   const { w, g, fd, rest } = T, D = deathOf(g);
   ok(fd?.id === FUNERAL_KIND && fd.occupants > 0, `the funeral director at (${fd?.x}, ${fd?.y}) is staffed (${fd?.occupants} staff)`);
-  ok(rest?.id === CHURCHYARD_KIND && plotCapacity(CHURCHYARD_KIND, ...(w.structureAt(rest.x, rest.y) ? [w.structureAt(rest.x, rest.y)!.ax, w.structureAt(rest.x, rest.y)!.ay] as [number, number] : [rest.x, rest.y])) >= 24, `a churchyard at (${rest?.x}, ${rest?.y}) with room`);
+  const st = rest && w.structureAt(rest.x, rest.y);
+  ok(rest?.id === CHURCHYARD_KIND && !!st && plotCapacity(CHURCHYARD_KIND, st.ax, st.ay) >= 24, `a churchyard at (${rest?.x}, ${rest?.y}) with ${st ? plotCapacity(CHURCHYARD_KIND, st.ax, st.ay) : 0} plots`);
   toHour(g, 7);
   const c = couples(w).find((x) => Math.abs(x.hx - fd.x) + Math.abs(x.hy - fd.y) < 40)!;
   const partner = w.citizens.get(c.partner)!;
