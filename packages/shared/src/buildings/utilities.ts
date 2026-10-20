@@ -250,14 +250,14 @@ export const solarFarm: KindDef = {
     designs: [
       { name: 'five rows of panels, an inverter kiosk and a fence', height: 0.2, ops: [
         slab(2, 2, 0x86b06a),
-        ...repeat(5, (r) => panelRow(-0.75, -0.75 + r * 0.32, 7, 0.25)).flat(),
+        ...[0, 1, 2, 3, 4].flatMap((r) => panelRow(-0.75, -0.75 + r * 0.32, 7, 0.25)),
         ...cabinet(0.7, 0.82, 0.24),
         ...fence(0, -0.97, 1.96, true, 'grey', 0.07), ...fence(-0.97, 0, 1.96, false, 'grey', 0.07), ...fence(0.97, 0, 1.96, false, 'grey', 0.07),
       ] },
       { name: 'four long arrays with a track between them and a hedge', height: 0.2, ops: [
         slab(2, 2, 0x86b06a),
         ['box', 0.12, 0.012, 1.9, -0.05, 0.02, 0, GRAVEL],
-        ...repeat(4, (r) => [...panelRow(-0.85, -0.7 + r * 0.42, 3, 0.26, 0.24, 0.22), ...panelRow(0.2, -0.7 + r * 0.42, 3, 0.26, 0.24, 0.22)]).flat(),
+        ...[0, 1, 2, 3].flatMap((r) => [...panelRow(-0.85, -0.7 + r * 0.42, 3, 0.26, 0.24, 0.22), ...panelRow(0.2, -0.7 + r * 0.42, 3, 0.26, 0.24, 0.22)]),
         ...cabinet(-0.05, 0.85, 0.2),
         ['box', 1.96, 0.08, 0.06, 0, 0.02, -0.95, 'hedge'],
       ] },

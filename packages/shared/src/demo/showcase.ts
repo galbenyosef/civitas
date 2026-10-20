@@ -28,6 +28,7 @@ import { zoneOf, levelOf, Zone } from '../tile';
 import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
 import { FIRE } from '../fires';
 import { AD_SIZE, AD_SIZES, type AdSize } from '../buildings/adslot';
+import { UTIL, type LinkMode } from '../utilities';
 import { AD } from '../adverts';
 
 /**
@@ -87,6 +88,8 @@ export interface DemoZone { zone: 'residential' | 'commercial' | 'industrial' | 
 export interface DemoRunway { id: string; from: DemoXY; to: DemoXY }
 /** railway track: each drag as a player makes it (rail.ts trackDragPath: the longer axis first, one corner) */
 export interface DemoTrack { id: string; name: string; drags: readonly (readonly [DemoXY, DemoXY])[] }
+/** a power trunk link (docs/utilities.md section 4.2) dragged as the pylon or cable tool drags it (rail.ts trackDragPath), from a plant or node door to another */
+export interface DemoUtilLink { id: string; name: string; mode: LinkMode; from: DemoXY; to: DemoXY }
 /**
  * A road bridge (bridges.ts planBridge) whose deck runs from `from` to `to`, both water tiles in a line, with road on
  * the banks beyond them. `style` forces the style (else the tool's choice); `landmark` is the catalogue landmark a
@@ -144,6 +147,8 @@ export interface DemoSection {
   tracks?: DemoTrack[];
   junctions?: DemoJunction[];
   bridges?: DemoBridge[];
+  /** power trunk links (docs/utilities.md), laid after the placements they join */
+  utilLinks?: DemoUtilLink[];
   lines?: DemoLine[];
   blocks?: DemoBlock[];
   spots?: DemoSpot[];
@@ -635,7 +640,7 @@ export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER |
  * tool fails the typecheck here until it is listed, and `demo:check` then fails until the showcase uses it.
  */
 type SurfaceTool = Exclude<Tool, 'road' | 'bulldoze' | KindToolId>;
-export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true };
+export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, pylons: true, cable: true };
 /** Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. */
 export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, ferry: true, freight: true };
 
@@ -669,6 +674,18 @@ const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
     what: 'One road lifted over the other on a short deck: the two never meet, so nobody waits at the crossing. Nobody can turn there either; drivers who want to plan round it.',
     how: 'Pick Flyover and click a crossroads whose road carries on straight both sides (the ramps go there). The east-west road goes over when it can; click the flyover again to put the other road on top. Bulldozing it leaves a crossroads.',
     facts: [['Tool', 'Flyover (no key), click a crossroads'], ['Footprint', 'the crossing tile, ramps on the tiles either side'], ['Needs', 'four roads meeting, plain straight road either side of the deck'], ['Technology', techLine('flyover')], ['Cost', `${money(FLYOVER_COST)}, swapping the deck is free`]],
+  },
+  pylons: {
+    title: 'Pylons',
+    what: 'An overhead trunk line: lattice towers every few tiles with the wires sagging between them, joining a power station to a substation (or a substation to a motorway connection, for the National Grid). Cheap, and it passes over anything, but nobody wants to live under one.',
+    how: 'Pick Pylons in the Power grid group and drag from a power station, substation or grid supply point to another: the line runs along the longer axis, then turns once. Every tile must be your land or unowned. Click a line with the tool to take it down (half the cost comes back).',
+    facts: [['Tool', 'Pylons (no key), drag'], ['Needs', 'a plant or node of yours at each end'], ['Technology', techLine('pylons')], ['Cost', `${money(UTIL.overheadCost)} a tile`]],
+  },
+  cable: {
+    title: 'Buried cable',
+    what: 'A trunk line under the ground: nothing to see but the cable joint pits, and no blight on the land it crosses. It costs four times as much as pylons, and more under water.',
+    how: 'Pick Buried cable in the Power grid group and drag from a plant or node to another, as with pylons. Click a line with the tool to take it down.',
+    facts: [['Tool', 'Buried cable (no key), drag'], ['Needs', 'a plant or node of yours at each end'], ['Technology', techLine('cable')], ['Cost', `${money(UTIL.buriedCost)} a tile, ${money(UTIL.buriedWaterCost)} under water`]],
   },
 };
 /** A bridge on the tour (not a tool of its own: the road tool lays it over water). */
@@ -1307,7 +1324,9 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   }
   const all = (f: (s: DemoSection) => unknown[] | undefined) => sections.flatMap((s) => f(s) ?? []);
   for (const tool of Object.keys(SURFACE_TOOLS) as SurfaceTool[]) {
-    const n = tool === 'runway' ? all((s) => s.runways).length : tool === 'rail' ? all((s) => s.tracks).length : all((s) => s.junctions?.filter((j) => j.tool === tool)).length;
+    const n = tool === 'runway' ? all((s) => s.runways).length : tool === 'rail' ? all((s) => s.tracks).length
+      : tool === 'pylons' || tool === 'cable' ? all((s) => s.utilLinks?.filter((l) => l.mode === (tool === 'pylons' ? 'overhead' : 'buried'))).length
+        : all((s) => s.junctions?.filter((j) => j.tool === tool)).length;
     if (!n) out.push(`no ${tool} is painted in the showcase`);
   }
   const lines = all((s) => s.lines) as DemoLine[];
