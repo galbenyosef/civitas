@@ -21,6 +21,8 @@ A pad is part of a building design: the tierkit `helipad(x, y, z, r)` helper dra
 | commercial (1×1, level 3) | Haiku's tower with helipad | roof |
 | Buckingham Palace | the east front | a square of lawn beside the Victoria Memorial |
 
+The media centre's tower carries a `'news'` pad (docs/media.md N1): its helicopter has no routine timetable and flies to stories instead (section 7 there, shared/src/newsHelis.ts `newsHelisAt`, drawn here alongside the others).
+
 Big Ben, the Shard, the Gherkin and the other spires and domes have none. The 1×1 hospital and level-3 office existed when `buildings:check` took its model snapshot, so their new geometry is re-snapshotted there (`HELIPAD_FIXED`); their heights are unchanged.
 
 `padAt(x, y, env)` reads only tile words, aux bytes and sub bytes. It picks the design (`designPick`, as `render/models.ts variant` does) and places the pad exactly as `render/chunkView.ts` places the model: a structure centred on its footprint and turned by its orientation, a 1×1 building turned to face its road (or by hash when it has none) and scaled by its hash. Unfinished buildings have no pad. A pad's id is a hash of the anchor tile; its service comes from the kind (hospital family: medical, police family: police, Buckingham Palace: royal, anything else: corporate); a parked helicopter faces the building's front.
