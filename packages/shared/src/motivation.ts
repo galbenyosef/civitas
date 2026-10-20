@@ -55,6 +55,11 @@ export const MOTIVE = {
    * household looks at homes with chance lookHome x (1.2 - Roots) and moves if one beats theirs by moveMargin. Nobody
    * looks again within settleDays of a move or a new job.
    */
+  /**
+   * an essential workplace under half staffed recruits: a plain worker living within recruitRadius tiles takes a place
+   * there with chance recruitChance a day (sim/motivation.ts recruit)
+   */
+  recruitRadius: 16, recruitChance: 0.3,
   lookJob: 0.012, switchMargin: 0.22, lookHome: 0.01, moveMargin: 0.12, settleDays: 7,
   /** how far a household looks for a new home (tiles), and how many candidates it compares at most */
   moveRadius: 30, homeOptions: 12,
