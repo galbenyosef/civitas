@@ -129,11 +129,12 @@ function schoolBus(): BufferGeometry {
 /** a hearse (docs/remembrance.md): a long black estate, a glass rear compartment with a chrome rail, the coffin (its own part) inside when loaded */
 function hearse(): BufferGeometry {
   const k = new Kit();
-  k.box(0.42, 0.085, 0.18, 0, 0.04, 0, 0xffffff)                                  // body, in the instance colour (black, or a deep grey or burgundy)
-    .box(0.12, 0.07, 0.16, 0.1, 0.125, 0, 0x2f3b4d)                               // the driver's cab glass
-    .box(0.24, 0.075, 0.166, -0.08, 0.125, 0, 0x3d4a5a)                           // the long glass of the coffin compartment
-    .box(0.24, 0.008, 0.168, -0.08, 0.2, 0, 0xffffff)                             // the roof, in the instance colour
-    .box(0.4, 0.006, 0.182, 0, 0.09, 0, 0xc9ccd2)                                 // a chrome rail along the side
+  // painted in the vertex colours (the instance colour only varies the sheen: a black hearse multiplied black would lose its glass)
+  k.box(0.42, 0.085, 0.18, 0, 0.04, 0, 0x17181d)                                  // body
+    .box(0.12, 0.07, 0.16, 0.1, 0.125, 0, 0x4f6274)                               // the driver's cab glass
+    .box(0.24, 0.075, 0.166, -0.08, 0.125, 0, 0x7d93a8)                           // the long glass of the coffin compartment
+    .box(0.24, 0.008, 0.168, -0.08, 0.2, 0, 0x17181d)                             // the roof
+    .box(0.4, 0.006, 0.182, 0, 0.09, 0, 0xdfe2e6)                                 // a chrome rail along the side
     .box(0.025, 0.02, 0.035, 0.21, 0.07, 0.06, 0xfff2b0, LAMP.head).box(0.025, 0.02, 0.035, 0.21, 0.07, -0.06, 0xfff2b0, LAMP.head)
     .box(0.015, 0.02, 0.035, -0.21, 0.07, 0.06, 0xd62020, LAMP.tail).box(0.015, 0.02, 0.035, -0.21, 0.07, -0.06, 0xd62020, LAMP.tail);
   for (const [x, z] of [[0.13, 0.095], [-0.14, 0.095], [0.13, -0.095], [-0.14, -0.095]]) k.wheel(0.04, 0.035, x, 0.04, z, 0x151515);
@@ -153,8 +154,8 @@ const COURIER = [0xd9302c, 0x2f5fb5, 0xf2b705, 0x4f2a7a, 0x2a8a4a].map((c) => ne
 const BINS = [0x2e7d32, 0x3a3a3a, 0x2a5db0, 0x6d4c2f, 0x8a8f96].map((c) => new Color(c));
 const SIGN_FREE = new Color(0xfffbe0), SIGN_HIRED = new Color(0x3a3833), BADGE = new Color(0xa88bff), HIVIS = new Color(0xf28c28), BEACON = new Color(0xffa31a), DIM = new Color(0x5a4a30);
 const WHITE = new Color(0xffffff);
-/** hearses: mostly black, some a deep grey, a few burgundy or silver; the wreath on the coffin */
-const HEARSE_PAINT = [0x111216, 0x111216, 0x16181d, 0x2a2c31, 0x3b1a22, 0x8d9096].map((c) => new Color(c));
+/** hearses: the sheen of each one's black paint (a factor on the vertex colours); the wreath on the coffin */
+const HEARSE_PAINT = [0xffffff, 0xf4f4f4, 0xe6e6ea, 0xfff0f0, 0xeef2ff].map((c) => new Color(c));
 const WREATH = [0xf2f0ea, 0xd23a5a, 0xe7c13e, 0xb64d8a].map((c) => new Color(c));
 const tmpC = new Color();
 
@@ -229,7 +230,7 @@ export class FleetMeshes {
     if (kind === FleetKind.Taxi) return TAXI_PAINT[Math.floor(hash2(id, 3) * TAXI_PAINT.length)].getHex();
     if (kind === FleetKind.BinLorry) return 0xf2f2ee;
     if (kind === FleetKind.SchoolBus) return 0xf2b705;
-    if (kind === FleetKind.Hearse) return HEARSE_PAINT[Math.floor(hash2(id, 3) * HEARSE_PAINT.length)].getHex();
+    if (kind === FleetKind.Hearse) return 0x17181d;
     return kind === FleetKind.PrivateHire ? CAR_PAINT[Math.floor(hash2(id, 3) * CAR_PAINT.length)].getHex() : 0xf4f4f2;
   }
 

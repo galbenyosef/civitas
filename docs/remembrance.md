@@ -108,7 +108,7 @@ The archive holds 1,500 records. Beyond that the oldest go first, but never a re
   - A funeral director: the bodies in its care, the funerals planned and those held.
   - A mortuary: the dead waiting there.
 - **The citizen panel** gains "In memory" (the dead they mourn, openable), and the grief shows in happiness.
-- **The hearse:** a long black estate (a few grey, burgundy or silver), with a coffin and its wreath behind the glass when loaded. The funeral director stands by the back door at the chapel.
+- **The hearse** (`FleetKind.Hearse`, 11): a long black estate with a chrome rail, each its own sheen, with a coffin and its wreath behind the glass when loaded. The funeral director stands by the back door at the chapel.
 - **The news.** An incident's dead are one story (`StoryKind 'death'`): "2 die in fire at a block of flats in Riverside", "Worker killed in accident at Vertex Fabrication". The story carries `dead`, the deceased's ids.
 - **The first death in a town** brings the advisor's `death` line, saying who died, where, and what happens next. It also brings in the event goal **Lay them to rest**: unlock Remembrance and place a funeral director and a resting place, for $300. The goal comes in once the technology could be bought, ahead of the chain's next goal.
 
