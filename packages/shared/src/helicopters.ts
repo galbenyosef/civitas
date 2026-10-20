@@ -81,8 +81,8 @@ const wrapPi = (a: number) => { while (a > Math.PI) a -= 2 * Math.PI; while (a <
 /** One point a leg starts or ends at: a pad, or a point off the map at cruise height. */
 interface End { x: number; y: number; z: number; pad: Pad | null }
 
-/** Distance travelled over time as constant-acceleration pieces (flights.ts has the same for planes). */
-class Profile {
+/** Distance travelled over time as constant-acceleration pieces (flights.ts has the same for planes; newsHelis.ts flies the news helicopter with it). */
+export class Profile {
   pieces: { t0: number; dur: number; s0: number; v0: number; a: number }[] = [];
   total = 0;
   dist = 0;
@@ -164,6 +164,8 @@ export interface HeliFlight {
   legs: Leg[];
   /** absolute start tick of each leg */
   legT: number[];
+  /** the operator, when it is not picked from HELI_OPERATORS by the seed: a news helicopter flies its channel's livery (newsHelis.ts) */
+  op?: HeliOperator;
 }
 
 /**
@@ -312,9 +314,10 @@ export const HELI_OPERATORS: Record<PadKind, readonly HeliOperator[]> = {
   ],
 };
 /** The operator of a flight, and its callsign and registration, all from the flight's seed. */
-export function heliOperator(f: Pick<HeliFlight, 'kind' | 'seed'>): HeliOperator & { reg: string; flightNo: string } {
+export function heliOperator(f: Pick<HeliFlight, 'kind' | 'seed' | 'op'>): HeliOperator & { reg: string; flightNo: string } {
   const list = HELI_OPERATORS[f.kind];
   const k = Math.floor(f.seed * 4194304);
+  if (f.op) return { ...f.op, reg: `G-${String.fromCharCode(...[0, 1, 2, 3].map((i) => 65 + Math.floor(hash2(k, 811 + i) * 26)))}`, flightNo: f.op.callsign };
   const op = list[Math.floor(hash2(k, 801) * list.length)];
   const reg = `G-${String.fromCharCode(...[0, 1, 2, 3].map((i) => 65 + Math.floor(hash2(k, 811 + i) * 26)))}`;
   const n = f.kind === 'medical' ? 10 + Math.floor(hash2(k, 821) * 90) : f.kind === 'police' ? 90 + Math.floor(hash2(k, 821) * 10) : 1 + Math.floor(hash2(k, 821) * 40);
@@ -329,6 +332,7 @@ export function heliCrew(f: Pick<HeliFlight, 'kind' | 'seed' | 'type'>): { name:
   if (f.kind === 'medical') out.push(who(1, 'paramedic'), who(2, hash2(k, 861) < 0.6 ? 'doctor' : 'critical care paramedic'));
   else if (f.kind === 'police') { out.push(who(1, 'tactical flight officer')); if (hash2(k, 863) < 0.6) out.push(who(2, 'tactical flight officer')); }
   else if (f.kind === 'royal') out.push(who(1, 'co-pilot'), who(2, 'crewman'));
+  else if (f.kind === 'news') out.push(who(1, 'camera operator'));
   else if (f.type === 'medium') out.push(who(1, 'co-pilot'));
   return out;
 }
@@ -336,7 +340,7 @@ export function heliCrew(f: Pick<HeliFlight, 'kind' | 'seed' | 'type'>): { name:
 export function heliPassengers(f: Pick<HeliFlight, 'kind' | 'seed' | 'type'>): number {
   const k = Math.floor(f.seed * 4194304);
   if (f.kind === 'medical') return 1;
-  if (f.kind === 'police') return 0;
+  if (f.kind === 'police' || f.kind === 'news') return 0;
   return 1 + Math.floor(hash2(k, 871) * (f.type === 'medium' ? 6 : 3));
 }
 /** Where a flight comes from and goes to beyond the map: a town, usually the same one. */
@@ -347,7 +351,8 @@ export function heliTowns(f: Pick<HeliFlight, 'seed'>): { from: string; to: stri
 }
 
 // ---- state at a tick ----------------------------------------------------------------------------
-export type HeliPhase = 'inbound' | 'approach' | 'landing' | 'onPad' | 'liftoff' | 'departing' | 'outbound';
+/** `onScene`: a news helicopter orbiting or hovering over its story (newsHelis.ts) */
+export type HeliPhase = 'inbound' | 'approach' | 'landing' | 'onPad' | 'liftoff' | 'departing' | 'outbound' | 'onScene';
 export interface HeliState {
   flight: HeliFlight;
   id: number;
@@ -373,6 +378,21 @@ export interface HeliState {
   /** 0..1 at the off-map ends */
   fade: number;
   lights: { nav: boolean; beacon: boolean; strobe: boolean; landing: boolean };
+  /** a news helicopter's errand (newsHelis.ts): the story it covers, the spot its camera looks at, a line for the tooltip */
+  news?: HeliNews;
+}
+/** What a news helicopter is doing (newsHelis.ts). */
+export interface HeliNews {
+  /** the channel (its owner's player id) and its name on air */
+  channel: string; name: string;
+  /** the story it is flying to or over (its id), absent on a traffic watch or on the way home */
+  story?: number;
+  /** what it is doing: 'parked' | 'out' (taking off, flying there) | 'live' (over the scene) | 'home' (flying back, landing) */
+  doing: 'parked' | 'out' | 'live' | 'home';
+  /** a traffic watch over the rush hour, not a story */
+  traffic?: boolean;
+  /** the point its camera looks at (tiles, x z) */
+  look?: [number, number];
 }
 
 /** Every helicopter in the air or on a pad at this (fractional) tick. */

@@ -15,15 +15,20 @@
  * 5. determinism: the same seed gives the same stories (ids, ticks, places, headlines, channels) on a second run;
  * 7. (run before 6) Fires v2: a gas explosion is one 'explosion' story named for its cause, its neighbours set
  *    alight are live 'spread' stories that end when they are out, and the blast's own source has no fire story of its own;
+ * 8. (N3, N4 filler) the news helicopter: over the live story of its channel and nobody else's, the same flight from the
+ *    same stories twice, home again after; a story live again (`lit`) is flown to again; the channel schedule is the
+ *    same for the same channel and hour;
  * 6. old saves: a snapshot without `news` loads with an empty log and saves without the field; one with stories loads
- *    them, keeps numbering after them, and a fire burning at the save still gets its end after loading.
+ *    them, keeps numbering after them, and a fire burning at the save still gets its end after loading; a story's `lit`
+ *    survives the save (and a save without it flies from the story's start).
  * `--bench`: ms per game step (sim, fires, adverts, news and the frame) on a test city of `--districts`², filled for a
  * day, over `--ticks` ticks: run it here and on main for the tick cost.
  * Prints pass/fail counts; exits 1 on any failure.
  */
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, KIND_ID, NEWS, Zone, DEFAULT_TAX, coverStory, packTile, terrainOf, subFor, tileKey, isGrowableId,
-  type Channel, type StoryDTO,
+  newsHelisAt, storyWindow, programmeAt, CIVITAS_CHANNELS, playerChannel,
+  type Channel, type StoryDTO, type NewsPad,
 } from '@msimcity/shared';
 import { World, emptyStats, type Building } from '../world';
 import { seedCity } from './cities';
@@ -209,6 +214,56 @@ console.log('7. spread and explosions');
   ok(spread.every((s) => s.end !== undefined), 'the spread fires end when they are out');
 }
 
+// ---------------------------------------------------------------- 8. the news helicopter and the schedule (N3, N4)
+console.log('8. the news helicopter and the channel schedule');
+{
+  const { w, g } = cityA;
+  // Ada's media centre with its roof pad (a pad where the tower stands; shared helipads.ts finds the real one on the client)
+  const skip = new Set([tileKey(A.x, A.y), tileKey(B.x, B.y)]);
+  const mc = broadcaster(w, lotNear(w, A.x - 6, A.y + 5, skip)!, MEDIA, 'ada', 'Ada');
+  const pad: NewsPad = { id: 4242, x: mc.x + 0.5, y: 3.4, z: mc.y + 0.5, r: 0.45, kind: 'news', heading: 0, building: MEDIA, bx: mc.x, by: mc.y, owner: 'ada', channel: 'Ada TV', color: 0x3388cc };
+  const benPad: NewsPad = { ...pad, id: 4343, x: pad.x + 1, owner: 'ben', channel: 'Ben TV' };
+  for (let i = 0; i < TPH / 4 + 1; i++) g.step(); // the coverage lookup refreshes every quarter hour
+  skip.add(tileKey(mc.x, mc.y));
+  const home = lotNear(w, mc.x + 12, mc.y + 9, skip)!;
+  const before = g.news.all()[g.news.all().length - 1]?.id ?? 0;
+  g.fires.ignite(home);
+  const st = stories(g).find((s) => s.id > before && s.k === 'fire');
+  ok(!!st && st.ch === 'ada', `a fire at (${home.x}, ${home.y}) on Ada's channel (salience ${st?.s})`);
+  const at = (t: number, list = stories(g)) => newsHelisAt([pad, benPad], list, t);
+  const [go, stop] = storyWindow(st!, pad);
+  // over the scene within two game hours of lifting off, and still there while the story is live
+  let over = -1;
+  for (let t = go; t < go + 2 * TPH && over < 0; t += 1) if (at(t)[0].news?.doing === 'live') over = t;
+  const s0 = over >= 0 ? at(over + 20)[0] : null;
+  ok(over >= 0 && !!s0 && s0.news?.story === st!.id && Math.hypot(s0.x - st!.x - 0.5, s0.z - st!.y - 0.5) < 6,
+    `Ada's helicopter is over it ${over >= 0 ? ((over - st!.t) / TPH).toFixed(2) : '?'} h after it broke, ${s0 ? Math.hypot(s0.x - st!.x - 0.5, s0.z - st!.y - 0.5).toFixed(1) : '?'} tiles out, ${s0?.y.toFixed(1)} up`);
+  ok(at(over + 20)[1].news?.doing === 'parked', 'Ben\'s helicopter stays on its roof (not his channel\'s story)');
+  // the same flight from the same stories, sampled every 3 ticks over the sortie
+  const copy = JSON.parse(JSON.stringify(stories(g))) as StoryDTO[];
+  let same = true;
+  for (let t = go - 10; t < go + 3 * TPH; t += 3) { const a = at(t)[0], b = at(t, [...copy].reverse())[0]; if (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z) > 1e-9 || a.phase !== b.phase) same = false; }
+  ok(same, 'the same stories (in any order) give the same flight, tick by tick');
+  let smooth = true, maxStep = 0;
+  for (let t = go - 10, p = at(go - 10)[0]; t < go + 3 * TPH; t += 0.5) { const q = at(t)[0]; const d = Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z); maxStep = Math.max(maxStep, d); if (d > 0.6) smooth = false; p = q; }
+  ok(smooth, `no jumps: at most ${maxStep.toFixed(2)} tiles a half tick`);
+  for (let i = 0; i < 12 * TPH && st!.end === undefined; i++) g.step();
+  const end = Math.max(stop, st!.end ?? stop), [, stop2] = storyWindow(st!, pad);
+  // (the city's other fires are Ada's stories too: with this one alone it comes home)
+  const t2 = Math.max(end, stop2) + 2 * TPH, home2 = at(t2, [st!])[0], other = at(t2)[0];
+  ok(home2.news?.doing === 'parked' && Math.hypot(home2.x - pad.x, home2.z - pad.z) < 0.1 && other.news?.story !== st!.id, `it leaves when the story ends: back on its pad (${home2.phase}), or off to a newer story (${other.news?.doing} ${other.news?.story ?? ''})`);
+  // live again: the helicopter goes out again from then
+  const relit = { ...st!, lit: Math.max(end, stop2) + 3 * TPH };
+  delete relit.end;
+  const [go3] = storyWindow(relit, pad);
+  ok(go3 > relit.lit! && at(go3 + TPH, [relit])[0].news?.doing !== 'parked', 'a story live again (lit) is flown to again from then');
+  // the schedule
+  const chs = [...CIVITAS_CHANNELS, playerChannel('ada', 'Ada', 0x3388cc)];
+  let sched = true;
+  for (const c of chs) for (let h = 0; h < 48; h++) if (JSON.stringify(programmeAt(c, h * TPH + 3, h % 3 === 0)) !== JSON.stringify(programmeAt(c, h * TPH + 3, h % 3 === 0)) || programmeAt(c, h * TPH + 3, false).title !== programmeAt(c, h * TPH + 40, false).title) sched = false;
+  ok(sched, 'the channel schedule is the same for the same channel and hour');
+}
+
 // ---------------------------------------------------------------- 6. old saves
 console.log('6. old saves');
 {
@@ -233,6 +288,12 @@ console.log('6. old saves');
   const last = loaded[loaded.length - 1].id;
   g1.news.rank({ kind: 'milestone', player: 'ada', at: [A.x, A.y], text: 'after the load' });
   ok(g1.news.all()[g1.news.all().length - 1].id === last + 1, `numbering goes on after it (${last + 1})`);
+  // a story's `lit` (live again after an end) survives the save; without it the helicopter flies from the start
+  const snapLit = JSON.parse(JSON.stringify(snap));
+  snapLit.news.stories[0].lit = snapLit.news.stories[0].t + 77;
+  const gl = createGame(worldFromSnapshot(snapLit)!, { onConnection() {} }, { devTools: false, sandbox: true });
+  const sl = gl.news.all()[0];
+  ok(sl.lit === sl.t + 77 && storyWindow(sl)[0] >= sl.lit && storyWindow(loaded[0])[0] >= loaded[0].t && loaded[0].lit === undefined, 'a story\'s lit survives the save; a save without it flies from the story\'s start');
   const fire = g1.news.all().find((s) => burning.some((b) => b.id === s.id));
   for (let i = 0; i < 10 * TPH && fire && fire.end === undefined; i++) g1.step();
   ok(!!fire && fire.end !== undefined, `the fire burning at the save gets its end after loading: "${fire?.h}"`);

@@ -19,6 +19,8 @@ import { GROW_FORMS, firstLevelOf } from '../zones';
 import { capacityOf, isGrowableId, terrainOf, Terrain } from '../tile';
 import { PLANE_TYPES, timetable, type PlaneType, type Airport } from '../flights';
 import { heliTimetable, type Pad, type PadKind } from '../helicopters';
+import { newsHelisAt } from '../newsHelis';
+import { TICKS_PER_DAY, TICKS_PER_HOUR } from '../constants';
 import { boatTimetable, boatLifts, type BoatType, type BoatHarbour } from '../boats';
 import { FERRY } from '../ferry';
 import { HARBOUR_OF, type HarbourRole } from '../harbours';
@@ -103,7 +105,8 @@ export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: 
 /** `view`: the tour turns the underground view ('under') or the world map ('map', docs/world-map.md) on at this stop */
 /** `view` 'ranks': the stop plays a rank-up celebration over the rect (client ranks.ts preview, docs/ranks.md) */
 /** `row`: a 'fire-spread' spot's homes, the lead first, which catch light one after another (server sim/fires.ts rows) */
-export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks'; row?: readonly DemoXY[]; /** the hour the stop is shown at (a blackout after dark) */ hour?: number }
+/** `hour`: the tour shows the spot at this hour of the day (a blackout after dark, the TV stop in the evening, when sets are on) */
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks' | 'tv'; row?: readonly DemoXY[]; hour?: number }
 /** Land parcels (by their `land` names, any section's) combined into one estate by the players' rule (parcelops.ts planCombine) */
 export interface DemoEstate { name: string; lands: readonly string[] }
 export interface DemoLine {
@@ -190,6 +193,8 @@ const POWER_SUB_A: DemoXY = [-33, 14], POWER_SUB_B: DemoXY = [-33, 8];
 /** the showcase's fire drill home: a level-3 house five tiles from the civic district's fire post (-24, -29), and the stop's frame */
 const FIRE_DRILL: DemoXY = [-29, -31];
 const FIRE_DRILL_RECT: DemoRect = [-31, -33, 9, 6];
+/** the news helicopter's orbit over the drill (shared newsHelis.ts NEWS_HELI.radius), framed from above */
+const NEWS_HELI_RECT: DemoRect = [-33, -35, 9, 9];
 /**
  * Fires v2 (docs/incidents.md): the spread drill's row, the four homes along the south edge of the civic district's
  * north-west block (the lead by the road at x = -30), and the blast drill's works, the south-east corner lot of the
@@ -478,6 +483,12 @@ export const SECTIONS: DemoSection[] = [
       { kind: 'tv-studio', door: [17, -7] },
       { kind: 'media-centre', door: [20, -7], rot: 0 },
     ],
+    // the news helicopter over the civic district's fire drill (shared newsHelis.ts), and the homes of district B2 where a
+    // set in the lounge shows its pictures, the channels' programmes or teletext (client render/tv.ts)
+    spots: [
+      { id: 'news-heli', spot: 'news-heli', name: 'News helicopter over the fire drill', rect: NEWS_HELI_RECT, inspect: FIRE_DRILL },
+      { id: 'live-tv', spot: 'live-tv', name: 'Live on TV', rect: [-6, -6, 6, 6], inspect: [-5, -4], view: 'tv', hour: 20.5 },
+    ],
   },
   {
     id: 'power', name: 'Power',
@@ -637,7 +648,7 @@ export const TOUR: string[] = [
   'studio-theatre', 'theatre', 'opera-house',
   'sports', 'leisure-centre', 'arena', 'stadium',
   'library', 'central-library', 'museum',
-  'tv-studio', 'broadcast-centre', 'media-centre',
+  'tv-studio', 'broadcast-centre', 'media-centre', 'news-heli', 'live-tv',
   'gas-plant', 'coal-plant', 'wind-turbine', 'solar-farm', 'grid-supply-point', 'substation', 'power-pylons', 'power-buried', 'power-depot', 'power-blackout',
   'nursery', 'primary-school', 'secondary-school', 'sixth-form', 'fe-college', 'university', 'halls', 'research-institute',
   'airport', 'runway',
@@ -740,8 +751,20 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | MobileSpot;
+export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
+  'news-heli': {
+    title: 'News helicopter',
+    what: 'A media centre keeps a news helicopter on its roof pad, in its channel\'s colours. When its channel covers a story worth the flight (a fire, an explosion, a rank, a big opening, a new line) it takes off a few minutes later, flies to the scene and circles it, or hovers and creeps round, while the story is live and for a while after, then flies home. The newest live story wins, and with none on it flies a traffic watch in the 08:00 and 17:00 rush. Its flights are worked out from the story log everyone already has, so everyone sees the same helicopter. Here it covers the fire drill.',
+    how: 'Build a media centre (Media, tier 3) and keep it staffed. Hover the helicopter for what it is covering, click it for its crew, I or O to ride in it.',
+    facts: [['Helicopters', '1 per media centre'], ['Over the scene', 'while live, at least 1.5 game hours'], ['Orbit', 'its own radius, height and speed each sortie'], ['Technology', 'Media centres (culture track)']],
+  },
+  'live-tv': {
+    title: 'Live on TV',
+    what: 'Indoors, in the first-person view, the TV shows what is on its channel: Civitas 1, Civitas 2 or a player\'s own channel, each with a schedule of its own (the news at six, quizzes, films, cartoons in the afternoon, the match on a stadium\'s event night, teletext or the test card after 01:00). While a news helicopter is over a story its channel cuts to its camera: a real low-resolution picture of the city, a few frames a second, with the headline in the lower third and a LIVE bug, and the big screens\' news turn carries the same pictures. Teletext pages are drawn from the town\'s own story log, jams, results, prices and rank. This stop follows someone at home here watching television, when someone is.',
+    how: 'Select someone at home in the evening and press I or O. The citizen panel says what they are watching. The live pictures are off on the low graphics preset (?fx=0).',
+    facts: [['Channels', 'Civitas 1, Civitas 2, each player\'s media channel'], ['Live feed', '160×90 at 5 frames a second, one at a time, only while on screen'], ['Teletext', 'news, weather, travel, sport, prices, your town']],
+  },
   'cab-office': {
     title: 'Cab office',
     what: 'A minicab firm in a shopfront (about one shop lot in eleven), its lit sign in taxi yellow. Every member of its staff drives: cabs with a roof sign lit while for hire, waiting at the nearest station or airport rank, and private-hire drivers who log on from home in their own car and wait where the last fare ended. People without a car to hand, out for the night or arriving with a suitcase book the nearest free one when it beats walking, the bus and driving; they wait at the kerb, ride, and pay at the door.',
@@ -900,8 +923,9 @@ export interface TourStop {
   inspect?: DemoXY;
   line?: { mode: TransitMode; number: number; colour: number };
   /** 'under': the tour turns the underground view on at this stop (a metro line, a spot under ground); 'map': the world map;
-   *  'ranks': a rank-up celebration plays over the stop (docs/ranks.md) */
-  view?: 'under' | 'map' | 'ranks';
+   *  'ranks': a rank-up celebration plays over the stop (docs/ranks.md); 'tv': the first-person view of someone at home
+   *  in the stop's rect watching television, when someone is (docs/media.md section 8) */
+  view?: 'under' | 'map' | 'ranks' | 'tv';
   /** the hour of the day the stop is shown at (client tour.ts pins the light until the next stop), from its placement */
   hour?: number;
 }
@@ -1120,6 +1144,18 @@ export interface ShowcaseFeature {
 
 /** Days of timetable read from day 0: every plane type and helicopter service must fly within them. */
 export const FEATURE_DAYS = 7;
+/**
+ * The news helicopter flies to the fire drill (shared newsHelis.ts): a media centre's pad on the demo owner's land, and
+ * a story at the drill home covered by its channel, puts the helicopter over the scene within a couple of hours.
+ */
+const newsHeliFlies = (d: SeededDemo) => {
+  const pad = d.pads.find((p) => p.kind === 'news');
+  if (!pad) return false;
+  const [x, y] = FIRE_DRILL, t0 = TICKS_PER_DAY + 18 * TICKS_PER_HOUR;
+  const np = { ...pad, owner: DEMO_OWNER, channel: 'demo TV', color: 0xc8463c };
+  const story = { id: 1, t: t0, k: 'fire' as const, x, y, h: 'Fire drill', s: 46, ch: DEMO_OWNER };
+  return [1.5, 2, 2.5].some((h) => newsHelisAt([np], [story], t0 + h * TICKS_PER_HOUR)[0]?.news?.doing === 'live');
+};
 const days = () => Array.from({ length: FEATURE_DAYS }, (_, d) => d);
 const placedKind = (kind: string) => (ss: readonly DemoSection[]) => ss.some((s) => s.placements?.some((p) => p.kind === kind));
 const anyTile = (d: SeededDemo, f: (x: number, y: number, t: number, a: number, u: number) => boolean) => { let hit = false; d.scan((x, y, t, a, u) => { if (!hit && f(x, y, t, a, u)) hit = true; }); return hit; };
@@ -1141,7 +1177,7 @@ const HELI_SERVICES: Record<PadKind, Pick<ShowcaseFeature, 'caption' | 'tour' | 
   corporate: { caption: 'executive helicopters (a tall office with a rooftop pad)', tour: 'off-hq' },
   royal: { caption: 'the royal flight (Buckingham Palace)', tour: 'buckingham-palace', demo: 'london',
     rule: 'only Buckingham Palace has a royal pad, and landmarks stand in their own city\'s demo (the London landmarks in London), not the showcase' },
-  news: { caption: 'the news helicopter (a media centre\'s roof pad)', tour: 'media-centre', todo: 'its pad stands in the showcase; it flies once N3 sends it to stories (docs/media.md)' },
+  news: { caption: 'the news helicopter (a media centre\'s roof pad) flying to a story', tour: 'news-heli' },
 };
 
 /**
@@ -1241,7 +1277,8 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   // ---- helicopters: every service has a pad, and flies within FEATURE_DAYS
   ...(Object.keys(HELI_SERVICES) as PadKind[]).map((kind): ShowcaseFeature => ({
     id: `heli-${kind}`, ...HELI_SERVICES[kind],
-    seeded: (d) => d.pads.some((p) => p.kind === kind) && days().some((day) => heliTimetable(d.pads, day).some((f) => f.kind === kind)),
+    seeded: kind === 'news' ? newsHeliFlies
+      : (d) => d.pads.some((p) => p.kind === kind) && days().some((day) => heliTimetable(d.pads, day).some((f) => f.kind === kind)),
   })),
   // ---- districts: every merged lot (zones.ts GROW_FORMS, from the catalogue, so a new form is enforced at once) and the
   // block middles: the deep plots settle by themselves (sim/blocks.ts), the other forms are placed
@@ -1274,6 +1311,11 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
     scenario: (ss) => ss.some((s) => s.utilLinks?.some((l) => l.mode === 'buried')), seeded: (d) => !!d.utilLinks?.some((l) => l.mode === 'buried') },
   { id: 'power-blackout', caption: 'a scripted blackout and the repair van that ends it', tour: 'power-blackout',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'blackout' && sp.inspect)) && placedKind('power-depot')(ss) },
+  // ---- live TV and the channels' programmes (docs/media.md sections 7-8): the tour follows someone at home watching
+  { id: 'live-tv', caption: 'live TV: a set in a lounge showing the news helicopter\'s pictures (the TV stop over district B2\'s homes)', tour: 'live-tv',
+    scenario: (ss) => placedKind('media-centre')(ss) && ss.some((s) => s.spots?.some((sp) => sp.spot === 'live-tv' && sp.view === 'tv')) },
+  { id: 'tv-programmes', caption: 'TV programmes and teletext between the news (any set on the TV stop)', tour: 'live-tv',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'live-tv')) },
   // ---- settlement ranks (docs/ranks.md): a sandbox has none, so the tour stop plays the celebration over the town
   { id: 'settlement-ranks', caption: 'settlement ranks (a rank-up celebration over the town)', tour: 'ranks',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'ranks' && sp.view === 'ranks')) },
