@@ -815,10 +815,11 @@ export class Death implements FleetService {
     return this.mourningOf(c).map((r) => { const d = this.dead.get(r.id)!; return { dead: d.id, relation: r.relation, cause: d.cause, died: d.died, ...(d.story !== undefined ? { story: d.story } : {}) }; });
   }
 
-  /** Dev servers (net.ts dev 'funeralSoon'): every service booked moves to a little over an hour from now. Returns how many. */
+  /** Dev servers (net.ts dev 'funeralSoon'): the dead not yet collected are taken in, and every service booked moves to a little over an hour from now. Returns how many. */
   hurry(): number {
     const now = this.w.tick;
     let n = 0;
+    for (const d of this.dead.values()) if (d.st === Body.Scene && d.fd && !this.hearse.has(d.id)) this.atParlour(d); // not collected yet: taken in at once
     for (const d of this.dead.values()) {
       if (d.svc === undefined || d.held || (d.st !== Body.Parlour && d.st !== Body.Mortuary) || this.hearse.has(d.id)) continue;
       d.svc = now + Math.round(1.2 * TPH); d.sent = false;
