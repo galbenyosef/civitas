@@ -1,14 +1,15 @@
 import type { Conn, ConnSource } from './transport';
 import {
-  CHUNK_SIZE, START_MONEY, FRONTIER_MONEY, LAND_PRICE_PER_TILE, MAX_PARCEL_EDGE, ROAD_COST, PUBLIC_ROAD_COST, ZONE_COST,
+  CHUNK_SIZE, START_MONEY, FRONTIER_MONEY, LAND_PRICE_PER_TILE, MAX_PARCEL_EDGE, ZONE_COST,
   BULLDOZE_COST, MAX_SUBS, MAX_TAX, DEFAULT_TAX, Zone, CitizenState, CIVIC_COST, workOf, KIND_NAMES, TRAFFIC_EVERY,
   isRoad, isBuildable, isGrowable, zoneOf, levelOf, terrainOf, packTile, chunkKey, chunkOf, parseKey, packCitizenFlags, localIndex, isStructureAux,
   u16ToB64, i32ToB64, u8ToB64, hasFeature, techFor, TECH_BY_ID, ALL_TECH_IDS, checkPurchase, ZONE_TOOLS, CIVIC_TOOLS, MANIFEST,
-  isMultiTile, planStructure, planRunway, isAirfieldAux, RUNWAY_MAX, isRailAux, isRailStationKind, RAIL_DRAG_MAX, roadOverTrackProblem, CROSSING_COST, familyOf, subFor, kindManifest, isHarbourId,
+  isMultiTile, planStructure, planRunway, isAirfieldAux, RUNWAY_MAX, isRailAux, isRailStationKind, RAIL_DRAG_MAX, familyOf, subFor, kindManifest, isHarbourId,
   isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
-  isBridgeAux, planBridge, joinsBridgeSide, BRIDGE_STYLE_NAMES, type BridgePlan,
+  isBridgeAux, BRIDGE_STYLE_NAMES,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
   isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction, Cause, nameFor,
+  planRoad, isRoadClass, describeDemolition, ROAD_DRAG_MAX, ROAD_UNDO_MS, MSG_ROAD_MONEY, cleanStreetName, type RoadEnv,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -44,6 +45,17 @@ interface Client {
   hist?: boolean;
   /** issue bubbles (flushIssues): the last problems list sent; the overlay channel asked for, a hash of what each chunk last got, chunks still to look at */
   probSig?: string; ovl?: number; ovlSent?: Map<string, number>; ovlQueue?: string[];
+}
+
+/** A road drag kept for undo (Net.undoRoad): the land tiles it laid with what they were, its bridges, what it cost. */
+interface RoadUndo {
+  at: number;
+  tiles: { x: number; y: number; was: number; sub: number; aux: number }[];
+  /** each bridge by its first deck tile, and its deck tiles */
+  bridges: { x: number; y: number; n: number }[];
+  refund: number;
+  /** tiles beside the road where something already stood (tkey) */
+  beside: Set<number>;
 }
 
 /** tool id -> kind id, from the building catalogue: zoning tools for growable kinds, placement tools for civic ones.
@@ -183,7 +195,11 @@ export class Net {
       case 'sub': return this.subscribe(c, m.chunks);
       case 'unsub': for (const [cx, cy] of m.chunks) { c.subs.delete(chunkKey(cx, cy)); c.ovlSent?.delete(chunkKey(cx, cy)); } return;
       case 'buy': return this.buy(c, m.x, m.y, m.w, m.h);
-      case 'build': return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
+      case 'build':
+        if (m.tool === 'road') return this.road(c, m.tiles, this.cfg.devTools && m.dev === true, typeof m.cls === 'number' ? m.cls : 0, m.demolish === true);
+        return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
+      case 'undoRoad': return this.undoRoad(c);
+      case 'renameStreet': return this.renameStreet(c, m.x, m.y, m.ns === true, m.name);
       case 'parcel': return this.editParcel(c, m.id, m.taxRate, m.name, m.color);
       case 'parcelOp': return this.parcelOp(c, m);
       case 'map': for (const json of this.map.answer(m.s, m.l)) if (c.conn.open) c.conn.send(json); return;
@@ -560,11 +576,8 @@ export class Net {
     const recount = new Set<number>();
     // zoning and parking lots go round roads and buildings instead of paving over them (counted for one toast)
     const paint = tool in TOOL_ZONE || tool === 'park';
-    let skipRoad = 0, skipBuilt = 0, sideJoin = 0;
+    let skipRoad = 0, skipBuilt = 0;
     const zonedAt: [number, number][] = [];
-    // the road tool over water lays bridges (shared/src/bridges.ts): runs of water tiles in drag order, after the land
-    const wet: [number, number][][] = [];
-    let lastWet = false;
     for (const pair of tiles.slice(0, 256)) {
       const x = Math.floor(Number(pair[0])), y = Math.floor(Number(pair[1]));
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
@@ -572,8 +585,7 @@ export class Net {
       // a harbour's wet tiles (docs/boats.md section 5) are bulldozed like any structure tile: the water stays
       const wetPart = tool === 'bulldoze' && isStructureAux(this.w.auxAt(x, y));
       if (!isBuildable(t) && !wetPart) {
-        if (tool === 'road') { if (!lastWet) wet.push([]); wet[wet.length - 1].push([x, y]); lastWet = true; }
-        else if (tool === 'bulldoze' && isBridgeAux(this.w.auxAt(x, y))) {
+        if (tool === 'bulldoze' && isBridgeAux(this.w.auxAt(x, y))) {
           // a deck tile takes the whole bridge with it, for nothing back
           const q = this.w.parcelAt(x, y);
           if (q && !this.mayEdit(p, q.owner)) { this.toast(c, 'Not your land'); return; }
@@ -584,21 +596,17 @@ export class Net {
         }
         continue;
       }
-      lastWet = false;
       const parcel = this.w.parcelAt(x, y);
       const ownsIt = !!parcel && this.mayEdit(p, parcel.owner);
       let cost = 0;
       let apply: () => void;
       const need = dev ? null : this.locked(p, tool);
-      if (need && tool !== 'road' && tool !== 'bulldoze') { this.toast(c, `${need} is needed before you can build that`); return; }
+      if (need && tool !== 'bulldoze') { this.toast(c, `${need} is needed before you can build that`); return; }
       if (tool !== 'bulldoze' && this.w.auxAt(x, y)) {
         if (paint) { skipBuilt++; continue; }
         if (isAirfieldAux(this.w.auxAt(x, y))) { this.toast(c, 'That is part of a runway; bulldoze it first'); return; }
-        if (isRailAux(this.w.auxAt(x, y))) {
-          if (tool !== 'road') { this.toast(c, 'That is railway track; bulldoze it first'); return; }
-          // a road over straight track makes a level crossing (shared/src/rail.ts); checked with the road below
-        } else if (isJunctionAux(this.w.auxAt(x, y))) {
-          if (tool === 'road' && isRoad(t)) continue;
+        if (isRailAux(this.w.auxAt(x, y))) { this.toast(c, 'That is railway track; bulldoze it first'); return; }
+        else if (isJunctionAux(this.w.auxAt(x, y))) {
           this.toast(c, `That is part of a ${isRingAux(this.w.auxAt(x, y)) || isIslandAux(this.w.auxAt(x, y)) ? 'roundabout' : 'flyover'}; bulldoze it first`); return;
         } else {
           const s = this.w.structureAt(x, y);
@@ -610,16 +618,7 @@ export class Net {
         if (zoned = this.placeStructure(c, TOOL_CIVIC[tool], x, y, this.w.spendable(p) - spent, rot)) spent += CIVIC_COST[TOOL_CIVIC[tool]];
         break;
       }
-      if (tool === 'road') {
-        if (!ownsIt && parcel) { this.toast(c, 'Not your land'); return; }
-        if (!parcel) { const pw = this.locked(p, 'publicRoads'); if (pw) { this.toast(c, `${pw} is needed to lay roads outside your own land`); return; } }
-        if (isRoad(t)) continue;
-        if (joinsBridgeSide(x, y, this.auxFn)) { sideJoin++; continue; }
-        const xing = roadOverTrackProblem(this.trackEnv, x, y);
-        if (xing) { this.toast(c, xing); return; }
-        cost = (parcel ? ROAD_COST : PUBLIC_ROAD_COST) + (isRailAux(this.w.auxAt(x, y)) ? CROSSING_COST : 0);
-        apply = () => { this.w.setTile(x, y, packTile(terrainOf(t), true, 0, 0)); this.w.bump(p.id, 'roads', 1); };
-      } else if (tool in TOOL_ZONE) {
+      if (tool in TOOL_ZONE) {
         if (!ownsIt) { this.toast(c, parcel ? 'Not your land' : 'Buy this land before zoning it'); return; }
         const z = TOOL_ZONE[tool];
         if (isRoad(t)) { skipRoad++; continue; }
@@ -704,14 +703,6 @@ export class Net {
       }
       if (inner) this.toast(c, `Also zoned ${inner} lot${inner === 1 ? '' : 's'} in the middle of the block: the buildings beside ${inner === 1 ? 'it grow back into it' : 'them grow back into them'}`, 'info');
     }
-    for (const run of wet) {
-      if (this.w.spendable(p) - spent < 0) break;
-      const r = this.bridge(c, run, tiles, dev, this.w.spendable(p) - spent);
-      if (!r) continue;
-      spent += r.cost!;
-      for (let i = 0; i < r.tiles!.length; i += 3) { const q = this.w.parcelIdAt(r.tiles![i], r.tiles![i + 1]); if (q) recount.add(q); }
-    }
-    if (sideJoin) this.toast(c, 'No road may join a bridge from the side: bridges meet roads only at their ends');
     for (const id of recount) this.w.recountRoads(id);
     if (spent) this.w.credit(p.id, -spent, 'build');
     if (skipRoad || skipBuilt) {
@@ -726,40 +717,144 @@ export class Net {
     }
   }
 
-  /**
-   * A bridge over one run of water tiles from a road drag (`run`, in drag order; `drag` is the whole message, for the
-   * way a one-tile run goes). Land as for roads: the player's own, or unclaimed with Public works. Lays the deck and
-   * returns the plan (the caller charges and recounts), or null with a toast.
-   */
-  private bridge(c: Client, run: [number, number][], drag: [number, number][], dev: boolean, budget: number): BridgePlan | null {
-    const p = c.player!;
-    if (!dev) { const need = this.locked(p, 'bridges'); if (need) { this.toast(c, `${need} is needed to bridge water`); return null; } }
-    const [x0, y0] = run[0];
-    let dx = 0, dy = 0;
-    if (run.length > 1) { dx = run[1][0] - x0; dy = run[1][1] - y0; }
-    else {
-      // one tile of water: the way the drag went through it, else whichever axis has road on both banks
-      const i = drag.findIndex((q) => Math.floor(Number(q[0])) === x0 && Math.floor(Number(q[1])) === y0);
-      const nb = drag[i + 1] ?? drag[i - 1];
-      if (nb) { dx = Math.abs(Math.floor(Number(nb[0])) - x0); dy = Math.abs(Math.floor(Number(nb[1])) - y0); }
-      if (dx + dy !== 1) { const ew = isRoad(this.w.getTile(x0 - 1, y0)) && isRoad(this.w.getTile(x0 + 1, y0)); dx = ew ? 1 : 0; dy = ew ? 0 : 1; }
-    }
-    for (let i = 1; i < run.length; i++) {
-      if (run[i][0] - run[i - 1][0] !== dx || run[i][1] - run[i - 1][1] !== dy) { this.toast(c, 'A bridge runs straight across the water: no bends or junctions on it'); return null; }
-    }
-    const pub = dev || !this.locked(p, 'publicRoads');
-    const plan = planBridge(x0, y0, dx, dy, run.length, {
-      tile: (x, y) => this.w.peekTile(x, y),
+  /** The rules a road drag is planned by (shared/src/roadtool.ts), for this player: their land, their technology. */
+  private roadEnv(p: Player, dev: boolean): RoadEnv {
+    const pw = dev ? null : this.locked(p, 'publicRoads');
+    return {
+      tile: (x, y) => this.w.getTile(x, y),
       aux: this.auxFn,
-      land: (x, y) => { const q = this.w.parcelAt(x, y); return q ? (this.mayEdit(p, q.owner) ? null : 'Not your land') : pub ? null : 'Public works is needed to lay roads outside your own land'; },
-    });
-    if (!plan.ok) { this.toast(c, plan.reason ?? 'A bridge cannot go there'); return null; }
-    if (!plan.tiles!.length) return null;
-    if (budget < plan.cost!) { this.toast(c, this.w.shortOf(p, plan.cost!, 'for that bridge')); return null; }
-    this.w.placeBridge(plan.tiles!);
-    this.w.bump(p.id, 'roads', plan.tiles!.length / 3);
-    this.toast(c, `${BRIDGE_STYLE_NAMES[plan.style!][0].toUpperCase()}${BRIDGE_STYLE_NAMES[plan.style!].slice(1)} built for $${plan.cost}: ${run.length} tile${run.length === 1 ? '' : 's'} over the water`, 'info');
-    return plan;
+      kindId: (x, y) => this.w.kindIdAt(x, y),
+      land: (x, y) => { const q = this.w.parcelAt(x, y); return q ? (this.mayEdit(p, q.owner) ? null : 'Not your land') : pw ? `${pw} is needed to lay roads outside your own land` : null; },
+      claimed: (x, y) => this.w.parcelIdAt(x, y) !== 0,
+      structure: (x, y) => { const s = this.w.structureAt(x, y); return s ? KIND_NAMES[s.kind] : undefined; },
+      bridgeLock: dev ? null : this.locked(p, 'bridges'),
+    };
+  }
+
+  /**
+   * The road tool (docs/roads.md "The road tool"): lay what planRoad allows along the drag, in one go. Buildings in the
+   * way come down only when the player agreed (`demolish`: the client asks, with the cost, before it sends); otherwise
+   * the road goes round them. A road of another class is upgraded in place (`cls`, R3; a no-op while every road is a
+   * street). Refused tiles are left out and the first reason is told. The drag is kept for undoRoad.
+   */
+  private road(c: Client, tiles: [number, number][], dev: boolean, cls: number, demolish: boolean) {
+    const p = c.player!;
+    if (!Array.isArray(tiles)) return;
+    if (!isRoadClass(cls)) return this.toast(c, 'There is no such class of road');
+    const path: [number, number][] = [];
+    for (const pair of tiles.slice(0, ROAD_DRAG_MAX)) {
+      const x = Math.floor(Number(pair?.[0])), y = Math.floor(Number(pair?.[1]));
+      if (Number.isFinite(x) && Number.isFinite(y)) path.push([x, y]);
+    }
+    const plan = planRoad(path, this.roadEnv(p, dev), { cls, demolish, budget: this.w.spendable(p) });
+    const recount = new Set<number>();
+    const undo: RoadUndo = { at: this.now(), tiles: [], bridges: [], refund: 0, beside: new Set() };
+    for (const tp of plan.tiles) {
+      if (tp.state === 'upgrade') { this.upgradeRoad(tp.x, tp.y, cls); continue; }
+      if (tp.state !== 'new' && !(tp.state === 'demolish' && demolish)) continue;
+      const t = this.w.getTile(tp.x, tp.y), sub = this.w.subAt(tp.x, tp.y);
+      if (tp.state === 'demolish') this.sim.start.campCleared(tp.x, tp.y); // a camp's people find beds nearby first (sim/firstfive.ts)
+      this.w.setTile(tp.x, tp.y, packTile(terrainOf(t), true, 0, 0));
+      this.w.bump(p.id, 'roads', 1);
+      const q = this.w.parcelIdAt(tp.x, tp.y);
+      if (q) recount.add(q);
+      // what undo puts back: the lot as it was, empty (a building that came down stays down)
+      undo.tiles.push({ x: tp.x, y: tp.y, was: packTile(terrainOf(t), false, zoneOf(t), 0), sub, aux: this.w.auxAt(tp.x, tp.y) });
+      undo.refund += tp.cost - (tp.state === 'demolish' && levelOf(t) > 0 ? BULLDOZE_COST : 0);
+    }
+    for (const b of plan.bridges) {
+      if (!b.plan.ok || !b.plan.tiles!.length) continue;
+      this.w.placeBridge(b.plan.tiles!);
+      this.w.bump(p.id, 'roads', b.plan.tiles!.length / 3);
+      for (let i = 0; i < b.plan.tiles!.length; i += 3) { const q = this.w.parcelIdAt(b.plan.tiles![i], b.plan.tiles![i + 1]); if (q) recount.add(q); }
+      undo.bridges.push({ x: b.plan.tiles![0], y: b.plan.tiles![1], n: b.plan.tiles!.length / 3 });
+      undo.refund += b.plan.cost!;
+      const style = BRIDGE_STYLE_NAMES[b.plan.style!];
+      this.toast(c, `${style[0].toUpperCase()}${style.slice(1)} built for $${b.plan.cost}: ${b.run.length} tile${b.run.length === 1 ? '' : 's'} over the water`, 'info');
+    }
+    for (const id of recount) this.w.recountRoads(id);
+    if (plan.cost) this.w.credit(p.id, -plan.cost, 'build');
+    if (undo.tiles.length || undo.bridges.length) {
+      // what stands beside the new road now: a building that appears beside it later makes the drag too late to undo
+      for (const u of undo.tiles) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (this.standing(u.x + dx, u.y + dy)) undo.beside.add(tkey(u.x + dx, u.y + dy));
+      this.lastRoad.set(p.id, undo);
+    }
+    // what was left out, and why: the buildings it went round, the money, the first other refusal
+    const n = (k: number, one: string) => `${k} ${one}${k === 1 ? '' : 's'}`;
+    if (plan.demolish.n && !demolish) this.toast(c, `Went round ${describeDemolition(plan.demolish.kinds)}: ${n(plan.demolish.n, 'tile')} left out`, 'info');
+    if (plan.short) this.toast(c, this.w.shortOf(p, undo.tiles.length || undo.bridges.length ? null : plan.tiles.find((t) => t.reason === MSG_ROAD_MONEY)?.cost || null));
+    const other = plan.tiles.filter((t) => t.state === 'refused' && t.reason !== MSG_ROAD_MONEY);
+    if (other.length) this.toast(c, other.length === plan.tiles.length ? other[0].reason! : `${other[0].reason} (${n(other.length, 'tile')} left out)`);
+  }
+
+  /** A building, a site or anything else standing on a tile (not an empty lot). */
+  private standing(x: number, y: number) { const t = this.w.peekTile(x, y); return t !== undefined && !isRoad(t) && zoneOf(t) !== Zone.None && (levelOf(t) > 0 || underConstruction(t)); }
+
+  /**
+   * Upgrade a road tile to another class in place, keeping its junction (R3, shared/src/roadtool.ts ROAD_CLASSES):
+   * a no-op while every road is a street. R3 writes the class's aux byte here (0x01-0x3f, docs/aux-layer.md); a tile
+   * with a junction, crossing or bridge byte keeps it.
+   */
+  private upgradeRoad(_x: number, _y: number, _cls: number) {}
+
+  /** Each player's last road drag, for Ctrl/Cmd+Z (not saved: the window is half a minute). */
+  private lastRoad = new Map<string, RoadUndo>();
+  /** The clock undo's window is measured by (probes replace it). */
+  now = () => Date.now();
+
+  /**
+   * Take back the player's last road drag: within ROAD_UNDO_MS of laying it, while every tile is still the bare road it
+   * laid (no junction put on it, not bulldozed, its bridges still standing) and no building has gone up beside it
+   * since. The tiles go back to what they were (an empty lot stays zoned; a building that came down stays down) and
+   * the road and bridges are refunded; the demolition fee is not.
+   */
+  private undoRoad(c: Client) {
+    const p = c.player!, u = this.lastRoad.get(p.id);
+    if (!u) return this.toast(c, 'Nothing to undo: Ctrl+Z (Cmd+Z on a Mac) takes back your last road drag');
+    const age = this.now() - u.at;
+    if (age > ROAD_UNDO_MS) { this.lastRoad.delete(p.id); return this.toast(c, `Too late to undo: a road drag can be taken back for ${ROAD_UNDO_MS / 1000} seconds`); }
+    for (const t of u.tiles) {
+      const now = this.w.peekTile(t.x, t.y);
+      if (now === undefined || !isRoad(now) || this.w.auxAt(t.x, t.y) !== t.aux) { this.lastRoad.delete(p.id); return this.toast(c, 'Cannot undo that road: part of it has changed since (bulldozed, or a junction on it)'); }
+    }
+    for (const b of u.bridges) if (!isBridgeAux(this.w.auxAt(b.x, b.y))) { this.lastRoad.delete(p.id); return this.toast(c, 'Cannot undo that road: its bridge has gone'); }
+    for (const t of u.tiles) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const k = tkey(t.x + dx, t.y + dy);
+      if (!u.beside.has(k) && this.standing(t.x + dx, t.y + dy)) { this.lastRoad.delete(p.id); return this.toast(c, 'Cannot undo that road: a building is going up beside it now'); }
+    }
+    this.lastRoad.delete(p.id);
+    const recount = new Set<number>();
+    for (const t of u.tiles) {
+      this.w.setTile(t.x, t.y, t.was, t.sub);
+      const q = this.w.parcelIdAt(t.x, t.y);
+      if (q) recount.add(q);
+    }
+    let decks = 0;
+    for (const b of u.bridges) {
+      for (let d = -12; d <= 12; d++) for (const [qx, qy] of [[b.x + d, b.y], [b.x, b.y + d]]) { const q = this.w.parcelIdAt(qx, qy); if (q) recount.add(q); }
+      this.w.removeBridge(b.x, b.y);
+      decks += b.n;
+    }
+    this.w.bump(p.id, 'roads', -(u.tiles.length + decks));
+    for (const id of recount) this.w.recountRoads(id);
+    if (u.refund) this.w.credit(p.id, u.refund, 'build');
+    const what = [u.tiles.length ? `${u.tiles.length} tile${u.tiles.length === 1 ? '' : 's'} of road` : '', u.bridges.length ? `${u.bridges.length === 1 ? 'a bridge' : `${u.bridges.length} bridges`}` : ''].filter(Boolean).join(' and ');
+    this.toast(c, `Undone: ${what}, $${u.refund.toLocaleString('en-GB')} back`, 'info');
+  }
+
+  /** Rename the street through road tile (x, y) along `ns` (streets.ts): its owner only (anyone's in a sandbox). */
+  private renameStreet(c: Client, x: number, y: number, ns: boolean, name: string) {
+    const p = c.player!;
+    x = Math.floor(Number(x)); y = Math.floor(Number(y));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const t = this.w.peekTile(x, y);
+    if (t === undefined || !isRoad(t)) return this.toast(c, 'That is not a street');
+    const run = this.w.streets.streetsAt(x, y).find((r) => r.ns === ns) ?? this.w.streets.streetsAt(x, y)[0];
+    const owner = this.w.streets.ownerOf(run);
+    if (!(owner ? this.mayEdit(p, owner) : this.cfg.sandbox)) return this.toast(c, owner ? `Not your street: ${this.w.players.get(owner)?.name ?? owner} owns most of it` : 'That is a public road: nobody can rename it');
+    if (typeof name !== 'string' || (name.trim() && !cleanStreetName(name))) return this.toast(c, 'That name will not do');
+    const now = this.w.streets.rename(run, name);
+    this.toast(c, name.trim() ? `Renamed: ${now}` : `Back to its own name: ${now}`, 'info');
   }
   private auxFn = (x: number, y: number) => this.w.auxAt(x, y);
 
@@ -882,9 +977,6 @@ export class Net {
     this.toast(c, r.msg, r.ok ? 'info' : 'error');
   }
 
-  /** What the level-crossing rules read (shared/src/rail.ts roadOverTrackProblem). */
-  private trackEnv = { tile: (x: number, y: number) => this.w.peekTile(x, y), aux: (x: number, y: number) => this.w.auxAt(x, y) };
-
   /** Whether a lot holds anything a paint tool must not cover: a building, a site, a parking lot or a bus stop (an empty zoned lot does not count). */
   private occupied(t: number) { return zoneOf(t) !== Zone.None && (levelOf(t) > 0 || underConstruction(t)); }
 
@@ -949,10 +1041,19 @@ export class Net {
     x = Math.floor(Number(x)); y = Math.floor(Number(y));
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     const t = this.w.peekTile(x, y);
-    if (t !== undefined && isRoad(t)) return this.send(c, { t: 'road', x, y, info: this.sim.describeRoad(x, y) });
+    if (t !== undefined && isRoad(t)) {
+      const info = this.sim.describeRoad(x, y);
+      // the streets through it (streets.ts): named now if nobody has asked before
+      info.streets = this.w.streets.streetsAt(x, y).map((r) => {
+        const owner = this.w.streets.ownerOf(r);
+        return { name: this.w.streets.nameOf(r), ns: r.ns, length: r.to - r.from + 1, ...((owner ? this.mayEdit(c.player!, owner) : this.cfg.sandbox) ? { mine: true } : {}) };
+      });
+      return this.send(c, { t: 'road', x, y, info });
+    }
     const [dx, dy] = this.w.doorOf(x, y); // any tile of a structure answers for the structure
     const b = this.w.buildings.get(`${dx},${dy}`);
     const info = b ? this.sim.describe(b, full) : null;
+    if (info) { const a = this.w.streets.address(dx, dy); if (a) info.address = a; }
     if (info && b!.id === Zone.Airport && this.airports) info.airport = this.airports.describe(dx, dy); // the airport kind, not every transport hub
     if (info && isRailStationKind(b!.id) && this.rail) info.rail = this.rail.describeStation(dx, dy);
     if (info && isMetroStationKind(b!.id) && this.metro) info.metro = this.metro.describeStation(dx, dy);

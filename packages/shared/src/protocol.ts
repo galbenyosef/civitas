@@ -192,6 +192,8 @@ export interface BuildingPeople {
 /** Live detail for one building, answered on hover. */
 export interface BuildingInfo {
   x: number; y: number;
+  /** the street address: the number on the door and the street it faces ('12 Mill Lane'; shared/src/streets.ts) */
+  address?: string;
   /** kind id (docs/sub-kinds.md) */
   kind: number; level: number;
   capacity: number; occupants: number;
@@ -392,6 +394,8 @@ export interface RoadInfo {
   parcel?: { name: string; owner: string };
   /** on a bridge deck (shared/src/bridges.ts): its style name and length in tiles */
   bridge?: { style: string; span: number };
+  /** the streets through this tile (shared/src/streets.ts), the longer first: two at a crossroads or a bend; `mine` when the viewer may rename it */
+  streets?: { name: string; ns: boolean; length: number; mine?: boolean }[];
 }
 
 /** Live detail for one person or vehicle. */
@@ -539,7 +543,13 @@ export type ClientMsg =
       /** multi-tile kinds: the orientation the player chose (0-3, the direction the front faces: 0 = +y, 1 = +x, 2 = -y, 3 = -x); left out = the server picks the road side */
       rot?: number;
       /** bulldoze in the underground view: fill unused tunnel instead of clearing the surface (docs/underground.md) */
-      under?: true }
+      under?: true;
+      /** the road tool (shared/src/roadtool.ts): the class to lay (0, a street, until R3), and whether the player agreed to demolish the buildings in the way (otherwise the road goes round them) */
+      cls?: number; demolish?: boolean }
+  /** the road tool's Ctrl/Cmd+Z: take back the player's last road drag (ROAD_UNDO_MS), refunded, while its tiles are still bare road */
+  | { t: 'undoRoad' }
+  /** rename the street through road tile (x, y) along `ns` (shared/src/streets.ts); an empty name gives back the generated one */
+  | { t: 'renameStreet'; x: number; y: number; ns: boolean; name: string }
   /** `color` -1 clears it back to the owner's colour; on an estate member every setting applies to the whole estate */
   | { t: 'parcel'; id: number; taxRate?: number; name?: string; color?: number }
   /** parcel management on the world map (docs/world-map.md section 2, shared/src/parcelops.ts) */

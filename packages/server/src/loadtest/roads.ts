@@ -1,0 +1,260 @@
+/**
+ * Road tool probe (docs/roads.md "The road tool", card af523039): the shared plan (shapes, snapping, costs, refusals,
+ * buildings in the way, money, upgrade in place), then the server over fake clients: laying, asking before
+ * demolishing (a0902fd7), undo (refund, refusals after the window, after a building appears beside it, after a
+ * bulldozer), upgrade in place as a no-op that keeps a roundabout, and street names (named once, neighbours never
+ * alike, the same on two servers, kept through a save and load, renamed by the owner only, addresses).
+ *
+ *   npx tsx packages/server/src/loadtest/roads.ts
+ */
+import {
+  ROAD_COST, PUBLIC_ROAD_COST, BULLDOZE_COST, Zone, Terrain, packTile, isRoad, zoneOf, levelOf, withConstruction, KIND_ID, familyOf, subFor,
+  roadDragPath, snapRoadEnd, planRoad, parallelGap, streetBase, streetName, ROAD_UNDO_MS, houseNumber, isJunctionAux,
+  type RoadEnv, type ServerMsg, type ClientMsg,
+} from '@msimcity/shared';
+import { World } from '../world';
+import { seedCommons } from '../seed';
+import { createGame } from '../game';
+import { snapshotOf, worldFromSnapshot } from '../snapshot';
+import type { Conn } from '../transport';
+
+let failed = 0, passed = 0;
+const ok = (cond: unknown, what: string) => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${what}`); if (cond) passed++; else failed++; };
+const key = (p: readonly (readonly [number, number])[]) => p.map(([x, y]) => `${x},${y}`).join(' ');
+
+// ---- shapes ------------------------------------------------------------------------------------------------
+{
+  ok(key(roadDragPath([0, 0], [3, 0])) === '0,0 1,0 2,0 3,0', 'a straight drag: the tiles along it');
+  ok(key(roadDragPath([0, 0], [2, 3])) === '0,0 0,1 0,2 0,3 1,3 2,3', 'an L: the longer axis first, one corner');
+  ok(key(roadDragPath([0, 0], [2, 3], 'line', true)) === '0,0 1,0 2,0 2,1 2,2 2,3', 'an L the way the drag first went (along x)');
+  const loop = roadDragPath([0, 0], [2, 2], 'loop');
+  ok(loop.length === 8 && new Set(loop.map(String)).size === 8 && key(loop).startsWith('0,0 1,0 2,0 2,1 2,2 1,2 0,2 0,1'), `a loop: the eight tiles round a 3×3 (${key(loop)})`);
+  ok(roadDragPath([0, 0], [0, 4], 'loop').length === 5, 'a loop one tile wide is a line');
+  ok(roadDragPath([0, 0], [500, 0]).length === 256, 'a drag is at most 256 tiles');
+  const roads = new Set(['5,0']);
+  const snapped = snapRoadEnd([[0, 0], [1, 0], [2, 0], [3, 0]], (x, y) => roads.has(`${x},${y}`), () => true);
+  ok(key(snapped) === '0,0 1,0 2,0 3,0 4,0', 'a drag stopping one tile short of a road gains the tile and meets it');
+  ok(snapRoadEnd([[0, 0], [1, 0], [2, 0]], (x, y) => roads.has(`${x},${y}`), () => true).length === 3, 'two short: no snap');
+  ok(snapRoadEnd([[0, 0], [1, 0], [2, 0], [3, 0]], (x, y) => roads.has(`${x},${y}`), () => false).length === 4, 'not across water');
+  const grid = new Set<string>(); for (let x = 0; x < 10; x++) grid.add(`${x},5`);
+  const g = parallelGap([[0, 0], [1, 0], [2, 0], [3, 0]], (x, y) => grid.has(`${x},${y}`));
+  ok(g?.depth === 4 && g.side === 1, `the spacing guide: a street 5 rows away makes a block 4 deep (${JSON.stringify(g)})`);
+  ok(parallelGap([[0, 0], [1, 0]], () => false) === null, 'nothing alongside: no guide');
+}
+
+// ---- the plan on a hand-made map ------------------------------------------------------------------------------
+function env(map: Map<string, number>, opts: Partial<RoadEnv> & { mine?: (x: number, y: number) => boolean | null } = {}): RoadEnv {
+  return {
+    tile: (x, y) => map.get(`${x},${y}`) ?? packTile(Terrain.Grass, false, 0, 0),
+    aux: () => 0,
+    kindId: (x, y) => zoneOf(map.get(`${x},${y}`) ?? 0),
+    land: (x, y) => { const m = opts.mine?.(x, y); return m === false ? 'Not your land' : null; },
+    claimed: (x, y) => opts.mine?.(x, y) !== null,
+    structure: () => undefined,
+    bridgeLock: null,
+    ...opts,
+  };
+}
+{
+  const map = new Map<string, number>();
+  map.set('2,0', packTile(Terrain.Grass, false, Zone.Residential, 2)); // a house
+  map.set('3,0', packTile(Terrain.Grass, false, Zone.Residential, 0)); // an empty lot
+  map.set('4,0', withConstruction(packTile(Terrain.Grass, false, Zone.Residential, 0), true)); // a growth site
+  map.set('5,0', withConstruction(packTile(Terrain.Grass, false, Zone.Hospital, 0), true)); // a hospital going up
+  map.set('6,0', packTile(Terrain.Grass, true, 0, 0)); // road already
+  const mine = (x: number) => (x >= 8 ? (x >= 9 ? false : null) : true); // 8 unclaimed, 9 someone else's
+  const path = roadDragPath([0, 0], [9, 0]);
+  const p = planRoad(path, env(map, { mine: (x) => mine(x) }));
+  ok(p.tiles[2].state === 'demolish' && p.tiles[2].cost === ROAD_COST + BULLDOZE_COST, 'a house in the way: ask, road and the demolition fee');
+  ok(p.tiles[3].state === 'new' && p.tiles[4].state === 'new', 'an empty lot and a growth site are paved over as before');
+  ok(p.tiles[5].state === 'demolish' && p.tiles[5].site && p.tiles[5].cost === ROAD_COST, 'a civic building still being built counts as a building: ask (no fee)');
+  ok(p.tiles[6].state === 'have', 'road already there is kept');
+  ok(p.tiles[8].state === 'new' && p.tiles[8].unclaimed && p.tiles[8].cost === PUBLIC_ROAD_COST, 'unclaimed land: the public premium');
+  ok(p.tiles[9].state === 'refused' && p.tiles[9].reason === 'Not your land', "someone else's land: refused, with the reason");
+  ok(p.demolish.n === 2 && p.cost === 5 * ROAD_COST + PUBLIC_ROAD_COST - ROAD_COST + ROAD_COST, `without a yes the cost leaves the buildings out ($${p.cost}) and they are listed (${p.demolish.n})`);
+  const yes = planRoad(path, env(map, { mine: (x) => mine(x) }), { demolish: true });
+  ok(yes.cost === p.cost + p.demolish.cost && yes.fresh === p.fresh + 2, `with a yes: $${yes.cost}, ${yes.fresh} new tiles`);
+  const broke = planRoad(path, env(map, { mine: (x) => mine(x) }), { budget: 25 });
+  ok(broke.tiles[0].state === 'new' && broke.tiles[1].state === 'new' && broke.tiles[3].reason === 'Not enough money' && broke.short > 0, 'money runs out along the drag: the rest is refused for it');
+  // water: needs the technology, and a bridge plan otherwise
+  const wet = new Map<string, number>([['1,0', packTile(Terrain.Water, false, 0, 0)], ['2,0', packTile(Terrain.Water, false, 0, 0)]]);
+  const w1 = planRoad(roadDragPath([0, 0], [3, 0]), env(wet, { bridgeLock: 'Civil engineering' }));
+  ok(w1.tiles[1].state === 'refused' && /Civil engineering is needed to bridge water/.test(w1.tiles[1].reason ?? ''), 'water without the bridge technology: red, and why');
+  const w2 = planRoad(roadDragPath([0, 0], [3, 0]), env(wet));
+  ok(w2.bridges.length === 1 && w2.bridges[0].plan.ok && w2.fresh === 4, `with it: a bridge of 2 between the new banks ($${w2.cost})`);
+  const w3 = planRoad(roadDragPath([0, 0], [2, 0]), env(wet));
+  ok(!w3.bridges[0].plan.ok && w3.tiles[2].state === 'refused', 'released over the water: the bridge is refused (it must reach dry land)');
+  // upgrade in place (R3): a road of another class is upgraded, keeping its junction byte; the same class is kept
+  const up = planRoad(roadDragPath([0, 0], [2, 0]), env(new Map([['1,0', packTile(Terrain.Grass, true, 0, 0)]]), { roadClass: () => 1, aux: (x) => (x === 1 ? 0xf0 : 0) }));
+  ok(up.tiles[1].state === 'upgrade' && up.upgrade === 1 && up.tiles[0].state === 'new', 'a road of another class is upgraded in place, junction and all');
+}
+
+// ---- the server ------------------------------------------------------------------------------------------------
+function setup(world: World, sandbox = false) {
+  let accept: ((c: Conn) => void) | null = null;
+  const game = createGame(world, { onConnection: (fn) => { accept = fn; } }, { devTools: true, sandbox });
+  const client = (name: string) => {
+    const got: ServerMsg[] = [];
+    let onMsg: ((d: string) => void) | null = null;
+    accept!({ open: true, send: (d) => got.push(JSON.parse(d)), close() {}, onMessage: (fn) => { onMsg = fn; }, onClose() {} });
+    const send = (m: ClientMsg) => onMsg!(JSON.stringify(m));
+    send({ t: 'hello', name });
+    const toasts = () => got.filter((m): m is Extract<ServerMsg, { t: 'toast' }> => m.t === 'toast').map((m) => m.msg);
+    const last = <T extends ServerMsg['t']>(t: T) => got.filter((m) => m.t === t).at(-1) as Extract<ServerMsg, { t: T }> | undefined;
+    return { got, send, toasts, toast: () => toasts().at(-1) ?? '', last, id: name.toLowerCase() };
+  };
+  return { game, client };
+}
+
+const world = new World(4242);
+seedCommons(world, 0);
+const { game, client } = setup(world);
+const a = client('Ada');
+const p = world.players.get(a.id)!;
+p.money = 50_000;
+p.tech = [...p.tech, 'publicRoads', 'bridges'];
+// Ada's land east of the Commons (whose east edge road is x = 10)
+a.send({ t: 'buy', x: 11, y: -11, w: 20, h: 22 });
+const own = (x: number, y: number) => world.parcelAt(x, y)?.owner === a.id;
+ok(own(11, 0) && own(30, 10), "Ada owns 20×22 east of the Commons");
+
+{
+  const m0 = p.money;
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([11, -5], [20, 0]) });
+  const laid = roadDragPath([11, -5], [20, 0]).every(([x, y]) => isRoad(world.getTile(x, y)));
+  ok(laid && m0 - p.money === 15 * ROAD_COST, `an L of 15 tiles laid in one go for $${m0 - p.money}`);
+  // undo
+  a.send({ t: 'undoRoad' });
+  ok(!isRoad(world.getTile(15, -5)) && p.money === m0 && /Undone: 15 tiles of road, \$150 back/.test(a.toast()), `Ctrl+Z: the drag is taken back and refunded ("${a.toast()}")`);
+  a.send({ t: 'undoRoad' });
+  ok(/Nothing to undo/.test(a.toast()), 'a second undo: nothing to undo');
+  // after the window
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([11, -5], [20, -5]) });
+  const t0 = Date.now();
+  game.net.now = () => t0 + ROAD_UNDO_MS + 1000;
+  a.send({ t: 'undoRoad' });
+  ok(/Too late to undo/.test(a.toast()) && isRoad(world.getTile(15, -5)), 'after 30 seconds: too late, the road stays');
+  game.net.now = () => Date.now();
+  // a building going up beside it
+  world.setTile(14, -4, packTile(Terrain.Grass, false, Zone.Residential, 0));
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([11, -3], [20, -3]) });
+  world.setTile(14, -4, withConstruction(packTile(Terrain.Grass, false, Zone.Residential, 0), true));
+  a.send({ t: 'undoRoad' });
+  ok(/a building is going up beside it/.test(a.toast()) && isRoad(world.getTile(15, -3)), `a site opened beside the new road: cannot undo ("${a.toast()}")`);
+  world.setTile(14, -4, packTile(Terrain.Grass, false, 0, 0));
+  // bulldozed since
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([22, -10], [22, -2]) });
+  a.send({ t: 'build', tool: 'bulldoze', tiles: [[22, -6]] });
+  a.send({ t: 'undoRoad' });
+  ok(/part of it has changed/.test(a.toast()), 'part of it bulldozed: cannot undo');
+  // a zoned lot paved over comes back zoned
+  world.setTile(25, -10, packTile(Terrain.Grass, false, Zone.Commercial, 0));
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([24, -10], [26, -10]) });
+  ok(isRoad(world.getTile(25, -10)), 'a road over an empty lot paves it (as before)');
+  a.send({ t: 'undoRoad' });
+  ok(zoneOf(world.getTile(25, -10)) === Zone.Commercial && !isRoad(world.getTile(25, -10)), 'undo gives the lot back, zoned');
+}
+
+// ---- buildings in the way (a0902fd7): the client asks; without a yes the road goes round
+{
+  const hx = 18, hy = 5;
+  world.setTile(hx, hy, packTile(Terrain.Grass, false, familyOf(KIND_ID['hospital']), 1), subFor(KIND_ID['hospital']));
+  const m0 = p.money;
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, hy], [24, hy]) });
+  ok(levelOf(world.getTile(hx, hy)) === 1 && !isRoad(world.getTile(hx, hy)) && isRoad(world.getTile(17, hy)) && isRoad(world.getTile(19, hy)), 'a road dragged over a hospital without a yes goes round it: the hospital stands');
+  ok(/Went round a hospital: 1 tile left out/.test(a.toasts().join('|')) && m0 - p.money === 12 * ROAD_COST, `and says so ("${a.toasts().find((t) => /Went round/.test(t))}"), charging only the road laid`);
+  const m1 = p.money;
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, hy], [24, hy]), demolish: true });
+  ok(isRoad(world.getTile(hx, hy)) && m1 - p.money === ROAD_COST + BULLDOZE_COST, `with a yes it comes down: road and fee, $${m1 - p.money}`);
+}
+
+// ---- upgrade in place: a drag over existing road (a roundabout, a crossing) keeps it all and costs nothing
+{
+  // a crossroads of Ada's own, then a roundabout on it
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, 8], [28, 8]) });
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([27, 2], [27, 10]) });
+  a.send({ t: 'build', tool: 'roundabout', tiles: [[27, 8]], dev: true });
+  const before: number[] = [];
+  for (let x = 25; x <= 29; x++) for (let y = 6; y <= 10; y++) before.push(world.getTile(x, y), world.auxAt(x, y));
+  const ring = isJunctionAux(world.auxAt(27, 8)) || isJunctionAux(world.auxAt(26, 7));
+  const m0 = p.money;
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, 8], [28, 8]), cls: 0 });
+  const after: number[] = [];
+  for (let x = 25; x <= 29; x++) for (let y = 6; y <= 10; y++) after.push(world.getTile(x, y), world.auxAt(x, y));
+  ok(ring && before.join() === after.join() && p.money === m0, `dragging a street over a street with a roundabout on it keeps every tile and byte, for nothing (roundabout ${ring}; ${a.toasts().filter((t) => /oundabout/.test(t)).join('|')})`);
+  a.send({ t: 'build', tool: 'road', tiles: [[12, 9]], cls: 7 });
+  ok(/no such class/.test(a.toast()), 'an unknown class is refused');
+}
+
+// ---- street names
+{
+  const roadAt = (x: number, y: number) => isRoad(world.getTile(x, y));
+  a.send({ t: 'inspect', x: 15, y: 8 });
+  const r1 = a.last('road')?.info;
+  const name = r1?.streets?.[0]?.name ?? '';
+  ok(/^[A-Z][a-z]+ [A-Z][a-z]+$/.test(name) && r1?.streets?.[0]?.mine, `a road's hover names its street: "${name}" (Ada's: renamable)`);
+  a.send({ t: 'inspect', x: 22, y: 8 });
+  ok(a.last('road')?.info?.streets?.[0]?.name === name, 'the same street along its length');
+  a.send({ t: 'inspect', x: 27, y: 4 });
+  const cross = a.last('road')?.info?.streets?.[0]?.name ?? '';
+  ok(cross && streetBase(cross) !== streetBase(name), `the street crossing it has another name ("${cross}")`);
+  // the Commons: every street's name differs from those crossing it and alongside it
+  let clashes = 0, streets = 0;
+  const names = new Map<string, string>();
+  for (let y = -11; y <= 10; y++) for (let x = -11; x <= 10; x++) {
+    if (!roadAt(x, y)) continue;
+    for (const r of world.streets.streetsAt(x, y)) { const k = `${r.ns}:${r.line}:${r.from}`; if (!names.has(k)) { names.set(k, world.streets.nameOf(r)); streets++; } }
+  }
+  const list = [...names].map(([k, n]) => { const [ns, line, from] = k.split(':'); return { ns: ns === 'true', line: +line, from: +from, n }; });
+  for (const s of list) for (const o of list) if (s !== o && s.ns === o.ns && Math.abs(s.line - o.line) <= 8 && streetBase(s.n) === streetBase(o.n)) clashes++;
+  ok(streets >= 8 && clashes === 0, `the Commons' ${streets} streets: no two alongside each other share a name (${[...names.values()].slice(0, 6).join(', ')}...)`);
+  // the same on another server: a fresh world with the same seed names its streets the same
+  const fresh = () => { const w = new World(4242); seedCommons(w, 0); return w; };
+  const w1 = fresh(), w2 = fresh();
+  let same = 0, total = 0;
+  for (const s of list) {
+    const at = (w: World) => w.streets.streetsAt(s.ns ? s.line : s.from, s.ns ? s.from : s.line).find((q) => q.ns === s.ns);
+    const r1 = at(w1), r2 = at(w2);
+    total++;
+    if (r1 && r2 && w1.streets.nameOf(r1) === w2.streets.nameOf(r2)) same++;
+  }
+  ok(same === total, `two servers with the same seed: the same names (${same}/${total})`);
+  // rename by the owner; a stranger may not
+  a.send({ t: 'renameStreet', x: 15, y: 8, ns: false, name: '  Ada   Parade ' });
+  a.send({ t: 'inspect', x: 24, y: 8 });
+  ok(a.last('road')?.info?.streets?.[0]?.name === 'Ada Parade', 'renamed by its owner: tidied, along its whole length');
+  const b = client('Bob');
+  b.send({ t: 'renameStreet', x: 15, y: 8, ns: false, name: 'Bob Street' });
+  ok(/Not your street/.test(b.toast()), `a stranger cannot rename it ("${b.toast()}")`);
+  b.send({ t: 'renameStreet', x: 0, y: -11, ns: false, name: 'Bob Street' });
+  ok(/Not your street: Commons/.test(b.toast()), "nor the Commons' streets");
+  // extended, it keeps its name
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([13, -8], [18, -8]) });
+  a.send({ t: 'inspect', x: 15, y: -8 });
+  const short = a.last('road')?.info?.streets?.[0]?.name;
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([19, -8], [29, -8]) });
+  a.send({ t: 'inspect', x: 28, y: -8 });
+  ok(short && a.last('road')?.info?.streets?.[0]?.name === short, `extended, a street keeps its name ("${short}", now ${a.last('road')?.info?.streets?.[0]?.length} tiles)`);
+  // a save and load keeps every name
+  const w3 = worldFromSnapshot(JSON.parse(JSON.stringify(snapshotOf(world))))!;
+  let kept = 0;
+  for (const s of list) { const r = w3.streets.streetsAt(s.ns ? s.line : s.from, s.ns ? s.from : s.line).find((q) => q.ns === s.ns); if (r && w3.streets.nameOf(r) === world.streets.nameOf(world.streets.streetsAt(s.ns ? s.line : s.from, s.ns ? s.from : s.line).find((q) => q.ns === s.ns)!)) kept++; }
+  const ada = w3.streets.streetsAt(15, 8).find((r) => !r.ns)!;
+  ok(kept === list.length && w3.streets.nameOf(ada) === 'Ada Parade', `saved and loaded: every name kept (${kept}/${list.length}), the rename too`);
+  // an empty name gives the generated one back
+  a.send({ t: 'renameStreet', x: 15, y: 8, ns: false, name: '' });
+  ok(/Back to its own name/.test(a.toast()), `an empty name: "${a.toast()}"`);
+  // addresses: the door number and the street the front faces
+  const hx = 15, hy = 9;
+  world.setTile(hx, hy, packTile(Terrain.Grass, false, Zone.Residential, 1));
+  a.send({ t: 'inspect', x: hx, y: hy });
+  const bi = a.last('building')?.info;
+  const st = world.streets.nameOf(world.streets.streetsAt(15, 8).find((r) => !r.ns)!);
+  ok(bi?.address === `${houseNumber(hx, hy, 2)} ${st}`, `a home's address: "${bi?.address}" (the number on its door, the street it faces)`);
+  ok(streetName(1, { ns: false, line: 0, from: 0, to: 5 }, { length: 6, joined: 1, homes: 8, shops: 0, works: 0, offices: 0 }).endsWith('Close')
+    || /Court|Gardens/.test(streetName(1, { ns: false, line: 0, from: 0, to: 5 }, { length: 6, joined: 1, homes: 8, shops: 0, works: 0, offices: 0 })), 'a short dead end of homes is a close (or court, gardens)');
+  ok(/Road|Way/.test(streetName(1, { ns: false, line: 0, from: 0, to: 30 }, { length: 31, joined: 2, homes: 0, shops: 0, works: 0, offices: 0 })), 'a long through route is a road (or way)');
+}
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed ? 1 : 0);

@@ -15,6 +15,7 @@ import type { NewsSave } from './sim/news';
 import type { DeathSave } from './sim/death';
 import type { UtilitiesSave } from '@msimcity/shared';
 
+import { StreetBook } from './streets';
 export interface Chunk {
   cx: number; cy: number;
   tiles: Uint16Array;
@@ -293,6 +294,8 @@ export class World {
   underVersion = 0;
   /** station names by tileKey of the entrance (docs/underground.md); persisted (snapshot v8) */
   stopNames = new Map<string, string>();
+  /** street names (streets.ts, docs/roads.md "Street names"): persisted (an optional snapshot field) */
+  streets: StreetBook = new StreetBook(this);
   /**
    * Where bodies of water leave a scenario world (docs/boats.md 2.3): boats come and go there. Written by the seeder,
    * persisted (an optional snapshot field). Empty in a procedural world, where open water gets its own offing.
