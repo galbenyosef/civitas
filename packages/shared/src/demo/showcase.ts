@@ -14,7 +14,7 @@ import { VALUE_NAMES, VALUE_COUNT, topValues, valuesOf } from '../motivation';
 import { RUNWAY_COST, RUNWAY_MIN, RUNWAY_MAX, TERMINAL_ROW } from '../airport';
 import { RAIL_COST, CROSSING_COST } from '../rail';
 import { ROUNDABOUT_COST, FLYOVER_COST, MINI_ROUNDABOUT_COST, BIG_ROUNDABOUT_COST, INTERCHANGE_COST, isMiniAux } from '../junctions';
-import { TURN_RULE_COST, PELICAN_COST, ARM_WORDS, type ArmState } from '../roadrules';
+import { TURN_RULE_COST, PELICAN_COST, ARM_WORDS, STREET_RULE_DEFS, STREET_RULE_BY_ID, StreetRule, ZONE20_SPEED, VISITOR_LIMIT_SHARE, type ArmState, type StreetRuleId, type RoadRuleDTO } from '../roadrules';
 import { junctionGroup } from '../signals';
 import { BRIDGE_TILE_COST, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES, BridgeStyle, isBridgeAux, bridgeStyle, bridgeSpanAt, basculeSeed, basculeLiftAt } from '../bridges';
 import { isCrossing } from '../rail';
@@ -120,7 +120,12 @@ export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover' | 'mi
 /** `row`: a 'fire-spread' spot's homes, the lead first, which catch light one after another (server sim/fires.ts rows) */
 /** `funeral`: a 'funeral' spot's funeral director and the resting place its pretend funerals go to (server sim/death.ts drills) */
 /** `hour`: the tour shows the spot at this hour of the day (a blackout after dark, the TV stop in the evening, when sets are on) */
-export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks' | 'tv'; row?: readonly DemoXY[]; hour?: number; funeral?: { from: DemoXY; to: DemoXY } }
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks' | 'tv' | 'traffic'; row?: readonly DemoXY[]; hour?: number; funeral?: { from: DemoXY; to: DemoXY } }
+/**
+ * A street rule the scenario sets (R5, shared/src/roadrules.ts StreetRule), as the Street rules tool does: on the whole
+ * street through `at` (east-west unless `ns`), or with `to` on the drag from `at` to `to` (part of a street).
+ */
+export interface DemoStreetRule { id: string; rule: StreetRuleId; name: string; at: DemoXY; ns?: boolean; to?: DemoXY; rect: DemoRect; inspect: DemoXY }
 /** Land parcels (by their `land` names, any section's) combined into one estate by the players' rule (parcelops.ts planCombine) */
 export interface DemoEstate { name: string; lands: readonly string[] }
 export interface DemoLine {
@@ -173,6 +178,10 @@ export interface DemoSection {
   runways?: DemoRunway[];
   tracks?: DemoTrack[];
   junctions?: DemoJunction[];
+  /** R5: street rules (an HGV ban, a bus lane, double yellows, a 20 zone), set after the roads and junctions */
+  streetRules?: DemoStreetRule[];
+  /** R5: gateways (their doors) with the visitor limit on */
+  visitorLimits?: DemoXY[];
   bridges?: DemoBridge[];
   /** power trunk links (docs/utilities.md), laid after the placements they join */
   utilLinks?: DemoUtilLink[];
@@ -367,7 +376,7 @@ const mobileRoleAt = (spot: MobileSpot, x: number, y: number, t: number, a: numb
 export const SECTIONS: DemoSection[] = [
   {
     id: 'roads', name: 'Road classes and junctions',
-    blurb: 'One street of every road class, west of the town: a pedestrian high street, a one-way pair, an avenue with a two-lane roundabout, a motorway from its own connection with a diamond interchange, and a country lane out to the edge; south of them the junctions: an avenue crossing with protected left turns, a mini-roundabout, a turn ban and a signal crossing.',
+    blurb: 'One street of every road class, west of the town: a pedestrian high street, a one-way pair, an avenue with a two-lane roundabout, a motorway from its own connection with a diamond interchange, and a country lane out to the edge; south of them the junctions: an avenue crossing with protected left turns, a mini-roundabout, a turn ban and a signal crossing; and the street rules: an HGV ban, a bus lane with its bus line, double yellows and a 20 zone, with the motorway connection\'s visitor limit on.',
     land: [{ name: 'Road classes', rect: ROAD_CLASSES_LAND }, { name: 'Junctions', rect: JUNCTIONS_LAND[0] }, { name: 'Mill Road', rect: JUNCTIONS_LAND[1] }],
     classRoads: [
       { cls: 5, from: [-57, -37], to: [-39, -37] }, // Cheapside, the pedestrian street, first: the streets that meet it end at it
@@ -387,7 +396,7 @@ export const SECTIONS: DemoSection[] = [
       { cls: 1, from: [-51, -10], to: [-60, -10] }, // Hedge Lane, from Queen's Avenue out to the edge
     ],
     zones: [
-      { zone: 'commercial', rect: [-57, -38, 19, 1], level: 2 }, { zone: 'commercial', rect: [-57, -36, 9, 1], level: 2 }, { zone: 'commercial', rect: [-47, -36, 9, 1], level: 2 },
+      { zone: 'commercial', rect: [-57, -38, 19, 1], level: 2 }, { zone: 'commercial', rect: [-54, -36, 6, 1], level: 2 }, { zone: 'commercial', rect: [-47, -36, 9, 1], level: 2 },
       { zone: 'residential', rect: [-57, -33, 9, 3] }, { zone: 'residential', rect: [-47, -33, 11, 3] },
       { zone: 'office', rect: [-57, -29, 9, 3] }, { zone: 'office', rect: [-47, -29, 5, 3] }, { zone: 'office', rect: [-37, -29, 2, 3] },
       { zone: 'residential', rect: [-57, -24, 9, 1], level: 2 }, { zone: 'residential', rect: [-47, -24, 4, 1], level: 2 }, { zone: 'residential', rect: [-36, -24, 1, 1], level: 2 },
@@ -397,7 +406,13 @@ export const SECTIONS: DemoSection[] = [
       { zone: 'residential', rect: [-59, 0, 4, 1] }, { zone: 'residential', rect: [-54, 0, 4, 1] }, { zone: 'residential', rect: [-48, 0, 8, 1] },
       { zone: 'commercial', rect: [-59, 2, 4, 1], level: 2 }, { zone: 'commercial', rect: [-54, 2, 4, 1], level: 2 }, { zone: 'commercial', rect: [-48, 2, 8, 1], level: 2 },
     ],
-    placements: [{ id: 'motorway-west', kind: 'motorway', door: [-58, -20], rot: 1 }],
+    placements: [{ id: 'motorway-west', kind: 'motorway', door: [-58, -20], rot: 1 },
+      // bus line 4's depot (R5), facing North Parade at the section's west end, so its buses start on their line
+      { id: 'bus-depot-parades', kind: 'bus-depot', door: [-56, -35], rot: 0 },
+      // bus line 4's stops (R5): two on North Parade's kerb (eastbound, in the bus lane), two on South Parade's (westbound)
+      ...([[-54, -33], [-50, -33], [-50, -31], [-55, -31]] as DemoXY[]).map((door, i): DemoPlacement => ({ id: `bus-stop-${31 + i}`, kind: 'bus-stop', door }))],
+    // a small loop inside the section (North Parade, Market Street, South Parade, the west street), clear of the town's perimeter road
+    lines: [{ id: 'line-bus-4', mode: 'bus', number: 4, colour: 0xc8362e, loop: true, vehicles: 2, stops: [[-54, -33], [-50, -33], [-50, -31], [-55, -31]] }],
     junctions: [
       { id: 'roundabout-big', tool: 'roundabout', at: [-40, -26] }, // on Kingsway: the 5×5 two-lane ring
       { id: 'interchange', tool: 'interchange', at: [-48, -21] }, // Market Street over the motorway
@@ -405,6 +420,16 @@ export const SECTIONS: DemoSection[] = [
       { id: 'turn-ban', tool: 'turnrule', at: [-51, 1], rule: 'noLeft' }, // Mill Road's west arm at Queen's Avenue: no left turn
       { id: 'pelican', tool: 'pelican', at: [-45, 1] },
     ],
+    // R5 traffic control: an HGV ban on South Parade, a bus lane on North Parade (bus line 4 runs along it), double yellows
+    // on Market Street's approach to Cheapside, a 20 zone on Church Lane through the homes, and the motorway connection's
+    // visitor limit
+    streetRules: [
+      { id: 'street-hgv', rule: 'hgv', name: 'HGV ban: South Parade', at: [-57, -30], to: [-36, -30], rect: [-58, -32, 24, 5], inspect: [-44, -30] },
+      { id: 'street-bus', rule: 'bus', name: 'Bus lane: North Parade', at: [-57, -34], to: [-36, -34], rect: [-58, -36, 24, 5], inspect: [-44, -34] },
+      { id: 'street-yellow', rule: 'yellow', name: 'Double yellows: Market Street', at: [-48, -36], to: [-48, -31], rect: [-51, -38, 7, 9], inspect: [-48, -33] },
+      { id: 'street-zone20', rule: 'zone20', name: '20 zone: Church Lane', at: [-55, -4], to: [-55, 4], rect: [-58, -5, 7, 11], inspect: [-55, -2] },
+    ],
+    visitorLimits: [[-58, -20]],
     streets: [
       { at: [-52, -37], name: 'Cheapside' }, { at: [-44, -34], name: 'North Parade' }, { at: [-44, -30], name: 'South Parade' },
       { at: [-52, -26], name: 'Kingsway' }, { at: [-52, -25], name: 'Kingsway' }, { at: [-37, -26], name: 'Kingsway' }, { at: [-37, -25], name: 'Kingsway' }, // both sides of its roundabout { at: [-48, -32], ns: true, name: 'Market Street' }, { at: [-40, -29], ns: true, name: 'Crown Street' },
@@ -418,6 +443,8 @@ export const SECTIONS: DemoSection[] = [
       { id: 'road-motorway', spot: 'road-motorway', name: 'Motorway', ...ROAD_CLASS_STOPS.motorway },
       { id: 'road-lane', spot: 'road-lane', name: 'Country lane', ...ROAD_CLASS_STOPS.lane },
       { id: 'junction-group', spot: 'junction-group', name: 'Avenue crossing', ...JUNCTION_STOPS.group },
+      { id: 'visitor-limit', spot: 'visitor-limit', name: 'Visitor limit', rect: [-60, -23, 6, 6], inspect: [-58, -20] },
+      { id: 'traffic-panel', spot: 'traffic-panel', name: 'The Traffic panel', rect: [-52, -31, 9, 9], inspect: [-48, -26], view: 'traffic' },
     ],
   },
   {
@@ -769,6 +796,7 @@ export const TOUR: string[] = [
   'cab-office', 'takeaway', 'waste-depot', 'parcel-depot',
   'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover', 'road-look',
   'road-pedestrian', 'road-oneway', 'road-avenue', 'roundabout-big', 'road-motorway', 'interchange', 'junction-group', 'road-lane', 'roundabout-mini', 'turn-ban', 'pelican',
+  'street-hgv', 'street-bus', 'line-bus-4', 'street-yellow', 'street-zone20', 'visitor-limit', 'traffic-panel',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
   'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
   'fire-post', 'house-fire', 'fire-spread', 'fire', 'large-fire-station', 'fire-hq',
@@ -820,7 +848,7 @@ export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER |
  * tool fails the typecheck here until it is listed, and `demo:check` then fails until the showcase uses it.
  */
 type SurfaceTool = Exclude<Tool, 'road' | 'bulldoze' | KindToolId>;
-export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, miniroundabout: true, interchange: true, turnrule: true, pelican: true, pylons: true, cable: true };
+export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, miniroundabout: true, interchange: true, turnrule: true, pelican: true, streetrule: true, pylons: true, cable: true };
 /** Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. */
 export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, ferry: true, freight: true };
 
@@ -873,6 +901,12 @@ const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
     how: 'Pick Signal crossing and click a straight stretch of street away from a junction. Click it again to take it away.',
     facts: [['Tool', 'Signal crossing (no key), click a street'], ['Needs', 'a straight two-way street tile, not next to a junction'], ['Technology', techLine('pelican')], ['Cost', money(PELICAN_COST)]],
   },
+  streetrule: {
+    title: 'Street rules',
+    what: 'Rules for a whole street, the way a council sets them: an HGV ban (no lorries but to deliver there), a bus lane on a one-way street or an avenue (buses, bikes, taxis and emergencies pass the queue in the kerb lane), double yellow lines (no kerb parking, so no lane slot lost to a parked car) and a 20 zone with speed humps (every vehicle at 60%, through traffic goes elsewhere, quieter and safer for walkers). The signs, the red lane, the yellow lines and the humps are drawn.',
+    how: 'Pick Street rules, choose a rule in its picker and click a street: the ghost covers the whole street with the cost and the day\'s upkeep (for an HGV ban, how far a lorry must go round). Drag along part of a street to set it there only. Click a street that has the rule to take it off. Ctrl+Z takes the last change back.',
+    facts: [['Tool', 'Street rules (no key), click a street or drag part of one'], ['Needs', 'a street; a bus lane needs two lanes one way'], ['Technology', `${techLine('streetrules')}; bus lanes ${techLine('buslane')}`], ['Cost', STREET_RULE_DEFS.map((d) => `${d.title} ${money(d.cost)} a tile`).join(', ')]],
+  },
   flyover: {
     title: 'Flyover',
     what: 'One road lifted over the other on a short deck: the two never meet, so nobody waits at the crossing. Nobody can turn there either; drivers who want to plan round it.',
@@ -914,17 +948,37 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'road-look' | 'junction-group' | 'road-lane' | 'road-oneway' | 'road-avenue' | 'road-motorway' | 'road-pedestrian' | 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'sound' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
+export type SpotKind = 'road-look' | 'junction-group' | 'traffic-panel' | 'visitor-limit' | 'road-lane' | 'road-oneway' | 'road-avenue' | 'road-motorway' | 'road-pedestrian' | 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'sound' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
 const roadFacts = (cls: number): [string, string][] => {
   const d = ROAD_CLASS_DEFS[cls];
   return [['Tool', `Road (3), ${d.title}`], ['Lanes', d.access === 'pedestrian' ? 'none: paving for walkers and bikes' : d.divided ? `${d.lanes} each way, a tile each way` : d.oneWay ? `${d.lanes}, one way` : 'one each way'],
     ['Speed', `${Math.round(d.speed * 100)}% of a street's`], ['Cost', `${money(d.cost)} a tile${d.divided ? ' (two tiles a length)' : ''}, ${money(d.upkeep)} a day`], ['Technology', d.feature ? techLine(d.feature) : 'available from the start']];
+};
+/** The R5 street rules' tour captions (shared/src/roadrules.ts STREET_RULE_DEFS). */
+const ruleFacts = (id: StreetRuleId): [string, string][] => { const d = STREET_RULE_BY_ID.get(id)!; return [['Tool', `Street rules (no key), ${d.title}`], ['Cost', `${money(d.cost)} a tile, ${money(d.upkeep)} a day`], ['Technology', techLine(d.feature)]]; };
+const STREET_RULE_CAPTIONS: Record<StreetRuleId, Caption> = {
+  hgv: { title: 'HGV ban', what: 'South Parade is closed to lorries: the red ring with a lorry in it stands where each road comes in. A lorry delivering to a home on it still comes, from the nearest end; every other lorry goes round by Kingsway, and the routers plan round the ban from the start. Vans and buses are not lorries: they still come through.', how: 'Street rules › HGV ban, then click the street; the ghost says how much further a lorry going past must go round.', facts: ruleFacts('hgv') },
+  bus: { title: 'Bus lane', what: 'North Parade\'s kerb lane is a bus lane: red, with BUS LANE every few tiles and a solid line beside it. Buses, bikes, taxis and emergencies use it and pass the queue; cars keep to the other lane and come into it only to turn off at the last tile. Bus line 4 runs along it.', how: 'Street rules › Bus lane, then click a one-way street or an avenue\'s carriageway (one lane each way has no room for one).', facts: ruleFacts('bus') },
+  yellow: { title: 'Double yellows', what: 'Market Street\'s approach to Cheapside has double yellow lines: nobody parks at its kerb, so no lane slot is lost to a parked car on the way into the shops. A driver who finds the shop\'s parking full parks on the next street back, or in a lot, and walks.', how: 'Street rules › Double yellows, then click a street or drag along part of one.', facts: ruleFacts('yellow') },
+  zone20: { title: '20 zone', what: `Church Lane, through the homes south of Regent Avenue, is a 20 zone: the roundel stands at each way in and is painted on the road, and speed humps every four to six tiles slow every vehicle to ${Math.round(ZONE20_SPEED * 100)}% (cars dip over them). Routes avoid it where there is another way, so it is quieter and safer for walkers.`, how: 'Street rules › 20 zone, then click a street or drag along part of one.', facts: ruleFacts('zone20') },
 };
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'road-lane': {
     title: 'Country lane',
     what: 'Hedge Lane runs from Queen\'s Avenue out to the edge of the land between grass verges: no kerbs, no centre line, no lamps, and cars take it at four fifths of a street\'s pace. It is the cheapest road there is, and every frontier starts with one from its motorway connection.',
     how: ROAD_CLASS_DEFS[1].howTo, facts: roadFacts(1),
+  },
+  'traffic-panel': {
+    title: 'The Traffic panel',
+    what: 'Who is on the roads and why it is slow. The panel (from the overlays menu) counts the cars on the road now by who drives them: residents, visitors, lorries, buses and services. It lists arrivals by gateway, the five junctions where most drivers gave up, and the three longest queues; click one to go there. With the congestion overlay on, hover a red road: the tooltip says what holds its cars (the car ahead, a red light, waiting for a gap, the box ahead blocked, parking, a turn) and how many are visitors and lorries, who are most of the load.',
+    how: 'Overlays (H) › Traffic panel…; hover a red road with the congestion overlay on.',
+    facts: [['Opens from', 'the overlays menu'], ['Costs the server', 'nothing while it is closed: it asks every few seconds while open'], ['Shapes the load', 'street rules, the visitor limit, the lorry curfew']],
+  },
+  'visitor-limit': {
+    title: 'Visitor limit',
+    what: `A motorway connection with the visitor limit on: ${Math.round(VISITOR_LIMIT_SHARE * 100)}% of the visitors who would drive in by it come, so there are fewer cars on your streets, and less visitor tax for the shops and offices they would have gone to. The gateway's panel says how many came today and yesterday and about what the limit costs a day.`,
+    how: 'Click your motorway connection and press Limit visitors; press it again to lift the limit.',
+    facts: [['Where', 'a motorway connection of yours (visitors come in by road)'], ['Effect', `${Math.round(VISITOR_LIMIT_SHARE * 100)}% of its visitors come`], ['Cost', 'the visitor tax of those who stay away']],
   },
   'road-oneway': {
     title: 'One-way streets',
@@ -1141,8 +1195,9 @@ export interface TourStop {
   line?: { mode: TransitMode; number: number; colour: number };
   /** 'under': the tour turns the underground view on at this stop (a metro line, a spot under ground); 'map': the world map;
    *  'ranks': a rank-up celebration plays over the stop (docs/ranks.md); 'tv': the first-person view of someone at home
-   *  in the stop's rect watching television, when someone is (docs/media.md section 8) */
-  view?: 'under' | 'map' | 'ranks' | 'tv';
+   *  in the stop's rect watching television, when someone is (docs/media.md section 8); 'traffic': the congestion overlay
+   *  and the Traffic panel open (R5) */
+  view?: 'under' | 'map' | 'ranks' | 'tv' | 'traffic';
   /** the hour of the day the stop is shown at (client tour.ts pins the light until the next stop), from its placement */
   hour?: number;
 }
@@ -1277,6 +1332,12 @@ export function demoTour(id: DemoId): TourStop[] {
         out.push({ id: sid, ...base, ...c, title: br.name, facts, ...framing(area[0], area[1], area[2], area[3], ns ? 1 : 0, k ? 1.2 : 0.8), kind: k?.kindId, rect: area, inspect: br.from });
         continue;
       }
+      const sr = s.streetRules?.find((q) => q.id === sid);
+      if (sr) {
+        const [x, y, w, h] = sr.rect;
+        out.push({ id: sid, ...base, ...STREET_RULE_CAPTIONS[sr.rule], title: sr.name, ...framing(x, y, w, h, 0, 0.55), rect: sr.rect, inspect: sr.inspect });
+        continue;
+      }
       const sp = s.spots?.find((q) => q.id === sid);
       if (sp) {
         const [x, y, w, h] = sp.rect;
@@ -1342,6 +1403,8 @@ export interface SeededDemo {
   ads?: { slots: Partial<Record<AdSize, number>>; wears: readonly number[]; screensRented?: number };
   /** every street in the town (shared/src/streets.ts) with the name the server gives it */
   streets?: readonly (StreetRun & { name: string })[];
+  /** the road rule records (R4 signs and crossings, R5 street rules and gateway limits: World.roadRulesList) */
+  roadRules?: readonly RoadRuleDTO[];
 }
 
 /**
@@ -1586,6 +1649,15 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
     id: tool, caption: `a ${JUNCTION_WORDS[tool]}`, tour: JUNCTION_TOUR[tool], scenario: (ss) => ss.some((s) => s.junctions?.some((j) => j.tool === tool && j.id !== 'roundabout-big')),
     ...(JUNCTION_SEEN[tool] ? { seeded: JUNCTION_SEEN[tool] } : {}),
   })),
+  // ---- traffic control (R5, docs/roads.md "Traffic control")
+  ...(['hgv', 'bus', 'yellow', 'zone20'] as const).map((rule): ShowcaseFeature => ({
+    id: `street-${rule}`, caption: `a street with ${STREET_RULE_BY_ID.get(rule)!.words}`, tour: `street-${rule}`,
+    scenario: (ss) => ss.some((s) => s.streetRules?.some((r) => r.rule === rule)),
+    seeded: (d) => (d.roadRules ?? []).filter((e) => (e[2].st ?? 0) & STREET_RULE_BY_ID.get(rule)!.bit).length >= 2,
+  })),
+  { id: 'visitor-limit', caption: 'a gateway with the visitor limit on', tour: 'visitor-limit', scenario: (ss) => ss.some((s) => s.visitorLimits?.length), seeded: (d) => (d.roadRules ?? []).some((e) => e[2].gw) },
+  { id: 'traffic-panel', caption: 'the Traffic panel open with the congestion overlay (why each jam is slow)', tour: 'traffic-panel', scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'traffic-panel' && sp.view === 'traffic')) },
+  { id: 'bus-lane-line', caption: 'a bus line along a bus lane', tour: 'line-bus-4', scenario: (ss) => ss.some((s) => s.lines?.some((l) => l.id === 'line-bus-4')), seeded: (d) => d.lines.some((l) => l.mode === 'bus' && l.number === 4) },
   // ---- junctions (R4, docs/roads.md "Junctions")
   { id: 'big-roundabout', caption: 'a 5×5 two-lane roundabout on an avenue', tour: 'roundabout-big', scenario: (ss) => ss.some((s) => s.junctions?.some((j) => j.id === 'roundabout-big')),
     seeded: (d) => anyTile(d, (_x, _y, _t, a) => isRingClassAux(a)) },
@@ -1765,6 +1837,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
     for (const r of s.runways ?? []) dup(r.id);
     for (const t of s.tracks ?? []) dup(t.id);
     for (const j of s.junctions ?? []) dup(j.id);
+    for (const r of s.streetRules ?? []) dup(r.id);
     for (const b of s.bridges ?? []) dup(b.id);
     for (const u of s.utilLinks ?? []) dup(u.id);
     for (const l of s.lines ?? []) dup(l.id);
@@ -1794,6 +1867,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   for (const tool of Object.keys(SURFACE_TOOLS) as SurfaceTool[]) {
     const n = tool === 'runway' ? all((s) => s.runways).length : tool === 'rail' ? all((s) => s.tracks).length
       : tool === 'pylons' || tool === 'cable' ? all((s) => s.utilLinks?.filter((l) => l.mode === (tool === 'pylons' ? 'overhead' : 'buried'))).length
+        : tool === 'streetrule' ? all((s) => s.streetRules).length // R5: the Street rules tool's rules
         : all((s) => s.junctions?.filter((j) => j.tool === tool)).length;
     if (!n) out.push(`no ${tool} is painted in the showcase`);
   }

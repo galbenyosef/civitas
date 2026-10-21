@@ -28,6 +28,8 @@ export interface OverlayDeps {
   setPower(on: boolean): void;
   /** the road classes overlay: roads in their class's colour, on the congestion path (main.ts) */
   setRoads(on: boolean): void;
+  /** R5: open or close the Traffic panel (trafficpanel.ts) */
+  trafficPanel?(): void;
 }
 
 export class OverlayMenu {
@@ -44,6 +46,7 @@ export class OverlayMenu {
     this.menu.id = 'ovlMenu'; this.menu.className = 'hidden';
     document.getElementById('ui')!.append(this.menu);
     this.menu.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('[data-panel]')) { this.menu.classList.add('hidden'); this.d.trafficPanel?.(); return; }
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-mode]');
       if (!b) return;
       const m = b.dataset.mode!;
@@ -87,7 +90,8 @@ export class OverlayMenu {
         <span class="oexp">${explain}</span>
       </button>`;
     let html = '<div class="ohead">Overlays <span>H cycles</span></div>';
-    html += row('traffic', 'free flowing', 'jammed', 'Roads by congestion');
+    html += row('traffic', 'free flowing', 'jammed', 'Roads by congestion; hover a red road to see why it is slow');
+    if (this.d.trafficPanel) html += `<button class="orow" data-panel="traffic"><span class="oname">Traffic panel…</span><span class="oexp">Who is on the roads (residents, visitors, lorries), arrivals by gateway, the worst junctions and the longest queues</span></button>`;
     html += row('roads', 'lane · street · one-way', 'avenue · motorway · pedestrian', 'Roads by class: country lane, street, one-way street, avenue, motorway, pedestrian street (docs/roads.md)');
     for (const ch of [Overlay.Coverage, Overlay.Leisure, Overlay.Happiness, Overlay.JobsHomes, Overlay.News]) { const t = OVERLAY_TEXT[ch]; html += row(ch, t.lo, t.hi, t.explain); }
     html += row('power', 'supplied', 'no supply', 'Streets by their substation: supplied, brownout, cut or fault, or a substation with no supply (docs/utilities.md)');

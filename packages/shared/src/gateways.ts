@@ -41,4 +41,9 @@ export interface GatewayInfo {
   enRoute: number;
   /** taking arrivals: built, and staffed unless it is a motorway connection */
   open: boolean;
+  /**
+   * R5: visitors by road through this gate (a motorway connection: visitors drive in through it) today and yesterday,
+   * whether the player's visitor limit is on (half come in), and what the limit costs in visitor tax a day, about
+   */
+  visitorsToday?: number; visitorsYesterday?: number; visitorLimit?: boolean; limitCost?: number;
 }

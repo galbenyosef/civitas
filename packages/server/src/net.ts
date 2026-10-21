@@ -12,6 +12,7 @@ import {
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
   isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction, Cause, nameFor,
   planRoad, isRoadClass, ROAD_CLASSES, CLASS_JUNCTION, describeDemolition, ROAD_DRAG_MAX, ROAD_UNDO_MS, MSG_ROAD_MONEY, cleanStreetName, type RoadEnv,
+  STREET_RULE_BY_ID, StreetRule, isStreetRuleId, busLaneProblem, GATEWAY_OF, MOTORWAY_KIND, VISITOR_LIMIT_SHARE,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -86,7 +87,7 @@ export interface GameConfig {
  * What a spectator may still ask: looking, never changing. A whitelist, so an intent added to ClientMsg later is refused in
  * spectate mode until it is listed here. (hello and ping are answered before this, as for everyone.)
  */
-const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map', 'inspectBoat', 'overlay', 'inspectDeceased']);
+const READ_ONLY = new Set<ClientMsg['t']>(['sub', 'unsub', 'inspect', 'inspectCitizen', 'inspectTrain', 'sites', 'lines', 'hist', 'map', 'inspectBoat', 'overlay', 'inspectDeceased', 'trafficPanel', 'jamWhy', 'ruleProbe']);
 const SPECTATE_REFUSAL = 'Read-only showcase: you can look around, but nothing can be changed here';
 const DRAFT_TOOLS = new Set(MANIFEST.filter((k) => k.draft && k.tool).map((k) => k.tool!.id));
 const isDraftKind = (id: number) => !!kindManifest(id)?.draft;
@@ -203,6 +204,12 @@ export class Net {
         if (m.tool === 'road') return this.road(c, m.tiles, this.cfg.devTools && m.dev === true, typeof m.cls === 'number' ? m.cls : 0, m.demolish === true);
         return m.under === true && m.tool === 'bulldoze' ? this.fillTunnels(c, m.tiles) : this.build(c, m.tool, m.tiles, this.cfg.devTools && m.dev === true, typeof m.rot === 'number' ? m.rot : undefined);
       case 'undoRoad': return this.undoRoad(c);
+      case 'streetRule': return this.streetRule(c, m.rule, m.tiles, m.on === true, this.cfg.devTools && m.dev === true);
+      case 'undoStreetRule': return this.undoStreetRule(c);
+      case 'ruleProbe': return this.send(c, { t: 'ruleProbe', seq: Number(m.seq) || 0, ...this.ruleProbe(m.tiles) });
+      case 'gatewayLimit': return this.gatewayLimit(c, Math.floor(Number(m.x)), Math.floor(Number(m.y)), m.on === true);
+      case 'trafficPanel': return this.send(c, { t: 'trafficPanel', info: this.sim.control.panel(c.player.id, (o) => this.mayEdit(c.player!, o)) });
+      case 'jamWhy': { const cx = Math.floor(Number(m.cx)), cy = Math.floor(Number(m.cy)); if (!Number.isFinite(cx) || !Number.isFinite(cy)) return; return this.send(c, { t: 'jamWhy', cx, cy, u: this.sim.control.jamWhy(cx, cy, (mv) => (mv as { leg?: { arrive?: string } | null }).leg?.arrive === 'parkLot') }); }
       case 'renameStreet': return this.renameStreet(c, m.x, m.y, m.ns === true, m.name);
       case 'parcel': return this.editParcel(c, m.id, m.taxRate, m.name, m.color);
       case 'parcelOp': return this.parcelOp(c, m);
@@ -865,6 +872,80 @@ export class Net {
     if (u.refund) this.w.credit(p.id, u.refund, 'build');
     const what = [u.tiles.length ? `${u.tiles.length} tile${u.tiles.length === 1 ? '' : 's'} of road` : '', u.classes.length ? `${u.classes.length} tile${u.classes.length === 1 ? '' : 's'} upgraded` : '', u.bridges.length ? `${u.bridges.length === 1 ? 'a bridge' : `${u.bridges.length} bridges`}` : ''].filter(Boolean).join(' and ');
     this.toast(c, `Undone: ${what}, $${u.refund.toLocaleString('en-GB')} back`, 'info');
+  }
+
+  // ---- street rules (R5, shared/src/roadrules.ts StreetRule, docs/roads.md "Traffic control") ---------------------
+
+  /** The last street rule change of each player, for undo: which bit, the tiles it changed, on or off, what it cost, when. */
+  private lastStreetRule = new Map<string, { bit: number; tiles: [number, number][]; on: boolean; cost: number; at: number }>();
+  /**
+   * Put a street rule on (or take it off) the road tiles the Street rules tool sent: a whole street from a click, or part
+   * of one from a drag. Each tile must be road the player may change (their own land; public road with Public works);
+   * a bus lane goes only on tiles with two lanes one way (refused, with the reason, when none of them has). Charged per
+   * tile it goes on; taking one off is free. Drivers whose way a rule breaks find another (Simulation.recheckClasses).
+   */
+  private streetRule(c: Client, rule: unknown, tiles: [number, number][], on: boolean, dev: boolean) {
+    const p = c.player!;
+    if (!isStreetRuleId(rule) || !Array.isArray(tiles)) return;
+    const def = STREET_RULE_BY_ID.get(rule)!;
+    if (on && !dev) { const need = this.locked(p, def.feature); if (need) return this.toast(c, `${need} is needed before you can put ${def.words} on a street`); }
+    const ok: [number, number][] = [];
+    let why: string | null = null;
+    const pub = dev || !this.locked(p, 'publicRoads');
+    for (const pair of tiles.slice(0, 600)) {
+      const x = Math.floor(Number(pair?.[0])), y = Math.floor(Number(pair?.[1]));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const t = this.w.peekTile(x, y);
+      if (t === undefined || !isRoad(t)) continue;
+      const q = this.w.parcelAt(x, y);
+      if (q ? !this.mayEdit(p, q.owner) : !pub) { why ??= q ? 'Not your street' : 'Public road: research Public works to set rules on it'; continue; }
+      ok.push([x, y]);
+    }
+    if (!ok.length) return this.toast(c, why ?? 'Click a street');
+    if (on && def.bit === StreetRule.BusLane) { const no = busLaneProblem(this.ruleEnv, ok); if (no) return this.toast(c, no); }
+    const fresh = on ? ok.filter(([x, y]) => !(this.w.streetAt(x, y) & def.bit) && (def.bit !== StreetRule.BusLane || this.w.busLaneTile(x, y))) : ok.filter(([x, y]) => this.w.streetAt(x, y) & def.bit);
+    if (!fresh.length) return this.toast(c, on ? `That street has ${def.words} already` : `There is no ${def.title.toLowerCase()} there`);
+    const cost = on ? fresh.length * def.cost : 0;
+    if (cost && this.w.spendable(p) < cost) return this.toast(c, this.w.shortOf(p, cost, `for ${def.words}`));
+    const changed = this.w.setStreetRules(fresh, def.bit, on);
+    const paid = on ? changed.length * def.cost : 0;
+    if (paid) this.w.credit(p.id, -paid, 'build');
+    this.lastStreetRule.set(p.id, { bit: def.bit, tiles: changed, on, cost: paid, at: this.now() });
+    const runs = this.w.streets.streetsAt(changed[0][0], changed[0][1]), name = runs.length ? this.w.streets.nameOf(runs[0]) : 'the street';
+    const n = changed.length, perDay = n * def.upkeep;
+    this.toast(c, on
+      ? `${def.title} on ${name}: ${n} tile${n === 1 ? '' : 's'}, $${paid.toLocaleString('en-GB')}, $${perDay.toFixed(2)} a day${why ? ` (not all: ${why.charAt(0).toLowerCase()}${why.slice(1)})` : ''}`
+      : `${def.title} taken off ${name} (${n} tile${n === 1 ? '' : 's'})`, 'info');
+  }
+  /** Take back the player's last street rule change (within ROAD_UNDO_MS), refunded. */
+  private undoStreetRule(c: Client) {
+    const p = c.player!, u = this.lastStreetRule.get(p.id);
+    if (!u) return this.toast(c, 'Nothing to undo: Ctrl+Z (Cmd+Z on a Mac) takes back your last street rule');
+    this.lastStreetRule.delete(p.id);
+    if (this.now() - u.at > ROAD_UNDO_MS) return this.toast(c, `Too late to undo: a street rule can be taken back for ${ROAD_UNDO_MS / 1000} seconds`);
+    this.w.setStreetRules(u.tiles, u.bit, !u.on);
+    if (u.cost) this.w.credit(p.id, u.cost, 'build');
+    const def = [...STREET_RULE_BY_ID.values()].find((d) => d.bit === u.bit)!;
+    this.toast(c, `Undone: ${def.title} ${u.on ? 'taken off again' : 'back on'}${u.cost ? `, $${u.cost.toLocaleString('en-GB')} back` : ''}`, 'info');
+  }
+  /** The Street rules tool's ghost for an HGV ban: a sample lorry's route cost past the tiles, without and with it (sim/control.ts probeBan). */
+  private ruleProbe(tiles: [number, number][]): { before: number; after: number } {
+    if (!Array.isArray(tiles)) return { before: -1, after: -1 };
+    const ok: [number, number][] = [];
+    for (const pair of tiles.slice(0, 600)) { const x = Math.floor(Number(pair?.[0])), y = Math.floor(Number(pair?.[1])); if (Number.isFinite(x) && Number.isFinite(y)) ok.push([x, y]); }
+    return this.sim.control.probeBan(ok);
+  }
+  /** The visitor limit at a gateway (R5): half the visitors come in by it, for less visitor tax; its owner switches it. */
+  private gatewayLimit(c: Client, x: number, y: number, on: boolean) {
+    const p = c.player!;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const b = this.w.buildings.get(`${x},${y}`);
+    if (!b || !GATEWAY_OF[b.id]) return this.toast(c, 'That is not a gateway');
+    if (b.id !== MOTORWAY_KIND) return this.toast(c, 'Visitors come by road through a motorway connection: the limit is set there');
+    const q = this.w.parcelAt(x, y);
+    if (q ? !this.mayEdit(p, q.owner) : !this.cfg.sandbox) return this.toast(c, 'Not your gateway');
+    this.sim.control.setLimit(x, y, on);
+    this.toast(c, on ? `Visitor limit on: ${Math.round(VISITOR_LIMIT_SHARE * 100)}% of visitors come in here, fewer cars on your streets and less visitor tax` : 'Visitor limit off: every visitor comes in', 'info');
   }
 
   /** Rename the street through road tile (x, y) along `ns` (streets.ts): its owner only (anyone's in a sandbox). */

@@ -1,6 +1,6 @@
 import { Group, Mesh, MeshLambertMaterial, Matrix4, Quaternion, Vector3, CylinderGeometry, BoxGeometry, Shape, ShapeGeometry, Color, type BufferGeometry } from 'three';
 import {
-  hash2, isRoad, isClassAux, isPedestrianAux, junctionGroup, carStepOk, inGroup, armState, Turn, type ArmState, type JunctionGroup, type RoadRule,
+  hash2, isRoad, isClassAux, isPedestrianAux, junctionGroup, carStepOk, inGroup, armState, Turn, StreetRule, humpAt, signalArms, armCount, type ArmState, type JunctionGroup, type RoadRule,
 } from '@msimcity/shared';
 import { Kit } from './kit';
 
@@ -45,6 +45,7 @@ export class JunctionSigns {
     const k = new Kit();
     let any = false;
     for (const [key, r] of this.world.roadRules) {
+      if (r.st) { const [x, y] = key.split(',').map(Number); any = this.streetSigns(k, x, y, r.st) || any; }
       if (!r.ban && !r.noEntry) continue;
       const [x, y] = key.split(',').map(Number);
       const g = this.groupAt(x, y);
@@ -77,6 +78,43 @@ export class JunctionSigns {
     this.ghost = new Mesh(k.build(), this.ghostMat);
     this.ghost.renderOrder = 3;
     this.group.add(this.ghost);
+  }
+
+  /**
+   * R5's street rule signs on road tile (x, y) with rule bits st: where a car comes in from a road without the rule (the
+   * street's end, or a junction's arm), an HGV ban's sign (a lorry in a red ring) and a 20 zone's roundel on both kerbs
+   * facing it; and a 20 repeater beside each hump, on the left-hand kerb. Each its own, as the turn signs are.
+   */
+  private streetSigns(k: Kit, x: number, y: number, st: number): boolean {
+    const bitsAt = (tx: number, ty: number) => this.world.roadRules.get(`${tx},${ty}`)?.st ?? 0;
+    let any = false;
+    for (let d = 0; d < 4; d++) {
+      const [dx, dy] = CD[d], nx = x + dx, ny = y + dy;
+      if (!this.road(nx, ny) || isPedestrianAux(this.ca(nx, ny)) || !carStepOk(this.ca(nx, ny), this.ca(x, y), OPP[d])) continue;
+      const nb = bitsAt(nx, ny), plates: string[] = [];
+      if (st & StreetRule.Hgv && !(nb & StreetRule.Hgv)) plates.push('H');
+      if (st & StreetRule.Zone20 && !(nb & StreetRule.Zone20)) plates.push('Z');
+      if (!plates.length) continue;
+      // cars come in heading h = -d; the signs at the edge they come in by, on both kerbs, facing them
+      const hx = -dx, hy = -dy, rx = -hy, ry = hx;
+      for (const sd of [1, -1]) {
+        const seed = (n: number) => hash2(x * 37 + d * 11 + n * 13 + (sd > 0 ? 0 : 50), y * 19 - n * 7);
+        this.sign(k, x + 0.5 + dx * 0.4 + rx * 0.46 * sd, y + 0.5 + dy * 0.4 + ry * 0.46 * sd, hx, hy, plates, seed);
+        any = true;
+      }
+    }
+    if (st & StreetRule.Zone20) {
+      const zone = (tx: number, ty: number) => (bitsAt(tx, ty) & StreetRule.Zone20) !== 0, jn = (tx: number, ty: number) => armCount(signalArms(this.road, tx, ty)) >= 3;
+      const ns = this.road(x, y - 1) || this.road(x, y + 1);
+      if (humpAt(x, y, ns && !(this.road(x - 1, y) || this.road(x + 1, y)), zone, jn)) {
+        // a repeater on one kerb, facing one way or the other by the hump's hash
+        const flip = hash2(x * 5 + 1, y * 3 + 2) < 0.5 ? 1 : -1, hx = ns ? 0 : flip, hy = ns ? flip : 0;
+        const seed = (n: number) => hash2(x * 41 + n * 17, y * 23 - n * 3);
+        this.sign(k, x + 0.5 + -hy * 0.46, y + 0.5 + hx * 0.46, hx, hy, ['z'], seed);
+        any = true;
+      }
+    }
+    return any;
   }
 
   private road = (x: number, y: number) => { const t = this.world.getTile(x, y); return t !== undefined && isRoad(t); };
@@ -139,6 +177,27 @@ export class JunctionSigns {
         // no entry: a red disc, a white bar across
         disc(R, 0, RED);
         put(new BoxGeometry(R * 1.3, R * 0.36, 0.004).translate(0, y, 0.003), WHITE);
+        return;
+      }
+      if (p === 'H') {
+        // an HGV ban (R5): a lorry in black in a red ring on white
+        disc(R, 0, RED); disc(R * 0.8, 0.002, WHITE);
+        const z = 0.0045, u = R * 0.18;
+        put(new BoxGeometry(u * 3.4, u * 1.8, 0.003).translate(-u * 0.6, y + u * 0.2, z), BLACK); // the box
+        put(new BoxGeometry(u * 1.4, u * 1.3, 0.003).translate(u * 1.9, y - u * 0.05, z), BLACK); // the cab
+        for (const wx of [-u * 1.6, u * 1.9]) put(new CylinderGeometry(u * 0.42, u * 0.42, 0.003, 8).rotateX(Math.PI / 2).translate(wx, y - u * 1.0, z + 0.0005), BLACK);
+        return;
+      }
+      if (p === 'Z' || p === 'z') {
+        // a 20 zone (R5): 20 in black in a red ring on white; the repeater (z) a little smaller
+        const rr = p === 'z' ? 0.8 : 1;
+        disc(R * rr, 0, RED); disc(R * rr * 0.8, 0.002, WHITE);
+        const z = 0.0045, u = R * rr * 0.11;
+        // a 2 and a 0 of bars (three by five)
+        const bar = (cx: number, cy: number, w: number, h: number) => put(new BoxGeometry(w, h, 0.003).translate(cx, y + cy, z), BLACK);
+        const two = -u * 2.2, zero = u * 2.2, W = u * 3, H5 = u * 5, t = u * 0.9;
+        bar(two, H5 / 2 - t / 2, W, t); bar(two + W / 2 - t / 2, H5 / 4, t, H5 / 2); bar(two, 0, W, t); bar(two - W / 2 + t / 2, -H5 / 4, t, H5 / 2); bar(two, -H5 / 2 + t / 2, W, t);
+        bar(zero, H5 / 2 - t / 2, W, t); bar(zero, -H5 / 2 + t / 2, W, t); bar(zero - W / 2 + t / 2, 0, t, H5); bar(zero + W / 2 - t / 2, 0, t, H5);
         return;
       }
       disc(R, 0, RED); disc(R * 0.8, 0.002, WHITE);

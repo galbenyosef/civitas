@@ -1,5 +1,5 @@
 import {
-  planMiniRoundabout, planBigRoundabout, planInterchange, junctionArmAt, pelicanProblem, withArmState, isDividedAux,
+  planMiniRoundabout, planBigRoundabout, planInterchange, junctionArmAt, pelicanProblem, withArmState, isDividedAux, STREET_RULE_BY_ID, StreetRule, streetRuleTiles, busLaneProblem,
   DEFAULT_TAX, Terrain, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, KIND_ID, KIND_NAMES, chunkKey, isBuildable, isRoad, packTile, terrainOf,
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
@@ -202,6 +202,19 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
         : j.tool === 'roundabout' ? planRoundabout(x, y, env) : planFlyover(x, y, env, j.deck ? j.deck === 'ew' : undefined);
       if (!plan.ok) { problems.push(`${s.id}: ${j.id} at ${at(j.at)}: ${plan.reason}`); continue; }
       w.placeJunction(plan.tiles!);
+    }
+    for (const r of s.streetRules ?? []) { // R5 street rules, as the Street rules tool sets them: the whole street, or a drag
+      const def = STREET_RULE_BY_ID.get(r.rule)!;
+      let tiles: [number, number][];
+      if (r.to) { const dx = Math.sign(r.to[0] - r.at[0]), dy = Math.sign(r.to[1] - r.at[1]), n = Math.abs(r.to[0] - r.at[0]) + Math.abs(r.to[1] - r.at[1]); tiles = []; for (let i = 0; i <= n; i++) tiles.push([r.at[0] + dx * i, r.at[1] + dy * i]); }
+      else tiles = streetRuleTiles(ruleEnv, r.at[0], r.at[1], !!r.ns, r.rule);
+      const why = def.bit === StreetRule.BusLane ? busLaneProblem(ruleEnv, tiles) : null;
+      if (why) { problems.push(`${s.id}: ${r.id} at ${at(r.at)}: ${why}`); continue; }
+      if (!w.setStreetRules(tiles, def.bit, true).length) problems.push(`${s.id}: ${r.id} at ${at(r.at)}: no road tile took ${def.words}`);
+    }
+    for (const g of s.visitorLimits ?? []) { // R5: the visitor limit at a gateway's door (sim/control.ts)
+      if (!w.buildings.get(`${g[0]},${g[1]}`)) { problems.push(`${s.id}: visitor limit at ${at(g)}: no gateway there`); continue; }
+      w.setRoadRule(g[0], g[1], { ...(w.roadRuleAt(g[0], g[1]) ?? {}), gw: 1 });
     }
     for (const b of s.bridges ?? []) { // road bridges, as the road tool lays them (shared/src/bridges.ts); one the town already has stands
       const dx = Math.sign(b.to[0] - b.from[0]), dy = Math.sign(b.to[1] - b.from[1]), len = Math.abs(b.to[0] - b.from[0]) + Math.abs(b.to[1] - b.from[1]) + 1;

@@ -13,9 +13,10 @@ import { deceasedHtml, remembranceHtml, mourningHtml } from './remembrance';
 import type { DeceasedInfo } from '@msimcity/shared';
 import { utilitiesHtml } from './utilities';
 import { UTIL } from '@msimcity/shared';
-import { POLICIES } from '@msimcity/shared';
+import { POLICIES, StreetRule, JAM_CAUSES } from '@msimcity/shared';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
 import type { RoadClassPicker } from './roadpicker';
+import type { StreetRulePicker } from './streetrules';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
 const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌', 'repair van': '🚐', hearse: '⚰️' };
 
@@ -47,7 +48,9 @@ export const TOOLS: { id: ToolId; label: string; key: string; cost?: string; col
     { id: 'interchange', label: 'Interchange (click where a street meets a motorway)', key: '', cost: `$${INTERCHANGE_COST}`, color: '#5f9be8' },
     // R4 road rules (shared/src/roadrules.ts): signs on a junction's arms, and signal crossings for walkers
     { id: 'turnrule', label: 'Turn rules (click the road just before a junction: no left, no right, no straight on, no entry)', key: '', cost: `$${TURN_RULE_COST}`, color: '#d8423a' },
-    { id: 'pelican', label: 'Signal crossing (click a straight street)', key: '', cost: `$${PELICAN_COST}`, color: '#f2c14e' });
+    { id: 'pelican', label: 'Signal crossing (click a straight street)', key: '', cost: `$${PELICAN_COST}`, color: '#f2c14e' },
+    // R5 street rules (shared/src/roadrules.ts StreetRule): HGV bans, bus lanes, double yellows, 20 zones, per street
+    { id: 'streetrule', label: 'Street rules (click a street, or drag part of one)', key: '', cost: 'per tile', color: '#2f8fd6' });
 }
 // the pioneer camp (docs/first-five.md, shared buildings/camp.ts) sits right after Residential; every letter is taken, so no key
 {
@@ -80,6 +83,11 @@ function gatewayHtml(g: GatewayInfo, row: (k: string, v: string | number) => str
   html += row('Yesterday', `${g.arrivalsYesterday} in · ${g.departuresYesterday} out · net ${net(g.arrivalsYesterday, g.departuresYesterday)}`);
   html += row('Waiting at the gate', g.waiting ? `${g.waiting} newcomer${g.waiting === 1 ? '' : 's'}` : 'nobody');
   html += row('On their way', `${g.enRoute}`);
+  // R5: visitors drive in through a motorway connection; the visitor limit halves them (server sim/control.ts)
+  if (g.visitorsToday !== undefined) {
+    html += row('Visitors by road', `${g.visitorsToday} today · ${g.visitorsYesterday ?? 0} yesterday`);
+    html += row('Visitor limit', g.visitorLimit ? `<b>on</b>: half come in, about $${(g.limitCost ?? 0).toFixed(2)} a day less visitor tax` : `off${g.limitCost ? ` (on, it would cost about $${g.limitCost.toFixed(2)} a day in visitor tax)` : ''}`);
+  }
   return html;
 }
 
@@ -192,9 +200,9 @@ export class UI {
         continue;
       }
       b.dataset.tool = t.id;
-      b.innerHTML = `<span class="sw" style="background:${t.color ?? 'var(--muted)'}"></span><span>${t.label}${t.id === 'road' ? ' <em class="tier"></em>' : ''}</span>${t.cost ? `<span class="cost">${t.cost}</span>` : ''}<span class="key">${t.key}</span>`;
+      b.innerHTML = `<span class="sw" style="background:${t.color ?? 'var(--muted)'}"></span><span>${t.label}${t.id === 'road' || t.id === 'streetrule' ? ' <em class="tier"></em>' : ''}</span>${t.cost ? `<span class="cost">${t.cost}</span>` : ''}<span class="key">${t.key}</span>`;
       // the road tool opens its class picker (roadpicker.ts) as a building tool opens its size picker
-      b.onclick = t.id === 'road' ? () => this.roadClick() : () => cb.onTool(t.id);
+      b.onclick = t.id === 'road' ? () => this.roadClick() : t.id === 'streetrule' ? () => this.ruleClick() : () => cb.onTool(t.id);
       tools.appendChild(b);
     }
     this.picker = new SizePicker({
@@ -219,6 +227,24 @@ export class UI {
     this.cb.onTool('road');
     const b = this.roadButton();
     if (rp && b) rp.show(b);
+  }
+  // ---- the Street rules tool's picker (client/src/streetrules.ts, R5): set by main.ts ----
+  rulePicker: StreetRulePicker | null = null;
+  /** the rule the Street rules tool sets now, for its button (main.ts keeps it) */
+  ruleName: () => string = () => '';
+  private ruleButton() { return $('tools').querySelector<HTMLButtonElement>('button[data-tool="streetrule"]'); }
+  private ruleClick() {
+    const rp = this.rulePicker;
+    if (rp?.open) { rp.close(); return; }
+    this.cb.onTool('streetrule');
+    const b = this.ruleButton();
+    if (rp && b) rp.show(b);
+  }
+  /** The rule picked changed: the button names it. */
+  ruleChanged() {
+    const em = this.ruleButton()?.querySelector('em.tier');
+    if (em) { const n = this.ruleName(); em.textContent = n ? `· ${n}` : ''; }
+    this.rulePicker?.refresh();
   }
   /** The class picked changed: the road button names it. */
   roadClassChanged() {
@@ -296,7 +322,9 @@ export class UI {
     if (this.picker.open && lad?.group.id !== this.picker.open) this.picker.close();
     else this.picker.refresh(t);
     if (t !== 'road') this.roadPicker?.close();
+    if (t !== 'streetrule') this.rulePicker?.close();
     this.roadClassChanged();
+    this.ruleChanged();
   }
   /** Grey out tools the player has not unlocked yet, naming the tier that opens them. */
   setLocks(tech: readonly string[]) {
@@ -351,6 +379,10 @@ export class UI {
   mineByName: ((ownerName: string) => boolean) | null = null;
   /** main.ts: mothball or reopen the building at (x, y) (the `recover` message with its door) */
   onMothball: ((x: number, y: number, on: boolean) => void) | null = null;
+  /** main.ts: the visitor limit at the gateway whose door is (x, y) (R5, the `gatewayLimit` message) */
+  onGatewayLimit: ((x: number, y: number, on: boolean) => void) | null = null;
+  /** main.ts: may the viewer change a building whose owner has this display name (their own, or anyone's in a sandbox; nobody's in a showcase) */
+  mayEditByName: ((ownerName: string) => boolean) | null = null;
   /** onboarding.ts takes advisor hints (shared/src/goals.ts HINTS) and returns true; false: toast them as before */
   onHint: ((id: 'night') => boolean) | null = null;
   /** charts.ts: open the charts panel on a chart (population and treasury figures link to theirs) */
@@ -643,6 +675,9 @@ export class UI {
     let html = `<div class="chead"><button class="chip" id="bClose" title="close (Esc)">✕</button></div>` + this.buildingHtml(info, 'h2');
     // a service or yard of yours can be mothballed (server sim/finance.ts): no staff, no upkeep, no cover until reopened
     if (info.mothballable && this.onMothball) html += `<button class="chip moth" id="bMoth" title="${info.mothballed ? 'Hire staff again; the upkeep comes back' : 'Let the staff go: no upkeep and no cover until you reopen it'}">${info.mothballed ? 'Reopen' : 'Mothball'}</button>`;
+    // a motorway connection of yours (R5): the visitor limit, with what it costs (server sim/control.ts)
+    const gw = info.gateway;
+    if (gw && gw.visitorLimit !== undefined && this.onGatewayLimit && info.parcel && this.mayEditByName?.(info.parcel.owner)) html += `<button class="chip moth" id="bGwLimit" title="${gw.visitorLimit ? 'Every visitor comes in again' : 'Half the visitors come in by this gateway: fewer cars on your streets, less visitor tax'}">${gw.visitorLimit ? 'Lift the visitor limit' : `Limit visitors (about $${(gw.limitCost ?? 0).toFixed(2)} a day)`}</button>`;
     const fam = familyOf(info.kind);
     if (p) {
       if (info.residents) {
@@ -662,6 +697,8 @@ export class UI {
     $('bClose').onclick = () => this.cb.onCloseBuilding();
     const moth = document.getElementById('bMoth');
     if (moth) moth.onclick = () => this.onMothball?.(info.x, info.y, !info.mothballed);
+    const gl = document.getElementById('bGwLimit');
+    if (gl) gl.onclick = () => this.onGatewayLimit?.(info.x, info.y, !info.gateway?.visitorLimit);
     panel.onclick = (e) => {
       const dead = (e.target as HTMLElement).closest<HTMLElement>('[data-did]');
       if (dead) { this.onDeceased?.(Number(dead.dataset.did)); return; }
@@ -706,7 +743,12 @@ export class UI {
     tip.classList.remove('hidden');
   }
 
-  showRoadTip(info: RoadInfo) {
+  /**
+   * The road tooltip. `rules`: the street rules on the tile (R5, shared/src/roadrules.ts); `why`: with the congestion
+   * overlay on, the cars held on it by cause (JAM_CAUSES) and the lorries and visitors among them ([] none held, null
+   * not known yet)
+   */
+  showRoadTip(info: RoadInfo, rules = 0, why: number[] | null = null) {
     const tip = $('tip');
     const row = (k: string, v: string | number) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
     const pct = Math.round(info.congestion * 100);
@@ -738,6 +780,17 @@ export class UI {
     if (info.group && info.group.w * info.group.h > 1) html += row('Junction', `${info.group.w * info.group.h} tiles working as one, ${info.group.phases === 4 ? 'four phases with protected left turns' : 'two phases'}`);
     for (const l of info.rules ?? []) html += row('Sign', esc(l));
     if (info.kerbParked) html += row('Parked at the kerb', `${info.kerbParked} (slows traffic)`);
+    // R5: the street's rules, and what each does
+    if (rules & StreetRule.Hgv) html += row('HGV ban', 'no lorries but to deliver here; vans and buses come');
+    if (rules & StreetRule.BusLane) html += row('Bus lane', 'the kerb lane for buses, bikes, taxis and emergencies');
+    if (rules & StreetRule.NoParking) html += row('Double yellows', 'no parking at the kerb');
+    if (rules & StreetRule.Zone20) html += row('20 zone', 'speed humps: 60% speed, quieter, safer for walkers');
+    // R5: why it is slow, from the simulation's own counters (the congestion overlay on)
+    if (why) {
+      const n = why[0] ?? 0, parts = JAM_CAUSES.map((c, i) => ((why[1 + i] ?? 0) ? `${why[1 + i]} ${c}` : '')).filter(Boolean);
+      html += `<div class="sect">Why it is slow</div>`;
+      html += parts.length ? `<div class="sub">${esc(parts.join(' · '))}</div>` + (n ? row('Lorries and visitors', `${why[7] ?? 0} of the ${n} car${n === 1 ? '' : 's'} here`) : '') : `<div class="sub">nothing held up here right now</div>`;
+    }
     tip.innerHTML = html;
     tip.classList.remove('hidden');
   }

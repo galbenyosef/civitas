@@ -903,3 +903,127 @@ cars a way; one car at a time in a mini-roundabout with `miniOne`; both ring lan
 car; all eight moves of a diamond routed legally and driven; turn bans honoured by A*, the bus router and a driver's
 re-route, ignored by a fire engine on a call; no car onto a signal crossing on its amber or red; car-car overlaps 0
 throughout.
+
+## Traffic control (R5, 2026-10-21)
+
+Docs/roads.md "Traffic control" has the model: street rules per tile (HGV ban, bus lane, double yellows, 20 zone), the
+visitor limit, freight routing round bans and zones, the lorry curfew, the Traffic panel and the overlay's explanation. A
+world with no street rule, no gateway limit and no curfew takes none of their code paths (`World.streetAny`,
+`World.gatewayLimits`, the policy): **on the plain Commons `ab.ts` gives output identical to main**, line for line, on all
+24 runs (seeds 1-12 at 08:00 and 17:00).
+
+**Variants** (`ab.ts --set`, on the Commons): `hgv=1` an HGV ban on its two busiest freight streets (each district's
+doubled south edge, local rows 20 and 21: measured, seeds 1-3 at both peaks, they carry the most lorry-ticks); `zone20=1`
+a 20 zone on its residential street tiles (homes beside them and no shop, works or office: about a third of the town's
+straights); `visitorLimit=1` the visitor limit at every entry (half the visitors come); `noLots=1,yellows=1` no parking
+lots and double yellows wherever shops or offices front the street, against `noLots=1`; `curfew=1` the lorry curfew for
+the town's owner; `busLane=1` bus lanes on every avenue carriageway, with `busAv=N` a bus line of N buses round district
+A1's avenue corner (laid two hours before the window, so its depot, a coach station, does not slow the fill).
+
+New measures (`AbResult.control`): freight and visitor trips (ticks from setting off to arriving), bus laps and the avenue
+line's avenue section, car-pedestrian near misses (a walker on the carriageway within half a tile of a car moving at over
+0.2 tiles a tick; "fast": over 60% of full speed, more than a 20 zone allows), lorries on the road overnight and the
+lorries the curfew held.
+
+**08:00**, twelve seeds, means; in brackets the difference paired by seed against the Commons as it is, ± one standard
+error:
+
+| Variant | give-ups | speed % | driver commute | freight trip | visitor trip | car-ped contacts / tick |
+| --- | --- | --- | --- | --- | --- | --- |
+| the Commons | 430 | 26.0 | 103 | 45.6 | 69.8 | 0.022 |
+| HGV ban, two busiest freight streets | 505 (+75 ± 26) | 23.9 (−2.1 ± 0.7) | 117 (+14 ± 5) | 52.2 (+6.6 ± 1.7) | 69.5 (−0.2 ± 1.2) | 0.028 (+0.006 ± 0.006) |
+| 20 zone on residential streets | 428 (−2 ± 24) | 24.9 (−1.0 ± 0.6) | 105 (+1 ± 5) | 46.2 (+0.6 ± 1.7) | 71.3 (+1.6 ± 1.2) | 0.015 (−0.006 ± 0.003) |
+| visitor limit | 372 (**−58 ± 17**) | 27.3 (+1.3 ± 0.4) | 96 (−7 ± 4) | 45.8 (+0.2 ± 1.5) | 62.9 (−6.9 ± 1.2) | 0.016 (−0.006 ± 0.003) |
+| no lots | 369 (−61 ± 21) | 27.2 (+1.2 ± 0.6) | 97 (−6 ± 5) | 44.7 (−0.9 ± 1.3) | 59.0 (−10.7 ± 1.2) | 0.018 (−0.004 ± 0.003) |
+| no lots, double yellows (against no lots) | 390 (+21 ± 25) | 26.1 (−1.1 ± 0.6) | 98 (+1 ± 7) | 46.4 (+1.6 ± 1.7) | 63.2 (+4.1 ± 1.4) | 0.024 (+0.006 ± 0.008) |
+
+**17:00**
+
+| Variant | give-ups | speed % | driver commute | freight trip | visitor trip | car-ped contacts / tick |
+| --- | --- | --- | --- | --- | --- | --- |
+| the Commons | 252 | 29.7 | 85 | 45.2 | 65.5 | 0.015 |
+| HGV ban, two busiest freight streets | 280 (+28 ± 14) | 28.1 (−1.6 ± 0.6) | 75 (−11 ± 12) | 50.3 (+5.1 ± 2.7) | 66.5 (+1.0 ± 1.7) | 0.015 (+0.001 ± 0.003) |
+| 20 zone on residential streets | 257 (+5 ± 13) | 28.2 (−1.6 ± 0.6) | 106 (+20 ± 10) | 44.4 (−0.8 ± 2.0) | 66.5 (+1.0 ± 1.4) | 0.010 (−0.005 ± 0.003) |
+| visitor limit | 219 (**−33 ± 8**) | 29.6 (−0.2 ± 0.6) | 66 (−19 ± 13) | 43.3 (−1.9 ± 2.1) | 67.9 (+2.4 ± 2.2) | 0.010 (−0.005 ± 0.003) |
+| no lots | 216 (−36 ± 9) | 30.4 (+0.7 ± 0.6) | 59 (−27 ± 9) | 42.6 (−2.6 ± 1.6) | 58.6 (−6.9 ± 1.4) | 0.011 (−0.003 ± 0.003) |
+| no lots, double yellows (against no lots) | 225 (+8 ± 14) | 29.8 (−0.6 ± 0.5) | 60 (+2 ± 8) | 45.9 (+3.3 ± 1.4) | 59.4 (+0.8 ± 1.8) | 0.018 (+0.006 ± 0.008) |
+
+Car-car body overlaps were 0 in every run.
+
+Reading it:
+
+- **The visitor limit is the one that pays here**: a quarter fewer give-ups at 08:00 and an eighth fewer at 17:00, and
+  faster trips for everyone else, for half the visitor tax through that gate. It confirms the load finding above: much of
+  the jam is visitors the player did not create, and now the player can choose.
+- **An HGV ban on the busiest freight streets makes the town worse.** The lorries do not go away: they go round, by
+  streets that were carrying cars, and their trips take an eighth longer. A ban belongs on a street lorries have no need
+  of (the Showcase's South Parade, a residential street), not on their trunk route; the ghost's detour number says which
+  is which before the player pays.
+- **A 20 zone on the residential streets costs a point or two of speed and no give-ups, and it is safer**: car-pedestrian
+  contacts (bodies touching, as the client draws them) fall by a quarter to a third at both peaks.
+- **Double yellows change nothing measurable** even with the lots gone: the drivers who would have parked on the kerb
+  park on the street before instead, so the lost lane slot moves rather than goes, and visitors walk a little further.
+  They are for a street that must keep its lane (a bus route, a junction's approach), not a cure for a jam.
+- Removing the four lots is better than the Commons as it is in this run of seeds (−61 ± 21 at 08:00); the R0 table above
+  had it level. The lots sit on the busiest streets, and a lot's entrance is a junction of its own.
+
+**The lorry curfew** (`curfew=1`, from 20:00 for 1,500 ticks, so the whole of 22:00-06:00; twelve seeds): it held 6.3
+lorries a night, the lorries on the road overnight went from 0.81 to 0.66 a tick (−0.15 ± 0.16, within the noise: most of
+those are lorries that set off before 20:00 and are still driving), and the freight trips completed over the window went
+from 214 to 220 (+5 ± 5): the deliveries come in the morning, none is lost. Industry sends lorries only from 06:00 to
+20:00 already, so the curfew catches the late ones, rail freight's last mile and the harbours' early fish.
+
+**Bus lanes.** On a queued one-way street (the probe in `loadtest/control.ts`: a one-way street east to a signalled
+crossing, 70 cars an hour, a bus every 150 ticks) a bus takes 122 ticks along it with a bus lane against 197 without
+(−38%), and the cars lose a lane: 893 got through against 1,129. On the 2×2 city with `avenues=2` and a bus line round
+district A1's avenue corner (`busAv=4`, twelve seeds, the lanes on every avenue carriageway) the gain is within the
+noise:
+
+| 2×2, avenues=2 | give-ups | driver commute | bus lap (ticks) | the avenue section (ticks) |
+| --- | --- | --- | --- | --- |
+| 08:00, no bus lanes | 1,098 | 91 | 448 | 125 |
+| 08:00, bus lanes | 1,097 (−1 ± 28) | 94 (+3 ± 2) | 414 (−31 ± 24) | 118 (−7 ± 7) |
+| 17:00, no bus lanes | 595 | 46 | (no lap completed) | 100 |
+| 17:00, bus lanes | 600 (+6 ± 13) | 53 (+7 ± 4) | (no lap completed) | 106 |
+
+On this grid the avenue's blocks are four tiles between lights: a bus loses its time at the red lights and behind the bus
+ahead at a stop, and in the boxes of junctions blocked by the town's gridlock, not in a queue of cars along a link, which is
+the only place a bus lane helps (a trace of what held each bus, `Traffic.whyHeld`: at 08:00 its held ticks on the avenue are mostly at a red). A bus lane
+pays on a long link that queues, as the probe's does.
+
+**Near misses** (a walker on the carriageway within half a tile of a car moving at over 60% of full speed, faster than a 20
+zone allows; twelve seeds): with the 20 zone on the residential streets 1.47 to 1.41 a tick at 08:00 (−0.05 ± 0.04) and
+0.96 to 0.93 at 17:00 (−0.04 ± 0.04), down but within the noise; the contacts above are the firmer sign.
+
+**Tick cost** (the 2×2 city, `districts=2`, plain: no rules, so the output is identical to main's, line for line, eight
+seeds): 0.996 ± 0.008 of main's time a tick, R5 and main run side by side so both had the same machine (its load average
+was 20 to 37 from other work: run one after the other, pairs scattered from 0.77 to 1.26). The first cut cost about 10%:
+a curfew field set only on lorries gave freight vehicles an object shape of their own, and the vehicle loop slowed for
+every vehicle (`moveVehicles` 218 to 466 ms in a profile); the holds now live in a map beside the vehicles.
+
+**The knobs**: `TRAFFIC_TUNING.visitorLimit` (0; 1 the visitor limit at every entry, for ab.ts), `VISITOR_LIMIT_SHARE`
+(0.5, the visitors a limited gateway lets in), `ZONE20_SPEED` (0.6), `ZONE20_COST` (1.4), `ZONE20_FREIGHT` (1.5),
+`POLICY.curfewFrom` / `curfewTo` (22, 6) and `curfewPerDay` ($10); the rules' costs and upkeep are `STREET_RULE_DEFS`
+(`shared/src/roadrules.ts`).
+
+**The Showcase's bus lane** (`loadtest/showbus.ts`: bus line 4, a small loop of two buses round North Parade's bus lane,
+Market Street, South Parade and the west street, 24 game hours after the fill, seeds 1 and 2; with the bus lane and with
+it taken off before the fill):
+
+| Seed | bus lane | laps | lap (ticks) | North Parade legs | leg (ticks) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | off | 24 | 177 | 9 | 23 |
+| 1 | on | 22 | 162 | 13 | 16 |
+| 2 | off | 21 | 210 | 8 | 22 |
+| 2 | on | 34 | 232 | 12 | 28 |
+
+Mixed, and within what two seeds can tell apart. The buses lose their time waiting to get into the Market Street
+junction and are withdrawn by the stuck rule now and then (a bus on a one-way street before a busy junction: a follow-up),
+not in a queue along North Parade. Measured where a bus lane can help (the probe's queued link) it takes a bus a third
+less time.
+
+**Drawing** (the Showcase at the road classes section, 40 tiles out, after the town's fill): the road mesh in view has
+262,544 triangles with the street rules drawn against 262,402 without them (+0.05%: the bus lanes, yellow lines, humps and
+roundels are a few hundred decals over 57 tiles), the same nine road meshes, and the junction signs' one merged mesh goes
+from 4,387 to 8,579 triangles (the HGV and 20 signs; no new draw call). Frame times at street zoom with and without the
+rules differ by less than the live scene moves from one pass to the next.

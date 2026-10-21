@@ -291,6 +291,14 @@ export const TRAFFIC_TUNING = {
   greenWave: 2,
   /** the speed a green wave is timed for, tiles per tick */
   waveSpeed: 0.3,
+
+  // ---- traffic control (R5, docs/roads.md "Traffic control") ----------------------------------------------------------
+  /**
+   * 1: the visitor limit on at every entry (half the visitors come in: VISITOR_LIMIT_SHARE), for ab.ts on a city with
+   * no gateway of its own (the Commons' visitors come in at its farthest roads). A player sets it per gateway instead
+   * (RoadRule.gw, in the gateway's panel).
+   */
+  visitorLimit: 0,
 };
 export type TrafficTuning = typeof TRAFFIC_TUNING;
 /** Hard cap on a pedestrian's wait at a signalled crossing: longer than any red. */

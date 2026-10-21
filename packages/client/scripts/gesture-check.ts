@@ -233,5 +233,69 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
   m.win.get('keydown')!({ code: 'Escape', key: 'Escape', target: null, repeat: false, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, preventDefault() {} });
   ok(m.input.tool === 'select', 'Esc with a junction tool: back to select');
 }
+{ // the Street rules tool (R5, docs/roads.md "Traffic control"): a click sets the whole street (one message, street), a straight drag part of one; Ctrl/Cmd+Z undoes; Shift at the press pans; Esc lets go, then back to select
+  const sent: { tiles: [number, number][]; street: boolean; ns: boolean }[] = [];
+  let built = 0, undos = 0;
+  const m = make(() => {}, { onBuild: () => { built++; }, onStreetRule: (tiles: [number, number][], street: boolean, ns: boolean) => sent.push({ tiles, street, ns }), onUndoStreetRule: () => { undos++; } });
+  (m.input as any).tileAt = (px: number, py: number) => [Math.floor(px / 10), Math.floor(py / 10)];
+  const pd = (type: string, tx: number, ty: number, o: any = {}) => m.handlers.get(type)!({ type, button: 0, clientX: tx * 10 + 5, clientY: ty * 10 + 5, offsetX: tx * 10 + 5, offsetY: ty * 10 + 5, movementX: 0, movementY: 0, altKey: false, shiftKey: false, pointerId: 1, ...o });
+  const key = (k: string, o: any = {}) => m.win.get('keydown')!({ code: k === 'Escape' ? 'Escape' : `Key${k.toUpperCase()}`, key: k, target: null, repeat: false, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, preventDefault() {}, ...o });
+  m.input.setTool('streetrule');
+  pd('pointerdown', 4, 4); pd('pointerup', 4, 4);
+  ok(sent.length === 1 && sent[0].street && sent[0].tiles.length === 1 && sent[0].tiles[0].join() === '4,4' && built === 0, 'street rules: a click sends the tile, as a whole street (the handler takes the street through it)');
+  pd('pointerdown', 4, 4); pd('pointermove', 6, 4); pd('pointermove', 9, 5);
+  ok(sent.length === 1 && m.input.streetPath?.length === 6 && m.input.streetPath.every(([, y]) => y === 4), `nothing sent while dragging; the drag is a straight line along its longer axis (${m.input.streetPath?.length} tiles)`);
+  pd('pointerup', 9, 5);
+  ok(sent.length === 2 && !sent[1].street && sent[1].tiles.length === 6 && !sent[1].ns && !m.input.streetPath, 'let go: the dragged tiles go in one message, part of a street');
+  pd('pointerdown', 4, 4); pd('pointermove', 4, 8); pd('pointerup', 4, 8);
+  ok(sent[2]?.ns === true && sent[2].tiles.length === 5, 'a north-south drag says so');
+  pd('pointerdown', 4, 4, { shiftKey: true }); pd('pointermove', 7, 4, { shiftKey: true }); pd('pointerup', 7, 4);
+  ok(sent.length === 3, 'Shift at the press pans, as with every tool');
+  key('z', { ctrlKey: true }); key('z', { metaKey: true });
+  ok(undos === 2, 'Ctrl+Z and Cmd+Z with the Street rules tool: undo the last rule');
+  pd('pointerdown', 4, 4); pd('pointermove', 7, 4); key('Escape');
+  ok(!m.input.streetPath && m.input.tool === 'streetrule', 'Esc mid-drag lets go and keeps the tool');
+  pd('pointerup', 7, 4);
+  ok(sent.length === 3, 'and the release after it sends nothing');
+  key('Escape');
+  ok(m.input.tool === 'select', 'Esc again: back to select');
+}
+{ // the Traffic panel (R5, client/src/trafficpanel.ts): asks the server only while open, every few seconds; a junction or street is a link to the camera; the visitor limit switch
+  const els: any[] = [];
+  const el = (): any => { const e: any = { children: [] as any[], listeners: new Map<string, any>(), cls: new Set<string>(), style: {}, innerHTML: '', id: '', className: '',
+    classList: { add: (c: string) => e.cls.add(c), remove: (c: string) => e.cls.delete(c), toggle: (c: string, on?: boolean) => { const v = on ?? !e.cls.has(c); if (v) e.cls.add(c); else e.cls.delete(c); return v; }, contains: (c: string) => e.cls.has(c) },
+    setAttribute() {}, appendChild: (c: any) => { e.children.push(c); return c; }, addEventListener: (t: string, f: any) => e.listeners.set(t, f) }; els.push(e); return e; };
+  const ui = el();
+  const timers: (() => void)[] = [];
+  const saved = { document: (globalThis as any).document, window: (globalThis as any).window };
+  Object.assign(globalThis, {
+    document: { getElementById: (id: string) => (id === 'ui' ? ui : null), createElement: () => el(), head: el() },
+    window: { ...saved.window, setInterval: (f: () => void) => { timers.push(f); return timers.length; } },
+    clearInterval: (n: number) => { if (n) timers[n - 1] = () => {}; },
+  });
+  const { TrafficPanel } = await import('../src/trafficpanel');
+  let asks = 0;
+  const jumps: string[] = [], limits: string[] = [];
+  const p = new TrafficPanel({ ask: () => { asks++; }, jump: (x, y) => jumps.push(`${x},${y}`), limit: (x, y, on) => limits.push(`${x},${y},${on}`) });
+  ok(asks === 0 && !p.open, 'Traffic panel: closed, nothing asked');
+  p.toggle(true);
+  ok(asks === 1 && !p.el.cls.has('hidden') && timers.length === 1, 'opened: it asks at once and sets a poll');
+  timers[0]();
+  ok(asks === 2, 'the poll asks again');
+  const info = { onRoad: { residents: 10, visitors: 6, freight: 4, buses: 1, services: 2 }, lastHour: { visitors: 12, freight: 5 }, giveUps: { residents: 1, visitors: 2, freight: 3, other: 0 },
+    gateways: [{ x: -58, y: -20, name: 'Motorway connection', type: 'motorway', perHour: 12, arrivalsToday: 3, visitorsToday: 40, visitorsYesterday: 55, limit: false, mine: true, limitCost: 13.75 }],
+    junctions: [{ x: 3, y: 4, name: 'Mill Lane / Station Road', giveUps: 9 }], streets: [{ x: 7, y: 8, name: 'Mill Lane', queued: 6, freightOrVisitors: 4 }] };
+  p.show(info);
+  ok(/23 on the road now · 43% visitors and lorries/.test(p.el.innerHTML) && /Mill Lane \/ Station Road/.test(p.el.innerHTML) && /Limit visitors · about \$13\.75\/day/.test(p.el.innerHTML), 'it shows the cars by kind, the junctions, the gateway with its limit switch');
+  const click = (attrs: Record<string, string>) => p.el.listeners.get('click')({ target: { closest: (sel: string) => (sel === '.x' ? null : Object.keys(attrs).some((k) => sel === `[data-${k}]`) ? { dataset: Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k.replace(/-(\w)/g, (_, c) => c.toUpperCase()), v])) } : null) } });
+  click({ jx: '3', jy: '4' });
+  ok(jumps[0] === '3,4', 'a junction is a link: the camera goes there');
+  click({ lim: '1', gx: '-58', gy: '-20' });
+  ok(limits[0] === '-58,-20,true', 'the switch sends the visitor limit for that gateway');
+  p.toggle(false);
+  const before = asks; timers[0]();
+  ok(asks === before && p.el.cls.has('hidden'), 'closed: the poll stops');
+  Object.assign(globalThis, saved);
+}
 console.log(fails ? `${fails} FAILED` : 'all passed');
 process.exit(fails ? 1 : 0);

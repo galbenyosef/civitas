@@ -1,4 +1,4 @@
-import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, stepRuleAux, STEP_RULE_AUX, isBridgeAux, bridgeNS, CHUNK_SIZE, isMotorwayAux, isPedestrianAux, carStepOk, MOTORWAY_KIND, isDeckClassAux, deckAxisStep, turnAllowed } from '@msimcity/shared';
+import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, stepRuleAux, STEP_RULE_AUX, isBridgeAux, bridgeNS, CHUNK_SIZE, isMotorwayAux, isPedestrianAux, carStepOk, MOTORWAY_KIND, isDeckClassAux, deckAxisStep, turnAllowed, StreetRule } from '@msimcity/shared';
 import { DIRS, tkey, type Chunk, type World } from './world';
 
 /** `a`: the tile's aux byte (roundabouts and flyovers restrict the steps out of it, shared/src/junctions.ts) */
@@ -262,9 +262,38 @@ export function pathStillValid(w: World, path: number[]): boolean {
  * building's way in or out is a motorway (no frontage) but the motorway connection's. Where roads cheaper than a street
  * to drive exist (World.minRouteCost) the distance estimate is scaled down by the cheapest, so it never overestimates.
  */
+/**
+ * The HGV-banned road tiles (R5, World.streetAt StreetRule.Hgv) a lorry from (sx, sy) to (gx, gy) may still use: "except
+ * for access", the banned streets joined to either end (the road it starts or ends on, or the roads beside the building
+ * there, and the banned tiles 4-connected to those, up to ACCESS_MAX). Null when the world has no HGV ban.
+ */
+export function lorryAccess(w: World, sx: number, sy: number, gx: number, gy: number): Set<number> | null {
+  if (!(w.streetAny & StreetRule.Hgv)) return null;
+  const out = new Set<number>(), q: number[] = [];
+  const banned = (x: number, y: number) => (w.streetAt(x, y) & StreetRule.Hgv) !== 0;
+  const seed = (x: number, y: number) => {
+    const t = w.peekTile(x, y);
+    if (t !== undefined && isRoad(t)) { if (banned(x, y) && !out.has(tkey(x, y))) { out.add(tkey(x, y)); q.push(x, y); } return; }
+    for (const [dx, dy] of DIRS) if (banned(x + dx, y + dy) && !out.has(tkey(x + dx, y + dy))) { out.add(tkey(x + dx, y + dy)); q.push(x + dx, y + dy); }
+  };
+  seed(sx, sy); seed(gx, gy);
+  for (let i = 0; i < q.length && out.size < ACCESS_MAX; i += 2) for (const [dx, dy] of DIRS) {
+    const nx = q[i] + dx, ny = q[i + 1] + dy, k = tkey(nx, ny);
+    if (!out.has(k) && banned(nx, ny)) { out.add(k); q.push(nx, ny); }
+  }
+  return out;
+}
+const ACCESS_MAX = 400;
+const NO_ACCESS = new Set<number>();
+
 export function findRoute(
   w: World, sx: number, sy: number, gx: number, gy: number,
   cost: (x: number, y: number) => number, turnCost = 0.4, maxNodes = 4000, startDir = -1, maxCost = Infinity, service = false, emergency = false,
+  /**
+   * a freight lorry (R5): HGV-banned streets are walls but for access to either end (lorryAccess); a set of tile keys
+   * (the Street rules tool's probe) also makes those tiles walls, as a ban on them would
+   */
+  lorry: boolean | Set<number> = false,
 ): { path: number[]; cost: number } | null {
   if (sx === gx && sy === gy) return { path: [sx, sy], cost: 0 };
   const goalRoad = (() => { const t = w.peekTile(gx, gy); return t !== undefined && isRoad(t); })();
@@ -328,6 +357,9 @@ export function findRoute(
   // turn bans and no entry (R4, World.ruleTiles): checked where a route leaves a ruled junction, from the way it came in
   const RT = w.ruleTiles.size ? w.ruleTiles : null;
   const tileOf = (node: number) => { const c = S.chunks[(node / NODES) | 0], i = node & (CELLS - 1); return tkey(c.cx * CHUNK_SIZE + (i % CHUNK_SIZE), c.cy * CHUNK_SIZE + ((i / CHUNK_SIZE) | 0)); };
+  // an HGV ban (R5): the banned tiles a lorry may use to reach either end; null leaves every tile open
+  const walls = typeof lorry === 'object' ? lorry : null;
+  const acc = lorry ? lorryAccess(w, sx, sy, gx, gy) ?? (walls ? NO_ACCESS : null) : null;
   let expanded = 0;
   while (hn && expanded < maxNodes) {
     // f never falls from one node taken to the next, and a route found from a node costs at least its f
@@ -375,6 +407,7 @@ export function findRoute(
       if (closed[nk] === st) continue;
       if (!isRoad(t) || sideways(a, DIRS[d][0])) continue;
       if (((here > 0 && here < 0x40) || (a > 0 && a < 0x40)) && !carStepOk(here, a, d, service)) continue;
+      if (acc && ((w.streetAt(nx, ny) & StreetRule.Hgv && !acc.has(tkey(nx, ny))) || (walls && walls.has(tkey(nx, ny))))) continue;
       const ng = gk + cost(nx, ny) + (din >= 0 && din !== d && k !== start ? turnCost : 0); // startDir restricts, it does not charge
       if (seen[nk] === st && gScore[nk] <= ng) continue;
       seen[nk] = st; gScore[nk] = ng; parent[nk] = k; dirIn[nk] = d;

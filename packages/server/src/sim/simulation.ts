@@ -1,4 +1,5 @@
 import {
+  MOTORWAY_KIND,
   ruleLines, turnAllowed, TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, pedestrianDeliveryOpen, auxClass, oneWayDir, carStepOk, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
   DRIVE_MIN_TILES, CAR_FETCH_RADIUS, PARK_RADIUS, PARKING_FEE, KERB_CAP, FREIGHT_TRIPS_PER_LEVEL_PER_DAY, VISITORS_PER_100_PEAK_HOUR,
   Zone, CitizenState, VehicleClass, VehicleKind, KIND_COUNT, KIND_ID_COUNT, KIND_NAMES, CIVIC_UPKEEP, CONSTRUCTION_FEE, MAX_BUILDERS_PER_SITE, CAMP_KIND,
@@ -28,6 +29,7 @@ import { indicatorOf } from './indicators';
 import { Transit, BusService, isMechanic } from './transit';
 import { Carpool, CARPOOL, householdShare, coworkerShare, friendShare, type Candidate } from './carpool';
 import { Gateways, MIG, type Gate } from './gateways';
+import { TrafficControl } from './control';
 import { Mobile, FLEET_VKIND } from './mobile';
 import { Taxis } from './taxis';
 import { Delivery } from './delivery';
@@ -181,6 +183,8 @@ export class Simulation {
   pool: Carpool;
   /** gateways (sim/gateways.ts): where newcomers arrive and leavers go out */
   gateways: Gateways;
+  /** traffic control (R5): freight routing round HGV bans and 20 zones, the visitor limit, the lorry curfew, the Traffic panel */
+  control: TrafficControl;
   /** mobile jobs (sim/mobile.ts, docs/mobile-jobs.md): workers on the road, and the taxi service */
   mobile: Mobile;
   taxis: Taxis;
@@ -239,6 +243,7 @@ export class Simulation {
     this.transit.register(this.buses);
     this.pool = new Carpool(w);
     this.gateways = new Gateways(w);
+    this.control = new TrafficControl(w, this.traffic, this.gateways);
     this.mobile = new Mobile(w, this.traffic);
     this.taxis = new Taxis(w, this.mobile);
     this.mobile.register(this.taxis);
@@ -330,6 +335,11 @@ export class Simulation {
       let enRoute = 0;
       for (const c of w.citizens.values()) if ((c.mig === MIG.In || c.mig === MIG.Out) && c.gx === b.x && c.gy === b.y) enRoute++;
       info.gateway = this.gateways.describe(b, enRoute);
+      // R5: visitors by road through a motorway connection, and the visitor limit with what it costs (sim/control.ts)
+      if (info.gateway && b.id === MOTORWAY_KIND) {
+        const st = w.structureAt(b.x, b.y), fx = st?.frontX ?? b.x, fy = st?.frontY ?? b.y, v = this.control.visitorsAt(fx, fy), on = this.control.limitAt(b.x, b.y);
+        Object.assign(info.gateway, { visitorsToday: v.today, visitorsYesterday: v.yesterday, visitorLimit: on, limitCost: this.control.limitCost(fx, fy, on) });
+      }
     }
     // bus stops (rail stations have their own section, net.ts / sim/rail.ts)
     if (stopModeOf(b.id) === 'bus') { info.transit = this.transit.describeStop(b.x, b.y); if (!capacityOf(b.id, b.level)) return info; }
@@ -751,6 +761,7 @@ export class Simulation {
       if (c.mig) continue; // moving in or out already
       if (++c.idleDays > MAX_IDLE_DAYS) { this.skills.count(c); this.leaveTown(c); }
     }
+    this.control.chargeCurfew(); // the lorry curfew's running cost (R5)
     w.parkFail.clear(); w.lotIncome.clear();
     this.leisureCache.clear(); // drops homes that are gone; the rest refill on first use
     this.jobMisses.clear(); // likewise
@@ -2593,6 +2604,7 @@ export class Simulation {
       if (!carStepOk(this.w.auxAt(ax, ay), this.w.auxAt(bx, by), dirBetween(ax, ay, bx, by), service)) broken = true;
     }
     if (!broken && this.w.ruleTiles.size) broken = this.breaksRules(m, Math.max(1, m.pi));
+    if (!broken && this.w.streetAny) broken = this.control.breaksBan(m, Math.max(1, m.pi)); // a new HGV ban on a lorry's way (R5)
     // a way broken by a class change or a road rule: any other way at all, from the tile ahead (not avoiding the one
     // after it, as the stuck rule does: that tile holds nobody up)
     if (broken) { const was = m.path; this.maybeReroute(m, leg, true, true); if (m.path === was) return; }
@@ -2639,15 +2651,20 @@ export class Simulation {
     const gx = m.path[(n - 1) * 2], gy = m.path[(n - 1) * 2 + 1];
     // never back through the tile behind: lanes have no U-turns (one would be drawn driving straight through the box)
     const AVOID = 1e4;
-    const cost = force && !broken
-      ? (x: number, y: number) => ((x === cx && y === cy && m.pi + 1 < n - 1) || (x === ax && y === ay) ? AVOID : this.traffic.cost(x, y))
-      : (x: number, y: number) => (x === ax && y === ay ? AVOID : this.traffic.cost(x, y));
+    const lorry = this.control.isLorry(m), base = lorry ? this.control.costFor(m) : null; // a lorry (R5): HGV bans and 20 zones
+    const cost = base
+      ? (force && !broken
+        ? (x: number, y: number) => ((x === cx && y === cy && m.pi + 1 < n - 1) || (x === ax && y === ay) ? AVOID : base(x, y))
+        : (x: number, y: number) => (x === ax && y === ay ? AVOID : base(x, y)))
+      : force && !broken
+        ? (x: number, y: number) => ((x === cx && y === cy && m.pi + 1 < n - 1) || (x === ax && y === ay) ? AVOID : this.traffic.cost(x, y))
+        : (x: number, y: number) => (x === ax && y === ay ? AVOID : this.traffic.cost(x, y));
     // a new way is taken only when it costs less than `worse`, so the search stops once it cannot find one that does
     // (docs/search-perf.md: three in four searches found the way the driver was already on; the margin keeps rounding
     // from ever stopping one short of a way that would be taken)
     const worse = force ? AVOID : Math.min(AVOID, this.traffic.pathCost(m.path, m.pi + 1) * (late ? TT.delayGain : 0.85));
     // a driver running late searches wider: the way round a jam is often a long way round
-    const alt = findRoute(w, bx, by, gx, gy, cost, 0.4, late ? TT.delayNodes : TT.rerouteNodes, dirBetween(ax, ay, bx, by), worse * (1 + 1e-9), false, m.priority); // heading into B already (no turning on a flyover)
+    const alt = findRoute(w, bx, by, gx, gy, cost, 0.4, late ? TT.delayNodes : TT.rerouteNodes, dirBetween(ax, ay, bx, by), worse * (1 + 1e-9), false, m.priority, lorry); // heading into B already (no turning on a flyover)
     if (!alt || alt.path.length < 2 || alt.cost >= worse) return;
     m.path = [ax, ay, ...alt.path]; m.pi = 1;
     leg.path = m.path;
@@ -2717,6 +2734,13 @@ export class Simulation {
    * at the kerb and walks on from the building beside it, a vehicle is withdrawn.
    */
   private onStuck(m: Citizen | Vehicle, leg: Leg) {
+    // the Traffic panel's give-ups by junction and by who (R5, sim/control.ts): whatever the rule below did
+    const c = this.traffic.counters, before = c.stuckHome + c.stuckDespawn + c.abandonKerb + c.abandonDespawn;
+    const at = m.pi >= 1 ? { pi: m.pi, path: m.path } : null;
+    this.stuckRule(m, leg);
+    if (at && c.stuckHome + c.stuckDespawn + c.abandonKerb + c.abandonDespawn > before) this.control.noteGiveUp({ ...m, ...at } as Citizen | Vehicle);
+  }
+  private stuckRule(m: Citizen | Vehicle, leg: Leg) {
     const veh = 'vkind' in m;
     if (!TT.stuckReroute) {
       if (this.traffic.inJunctionBox(m)) this.traffic.count('stuckInBox');
@@ -2782,6 +2806,7 @@ export class Simulation {
     const rx = ax + [1, -1, 0, 0][RIGHT[d]], ry = ay + [0, 0, 1, -1][RIGHT[d]];
     const rt = w.peekTile(rx, ry);
     if (rt === undefined || isRoad(rt)) return false;
+    if (w.streetAny && this.traffic.kerbless(ax, ay)) return false; // double yellows or a bus lane (R5): not here
     const n = c.path.length / 2;
     // a shared drive with stops still to make: walk to where the whole trip was going (passengers make their own way)
     const last = leg.pool ? c.legs.filter((l) => l.pool === leg.pool).pop() : undefined;
@@ -2915,7 +2940,9 @@ export class Simulation {
     // a pedestrian street lets in emergencies, and deliveries out of shop hours (shared/src/roadclass.ts)
     const service = priority || (vkind === VehicleKind.Freight && pedestrianDeliveryOpen((w.tick % TICKS_PER_DAY) / TICKS_PER_HOUR));
     // an emergency on a call ignores turn bans, never a no-entry (shared/src/roadrules.ts)
-    const route = findRoute(w, from[0], from[1], to[0], to[1], (x, y) => this.traffic.cost(x, y), undefined, undefined, undefined, undefined, service, priority);
+    // a lorry (R5): round HGV bans but to reach either end, and 20 zones cost it more (sim/control.ts)
+    const lorry = vkind === VehicleKind.Freight;
+    const route = findRoute(w, from[0], from[1], to[0], to[1], this.control.costFor(null, vkind), undefined, undefined, undefined, undefined, service, priority, lorry);
     if (!route || route.path.length < 4) return null;
     const id = this.nextVehicleId++;
     const v: Vehicle = {
@@ -2930,7 +2957,12 @@ export class Simulation {
     if (vkind === VehicleKind.Freight) v.gapMul *= 1.4;
     resetTrail(v, from[0], from[1]);
     w.vehicles.set(id, v);
-    this.startLeg(v);
+    // a lorry the curfew holds sets off in the morning (moveVehicles); kept off the Vehicle, so every vehicle has one shape
+    const hold = lorry ? this.control.curfewHold(id, owner, to) : undefined;
+    if (lorry) this.control.noteFreight();
+    else if (vkind === VehicleKind.Visitor) this.control.noteVisitor(from[0], from[1]);
+    if (hold !== undefined) this.control.holds.set(id, hold);
+    else this.startLeg(v);
     return v;
   }
 
@@ -2941,6 +2973,10 @@ export class Simulation {
       if (v.phase === 'dwell') {
         if (w.tick >= v.until) this.headBack(v);
         continue;
+      }
+      if (this.control.holds.size) { // a lorry the curfew held (R5): it sets off once its time comes
+        const h = this.control.holds.get(v.id);
+        if (h !== undefined) { if (w.tick < h) continue; this.control.holds.delete(v.id); this.control.curfew.released++; if (!this.startLeg(v)) { w.vehicles.delete(v.id); continue; } }
       }
       if (!v.leg) { w.vehicles.delete(v.id); continue; }
       const leg = v.leg;
@@ -3018,19 +3054,27 @@ export class Simulation {
   }
   private headBack(v: Vehicle) {
     const w = this.w;
+    // the lorry curfew (R5): a lorry that delivered late stays where it is until the morning
+    if (v.vkind === VehicleKind.Freight && this.curfewOwners() > 0) { const h = this.control.curfewHold(v.id, v.owner, v.to); if (h !== undefined) { v.until = h; return; } }
     const at: [number, number] = v.parkedAt ? parseKey(v.parkedAt) : [Math.floor(v.x), Math.floor(v.y)];
     this.releaseParking(v);
     v.phase = 'back';
     const dest: [number, number] = v.vkind === VehicleKind.Visitor && this.entries.length ? this.entries[Math.floor(Math.random() * this.entries.length)] : v.from;
     // a delivery or an emergency that went down a pedestrian street drives out of it again (roadclass.ts)
     const service = v.vkind === VehicleKind.Freight || v.vkind === VehicleKind.FireEngine || v.vkind === VehicleKind.Ambulance || v.vkind === VehicleKind.Patrol;
-    const route = findRoute(w, at[0], at[1], dest[0], dest[1], (x, y) => this.traffic.cost(x, y), undefined, undefined, undefined, undefined, service);
+    const route = findRoute(w, at[0], at[1], dest[0], dest[1], this.control.costFor(v), undefined, undefined, undefined, undefined, service, false, this.control.isLorry(v));
     if (!route || route.path.length < 4) { this.despawn(v); return; }
     v.x = at[0] + 0.5; v.y = at[1] + 0.5;
     v.priority = false; v.call = false;
     resetTrail(v, at[0], at[1]);
     v.legs = [{ path: route.path, drive: true, arrive: 'none' }];
     this.startLeg(v);
+  }
+  /** How many players have the lorry curfew on (0 skips its checks), recounted when the players change. */
+  private curfewOwners(): number {
+    let n = 0;
+    for (const p of this.w.players.values()) if (p.policies?.includes('curfew')) n++;
+    return n;
   }
   private despawn(v: Vehicle) {
     this.traffic.leave(v);
@@ -3088,7 +3132,10 @@ export class Simulation {
       while (n > 0) {
         if (Math.random() >= n) break;
         n -= 1;
-        q.push({ vkind: VehicleKind.Visitor, b: null, entry: this.entries[Math.floor(Math.random() * this.entries.length)] });
+        const entry = this.entries[Math.floor(Math.random() * this.entries.length)];
+        // the visitor limit at its gateway (R5): half are turned away
+        if ((TT.visitorLimit || w.gatewayLimits) && this.control.dropVisitor(entry, !!TT.visitorLimit, Math.random)) continue;
+        q.push({ vkind: VehicleKind.Visitor, b: null, entry });
       }
     }
     if (q.length > DISPATCH_QUEUE_MAX) q.splice(0, q.length - DISPATCH_QUEUE_MAX); // overloaded: the oldest give up

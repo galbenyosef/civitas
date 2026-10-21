@@ -97,6 +97,8 @@ interface Deps {
   setHour?: (hour: number | null) => void;
   /** a stop with `view: 'tv'`: the first-person view of someone at home in the rect watching TV (main.ts); null ends it */
   watchTv?: (rect: [number, number, number, number] | null) => void;
+  /** a stop with `view: 'traffic'` (R5): the congestion overlay and the Traffic panel, on at the stop and off after it */
+  setTrafficView?: (on: boolean) => void;
 }
 
 export class TourPanel {
@@ -130,6 +132,8 @@ export class TourPanel {
   private hour: number | null = null;
   /** the tour opened a TV stop's first-person view, so the next stop closes it */
   private tv = false;
+  /** a stop with `view: 'traffic'` is showing (R5): the overlay and the Traffic panel are on */
+  private traffic = false;
 
   constructor(private d: Deps) {
     this.stops = demoTour(d.demo);
@@ -196,6 +200,8 @@ export class TourPanel {
     if (hour !== this.hour) { this.d.setHour?.(hour); this.hour = hour; }
     if (s.view === 'ranks') setTimeout(() => this.d.celebrate?.(s.focus[0], s.focus[1]), instant ? 0 : FLY_S * 1000);
     if (this.tv && s.view !== 'tv') { this.d.watchTv?.(null); this.tv = false; }
+    const traffic = s.view === 'traffic';
+    if (traffic !== this.traffic) { this.d.setTrafficView?.(traffic); this.traffic = traffic; }
     if (s.view === 'tv' && s.rect) { const r = s.rect, at = this.i; this.tv = true; setTimeout(() => { if (this.i === at) this.d.watchTv?.([r[0], r[1], r[2], r[3]]); }, instant ? 0 : FLY_S * 1000); }
     this.live = null;
     this.autoAt = performance.now() + (instant ? 0 : FLY_S * 1000) + DWELL_S * 1000;

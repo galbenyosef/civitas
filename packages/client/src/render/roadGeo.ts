@@ -123,8 +123,12 @@ export interface RoadTile {
   under: boolean;
   /** a zebra across the middle of this straight (roadlook midZebraAt) */
   zebra: boolean;
-  /** kerb sides (mask bits) with double yellow lines: R5's parking restrictions set it; nothing does yet */
+  /** kerb sides (mask bits) with double yellow lines (R5's parking restrictions, shared/src/roadrules.ts StreetRule) */
   yellow?: number;
+  /** R5: a bus lane in the kerb lane of this one-way tile (red, a solid lane line, BUS LANE every few tiles: `busText`) */
+  bus?: boolean; busText?: boolean;
+  /** R5: a 20 zone's speed hump across this tile; and the sides (bits) a car comes into the zone by here (the 20 roundel) */
+  hump?: boolean; zoneIn?: number;
   /** 0..3, from the traffic the tile has seen */
   wear: number;
   /** R3: a road of a class other than the street (absent on a street, which is drawn as R1 left it) */
@@ -553,6 +557,11 @@ function paint(t: RoadTile, g: Geo) {
     }
     for (const s of toJ) approachPaint(t, s, decal, white);
     if (t.yellow) yellowLines(t, decal);
+    // R5: a 20 zone's hump and its roundels; a two-way street's lanes: +across heads +along east-west, -across north-south
+    const L2 = (along: number, across: number): P => (ns ? [ox + across, oz + along] : [ox + along, oz + across]);
+    const ways: [number, number][] = ns ? [[-0.19, 1], [0.19, -1]] : [[0.19, 1], [-0.19, -1]];
+    if (t.hump) humpPaint(t, decal, white, L2, c, ways);
+    if (t.zoneIn) zonePaint(t, decal, white, L2, ways, ns);
   } else if (!t.under && (t.m8 & 15) === t.arms) {
     // (a corner of a wide road's crossing, where twin lanes meet, has no line of its own)
     const bits = t.arms;
@@ -1368,6 +1377,77 @@ function classPaint(t: RoadTile, g: Geo, grass: Color, ped: PedStyle | null) {
   }
   for (const s of toJ) if (s === f) oneWayApproach(t, s, decal, white, -left, c);
   if (cl.jAhead && !toJ.includes(f)) decal(quad(0.455, 0.49, -left + 0.01, c - 0.01), white);
+  // R5: a bus lane in the kerb lane (+across), double yellows, a 20 zone's hump and roundel (one way: every lane heads +along)
+  if (t.bus) busLanePaint(t, decal, white, P2, quad, c);
+  if (t.yellow) yellowLines(t, decal);
+  const lanes: [number, number][] = [[0.19, 1], [-0.19, 1]];
+  if (t.hump) humpPaint(t, decal, white, P2, c, lanes, -left);
+  if (t.zoneIn) zonePaint(t, decal, white, P2, lanes.slice(0, 1), false);
+}
+
+// ---- R5 street rules: bus lanes, humps, the 20 zone's roundel (shared/src/roadrules.ts StreetRule) ------------------------
+
+const BUS_RED = col(0x8e2c27), ROUNDEL_RED = col(0xc8362e), HUMP = col(0x5c5e63);
+/** A 3×5 pixel font for the road's words: rows top (furthest along) to bottom. */
+const GLYPH: Record<string, string[]> = {
+  B: ['110', '101', '110', '101', '110'], U: ['101', '101', '101', '101', '111'], S: ['111', '100', '111', '001', '111'],
+  L: ['100', '100', '100', '100', '111'], A: ['010', '101', '111', '101', '101'], N: ['101', '111', '111', '111', '101'],
+  E: ['111', '100', '110', '100', '111'], '2': ['111', '001', '111', '100', '111'], '0': ['111', '101', '101', '101', '111'],
+};
+/**
+ * Words painted on the carriageway for a driver heading +along (`sg` 1) or -along: left to right across, each letter
+ * `cw` wide (across) and `ch` long (along, the way road lettering is stretched), the text's middle at (along a, across b).
+ */
+function words(decal: Decal, P2: (along: number, across: number) => P, text: string, a: number, b: number, cw: number, ch: number, sg: number, color: Color, mirror = false) {
+  // `mirror`: +across is the driver's left heading +along (a north-south street's L2 frame), not their right
+  const sx = mirror ? -sg : sg;
+  const gap = cw * 0.35, w = text.length * cw + (text.length - 1) * gap, px = cw / 3, py = ch / 5;
+  for (let i = 0; i < text.length; i++) {
+    const g = GLYPH[text[i]];
+    if (!g) continue;
+    for (let r = 0; r < 5; r++) for (let k = 0; k < 3; k++) {
+      if (g[r][k] !== '1') continue;
+      // across: left to right as the driver sees it (their right is +across heading +along); along: top row furthest
+      const c0 = -w / 2 + i * (cw + gap) + k * px, l0 = ch / 2 - (r + 1) * py;
+      const A0 = a + sg * l0, A1 = a + sg * (l0 + py * 0.92), B0 = b + sx * c0, B1 = b + sx * (c0 + px * 0.92);
+      decal([P2(A0, B0), P2(A1, B0), P2(A1, B1), P2(A0, B1)], color);
+    }
+  }
+}
+/** A bus lane on a one-way tile's kerb lane: red surface, the lane line solid, BUS LANE every few tiles (t.busText). */
+function busLanePaint(t: RoadTile, decal: Decal, white: Color, P2: (along: number, across: number) => P, quad: (a0: number, a1: number, c0: number, c1: number) => P[], c: number) {
+  const red = BUS_RED.clone().multiplyScalar(0.92 + 0.14 * hk(t, 140) - 0.04 * t.wear); // the organic rule: each tile's red its own
+  decal(quad(-0.5, 0.5, 0.016, c - 0.006), red, Y_PATCH + 0.0003);
+  decal(quad(-0.5, 0.5, -0.013, 0.013), white);
+  // read as a driver comes up to it: BUS first, LANE beyond
+  if (t.busText) { words(decal, P2, 'BUS', -0.12, 0.19, 0.05, 0.11, 1, white); words(decal, P2, 'LANE', 0.13, 0.19, 0.045, 0.11, 1, white); }
+}
+/**
+ * A speed hump across the carriageway (a 20 zone, R5): a raised band, and on each lane white triangles on the slope a
+ * driver comes up, pointing the way they go (`lanes`: each lane's across and heading). Every hump a shade its own.
+ */
+function humpPaint(t: RoadTile, decal: Decal, white: Color, P2: (along: number, across: number) => P, c: number, lanes: [number, number][], c0 = -c) {
+  const k = 0.9 + 0.2 * hk(t, 150), at = (hk(t, 151) - 0.5) * 0.12;
+  decal([P2(at - 0.07, c0 + 0.01), P2(at + 0.07, c0 + 0.01), P2(at + 0.07, c - 0.01), P2(at - 0.07, c - 0.01)], HUMP.clone().multiplyScalar(k), Y_PATCH + 0.0004);
+  for (const [b, sg] of lanes) for (const o of [-0.07, 0.07]) {
+    const base = at - sg * 0.07, tip = base + sg * 0.06;
+    decal([P2(base, b + o - 0.03), P2(base, b + o + 0.03), P2(tip, b + o)], white);
+  }
+}
+/** A 20 zone's entry: the red roundel with 20 in it on the carriageway of each lane coming in (t.zoneIn: the sides cars come in from). */
+function zonePaint(t: RoadTile, decal: Decal, white: Color, P2: (along: number, across: number) => P, lanes: [number, number][], ns: boolean) {
+  const ring = ROUNDEL_RED.clone().multiplyScalar(0.94 + 0.1 * hk(t, 160));
+  for (const [b, sg] of lanes) {
+    // the lane heading sg comes in from the side behind it: -along for sg 1
+    const from = ns ? (sg > 0 ? 0 : 2) : t.cl ? -1 : sg > 0 ? 3 : 1;
+    if (from >= 0 && !(t.zoneIn! & (1 << from))) continue;
+    const a = -sg * 0.18, r0 = 0.095, r1 = 0.118, n = 18;
+    for (let i = 0; i < n; i++) {
+      const u0 = (i / n) * Math.PI * 2, u1 = ((i + 1) / n) * Math.PI * 2;
+      decal([P2(a + Math.cos(u0) * r0, b + Math.sin(u0) * r0), P2(a + Math.cos(u0) * r1, b + Math.sin(u0) * r1), P2(a + Math.cos(u1) * r1, b + Math.sin(u1) * r1), P2(a + Math.cos(u1) * r0, b + Math.sin(u1) * r0)], ring);
+    }
+    words(decal, P2, '20', a, b, 0.04, 0.1, sg, white, ns);
+  }
 }
 
 /** An avenue crossing's yellow box, its part on this tile: the border only along the crossing's outside (jbox), the hatching in world-aligned lines so it runs on across the tiles. */
