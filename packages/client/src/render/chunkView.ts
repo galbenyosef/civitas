@@ -4,7 +4,7 @@ import {
   isPartAux, isAnchorAux, partDx, partDy, auxOrientation, isMultiTile, placedFromAnchor, footprintOf, type Placed,
   isAirfieldAux, airfieldOrientation, airfieldRow, FRONT, isRailAux, railMask,
   isRingAux, ringPos, isArmPos, isIslandAux, isFlyoverAux, deckEW, RING_POS,
-  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, KIND_ID,
+  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, KIND_ID, isClassAux, auxClass, oneWayDir, RoadCls,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Cell, cellUV } from './atlas';
@@ -51,6 +51,31 @@ function airfieldCell(a: number, x: number, z: number, auxAt: (x: number, y: num
     case 4: return { cell: end ? Cell.TaxiCentreEnd : Cell.TaxiCentre, flipA, flipB: false };
     default: return { cell: Cell.TaxiOuter, flipA, flipB: false };
   }
+}
+
+/** DIRS order (E, W, S, N) to a side (N 0, E 1, S 2, W 3) */
+const DIR_SIDE = [1, 3, 2, 0];
+/**
+ * The far cell of a road of a class other than the street (R3): a lane's by its connection mask; a one-way's, an
+ * avenue's or a motorway's carriageway turned to its flow (the cells flow north, `turn` anticlockwise quarter turns);
+ * a pedestrian street's paving. Junction tiles and the odd bend keep the street's cell.
+ */
+function classCell(a: number, mask: number, x: number, z: number, roadAt: (x: number, z: number) => boolean): { cell: number; turn: number } {
+  const cls = auxClass(a), ow = oneWayDir(a);
+  if (cls === RoadCls.Lane) return { cell: Cell.LaneRoad + mask, turn: 0 };
+  if (cls === RoadCls.Pedestrian) return mask === 5 || mask === 10 ? { cell: Cell.PedStraight, turn: mask === 10 ? 1 : 0 } : { cell: Cell.Ped, turn: 0 };
+  // a crossroads: pavement corners only where there is no road on the diagonal (two avenues crossing share their middle)
+  const road = mask === 15
+    ? { cell: Cell.Cross + (roadAt(x + 1, z - 1) ? 1 : 0) + (roadAt(x + 1, z + 1) ? 2 : 0) + (roadAt(x - 1, z + 1) ? 4 : 0) + (roadAt(x - 1, z - 1) ? 8 : 0), turn: 0 }
+    : { cell: Cell.Road + mask, turn: 0 };
+  if (ow < 0) return road;
+  const side = DIR_SIDE[ow], ns = side === 0 || side === 2, turn = (4 - side) & 3;
+  if (cls === RoadCls.OneWay) {
+    if (mask !== (ns ? 5 : 10)) return road;
+    const line = ns ? x : z, pos = ns ? z : x, per = 4 + Math.floor(hash2(line * 3 + 1, 9) * 3), ph = Math.floor(hash2(line * 5 + 2, 11) * per);
+    return { cell: (((pos + ph) % per) + per) % per === 0 ? Cell.OneWayArrow : Cell.OneWay, turn };
+  }
+  return { cell: cls === RoadCls.Motorway ? Cell.Motorway : Cell.Avenue, turn };
 }
 
 /**
@@ -141,6 +166,7 @@ export class ChunkView {
           turn = p >> 1;
         } else if (ja && isFlyoverAux(ja)) cell = Cell.Road + (deckEW(ja) ? 5 : 10);
         else if (ja && isRailAux(ja)) { cell = Cell.Crossing; turn = railMask(ja) === 10 ? 1 : 0; } // a level crossing (shared/src/rail.ts)
+        else if (ja && isClassAux(ja)) { const k = classCell(ja, mask, x, z, roadAt); cell = k.cell; turn = k.turn; } // a road class (shared/src/roadclass.ts)
       } else if (building && terrainOf(t) === Terrain.Water) {
         // a harbour's wet rows (docs/boats.md section 5): open water under the pontoons and quays the model draws
         cell = Cell.Water;
