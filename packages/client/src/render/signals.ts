@@ -197,6 +197,18 @@ export class TrafficLights {
   /** Ownership, technology or road rules changed: re-check which junctions have lights. */
   invalidate() { this.dirty = true; }
 
+  /** The nearest signal crossing within `r` tiles of (x, z) that holds the cars at red (the walkers' green): where its beep comes from (audio/ambience.ts). */
+  redPelicanNear(x: number, z: number, r: number, tick: number): { x: number; z: number } | null {
+    let best: { x: number; z: number } | null = null, bd = r * r;
+    for (const h of this.heads) {
+      if (h.kind !== Kind.Pel) continue;
+      const dx = h.px! + 0.5 - x, dz = h.pz! + 0.5 - z, d = dx * dx + dz * dz;
+      if (d >= bd || pelicanPhase(this.world?.walkAt(h.px!, h.pz!) ?? -Infinity, tick) !== 'red') continue;
+      bd = d; best = { x: h.px! + 0.5, z: h.pz! + 0.5 };
+    }
+    return best;
+  }
+
   /** Rebuild the pole list if needed and light this tick's lamps. */
   frame(tick: number, signalled: (x: number, y: number) => boolean) {
     if (this.dirty) { this.rebuild(signalled); this.lastTick = NaN; }

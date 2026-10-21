@@ -89,6 +89,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
 #status { position: absolute; left: 12px; bottom: 50px; padding: 6px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-variant-numeric: tabular-nums; }
 #status:empty { display: none; }
 #help { position: absolute; left: 12px; bottom: 10px; max-width: calc(100vw - 24px); font-size: 11px; color: var(--muted); opacity: 0.8; }
+#help .snd { white-space: nowrap; }
+#help .snd input[type=range] { width: 70px; height: 10px; vertical-align: middle; accent-color: var(--muted); }
+#help .snd input:disabled { opacity: 0.4; }
+#soundNote button { margin-left: 8px; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
 #help select { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; }
 
 #toasts { position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; }
