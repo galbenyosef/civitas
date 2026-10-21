@@ -60,11 +60,14 @@ const DIR_SIDE = [1, 3, 2, 0];
  * avenue's or a motorway's carriageway turned to its flow (the cells flow north, `turn` anticlockwise quarter turns);
  * a pedestrian street's paving. Junction tiles and the odd bend keep the street's cell.
  */
-function classCell(a: number, mask: number, x: number, z: number): { cell: number; turn: number } {
+function classCell(a: number, mask: number, x: number, z: number, roadAt: (x: number, z: number) => boolean): { cell: number; turn: number } {
   const cls = auxClass(a), ow = oneWayDir(a);
-  const road = { cell: Cell.Road + mask, turn: 0 };
   if (cls === RoadCls.Lane) return { cell: Cell.LaneRoad + mask, turn: 0 };
   if (cls === RoadCls.Pedestrian) return mask === 5 || mask === 10 ? { cell: Cell.PedStraight, turn: mask === 10 ? 1 : 0 } : { cell: Cell.Ped, turn: 0 };
+  // a crossroads: pavement corners only where there is no road on the diagonal (two avenues crossing share their middle)
+  const road = mask === 15
+    ? { cell: Cell.Cross + (roadAt(x + 1, z - 1) ? 1 : 0) + (roadAt(x + 1, z + 1) ? 2 : 0) + (roadAt(x - 1, z + 1) ? 4 : 0) + (roadAt(x - 1, z - 1) ? 8 : 0), turn: 0 }
+    : { cell: Cell.Road + mask, turn: 0 };
   if (ow < 0) return road;
   const side = DIR_SIDE[ow], ns = side === 0 || side === 2, turn = (4 - side) & 3;
   if (cls === RoadCls.OneWay) {
@@ -163,7 +166,7 @@ export class ChunkView {
           turn = p >> 1;
         } else if (ja && isFlyoverAux(ja)) cell = Cell.Road + (deckEW(ja) ? 5 : 10);
         else if (ja && isRailAux(ja)) { cell = Cell.Crossing; turn = railMask(ja) === 10 ? 1 : 0; } // a level crossing (shared/src/rail.ts)
-        else if (ja && isClassAux(ja)) { const k = classCell(ja, mask, x, z); cell = k.cell; turn = k.turn; } // a road class (shared/src/roadclass.ts)
+        else if (ja && isClassAux(ja)) { const k = classCell(ja, mask, x, z, roadAt); cell = k.cell; turn = k.turn; } // a road class (shared/src/roadclass.ts)
       } else if (building && terrainOf(t) === Terrain.Water) {
         // a harbour's wet rows (docs/boats.md section 5): open water under the pontoons and quays the model draws
         cell = Cell.Water;

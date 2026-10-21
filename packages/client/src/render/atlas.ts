@@ -11,7 +11,7 @@ import { mulberry32 } from '@msimcity/shared';
  * the *End cells), canvas y runs across it, away from the runway centre on shoulders and towards the terminal on
  * taxiway rows. chunkView turns and mirrors the UVs per tile.
  */
-export const CELL = 128, COLS = 8, ROWS = 12;
+export const CELL = 128, COLS = 8, ROWS = 14;
 export const Cell = {
   Grass: 0, Water: 1, Sand: 2, Pavement: 3, Lot: 4, Dirt: 5, Road: 8,
   /** the road geometry's surfaces (render/roadGeo.ts): plain asphalt, flat white for paint and stone (tinted by vertex colour), tactile paving, setts */
@@ -35,6 +35,8 @@ export const Cell = {
    * a pedestrian street's straight (north-south) and its other tiles
    */
   LaneRoad: 64, OneWay: 80, OneWayArrow: 81, Avenue: 82, Motorway: 83, PedStraight: 84, Ped: 85,
+  /** a class road's crossroads (where avenues cross, or a street crosses one): pavement corners only where the diagonal is not road (NE 1, SE 2, SW 4, NW 8 set: road) */
+  Cross: 96,
 } as const;
 /** Roundabout geometry in tiles out from the island tile's edge (render/junctions.ts draws the island to RING_ISLAND). */
 export const RING_ISLAND = 0.3, RING_APRON = 0.44, RING_OUTER = 0.92;
@@ -482,7 +484,8 @@ function drawClassCells(at: (i: number, draw: (g: CanvasRenderingContext2D) => v
   at(Cell.Avenue, (g) => {
     tarmac(g);
     const M = Math.round(0.09 * CELL);
-    g.fillStyle = '#5f9a4b'; g.fillRect(0, 0, M, CELL); speckle(g, ['#558f43', '#4f8a3e'], 20, 3);
+    g.fillStyle = '#5f9a4b'; g.fillRect(0, 0, M, CELL);
+    g.save(); g.beginPath(); g.rect(0, 0, M, CELL); g.clip(); speckle(g, ['#558f43', '#4f8a3e'], 40, 3); g.restore();
     g.fillStyle = '#4f8a3e'; for (let y = 6; y < CELL; y += 32) { g.beginPath(); g.arc(1 + rand() * 3, y + rand() * 10, 5 + rand() * 3, 0, Math.PI * 2); g.fill(); } // tree crowns on the strip
     g.fillStyle = KERBLINE; g.fillRect(M - 1, 0, 2.5, CELL);
     kerbSide(g, CELL - SW, CELL, CELL - SW);
@@ -513,4 +516,15 @@ function drawClassCells(at: (i: number, draw: (g: CanvasRenderingContext2D) => v
     g.fillStyle = '#9d968a'; g.fillRect(CELL / 2 - 3, 0, 6, CELL);
   });
   at(Cell.Ped, pedBase);
+
+  // ---- crossroads of the class roads: asphalt, a rounded pavement corner where the diagonal tile is not road
+  for (let dm = 0; dm < 16; dm++) at(Cell.Cross + dm, (g) => {
+    tarmac(g);
+    g.fillStyle = PAVE; g.strokeStyle = KERBLINE; g.lineWidth = 2.5;
+    for (const [bit, cx, cy] of [[1, CELL, 0], [2, CELL, CELL], [4, 0, CELL], [8, 0, 0]]) {
+      if (dm & bit) continue;
+      g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, SW, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(cx, cy, SW, 0, Math.PI * 2); g.stroke();
+    }
+  });
 }
