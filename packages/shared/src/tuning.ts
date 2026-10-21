@@ -198,6 +198,8 @@ export const TRAFFIC_TUNING = {
   heavyAccel: 0.6,
   /** Comfortable braking, tiles per tick per tick: what a driver plans with (harder only when the gap closes unexpectedly). */
   brake: 0.2,
+  /** With follow, 1: slow down before a turn, to be at the turn's speed (0.6 of full at a plain junction) as it begins. */
+  followTurn: 1,
   /** Time headway, ticks: a driver keeps headway × its speed on top of MIN_GAP to a car ahead that is braking at `brake` too. */
   headway: 0.5,
   /**

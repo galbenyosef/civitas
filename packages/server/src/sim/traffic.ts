@@ -1569,7 +1569,7 @@ export class Traffic {
       }
       if (haltLim < Infinity) want = Math.min(want, safeSpeed(haltLim, 0, dec));
       // a turn through the next tile begins at progress 0.3: be down to its speed by then
-      if (!last && nextDir !== dir && m.prog < 0.3) {
+      if (TT.followTurn && !last && nextDir !== dir && m.prog < 0.3) {
         const vt = free * this.turnSlow(bx, by) * (nextDir === OPP[dir] ? UTURN_SLOW : 1);
         want = Math.min(want, safeSpeed(0.3 - m.prog, vt, dec));
       }
