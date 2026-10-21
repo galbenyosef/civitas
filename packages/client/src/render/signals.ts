@@ -1,6 +1,6 @@
 import { InstancedMesh, Group, Matrix4, Quaternion, Vector3, Color, SphereGeometry, MeshBasicMaterial, MeshLambertMaterial, DynamicDrawUsage, AdditiveBlending, Shape, ShapeGeometry, type BufferGeometry } from 'three';
 import {
-  CHUNK_SIZE, isRoad, isJunctionAux, hash2, signalTiming, groupTiming, groupPhaseOf, signalArms, signalledArms, groupArms, junctionGroup, inGroup, linkedDegree,
+  CHUNK_SIZE, isRoad, isJunctionAux, hash2, signalTiming, groupTiming, groupMain, groupPhaseOf, signalArms, signalledArms, groupArms, junctionGroup, inGroup, linkedDegree,
   isClassAux, isDividedAux, isMotorwayAux, isRingClassAux, isDeckClassAux, isPedestrianAux, isFlyoverAux, oneWayDir, carStepOk, slipJunction,
   implicitPelican, pelicanPhase, TRAFFIC_TUNING, ARM_STEPS, type SignalTiming, type SignalPhase, type JunctionGroup, type RoadRule, type PelicanLamp,
 } from '@msimcity/shared';
@@ -31,6 +31,8 @@ const MAN_X = -0.032, MAN_Y = [0.215, 0.255], MAN_Z = 0;
 /** What a head shows: a junction's through head, a four-phase group's left-arrow head, a pelican's car head or its walker's man. */
 const enum Kind { Main, Left, Pel, Man }
 interface Head {
+  /** a two-tile group's avenue axis, for its green split (shared groupMain) */
+  main?: 'ns' | 'ew';
   kind: Kind; ew: boolean; timing: SignalTiming; phases: number;
   matrix: Matrix4; glow: number;
   /** a pelican's tile (walkAt) */
@@ -219,7 +221,7 @@ export class TrafficLights {
         else if (p !== 'flash') put(this.lit[2], counts[2]++, h.alt!, h.glow); // the red man while cars go
         continue;
       }
-      const ph = groupPhaseOf(h.timing, h.phases, tick, this.phase);
+      const ph = groupPhaseOf(h.timing, h.phases, tick, this.phase, h.main);
       const mine = (ph.green === 'ew') === h.ew;
       if (h.kind === Kind.Main) { const lamp = !mine || ph.left ? 2 : ph.amber ? 1 : 0; put(this.lit[lamp], counts[lamp]++, h.matrix, h.glow); continue; }
       // a left-arrow head: the green arrow in its own mesh, its red and amber the round lamps moved over to its housing
@@ -275,18 +277,18 @@ export class TrafficLights {
         // a junction group (R4): heads on every approach into it from outside, all on the anchor's timing
         const j = junctionLights(road, aux, x, z);
         if (!j || !j.lit) continue;
-        const g = j.g, timing = groupTiming(g.x, g.y), phases = j.phases;
+        const g = j.g, timing = groupTiming(g.x, g.y), phases = j.phases, main = groupMain(g);
         for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) for (let d = 0; d < 4; d++) {
           const [hx, hz] = CD[d], nx = tx - hx, nz = ty - hz;
           if (inGroup(g, nx, nz) || !car(nx, nz) || !carStepOk(ca(nx, nz), ca(tx, ty), d)) continue;
           const rx = -hz, rz = hx, seed = hash2(tx * 4 + d * 3, ty * 7 - d);
-          add({ kind: Kind.Main, ew: hx !== 0, timing, phases, matrix: pole(tx + 0.5 + CORNER * (rx - hx), ty + 0.5 + CORNER * (rz - hz), hx, hz, seed), glow: seed });
+          add({ kind: Kind.Main, ew: hx !== 0, timing, phases, main, matrix: pole(tx + 0.5 + CORNER * (rx - hx), ty + 0.5 + CORNER * (rz - hz), hx, hz, seed), glow: seed });
           // a divided road's carriageway coming in: a second pole on its reservation's nose (the left-arrow head on it at four phases)
           const na = ca(nx, nz);
           if (!isDividedAux(na) || oneWayDir(na) !== d) continue;
           const s2 = hash2(tx * 9 + d, ty * 5 + 11);
           const m = pole(nx + 0.5 + 0.5 * hz + 0.31 * hx, nz + 0.5 - 0.5 * hx + 0.31 * hz, hx, hz, s2, 0.014);
-          add({ kind: Kind.Main, ew: hx !== 0, timing, phases, matrix: m, glow: s2 });
+          add({ kind: Kind.Main, ew: hx !== 0, timing, phases, main, matrix: m, glow: s2 });
           if (phases === 4) add({ kind: Kind.Left, ew: hx !== 0, timing, phases, matrix: m, glow: hash2(tx + d * 17, ty * 3), alt: m.clone().multiply(SHIFT) });
         }
       }

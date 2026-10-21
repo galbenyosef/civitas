@@ -1,4 +1,4 @@
-import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, stepRuleAux, isBridgeAux, bridgeNS, CHUNK_SIZE, isMotorwayAux, isPedestrianAux, carStepOk, MOTORWAY_KIND, isDeckClassAux, deckAxisStep, turnAllowed } from '@msimcity/shared';
+import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, stepRuleAux, STEP_RULE_AUX, isBridgeAux, bridgeNS, CHUNK_SIZE, isMotorwayAux, isPedestrianAux, carStepOk, MOTORWAY_KIND, isDeckClassAux, deckAxisStep, turnAllowed } from '@msimcity/shared';
 import { DIRS, tkey, type Chunk, type World } from './world';
 
 /** `a`: the tile's aux byte (roundabouts and flyovers restrict the steps out of it, shared/src/junctions.ts) */
@@ -351,7 +351,7 @@ export function findRoute(
     }
     for (let d = 0; d < 4; d++) {
       const nx = x + DIRS[d][0], ny = y + DIRS[d][1];
-      if (stepRuleAux(here) && !junctionStepOk(auxFn, x, y, nx, ny, din >= 0 ? DIRS[din][0] : 0, din >= 0 ? DIRS[din][1] : 0)) continue;
+      if ((here >= STEP_RULE_AUX || (here & 0xe7) === 7) && !junctionStepOk(auxFn, x, y, nx, ny, din >= 0 ? DIRS[din][0] : 0, din >= 0 ? DIRS[din][1] : 0)) continue; // stepRuleAux, inline
       if (rk !== undefined && entry >= 0 && RT!.get(tkey(nx, ny)) !== rk && !turnAllowed(w.roadRules.get(rk), entry, d, emergency)) continue;
       // never straight back where it came from (a U-turn on the road): the closed parent already stops that everywhere
       // but where a ruled junction's tile is two nodes, where turning round beside it would get round its signs

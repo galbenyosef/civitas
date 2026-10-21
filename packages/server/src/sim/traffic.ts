@@ -5,7 +5,7 @@ import {
   CHUNK_SIZE, chunkOf, localIndex, hash2,
   isClassAux, edgeLanes, classDef, carStepOk, isMotorwayAux, isPedestrianAux, oneWayDir, auxDir, isDividedAux,
   groupPhaseOf, groupArms, inGroup, isRingClassAux, isDeckClassAux, deckAxisStep, isMiniAux, CDIRS, pelicanPhase, pelicanReady, implicitPelican,
-  slipJunction, groupTiming, type JunctionGroup,
+  slipJunction, groupTiming, groupMain, MINI_AUX, type JunctionGroup,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
@@ -899,7 +899,7 @@ export class Traffic {
     if (j.ctl) {
       // a junction group (R4): one controller, at its anchor; actuated only when it runs two phases
       if (TT.signalActuated && j.signal && j.phases === 2) return this.actuated(j.ctl, j.g!.x, j.g!.y);
-      return groupPhaseOf(j, j.phases ?? 2, this.w.tick + this.lookTicks, this.phase);
+      return groupPhaseOf(j, j.phases ?? 2, this.w.tick + this.lookTicks, this.phase, groupMain(j.g!));
     }
     if (TT.signalActuated && j.signal) return this.actuated(j, x, y);
     return signalPhaseOf(j, this.w.tick + this.lookTicks, this.phase);
@@ -1021,15 +1021,15 @@ export class Traffic {
     // inside a chunk, not on its edge: every lane looked at is in this tile's RoadChunk
     const lx = tx - Math.floor(tx / CHUNK_SIZE) * CHUNK_SIZE, ly = ty - Math.floor(ty / CHUNK_SIZE) * CHUNK_SIZE;
     const inner = lx >= 1 && lx <= CHUNK_SIZE - 2 && ly >= 1 && ly <= CHUNK_SIZE - 2;
-    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx;
+    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx, med = this.w.anyRoadClass;
     if (inner && !rc) return 0;
     for (let d = 0; d < 4; d++) {
       // arriving lanes: from the neighbour on the opposite side, heading d
       const q = rc ? rc.lanes[(i0 - DIRS[d][0] - DIRS[d][1] * CHUNK_SIZE) * 4 + d] : this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
-      // a car waiting in a median box (R4) is in neither carriageway's box
-      if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m) && !m.med) { M[n] = m; I[n] = d; O[n] = this.nextDirOf(m); SI[n] = m.s1 ?? 0; SO[n] = m.s2 ?? 0; n++; }
+      // a car waiting in a median box (R4: there are none without road classes) is in neither carriageway's box
+      if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m) && !(med && m.med)) { M[n] = m; I[n] = d; O[n] = this.nextDirOf(m); SI[n] = m.s1 ?? 0; SO[n] = m.s2 ?? 0; n++; }
       const o = rc ? rc.lanes[i0 * 4 + d] : this.laneQ(tx, ty, d);
-      if (o) for (const m of o) if (m.prog < this.clearAt(m) && !m.med) { M[n] = m; I[n] = m.inDir; O[n] = d; SI[n] = m.s0 ?? 0; SO[n] = m.s1 ?? 0; n++; }
+      if (o) for (const m of o) if (m.prog < this.clearAt(m) && !(med && m.med)) { M[n] = m; I[n] = m.inDir; O[n] = d; SI[n] = m.s0 ?? 0; SO[n] = m.s1 ?? 0; n++; }
     }
     return n;
   }
@@ -1070,13 +1070,13 @@ export class Traffic {
     // inBox, stopping at the first mover found other than m
     const lx = tx - Math.floor(tx / CHUNK_SIZE) * CHUNK_SIZE, ly = ty - Math.floor(ty / CHUNK_SIZE) * CHUNK_SIZE;
     const inner = lx >= 1 && lx <= CHUNK_SIZE - 2 && ly >= 1 && ly <= CHUNK_SIZE - 2;
-    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx;
+    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx, med = this.w.anyRoadClass;
     if (inner && !rc) return false;
     for (let d = 0; d < 4; d++) {
       const q = rc ? rc.lanes[(i0 - DIRS[d][0] - DIRS[d][1] * CHUNK_SIZE) * 4 + d] : this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
-      if (q) for (const o of q) if ((TT.boxByCommit ? o.committed : o.prog > this.stopLine(o) && !o.med) && o !== m) return true;
+      if (q) for (const o of q) if ((TT.boxByCommit ? o.committed : o.prog > this.stopLine(o) && !(med && o.med)) && o !== m) return true;
       const l = rc ? rc.lanes[i0 * 4 + d] : this.laneQ(tx, ty, d);
-      if (l) for (const o of l) if (o.prog < this.clearAt(o) && !o.med && o !== m) return true;
+      if (l) for (const o of l) if (o.prog < this.clearAt(o) && !(med && o.med) && o !== m) return true;
     }
     return false;
   }
@@ -1408,7 +1408,7 @@ export class Traffic {
     if (m.pi >= n) return null;
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1], bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
     const dir = dirBetween(ax, ay, bx, by), last = m.pi + 1 >= n;
-    const fly = this.flyAt(bx, by);
+    const fly = isFlyoverAux(this.junctionAux(bx, by)) || (this.w.anyRoadClass && isDeckClassAux(this.classAux(bx, by)));
     const M = this.boxM, I = this.boxIn, O = this.boxOut;
     const SI = this.boxSi, SO = this.boxSo, s1 = m.s1 ?? 0, s2 = m.s2 ?? 0;
     if (last) { for (let i = 0, k = this.inBox(bx, by); i < k; i++) if (M[i] !== m && !(fly && isEW(I[i]) !== isEW(dir)) && conflictsS(dir, dir, s1, s2, I[i], O[i], SI[i], SO[i])) return M[i]; return null; }
@@ -1542,8 +1542,8 @@ export class Traffic {
     const deg = this.degreeOf(bx, by);
     // nobody waits in a junction box for a level crossing's barriers: they hold at the junction's stop line instead
     if (deg >= 3 && this.crossingClosed(bx + DIRS[outD][0], by + DIRS[outD][1], outD)) return false;
-    const ja = this.junctionAux(bx, by), cb0 = this.w.anyRoadClass ? this.classAux(bx, by) : 0, bigRing = isRingClassAux(cb0);
-    const ring = (isRingAux(ja) || bigRing) && TT.ringMerge > 0;
+    const ja = this.junctionAux(bx, by), classes = this.w.anyRoadClass;
+    const ring = (isRingAux(ja) || (classes && isRingClassAux(this.classAux(bx, by)))) && TT.ringMerge > 0;
     if (nq && nq.length && deg >= 3 && !ring) {
       // at a junction the car ahead in the exit lane must be out of the box before we go in behind it;
       // on plain road the following gap in step() is all that is needed, so cars can close up inside a tile
@@ -1551,8 +1551,8 @@ export class Traffic {
       if (tail && tail.prog < this.clearAt(tail) + MIN_GAP && !(TT.platoon && (TT.platoon === 1 || this.junction(bx, by).signal) && this.platoonBehind(m, tail, inD))) return false;
     }
     // a mini-roundabout (R4) holds one car at a time: it needs no don't-block-the-box rule
-    if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && !isMiniAux(ja) && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
-    const signal = deg >= 3 && this.junction(bx, by).signal && !trapped;
+    if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && ja !== MINI_AUX && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
+    const jb = deg >= 3 ? this.junction(bx, by) : null, signal = !!jb && jb.signal && !trapped;
     const walkers = trapped ? 0 : this.crossingsAt(bx, by);
     if (walkers && ((!signal && !isRingAux(ja)) || (walkers & movementMask(inD, outD)))) {
       // at lights only the crossings this movement drives over hold it (straight through on green passes people crossing the red road);
@@ -1561,17 +1561,14 @@ export class Traffic {
       if (!this.predicting) this.cnt.carNosed++;
     }
     // green for my approach axis, and not its amber: cars already committed clear the box before the other axis goes
-    if (signal && this.lightHolds(m, m.pi, inD)) return false;
-    if (TT.ringYield > 0 && isRingAux(ja) && !m.priority && !trapped && !this.ringGiven(m, bx, by, inD, outD, ja)) return false;
-    // a big roundabout (R4): coming on, give way to the ring and never fill it
-    if (bigRing && !m.priority && !trapped && !this.bigRingGiven(m, ax, ay, bx, by)) return false;
-    // a mini-roundabout (R4): one car in the box at a time, giving way to one coming in from the left
-    if (isMiniAux(ja) && !trapped && !this.miniGiven(m, bx, by, inD)) return false;
-    // a signal crossing (R4): stop on its amber and red (cars already on it drive off)
-    if (!m.priority && !trapped && deg < 3 && (this.w.anyRoadClass || this.w.roadRules.size) && this.pelicanAt(bx, by)) {
-      const lamp = pelicanPhase(this.walkAtOf(bx, by), this.w.tick + this.lookTicks);
-      if (lamp === 'amber' || lamp === 'red') return false;
+    // (a junction group's lights, R4, gate only cars coming into the group: lightHolds)
+    if (signal && !m.priority) {
+      if (jb!.g) { if (this.lightHolds(m, m.pi, inD)) return false; }
+      else { const ph = this.signalPhase(bx, by); if ((ph.green === 'ew') !== isEW(inD) || ph.amber) return false; }
     }
+    if (TT.ringYield > 0 && isRingAux(ja) && !m.priority && !trapped && !this.ringGiven(m, bx, by, inD, outD, ja)) return false;
+    // R4's junctions (a big roundabout, a mini-roundabout, a signal crossing, the median box): their own entry rules
+    if ((ja || classes || this.w.roadRules.size) && !this.r4Entry(m, ax, ay, bx, by, inD, outD, ja, deg, trapped)) return false;
     // a slip road: from any other road onto a motorway, give way to the cars coming along it (roadclass.ts), lights or none
     if (this.w.anyRoadClass && !m.priority && !trapped && m.wait < TT.minorWaitMax * 3) {
       const cb = this.classAux(bx, by);
@@ -1583,9 +1580,27 @@ export class Traffic {
       if (main >= 0 && (isEW(inD) ? 1 : 0) !== main && this.mainComing(m, bx, by, inD, outD, main)) return false;
     }
     if (!trapped && this.w.anyRoadClass && !this.overMedian(m, bx, by, outD)) return false;
-    // the median box holds one car a way (R4): nobody comes into B to cross the reservation while one is waiting to
-    if (TT.medianBox && this.w.anyRoadClass && !trapped && this.medianEdge(bx, by, outD) && this.medianTaken(m, bx, by, outD)) return false;
     return !this.boxConflict(m, bx, by, inD, outD, trapped);
+  }
+  /**
+   * The entry rules of R4's junctions (canEnter): may m go on into tile B? A big roundabout's give way and never full; a
+   * mini-roundabout's give way to the left; a signal crossing's amber and red; the median box's one car a way.
+   */
+  private r4Entry(m: Mover, ax: number, ay: number, bx: number, by: number, inD: number, outD: number, ja: number, deg: number, trapped: boolean): boolean {
+    if (trapped) return true;
+    const classes = this.w.anyRoadClass;
+    // a big roundabout: coming on, give way to the ring and never fill it
+    if (classes && !m.priority && isRingClassAux(this.classAux(bx, by)) && !this.bigRingGiven(m, ax, ay, bx, by)) return false;
+    // a mini-roundabout: giving way to a car coming in from the left (one car in the box at a time with miniOne)
+    if (ja === MINI_AUX && !this.miniGiven(m, bx, by, inD)) return false;
+    // a signal crossing: stop on its amber and red (cars already on it drive off)
+    if (!m.priority && deg < 3 && (classes || this.w.roadRules.size) && this.pelicanAt(bx, by)) {
+      const lamp = pelicanPhase(this.walkAtOf(bx, by), this.w.tick + this.lookTicks);
+      if (lamp === 'amber' || lamp === 'red') return false;
+    }
+    // the median box holds one car a way: nobody comes into B to cross the reservation while one is waiting to
+    if (classes && TT.medianBox && this.medianEdge(bx, by, outD) && this.medianTaken(m, bx, by, outD)) return false;
+    return true;
   }
   /**
    * Is the edge out of junction tile B heading d a crossing of a divided road's reservation inside one junction group
@@ -1595,6 +1610,19 @@ export class Traffic {
     if (!isDividedAux(this.classAux(bx, by)) || this.degreeOf(bx, by) < 3) return false;
     const g = this.junction(bx, by).g;
     return !!g && inGroup(g, bx + DIRS[d][0], by + DIRS[d][1]);
+  }
+  /** Does m, held at the edge of the next tile, wait in the median box over a divided road's reservation (R4)? */
+  private medianWaits(m: Mover, ax: number, ay: number, dir: number): boolean {
+    return !!m.med || (TT.medianBox > 0 && m.len <= MEDIAN_LEN && this.medianEdge(ax, ay, dir));
+  }
+  /**
+   * How far m may move towards its median box this tick: up to the edge between the carriageways (centred on it, clear
+   * of both), rather than the stop line in the first carriageway's box; it is in the median once there.
+   */
+  private medianAllowed(m: Mover, allowed: number): number {
+    const a = Math.max(0, Math.min(allowed, MEDIAN_PROG - m.prog));
+    if (m.prog + a >= MEDIAN_PROG - 1e-9) m.med = true;
+    return a;
   }
   /** Is the median box out of B heading d taken (a car other than m in lane B→d not yet let on over the reservation)? */
   private medianTaken(m: Mover, bx: number, by: number, d: number): boolean {
@@ -1856,7 +1884,8 @@ export class Traffic {
   }
   /** Is a movement inD -> outD through tile B blocked by a car already in that box? */
   private boxConflict(m: Mover, bx: number, by: number, inD: number, outD: number, trapped = false, ms1 = m.s1 ?? 0, ms2 = m.s2 ?? 0): boolean {
-    const ja = this.junctionAux(bx, by), fly = this.flyAt(bx, by), ring = (isRingAux(ja) || (this.w.anyRoadClass && isRingClassAux(this.classAux(bx, by)))) && TT.ringMerge > 0;
+    const ja = this.junctionAux(bx, by), classes = this.w.anyRoadClass;
+    const fly = isFlyoverAux(ja) || (classes && isDeckClassAux(this.classAux(bx, by))), ring = (isRingAux(ja) || (classes && isRingClassAux(this.classAux(bx, by)))) && TT.ringMerge > 0;
     for (let i = 0, n = this.inBox(bx, by); i < n; i++) {
       const om = this.boxM[i], oIn = this.boxIn[i], oOut = this.boxOut[i], si = this.boxSi[i], so = this.boxSo[i];
       if (om === m) continue;
@@ -2046,13 +2075,9 @@ export class Traffic {
     if (!m.committed && m.prog + allowed >= stop) {
       // into the next road tile: the full entry rules; into the destination building: one vehicle in its forecourt at a time
       const ok = last ? this.forecourtFree(m, bx, by, dir) : this.canEnter(m, bx, by, dir, nextDir);
-      if (ok) { m.committed = true; m.med = false; }
-      else if (m.med || (TT.medianBox && this.w.anyRoadClass && !last && m.len <= MEDIAN_LEN && this.medianEdge(ax, ay, dir))) {
-        // over a divided road's reservation (R4): wait in the median box, centred on the edge between the carriageways,
-        // clear of both, rather than at the stop line in the first carriageway's box
-        allowed = Math.max(0, Math.min(allowed, MEDIAN_PROG - m.prog));
-        if (m.prog + allowed >= MEDIAN_PROG - 1e-9) m.med = true;
-      } else allowed = Math.max(0, stop - m.prog);
+      if (ok) { m.committed = true; if (m.med) m.med = false; }
+      else if (this.w.anyRoadClass && !last && this.medianWaits(m, ax, ay, dir)) allowed = this.medianAllowed(m, allowed);
+      else allowed = Math.max(0, stop - m.prog);
     }
 
     if ((TT.bodyGuard || TT.carGuard) && allowed > 0) {

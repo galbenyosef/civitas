@@ -80,6 +80,8 @@ export const TRAFFIC_TUNING = {
   groupSignals: 1,
   /** A four-phase group's protected left phase, as a share of its through phase (shared with the client: signals.ts leftTicks). */
   leftPhase: 0.5,
+  /** A two-tile group's green for the avenue's axis, as a share of the cycle (shared with the client: signals.ts groupPhaseOf). */
+  groupSplit: 0.5,
   /**
    * 1: a car crossing a divided road's reservation may wait in the median box (straddling the edge between the two
    * carriageways' junction tiles, clear of both), one a way at each; 0: it waits in the first carriageway's box (R3).

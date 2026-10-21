@@ -53,8 +53,17 @@ export const leftTicks = (period: number) => Math.max(TRAFFIC_TUNING.signalAmber
  * Four (two divided roads crossing): north-south straight on and right turns for `period` ticks, then north-south lefts
  * (protected) for leftTicks, then east-west straight on and right, then east-west lefts; each ends with an amber.
  */
-export function groupPhaseOf(t: SignalTiming, phases: number, tick: number, out: SignalPhase = { green: 'ns', amber: false }): SignalPhase {
-  if (phases !== 4) return signalPhaseOf(t, tick, out);
+export function groupPhaseOf(t: SignalTiming, phases: number, tick: number, out: SignalPhase = { green: 'ns', amber: false }, main?: 'ns' | 'ew'): SignalPhase {
+  if (phases !== 4) {
+    // a two-tile group (an avenue crossed by a street) gives the avenue's axis `groupSplit` of the cycle (0.5: even)
+    const sp = TRAFFIC_TUNING.groupSplit;
+    if (!main || sp === 0.5) return signalPhaseOf(t, tick, out);
+    const c = 2 * t.period, g = Math.round(c * sp), r = (((tick + t.offset) % c) + c) % c, first = r < g;
+    out.green = first ? main : main === 'ns' ? 'ew' : 'ns';
+    out.amber = (first ? r : r - g) >= (first ? g : c - g) - TRAFFIC_TUNING.signalAmber;
+    out.left = false;
+    return out;
+  }
   const P = t.period, L = leftTicks(P), c = 2 * (P + L);
   const r = (((tick + t.offset) % c) + c) % c, half = r >= P + L, h = half ? r - P - L : r;
   out.green = half ? 'ew' : 'ns';
@@ -145,6 +154,8 @@ export function junctionGroup(road: (x: number, y: number) => boolean, aux: (x: 
   if (w > 2 || h > 2 || seen.length > 8) return { x, y, w: 1, h: 1, phases: 2 };
   return { x: x0, y: y0, w, h, phases: w === 2 && h === 2 ? 4 : 2 };
 }
+/** The axis of the avenue in a two-tile group (its two carriageways side by side, the street crossing them): its green split. */
+export const groupMain = (g: JunctionGroup): 'ns' | 'ew' | undefined => (g.w === 1 && g.h === 2 ? 'ew' : g.w === 2 && g.h === 1 ? 'ns' : undefined);
 /** Is (tx, ty) inside group g? */
 export const inGroup = (g: JunctionGroup, tx: number, ty: number) => tx >= g.x && ty >= g.y && tx < g.x + g.w && ty < g.y + g.h;
 /**

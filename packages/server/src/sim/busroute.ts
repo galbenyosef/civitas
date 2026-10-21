@@ -172,13 +172,13 @@ export function busLegs(
       for (let p = parent.get(c); p !== undefined && p !== -1 && p !== start && via.get(c) === 0 && w.ruleTiles.get(tkey(xs.get(p)!, ys.get(p)!)) === rk; p = parent.get(c)) c = p;
       entry = c % 8;
     }
-    const banned = (d: number, nx: number, ny: number) => rk !== undefined && entry !== ANY && w.ruleTiles.get(tkey(nx, ny)) !== rk && !turnAllowed(w.roadRules.get(rk), entry, d);
+
     // forward: any way but straight back
     for (let d = 0; d < 4; d++) {
       if (head !== ANY && d === OPP[head]) continue;
       const nx = x + DIRS[d][0], ny = y + DIRS[d][1];
-      if (stepRuleAux(here) && !junctionStepOk(auxFn, x, y, nx, ny, head !== ANY ? DIRS[head][0] : 0, head !== ANY ? DIRS[head][1] : 0)) continue;
-      if (banned(d, nx, ny)) continue;
+      if ((here >= STEP_RULE_AUX || (here & 0xe7) === 7) && !junctionStepOk(auxFn, x, y, nx, ny, head !== ANY ? DIRS[head][0] : 0, head !== ANY ? DIRS[head][1] : 0)) continue;
+      if (rk !== undefined && entry !== ANY && w.ruleTiles.get(tkey(nx, ny)) !== rk && !turnAllowed(w.roadRules.get(rk), entry, d)) continue;
       const isGoal = nx === gx && ny === gy;
       if (!isGoal && (!roadAt(nx, ny) || sideways(nx, ny, DIRS[d][0]))) continue;
       if (!isGoal && !carStepOk(here, w.auxAt(nx, ny), d)) continue; // one-way streets, reservations, pedestrian streets (roadclass.ts)
@@ -190,7 +190,7 @@ export function busLegs(
     // turn round here, back onto the tile we came from
     const kind = turnAt(net, x, y);
     const px = x - DIRS[head][0], py = y - DIRS[head][1], back = OPP[head];
-    if (kind && roadAt(px, py) && !opts.avoid?.(px, py) && !banned(back, px, py)) reach(keyOf(px, py, DIRS[back][0], back), px, py, gk + net.cost(px, py) + TURN_COST[kind], k, 1);
+    if (kind && roadAt(px, py) && !opts.avoid?.(px, py) && !(rk !== undefined && entry !== ANY && w.ruleTiles.get(tkey(px, py)) !== rk && !turnAllowed(w.roadRules.get(rk), entry, back))) reach(keyOf(px, py, DIRS[back][0], back), px, py, gk + net.cost(px, py) + TURN_COST[kind], k, 1);
     // or in at the depot door beside this tile and out again
     const dp = net.depot;
     if (dp && Math.abs(dp[0] - x) + Math.abs(dp[1] - y) === 1 && !(dp[0] === gx && dp[1] === gy)) {

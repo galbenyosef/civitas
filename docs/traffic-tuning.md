@@ -802,3 +802,104 @@ cars from both ends and a quarter as many over the crossing street, give-way): a
 carries 87 an hour to a street's 75, with a quarter of the give-ups, the one-way street 53 (one way only), the motorway
 90; at 60 an hour, 79 to 66. No car-car overlaps on any class. Most give-ups left are cars from the crossing street
 waiting for a gap in a busy road, as at any unsignalled crossing.
+
+## Junctions (R4, 2026-10-21)
+
+Docs/roads.md "Junctions" has the model: junction groups (an avenue crossing's two or four tiles as one controller, the
+lights gating only cars coming in, four phases with protected lefts where two avenues cross), turn lanes, the median
+box, mini-roundabouts, the 5×5 two-lane roundabout, the diamond interchange, turn bans and signal crossings. Every rule
+has a knob in `TRAFFIC_TUNING` that puts R3's back (`groupSignals`, `medianBox`, `turnLanes`, `miniOne`, `greenWave`);
+with all of them at 0 the avenue grid's output is R3's, line for line.
+
+**The city** (`ab.ts`, 08:00, 1,500 ticks, twelve seeds 1-12; give-ups, means, differences paired by seed ± one standard
+error). R4 is measured against main after c3ebc48 (R3's late fix that made an avenue crossing one controller: most of
+item 1), on the same machine:
+
+| Grid | main (c3ebc48) | R4 | R4 − main |
+| --- | --- | --- | --- |
+| plain (doubled edge streets) | 430 | 430 | identical, line for line, on all twelve seeds |
+| `avenues=2`, lights | 459 | 453 | −6 ± 16 |
+| `avenues=2`, give-way everywhere (`noSignals=1`) | 409 | 367 | **−42 ± 19** |
+
+Against R3's rules (the knobs at 0) the avenue grid with lights goes from 491 to 453 (−38). The acceptance asked for
+fewer than R3's 508 (met) and no worse than the plain grid (430): 453 is +24 ± 26 above it, within the noise but not
+below it. The test city's avenues meet only streets (their own crossing is an L at the district's corner), so it has no
+four-phase group: protected lefts and the turn lanes they hold are measured on the junction bench below.
+
+What each rule did on the avenue grid with lights (before the merge with main, R3's rules as the base, twelve seeds
+where given, six otherwise):
+
+| Change | Give-ups | Reading |
+| --- | --- | --- |
+| R3's rules | 491 (12) | |
+| all of R4, turn lanes held everywhere (`turnLanes=1`) | 455 (6) | |
+| turn lanes only at four-phase groups (`turnLanes=2`, the default) | 451 (12) | the same as no held lanes (`turnLanes=0`) here: no four-phase group |
+| and green waves at the groups (`greenWave=2`, the default) | 437 (12), −14 ± 12 | waves along each avenue's crossings; single junctions keep their own timing |
+| green waves at every light (`greenWave=1`) | 424 (12) | better again on avenues, but it changes the plain grid (433 against 430), which must stay identical |
+| main-road priority (`mainRoad=1`) | no change | every avenue junction has lights, and the rule acts only where there are none; with give-way everywhere it was +16 (6 seeds): it stays off |
+| after the merge: the avenue's axis given 60% of a two-tile group's cycle (`groupSplit=0.6`) | −17 ± 21 (12) | within the noise; 67% was +25 ± 20: the even split stays |
+
+The median box needed one fix on the way: the body guard keeps a margin on both bodies (0.03 a side), and a car waiting
+in the median clears the reservation-side lanes by 0.05 of a tile, so the guard held the next car in that lane, which
+was committed into the box the median car was waiting for: a lock. On the give-way corridor bench it took an avenue from
+83 cars an hour to 20. The guard now tests a car in the median body to body (no car ever touches another: car-car
+overlaps were 0 in every run).
+
+**Avenue × avenue** (`loadtest/avenuebench.ts`: two avenues crossing, every one of the twelve moves at the same demand,
+one seed, 2,600 ticks; cars through / give-ups):
+
+| Demand (all moves) | four phases (the default) | two phases (`groupSignals=2`) | give-way | 5×5 roundabout | R3's rules |
+| --- | --- | --- | --- | --- | --- |
+| 36 / h | 891 / 4 | 904 / 0 | 904 / 0 | 894 / 5 | 784 / 82 |
+| 48 / h | 1165 / 26 | 1212 / 1 | 1102 / 112 | 1193 / 8 | 468 / 572 |
+| 60 / h | 1207 / 125 | 1484 / 2 | 1065 / 331 | 1472 / 18 | 411 / 625 |
+
+R3's rules locked this junction above about 40 an hour (each tile its own lights, out of step). With the twelve moves
+equal (a third of the traffic turning left), two phases, the lefts giving way from the median box, carry more than four
+with protected lefts; protected lefts pay where opposing traffic is heavy and the lefts many, which this bench does not
+have. The four phases stay, as the brief asks, with the left phase half a through phase (`leftPhase`: five ticks instead of eight tripled the
+give-ups at 48 an hour). The 5×5 roundabout carries as much as two-phase lights with no lights at all.
+
+**Mini-roundabouts** (`loadtest/junctions.ts --mix turns`, a crossroads of streets, 20/40/60 cars an hour per arm,
+three seeds, 2,000 ticks; served / give-ups):
+
+| Demand per arm | give-way | signals | mini-roundabout | one car at a time (`miniOne=1`) |
+| --- | --- | --- | --- | --- |
+| 20 | 63 / 14 | 49 / 10 | 60 / 8 | 32 / 86 |
+| 40 | 52 / 10 | 37 / 8 | 47 / 7 | 22 / 90 |
+| 60 | 39 / 14 | 26 / 9 | 36 / 11 | 10 / 72 |
+
+A mini-roundabout carries within a tenth of a give-way crossroads, a fifth more than lights, with fewer give-ups than
+either at the lower loads (giving way to the left shares the box out fairly). The brief's model, one car in the box at a
+time, carries half: the default lets movements that do not cross share the box, as the box rules always have.
+
+**The corridor bench with a crossing** (`classbench.ts --junctions`, 40 and 60 cars an hour each way along, a quarter as
+many over the crossing street; served / give-ups):
+
+| Corridor, crossing | 40 / h | 60 / h |
+| --- | --- | --- |
+| street, give-way | 76 / 95 | 69 / 100 |
+| street, signals | 49 / 0 | 45 / 7 |
+| street, mini-roundabout | 70 / 85 | 61 / 77 |
+| avenue, give-way | 96 / 6 | 105 / 18 |
+| avenue, signals (one group) | 88 / 1 | 82 / 3 |
+| avenue, 5×5 roundabout | 83 / 39 | 76 / 51 |
+
+On a straight-through corridor the street crossing is the weak arm everywhere: give-way and the mini-roundabout starve
+it (the give-ups are cars on the crossing street), lights do not. The 5×5 roundabout takes the avenue's straight traffic
+round two sides of its ring, so on a corridor it carries a little less than lights; its side streets go once they have
+waited `minorWaitMax` (without that, 67 give-ups at 40 an hour). Holding the turn lanes at every junction
+(`turnLanes=1`) cost the give-way avenue corridor a sixth (83 to 70 an hour): the straight-on traffic is squeezed into
+one lane where the side street's traffic joins; at four-phase groups only, nothing is lost.
+
+**Tick cost** (the 2×2 city, `districts=2`, plain: no road classes, so the output is identical to main's, line for line):
+2.73 ms a tick against main's 2.63, +3.7 ± 0.3% over six interleaved pairs. The first cut cost +9%: R4's entry rules had
+grown the traffic model's hottest functions past what the engine inlines, and the bus router made a closure on every
+expansion; they now sit behind one test a town of streets fails (`r4Entry`), and the closure is gone.
+
+**Probes** (`loadtest/junctions.ts`, 50 checks): a group's every tile on its anchor's phase for 400 ticks as the client
+works it out; no car coming into a four-phase group against its phase (888 entries); the median box never holding two
+cars a way; one car at a time in a mini-roundabout with `miniOne`; both ring lanes used, the inner never by a first-exit
+car; all eight moves of a diamond routed legally and driven; turn bans honoured by A*, the bus router and a driver's
+re-route, ignored by a fire engine on a call; no car onto a signal crossing on its amber or red; car-car overlaps 0
+throughout.
