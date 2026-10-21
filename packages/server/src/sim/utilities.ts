@@ -1,9 +1,9 @@
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, Zone, FleetKind, MOTORWAY_KIND, KIND_NAMES,
-  capacityOf, tileKey, hash2, isRoad, hasFeature, terrainOf, Terrain, kindManifest, signSource, signText, chunkKey, chunkOf, trackDragPath,
+  capacityOf, tileKey, hash2, isRoad, hasFeature, techFor, faultAdvice, terrainOf, Terrain, kindManifest, signSource, signText, chunkKey, chunkOf, trackDragPath,
   UTIL, UTIL_WEATHER, UtilRole, UtilState, UTIL_STATE_WORDS, UTIL_ROLE_OF, UTIL_SUPPLY_OF, UTIL_NODE_CAP_OF, UTIL_IMPORT_OF, UTIL_FUEL_OF,
   UtilityField, Unions, utilityReach, solveNetwork, powerDemand, availability, linkCost, chunkUtilSig, utilKey, isMotorwayAt,
-  type UtilEnv, type UtilNode, type SolveNode, type UtilLinkDTO, type LinkMode, type UtilitiesSave, type FaultSave, type UtilityInfo, type NetworkInfo,
+  type HintId, type UtilEnv, type UtilNode, type SolveNode, type UtilLinkDTO, type LinkMode, type UtilitiesSave, type FaultSave, type UtilityInfo, type NetworkInfo,
 } from '@msimcity/shared';
 import type { Building, Citizen, Player, World } from '../world';
 import type { Mobile, Unit, Stop, FleetService, FleetInfoRows } from './mobile';
@@ -86,8 +86,8 @@ export class Utilities implements FleetService {
   /** net.ts sends `utilState` / `utilLinks` when these are set */
   stateChanged = false;
   linksChanged = false;
-  /** owners' notices (net.ts sends them as toasts) */
-  notices: { owner: string; msg: string }[] = [];
+  /** owners' notices (net.ts sends them as toasts; `hint`: as that advisor hint when the player has not just had it) */
+  notices: { owner: string; msg: string; hint?: HintId }[] = [];
   /** since start (loadtest/utilities.ts reads them) */
   stats = { solves: 0, rebuilds: 0, faults: 0, repaired: 0, byVan: 0, byContractor: 0, vansSent: 0, unreachable: 0, bills: 0, fuel: 0, imported: 0, cutHours: 0, brownHours: 0, held: 0, solveMs: 0 };
   readonly env: UtilEnv;
@@ -290,10 +290,10 @@ export class Utilities implements FleetService {
     return j === undefined ? -1 : this.field.nodes.length + j;
   }
 
-  private notice(owner: string, msg: string) {
+  private notice(owner: string, msg: string, hint?: HintId) {
     const p = this.w.players.get(owner);
     if (!p || owner === 'sys') return;
-    this.notices.push({ owner, msg });
+    this.notices.push({ owner, msg, ...(hint ? { hint } : {}) });
   }
 
   // ---- the growth gate ---------------------------------------------------------------------------------------------
@@ -434,8 +434,7 @@ export class Utilities implements FleetService {
     const st = kind === 'node' ? this.nodeState.get(ref) : null;
     if (st) { st.state = UtilState.Fault; this.stateChanged = true; }
     if (kind === 'link') this.linksChanged = true;
-    const where = kind === 'node' ? `a ${KIND_NAMES[this.w.buildings.get(tileKey(x, y))?.id ?? 0] ?? 'substation'} at (${x}, ${y})` : `the trunk line from (${x}, ${y})`;
-    this.notice(owner, `Power fault at ${where}: its streets are dark until a repair van fixes it`);
+    this.notice(owner, `${this.faultName(f)}: its streets are dark. ${this.advice(f)}`, 'fault');
     return f;
   }
   get openFaults(): readonly FaultSave[] { return [...this.faults.values()]; }
@@ -447,7 +446,30 @@ export class Utilities implements FleetService {
     // the area comes back at once: the next solve puts it in its network; until then it reads as it was before the fault
     const st = f.kind === 'node' ? this.nodeState.get(f.ref) : null;
     if (st && st.state === UtilState.Fault) { st.state = UtilState.Ok; this.stateChanged = true; }
-    this.notice(f.owner, `Power restored at (${f.x}, ${f.y})${by === 'contractor' ? ': a contractor fixed it (a power depot of your own is quicker)' : ''}`);
+    const h = Math.max(1, Math.round((this.w.tick - f.at) / TPH)), took = `after ${h} hour${h === 1 ? '' : 's'}`;
+    const p = this.w.players.get(f.owner);
+    this.notice(f.owner, by === 'van' ? `Power restored at (${f.x}, ${f.y}) ${took}: your repair van fixed it`
+      : `Power restored at (${f.x}, ${f.y}) ${took}: a contractor fixed it. ${hasFeature(p?.tech ?? [], 'powerdepot')
+        ? this.hasDepot(f.owner) ? 'Your power depot\'s van could not come (no lineworker on shift, or no road to it).' : `A power depot of your own sends a repair van in ${UTIL.repairHours}–${UTIL.repairHours + 1} hours.`
+        : `A power depot of your own would send a repair van in ${UTIL.repairHours}–${UTIL.repairHours + 1} hours: it needs ${techFor('powerdepot')?.name ?? 'Power stations'} (T).`}`);
+  }
+  /** "Substation fault at (x, y)", "Fault on the trunk line from (x, y)" */
+  private faultName(f: FaultSave) {
+    const kind = KIND_NAMES[this.w.buildings.get(tileKey(f.x, f.y))?.id ?? 0] ?? 'substation';
+    return f.kind === 'node' ? `${kind[0].toUpperCase()}${kind.slice(1)} fault at (${f.x}, ${f.y})` : `Fault on the trunk line from (${f.x}, ${f.y})`;
+  }
+  /** What the owner can expect and do about an open fault (shared faultAdvice): the notice and the panels. */
+  private advice(f: Fault) {
+    const p = this.w.players.get(f.owner);
+    return faultAdvice({
+      crew: f.working ? 'working' : f.crew ? 'coming' : undefined, depot: this.hasDepot(f.owner),
+      tech: hasFeature(p?.tech ?? [], 'powerdepot'), techName: techFor('powerdepot')?.name ?? 'Power stations', hoursLeft: (f.until - this.w.tick) / TPH,
+    });
+  }
+  /** The owner has a power depot standing (built, on their land). */
+  private hasDepot(owner: string) {
+    for (const b of this.w.buildings.values()) if (UTIL_ROLE_OF[b.id] === UtilRole.Depot && b.level > 0 && this.w.parcelAt(b.x, b.y)?.owner === owner) return true;
+    return false;
   }
   /** Send the nearest free lineworker of the fault's owner; clear faults whose contractor time has come. */
   private dispatch() {
@@ -518,7 +540,8 @@ export class Utilities implements FleetService {
     const units = d?.units ?? 0;
     let steps = 99;
     for (let k = 0; k < 4; k++) { const x = b.x + DX[k], y = b.y + DY[k]; if (this.field.nodeIndexAt(owner, x, y) === n) steps = Math.min(steps, this.field.distAt(owner, x, y)); }
-    return { power: { state: st, node: [node.x, node.y], nodeKind: node.kind, steps, units, bill: units * UTIL.tariff * (this.tariff.get(owner) ?? 1), needed } };
+    const f = st === UtilState.Fault ? [...this.faults.values()].find((q) => q.kind === 'node' && q.ref === node.key) : undefined;
+    return { power: { state: st, node: [node.x, node.y], nodeKind: node.kind, steps, units, bill: units * UTIL.tariff * (this.tariff.get(owner) ?? 1), needed, ...(f ? { repair: this.advice(f) } : {}) } };
   }
   private networkInfo(b: Building, owner: string, role: number): NetworkInfo {
     let ni = -1, state: number | undefined, load: number | undefined, output: number | undefined, share: number | undefined, protect: boolean | undefined;
@@ -534,13 +557,13 @@ export class Utilities implements FleetService {
       share = UTIL_SUPPLY_OF[b.id] > 0 ? (this.plantOut.get(b) ?? 0) / UTIL_SUPPLY_OF[b.id] : 0;
     }
     const n = ni >= 0 ? this.nets[ni] : null;
-    const faults = [...this.faults.values()].filter((f) => f.owner === owner && (!n || f.kind === 'link' || n.nodes.some((i) => this.field.nodes[i]?.key === f.ref)))
-      .map((f) => `${f.kind === 'node' ? 'substation' : 'trunk line'} at (${f.x}, ${f.y}): ${f.working ? 'crew at work' : f.crew ? 'van on its way' : `waiting${f.tries >= MAX_TRIES ? ' for the contractor' : ''}`}`);
+    const open = [...this.faults.values()].filter((f) => f.owner === owner && (!n || f.kind === 'link' || n.nodes.some((i) => this.field.nodes[i]?.key === f.ref)));
+    const faults = open.map((f) => this.faultName(f)), repair = open.map((f) => this.advice(f));
     const info: NetworkInfo = {
       role: role === UtilRole.Node ? 'node' : role === UtilRole.Plant ? 'plant' : 'depot', state, load, output, share, protect,
       demand: Math.round(n?.demand ?? 0), supply: Math.round(n?.supply ?? 0), generated: Math.round(n?.generated ?? 0), imported: Math.round(n?.imported ?? 0),
       nodes: n?.nodes.length ?? 0, plants: n?.plants.length ?? 0,
-      importable: n?.importable ?? false, importOn: !this.noImport.has(owner), importCap: n?.importCap ?? 0, faults,
+      importable: n?.importable ?? false, importOn: !this.noImport.has(owner), importCap: n?.importCap ?? 0, faults, ...(repair.length ? { repair } : {}),
     };
     if (role === UtilRole.Depot) {
       let vans = 0;

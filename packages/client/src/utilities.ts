@@ -388,6 +388,7 @@ export function utilitiesHtml(u: UtilityInfo, row: (k: string, v: string | numbe
     else {
       html += row('Supply', `${word(p.state)} · ${KIND_NAMES[p.nodeKind ?? 0] ?? 'substation'} at (${p.node[0]}, ${p.node[1]})${p.steps !== undefined && p.steps < 99 ? `, ${p.steps} road tile${p.steps === 1 ? '' : 's'} away` : ''}`);
       if (p.units > 0) html += row('This hour', `${p.units.toFixed(1)} units · bill $${p.bill.toFixed(2)}`);
+      if (p.repair) html += row('Repair', p.repair);
       if (p.state !== UtilState.Ok && p.needed) html += row('Growth', bad('paused until the power is back'));
     }
   }
@@ -404,7 +405,7 @@ export function utilitiesHtml(u: UtilityInfo, row: (k: string, v: string | numbe
       html += row('This hour', `${n.generated} generated · ${n.imported} from the grid`);
       html += row('Grid import', n.importable ? `${n.importOn ? `on, up to ${n.importCap} units at $${UTIL.importPrice} a unit` : 'switched off'}` : `out of reach: within ${UTIL.importReach} road tiles of a motorway connection, or a trunk line to one`);
     } else if (n.role !== 'depot') html += row('Network', bad('not joined to a substation: put one whose streets reach its gate, or lay pylons or a buried cable'));
-    for (const f of n.faults) html += row('Fault', bad(f));
+    n.faults.forEach((f, i) => { html += row('Fault', bad(f)) + (n.repair?.[i] ? row('Repair', n.repair[i]) : ''); });
     if (mine && n.role === 'node') html += `<button class="chip" data-util="protect" data-on="${n.protect ? 0 : 1}" title="A protected node is cut last in rolling cuts (hospitals and police are never cut)">${n.protect ? 'Unprotect' : 'Protect'}</button>`;
     if (mine && n.role !== 'depot') html += ` <button class="chip" data-util="import" data-on="${n.importOn ? 0 : 1}" title="Grid import tops up a shortfall at $${UTIL.importPrice} a unit">${n.importOn ? 'Grid import off' : 'Grid import on'}</button>`;
   }
