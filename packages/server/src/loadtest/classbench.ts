@@ -70,7 +70,8 @@ export function corridor(cls: number, cross = true, junction: 'yield' | 'signal'
 export function bench(w: World, rate: number, seed: number, ticks: number, opts: { cross?: boolean; warm?: number } = {}): BenchRes {
   const rnd = mulberry32(seed * 7919 + rate * 31);
   const t = new Traffic(w);
-  const divided = ROAD_CLASS_DEFS[w.auxAt(0, 0) & 7]?.divided && w.auxAt(0, 0) < 0x40 && w.auxAt(0, 0) > 0;
+  // the corridor's class read away from the crossing (a roundabout there has no class byte at (0, 0))
+  const divided = ROAD_CLASS_DEFS[w.auxAt(-ARM + 2, 0) & 7]?.divided && w.auxAt(-ARM + 2, 0) < 0x40 && w.auxAt(-ARM + 2, 0) > 0;
   const twinY = isRoad(w.getTile(-ARM + 1, -1)) ? -1 : null;
   // ends: corridor west and east (east only when two-way or divided), street north and south
   const ends: { at: [number, number]; to: [number, number][]; rate: number }[] = [];

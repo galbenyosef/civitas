@@ -378,12 +378,12 @@ if (!argv.includes('--bench')) {
         if (!isRingClassAux(w.auxAt(ax, ay)) || !isRingClassAux(w.auxAt(bx, by))) continue;
         let n = 0;
         for (let k = 0; k * 2 < m.path.length; k++) if (isRingClassAux(w.auxAt(m.path[k * 2], m.path[k * 2 + 1]))) n++;
-        if (m.s1) { inner++; if (n <= 9) innerShort++; } else outer++;
+        if (m.s1) { inner++; if (n <= 5) innerShort++; } else outer++;
         const d = bx > ax ? 0 : bx < ax ? 1 : by > ay ? 2 : 3;
         if (!carStepOk(w.auxAt(ax, ay), w.auxAt(bx, by), d)) wrong++;
       }
     });
-    ok(inner > 20 && outer > 20 && innerShort === 0, `both lanes used round the ring (inner ${inner}, outer ${outer} car-ticks), the inner only by cars going past the second exit (${innerShort} others)`);
+    ok(inner > 20 && outer > 20 && innerShort === 0, `both lanes used round the ring (inner ${inner}, outer ${outer} car-ticks), the inner never by cars leaving at the first exit (${innerShort})`);
     ok(wrong === 0 && r.overlaps === 0 && r.noRoute === 0 && r.through > 50 && few(r), `every move routes (${r.noRoute} without), nobody goes round the wrong way (${wrong}), ${r.overlaps} overlaps, ${r.through.toFixed(0)}/h, ${r.giveUps} give-ups`);
   }
   // ---- 6. the diamond interchange: all eight moves --------------------------------------------------------------

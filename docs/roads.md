@@ -185,17 +185,21 @@ junction, is a group of one, exactly as before). A group has one controller: its
 tiles answers only to the box rules. Two phases at an avenue × street (as every junction: north-south, then east-west,
 each ending in amber; lefts go on the green and give way). Four at an avenue × avenue, with **protected left turns**:
 north-south straight on and right, then north-south lefts and U-turns on their own (`leftPhase` of a through phase,
-half by default), then east-west the same. Walkers cross only in the through phases. The server (`Traffic.signalPhase`)
-and the client draw from the same `groupPhaseOf`, so the lamps match. Signals at a T (`signalT`) and the hold rule
-(`signalActuated`, two-phase groups only) carry over; the junction where an interchange's slips meet its street never
-has lights (`slipJunction`).
+half by default), then east-west the same. Walkers cross only in the through phases. The groups along an avenue run a
+**green wave** (`TRAFFIC_TUNING.greenWave` 2, the default: their offsets timed for `waveSpeed` along the diagonal, as R0's
+wave; every single junction keeps its own timing, so a town of streets runs as before). The server
+(`Traffic.signalPhase`) and the client draw from the same `groupTiming` and `groupPhaseOf`, so the lamps match. Signals
+at a T (`signalT`) and the hold rule (`signalActuated`, two-phase groups only) carry over; the junction where an
+interchange's slips meet its street never has lights (`slipJunction`).
 
 **Turn lanes.** On a one-way approach (an avenue's carriageway, a one-way street; not a motorway, where nobody turns
-left) the last two tiles before a junction hold the lane: the left lane for left turns and U-turns, the right for
-straight on and right turns (`TRAFFIC_TUNING.turnLanes`, 2: at four-phase groups, where the lefts have their own
-phase; elsewhere a car takes the lane for its next turn within six tiles and goes straight on in either, as in R3). The
-lane changes happen on the tile before. A street approaching an avenue gets no new lane: the queue at its stop line is
-the lane.
+left) to a four-phase group, where the lefts have a phase of their own, the last two tiles before the junction hold the
+lane: the left lane for left turns and U-turns only, the right for straight on and right turns; the lane changes happen
+on the tile before (`TRAFFIC_TUNING.turnLanes` 2, the default). Approaching any other junction a car takes the lane for
+its next turn within six tiles and goes straight on in either, as in R3 (the arrows read left and ahead, ahead and
+right). `turnLanes` 1 holds the lanes at every junction: on a give-way avenue corridor that halves the straight-on
+lanes where they meet and costs a sixth of the throughput (docs/traffic-tuning.md "Junctions"). A street approaching an
+avenue gets no new lane: the queue at its stop line is the lane.
 
 **The median box.** A car crossing an avenue, or turning left across it, may wait in the reservation between the two
 carriageways' junction tiles: centred on their shared edge (lane progress 0.5), clear of both carriageways' lanes by a
@@ -219,9 +223,12 @@ the group at the box's middle (the box from the anchor less two each way), a 3×
 round in each tile's direction, a corner's the way out; two lanes, as R3 drives every one-way tile). An avenue's two
 carriageways join a side at its second and third tiles (the way out first in driving order, then the way in), a street
 at its middle; corners take no road. Cars going past the second exit (more than nine ring tiles) take the inner lane and
-move out four tiles before they leave; the rest keep to the outer; the approach takes the lane the ring will want. A car
-coming on gives way to a moving car on the ring tile before it (or the one before that) that stays on past it, within
-`ringYield`, and never fills the ring (`bigRingSpare` places free over both lanes). Bulldozing any of it leaves the ring
+move out four tiles before they leave; cars for the second exit (straight over, six to nine) take either lane by the
+driver's hash and move out two tiles before; cars for the first keep to the outer; the approach takes the lane the ring
+will want. A car coming on gives way to a moving car on the ring tile before it (or the one before that) that stays on
+past it, within `ringYield` (joining the outer lane, not to one in the inner lane that stays there), and never fills the
+ring (`bigRingSpare` places free over both lanes); after `minorWaitMax` ticks it goes when the box is clear anyway, so a
+side street does not starve behind a busy avenue. Bulldozing any of it leaves the ring
 as plain streets and the island bare.
 
 **The diamond interchange.** The Interchange tool, clicked on a motorway where a street meets or should cross it
@@ -275,7 +282,7 @@ status line gives the cost.
 **Showcase.** In the "Road classes and junctions" section: Kingsway's 5×5 roundabout where Crown Street meets it,
 Market Street's diamond over the motorway, and on the land south of them Regent Avenue crossing Queen's Avenue (the
 four-phase group), Mill Road's mini-roundabout at Church Lane, its no left turn at Queen's Avenue and its signal crossing
-between the homes and shops; a tour stop each, and six features (`roundabout-mini`, `interchange`, `turn-ban`,
+between the homes and shops; a tour stop each, and six features (`miniroundabout`, `interchange`, `turnrule`,
 `pelican`, `big-roundabout`, `junction-group`) that demo:check enforces.
 
 ## Street names

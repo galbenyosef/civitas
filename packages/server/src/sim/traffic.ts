@@ -719,8 +719,8 @@ export class Traffic {
   /**
    * The lane on a big roundabout (R4, road class 6) for m's edge from path node k: -1 when the edge is not on the ring
    * or its approach. Counting the ring tiles m drives from where it comes on to where it leaves: more than nine (past the
-   * second exit), the inner lane (1) but for the last four; otherwise the outer (0), and the approach takes the lane the
-   * ring will want.
+   * second exit), the inner lane (1) but for the last four; six to nine (the second exit, straight over), either lane by
+   * the driver's hash but the last two; otherwise the outer (0); the approach takes the lane the ring will want.
    */
   private ringStrand(m: Mover, k: number): number {
     const p = m.path, n = p.length / 2;
@@ -733,7 +733,11 @@ export class Traffic {
     let e = r0;
     while (e + 1 < n && isRingClassAux(this.classAux(p[e * 2 + 2], p[e * 2 + 3]))) e++;
     const total = e - s0 + 1, left = e - Math.max(k + 1, s0) + 1;
-    return total > 9 && left > 4 ? 1 : 0;
+    // past the second exit (ten ring tiles or more): the inner lane, out again four tiles before the exit; to the second
+    // exit (six to nine, straight over): either lane, by the driver, out two tiles before; to the first: the outer
+    if (total > 9) return left > 4 ? 1 : 0;
+    if (total > 5) return left > 2 && hash2(m.id * 31 + s0, 0x51ab) < 0.5 ? 1 : 0;
+    return 0;
   }
   /**
    * After m's path changed ahead of it (a re-route), the lane it leaves the tile ahead by. A road's class changing under
@@ -1733,7 +1737,8 @@ export class Traffic {
   /**
    * Give way on to a big roundabout (R4, road class 6): may m, coming from A (not a ring tile), come onto ring tile B?
    * Not while a car going round, and moving, is within ringYield of B's box on the ring tile before it (or the one before
-   * that) and stays on the ring past B; and never when the ring would fill (bigRingSpare places free, both lanes).
+   * that) and stays on the ring past B, unless m has waited minorWaitMax already (the box rules still hold it while
+   * anything crosses its way); and never when the ring would fill (bigRingSpare places free, both lanes).
    */
   private bigRingGiven(m: Mover, ax: number, ay: number, bx: number, by: number): boolean {
     if (isRingClassAux(this.classAux(ax, ay))) return true;
@@ -1743,9 +1748,12 @@ export class Traffic {
     // the ring tile before B, and the one before that
     let px = 0, py = 0, pd = -1;
     for (let d = 0; d < 4; d++) { const tx = bx - DIRS[d][0], ty = by - DIRS[d][1], a = this.classAux(tx, ty); if (isRingClassAux(a) && auxDir(a) === d) { px = tx; py = ty; pd = d; break; } }
-    if (pd >= 0 && gap > 0) {
+    // a driver held this long by the ring's traffic goes when the box is clear anyway (no starving), as at a main road
+    if (pd >= 0 && gap > 0 && m.wait < TT.minorWaitMax) {
+      // joining the outer lane, a car going round in the inner one that stays there crosses nobody
+      const outer = !(m.s2 ?? 0);
       const q1 = this.laneQ(px, py, pd);
-      if (q1) for (const c of q1) if (c !== m && c.wait < 2 && at(c, c.pi, bx, by) && on(c, c.pi + 1) && this.stopLine(c) - c.prog < gap) return false;
+      if (q1) for (const c of q1) if (c !== m && c.wait < 2 && at(c, c.pi, bx, by) && on(c, c.pi + 1) && !(outer && c.s1 && c.s2) && this.stopLine(c) - c.prog < gap) return false;
       for (let d = 0; d < 4; d++) {
         const tx = px - DIRS[d][0], ty = py - DIRS[d][1], a = this.classAux(tx, ty);
         if (!isRingClassAux(a) || auxDir(a) !== d) continue;
