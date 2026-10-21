@@ -7,7 +7,7 @@
  * 1.3 game days at 08:00, by when the population has settled), then measures `--ticks` ticks. Everything is
  * deterministic for a given --seed: Math.random is replaced by a seeded generator before the world is built.
  * `--set` overrides TRAFFIC_TUNING (shared/src/tuning.ts) for the whole run, fill included; `old=1` first restores
- * the rules as they were before the tuning (OLD_RULES); `carOwnership=0.55` also changes who owns a car (office
+ * the rules as they were before the tuning (OLD_RULES); `smooth=0` turns the smooth-flow rules off (UNSMOOTH); `carOwnership=0.55` also changes who owns a car (office
  * workers +0.15); `noLots=1` builds the city without its four parking lots; `noSignals=1` takes the signals technology
  * away (every junction is give-way); `ring=1` adds a public ring road two tiles outside the district, joined to the end
  * of every street; `bus=N` lays a bus network on the Commons (a depot and twelve stops on two lines, docs/transit.md) with
@@ -112,7 +112,10 @@ export const OLD_RULES: Partial<TrafficTuning> = {
   carYieldMax: 15, crossingWaitMax: 20, crossingLag: 1, pedPriority: 0, pedSignalPatient: 0, pedYieldAfter: 0, pedPathClear: 0,
   bodyGuard: 0, carGuard: 0, guardWaitMax: 40, pedRetreatAfter: 0, pedBehind: 0, guardDrawn: 0,
   delayReroute: 0,
+  follow: 0, platoon: 0, startGap: 0, lookAhead: 0, mainRoad: 0, greenWave: 0,
 };
+/** The smooth-flow rules (docs/traffic-tuning.md "Smooth flow") all off, as before 2026-10-21 (`--set smooth=0`). */
+export const UNSMOOTH: Partial<TrafficTuning> = { follow: 0, platoon: 0, startGap: 0, lookAhead: 0, mainRoad: 0, greenWave: 0 };
 
 /** Keys that change the test city rather than TRAFFIC_TUNING: car ownership, no parking lots, no signals technology. */
 const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile', 'edu', 'districts'];
@@ -151,6 +154,7 @@ export function parseSet(spec: string | undefined): Record<string, number> {
     const n = Number(v);
     if (!Number.isFinite(n)) throw new Error(`--set ${kv}: not a number`);
     if (k === 'old') { if (n) Object.assign(out, OLD_RULES); continue; }
+    if (k === 'smooth') { if (!n) Object.assign(out, UNSMOOTH); continue; }
     if (!CITY_KEYS.includes(k) && !(k in TRAFFIC_TUNING)) throw new Error(`--set ${k}: unknown tunable (known: ${Object.keys(TRAFFIC_TUNING).join(', ')}, ${CITY_KEYS.join(', ')}, old)`);
     out[k] = n;
   }

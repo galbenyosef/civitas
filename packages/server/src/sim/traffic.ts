@@ -1487,16 +1487,34 @@ export class Traffic {
     return TT.accel * (1 + TT.accelVar * (2 * hash2(m.id, 0x5a17) - 1)) * (heavy ? TT.heavyAccel : 1);
   }
   /**
-   * Look-ahead (TRAFFIC_TUNING.lookAhead): would m, `ds` short of its stop line at speed v, be let into tile B on
-   * arrival? The entry rules as they stand now, with the light as it will be when m gets there.
+   * Look-ahead (TRAFFIC_TUNING.lookAhead): would m, `ds` short of its stop line and wanting to go at v, be let into
+   * tile B on arrival? The entry rules as they stand now (2: only what will still be there; 3: only the lights and the
+   * barriers), with the light as it will be when m gets there at that speed.
    */
   private wouldEnter(m: Mover, bx: number, by: number, dir: number, nextDir: number, last: boolean, ds: number, v: number): boolean {
     if (last) return this.forecourtFree(m, bx, by, dir);
-    this.lookTicks = Math.min(4 * TT.signalPeriod, Math.ceil(ds / Math.max(v, TT.accel)));
+    // step() decides at the line on the tick whose move would take it over, a tick before it is there
+    this.lookTicks = Math.min(4 * TT.signalPeriod, Math.max(0, Math.ceil(ds / Math.max(v, 0.05)) - 1));
     this.predicting = true;
-    const ok = this.canEnter(m, bx, by, dir, nextDir);
+    const ok = TT.lookAhead >= 2 ? !this.heldAhead(m, bx, by, dir, nextDir, TT.lookAhead >= 3) : this.canEnter(m, bx, by, dir, nextDir);
     this.predicting = false; this.lookTicks = 0;
     return ok;
+  }
+  /**
+   * Look-ahead 2: only what will still hold m when it gets to the line, not what is passing now (a car crossing the box,
+   * the one ahead still in it): a red or amber light then, barriers down, people on the crossing, an exit lane full of
+   * cars that are standing.
+   */
+  private heldAhead(m: Mover, bx: number, by: number, inD: number, outD: number, lightsOnly: boolean): boolean {
+    const deg = this.degreeOf(bx, by), signal = deg >= 3 && this.junction(bx, by).signal;
+    if (signal && !m.priority) { const ph = this.signalPhase(bx, by); if ((ph.green === 'ew') !== isEW(inD) || ph.amber) return true; }
+    if (this.isCrossingAt(bx, by) && this.crossingClosed(bx, by, inD)) return true;
+    if (lightsOnly) return false;
+    const walkers = this.crossingsAt(bx, by);
+    if (walkers && ((!signal && !isRingAux(this.junctionAux(bx, by))) || (walkers & movementMask(inD, outD)))) return true;
+    const key = Traffic.laneKey(bx, by, outD);
+    if (!this.laneRoom(bx, by, key, m)) { const nq = this.laneAt(key); if (nq && nq.every((o) => (o.v ?? 0) < 0.05)) return true; }
+    return false;
   }
   /** while wouldEnter asks canEnter: ticks ahead to read the lights at, and no counting */
   private lookTicks = 0; private predicting = false;
@@ -1576,7 +1594,7 @@ export class Traffic {
       // look ahead to the stop line: brake for it only when the next tile will not take me on arrival
       if (TT.lookAhead && !m.committed && stop > m.prog) {
         const ds = stop - m.prog, vs = safeSpeed(ds, 0, dec);
-        if (vs < want && !this.wouldEnter(m, bx, by, dir, nextDir, last, ds, v)) want = vs;
+        if (vs < want && !this.wouldEnter(m, bx, by, dir, nextDir, last, ds, want)) want = vs;
       }
       if (want < allowed) allowed = Math.max(0, want);
     }

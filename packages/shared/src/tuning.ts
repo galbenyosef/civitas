@@ -189,9 +189,14 @@ export const TRAFFIC_TUNING = {
    * tick: from a stop to full speed and back in one tick. The gap, MIN_GAP, the stop lines, the conflict table and the
    * body guard are hard limits either way.
    */
-  follow: 0,
-  /** Acceleration, tiles per tick per tick, before the driver's own style (accelVar) and heavyAccel. */
-  accel: 0.15,
+  follow: 1,
+  /**
+   * Acceleration, tiles per tick per tick, before the driver's own style (accelVar) and heavyAccel. At 1 a car can be
+   * at full speed a tick after it moves off (a tick is 36 game seconds) and a truck or bus in two; anything slower costs
+   * the junctions throughput (0.15: 3 speed points, docs/traffic-tuning.md), so the drawing (client render/glide.ts) is
+   * what eases a car up to speed.
+   */
+  accel: 1,
   /** Each driver's acceleration is accel × (1 ± accelVar), from a hash of their id (the same driver every trip). */
   accelVar: 0.25,
   /** Trucks and buses accelerate at this share of a car's rate. */
@@ -207,11 +212,13 @@ export const TRAFFIC_TUNING = {
    * MIN_GAP) before moving up, or until that car moves off: a queue closes up in fewer, longer moves rather than
    * shuffling forward one car length every time the front moves (0: always move up at once).
    */
-  startGap: 0,
+  startGap: 0.9,
   /**
    * 1: look ahead to the stop line. Within braking distance of it, a driver asks the entry rules whether it would be
    * let in on arrival (the light as it will be then: phases are a pure function of the tick) and brakes for the line
-   * only if not, so it glides to a red and rolls on into a green that comes before it gets there.
+   * only if not, so it glides to a red and rolls on into a green that comes before it gets there. 2: only for what
+   * will still be there then (a red or amber light on arrival, barriers, people on the crossing, an exit lane of
+   * standing cars), not a car passing through the box now. 3: only the lights and level-crossing barriers.
    */
   lookAhead: 0,
   /**
@@ -219,7 +226,7 @@ export const TRAFFIC_TUNING = {
    * within platoonGap tiles, may go in behind it before it has left the box (the following gap keeps them apart);
    * every other entry rule still applies (the light, crossings, conflicting movements).
    */
-  platoon: 0,
+  platoon: 1,
   platoonGap: 0.6,
   /** the leader of a platoon must be moving at least this fast (tiles per tick) */
   platoonV: 0.1,
