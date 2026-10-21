@@ -4,12 +4,11 @@ import {
 } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import {
-  CHUNK_SIZE, hash2, isRoad, terrainOf, Terrain, isBridgeAux, bridgeNS, bridgeStyle, bridgeDeckH, BridgeStyle, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES,
-  hasFeature, planBridge, bridgeClearance, basculeSeed, basculeLiftAt, BASCULE_LIFT, BASCULE_CLOSE_BEFORE, BASCULE_OPEN_AFTER,
-  type BridgeStyleId, type BridgePlan,
+  CHUNK_SIZE, hash2, isRoad, isBridgeAux, bridgeNS, bridgeStyle, bridgeDeckH, BridgeStyle, BRIDGE_MAX_SPAN,
+  bridgeClearance, basculeSeed, basculeLiftAt, BASCULE_LIFT, BASCULE_CLOSE_BEFORE, BASCULE_OPEN_AFTER,
+  type BridgeStyleId,
 } from '@msimcity/shared';
 import type { ClientChunk, ClientWorld } from '../world';
-import type { Crossing } from '../input';
 import { Kit } from './kit';
 import { sceneUniforms } from './materials';
 
@@ -243,32 +242,6 @@ export class BridgeView {
     if (!l) return 0;
     if (l.land && (Math.abs(hz) > Math.abs(hx)) !== l.ns) return 0;
     return liftY(l, (l.ns ? z : x) - l.o);
-  }
-
-  /** The road tool's verdict on a drag out over the water (input.ts Crossing) to the bank in line with it, on the loaded chunks; `dev`: a ?dev client on a dev server. */
-  crossingPlan(c: Crossing, dev: boolean): { plan: BridgePlan; x: number; y: number; w: number; h: number } {
-    const wet = (tx: number, ty: number) => { const t = this.world.getTile(tx, ty); return t !== undefined && terrainOf(t) === Terrain.Water; };
-    const [fx, fy] = c.from;
-    let n = 0;
-    while (n <= BRIDGE_MAX_SPAN && wet(fx + c.dx * (n + 1), fy + c.dy * (n + 1))) n++;
-    const bx = fx + c.dx * (n + 1), by = fy + c.dy * (n + 1);
-    const me = this.world.myPlayer, pub = dev || (!!me && hasFeature(me.tech, 'publicRoads'));
-    const rect = { x: Math.min(fx, bx), y: Math.min(fy, by), w: Math.abs(bx - fx) + 1, h: Math.abs(by - fy) + 1 };
-    if (!dev && (!me || !hasFeature(me.tech, 'bridges'))) return { plan: { ok: false, reason: 'Civil engineering is needed to bridge water' }, ...rect };
-    const plan = planBridge(fx + c.dx, fy + c.dy, c.dx, c.dy, n, {
-      // the banks are road by the time the bridge goes down (the drag lays them first)
-      tile: (tx, ty) => { const t = this.world.getTile(tx, ty); return t !== undefined && ((tx === fx && ty === fy) || (tx === bx && ty === by)) && terrainOf(t) !== Terrain.Water ? t | 4 : t; },
-      aux: (tx, ty) => this.world.auxAt(tx, ty),
-      land: (tx, ty) => { const p = this.world.parcelAt(tx, ty); return p ? (this.world.mayEdit(p.owner) ? null : 'Not your land') : pub ? null : 'Public works is needed to lay roads outside your own land'; },
-    });
-    return { plan, ...rect };
-  }
-  /** Status-line text for the road tool's crossing in progress. */
-  crossingStatus(c: Crossing, dev: boolean): string {
-    const { plan } = this.crossingPlan(c, dev);
-    if (!plan.ok) return ` · ${plan.reason}`;
-    const n = plan.tiles!.length / 3;
-    return n ? ` · ${BRIDGE_STYLE_NAMES[plan.style!]}, ${n} tile${n === 1 ? '' : 's'}, $${plan.cost} · drag on to the far bank` : ' · that bridge is there already';
   }
 
   // ---- models ----------------------------------------------------------------------------------------

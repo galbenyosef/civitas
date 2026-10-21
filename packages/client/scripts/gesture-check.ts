@@ -20,7 +20,7 @@ type Ev = Partial<WheelLike>;
 const ev = (t: number, e: Ev): WheelLike => ({ deltaX: 0, deltaY: 0, deltaMode: 0, ctrlKey: false, shiftKey: false, timeStamp: t, ...e });
 
 // ---- Input + rig ------------------------------------------------------------------------------
-function make(onSelect: () => void = () => {}) {
+function make(onSelect: () => void = () => {}, extra: Record<string, unknown> = {}) {
   winHandlers.clear();
   const handlers = new Map<string, (e: any) => void>();
   const canvas: any = {
@@ -30,7 +30,7 @@ function make(onSelect: () => void = () => {}) {
   };
   const rig = new CameraRig(1000 / 700);
   rig.update(); rig.camera.updateMatrixWorld();
-  const input = new Input(canvas, rig, { onBuild() {}, onBuy() {}, onSelect, onHover() {}, onToolChange() {}, onRotate() {}, onKey() {} });
+  const input = new Input(canvas, rig, { onBuild() {}, onBuy() {}, onSelect, onHover() {}, onToolChange() {}, onRotate() {}, onKey() {}, ...extra });
   let prevented = 0;
   let t = 100;
   const wheel = (e: Ev & { altKey?: boolean; metaKey?: boolean; offsetX?: number; offsetY?: number }, dtMs = 16) => {
@@ -158,6 +158,47 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
   for (let r = 4; r <= 44; r += 4) g('gesturechange', { scale: 1, rotation: r });
   m.settle(); const c2 = snap(m.rig);
   ok(c2.yaw > b.yaw + 0.4 && c2.yaw < b.yaw + 0.8, `Safari twist orbits past the dead zone (${(c2.yaw - b.yaw).toFixed(2)} rad for 36 deg)`);
+}
+{ // the road tool (docs/roads.md "The road tool"): one drag, sent on release, straight or one corner, Shift held for a loop, Esc to let go, Ctrl/Cmd+Z to undo
+  const roads: { tiles: [number, number][]; shape: string }[] = [];
+  let built = 0, undos = 0;
+  const road = new Set(['7,0']);
+  const m = make(() => {}, {
+    onBuild: () => { built++; }, onRoad: (tiles: [number, number][], shape: string) => roads.push({ tiles, shape }), onUndoRoad: () => { undos++; },
+    isRoad: (x: number, y: number) => road.has(`${x},${y}`), isWater: () => false,
+  });
+  // a tile every 10 pixels, so the drags read in tiles
+  (m.input as any).tileAt = (px: number, py: number) => [Math.floor(px / 10), Math.floor(py / 10)];
+  const pd = (type: string, tx: number, ty: number, o: any = {}) => m.handlers.get(type)!({ type, button: 0, clientX: tx * 10 + 5, clientY: ty * 10 + 5, offsetX: tx * 10 + 5, offsetY: ty * 10 + 5, movementX: 0, movementY: 0, altKey: false, shiftKey: false, pointerId: 1, ...o });
+  const key = (type: 'keydown' | 'keyup', k: string, o: any = {}) => m.win.get(type)!({ code: k === 'Shift' ? 'ShiftLeft' : k === 'Escape' ? 'Escape' : `Key${k.toUpperCase()}`, key: k, target: null, repeat: false, metaKey: false, ctrlKey: false, altKey: false, shiftKey: k === 'Shift', preventDefault() {}, ...o });
+  const tiles = (p: [number, number][] | null | undefined) => (p ?? []).map(([x, y]) => `${x},${y}`).join(' ');
+  key('keydown', '3');
+  ok(m.input.tool === 'road', '3 picks the road tool');
+  pd('pointerdown', 20, 20); pd('pointermove', 23, 20); pd('pointermove', 25, 23);
+  ok(roads.length === 0 && built === 0, 'nothing is sent while the road is dragged');
+  ok(tiles(m.input.roadPath) === '20,20 21,20 22,20 23,20 24,20 25,20 25,21 25,22 25,23', `an L, along the way the drag first went (${tiles(m.input.roadPath)})`);
+  pd('pointerup', 25, 23);
+  ok(roads.length === 1 && roads[0].tiles.length === 9 && roads[0].shape === 'line' && !m.input.roadPath, 'let go: the whole drag goes in one message');
+  pd('pointerdown', 20, 20); pd('pointermove', 20, 22); pd('pointermove', 25, 23);
+  ok(tiles(m.input.roadPath).startsWith('20,20 20,21 20,22 20,23 21,23'), 'first down, then across: the corner follows the drag');
+  key('keydown', 'Shift');
+  ok(m.input.roadShape === 'loop' && m.input.roadPath!.length === 2 * (5 + 3), `Shift held during the drag: a loop round the rectangle (${m.input.roadPath!.length} tiles)`);
+  key('keyup', 'Shift');
+  ok(m.input.roadShape === 'line' && m.input.roadPath!.length === 9, 'Shift let go: a line again');
+  key('keydown', 'Escape', { code: 'Escape' });
+  pd('pointerup', 25, 23);
+  ok(roads.length === 1 && m.input.tool === 'road', 'Esc mid-drag lets go of the road and keeps the tool');
+  pd('pointerdown', 0, 0); pd('pointermove', 5, 0); pd('pointerup', 5, 0);
+  ok(tiles(roads[1]?.tiles) === '0,0 1,0 2,0 3,0 4,0 5,0 6,0', 'stopping one tile short of a road snaps on to meet it');
+  pd('pointerdown', 0, 0, { shiftKey: true }); pd('pointermove', 5, 0, { shiftKey: true }); pd('pointerup', 5, 0);
+  ok(roads.length === 2, 'Shift at the press still pans, as with any tool: no road');
+  key('keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
+  key('keydown', 'z', { metaKey: true, code: 'KeyZ' });
+  ok(undos === 2, 'Ctrl+Z and Cmd+Z with the road tool: undo the last drag');
+  key('keydown', 'Escape', { code: 'Escape' });
+  ok(m.input.tool === 'select', 'Esc with no drag: back to select');
+  key('keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
+  ok(undos === 2, 'Ctrl+Z with another tool: nothing');
 }
 console.log(fails ? `${fails} FAILED` : 'all passed');
 process.exit(fails ? 1 : 0);

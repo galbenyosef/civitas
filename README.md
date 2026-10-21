@@ -102,7 +102,7 @@ still selects.
 | --- | --- |
 | Panels | the panel on the right (land, a building, a person) keeps its head with ✕ in view while its body scrolls; **Esc** or ✕ closes it. A parcel's panel (on a frontier "<name>'s charter") also folds to its title (–), and its build list shows eight sites with "show more" for the rest. `client/src/ui.ts` |
 | Context menu | right-**click** (press and release without dragging) a person, car, train, plane, building, road, track or land for the actions that exist for it: inspect, follow, first-person view, go to home or work, build priority, parcel settings, buy this tile, demolish (asks again to confirm, shows the cost). Greyed entries say why in a tooltip. Esc closes; also on the FPV inset. `client/src/contextmenu.ts` |
-| Tools | 1 select · 2 buy land · 3 road (drag across water for a bridge) · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
+| Tools | 1 select · 2 buy land · 3 road (drag: straight or one corner, Shift held while dragging for a loop, Esc lets go, built on release with its cost shown; across water for a bridge; Ctrl/Cmd+Z undoes the last drag for 30 s; docs/roads.md) · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
 | Turn a footprint | Z turns the footprint of a building bigger than 1×1 anticlockwise, C clockwise, in quarter turns, while its tool is active (airport terminal, bus depot, rail halt and station). The choice sticks for that tool until you change it; before the first press the footprint faces a road by itself. The preview shows each tile's outline, an arrow from the door towards the road (green with a road, red without) and the building's marked parts (platform, apron, stands, vehicle gate); hovering a placed structure shows them faintly |
 | People and cars | hover anyone for who they are and what they are doing; click to select them in a side panel with a **follow** camera |
 | Trains and planes | hover a train or plane to highlight it; click to select it: a panel with its line or flight, what it is doing, speed, its crew and everyone on board (a train's riders are clickable citizens; plane passengers are visitors), and **follow**. `client/src/vehicles.ts`, docs/rail.md and docs/airport.md |
@@ -125,9 +125,12 @@ the open country around your holdings, or if it would enclose a pocket of
 unclaimed land bigger than four tiles. Small notches are fine and water never
 counts as an enclosure. The buy rectangle turns red and the status line says
 why before you let go; the server makes the same check and is the authority.
-Roads and zones are painted by dragging; zoning and parking lots go round road tiles and buildings
-(bulldoze first to rebuild there), and the server says how many lots it left alone and which newly zoned
-lots have no road beside them.
+Roads are dragged and built on release: the ghost shows each tile's cost and, in red, why anything will be refused,
+and a road over a building asks first (demolish it, or build round it). Zones are painted by dragging; zoning and
+parking lots go round road tiles and buildings (bulldoze first to rebuild there), and the server says how many lots
+it left alone and which newly zoned lots have no road beside them (the hover turns amber over such a lot: it builds
+only once the building in front grows back into it, or a road reaches it). Streets are named, British style, and
+their owners can rename them (right-click a road); a building's panel gives its address (docs/roads.md).
 Roads can be laid on unclaimed land too (at a premium) so parcels can be joined
 up; zoning needs land you own. Nothing gets built until builders can reach it:
 connect to a road network that has a builders' yard, or place your own (your

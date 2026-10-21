@@ -8,6 +8,7 @@ import { STOP_KINDS, TRANSIT, type TransitMode } from '../transit';
 import { METRO, isTunnel, isPlatform, underMask } from '../metro';
 import { placedFromDoor, footprintOf, FRONT, FRONT_NAMES, type Placed } from '../structures';
 import { kindManifest, CIVIC_COST } from '../tile';
+import { streetClashes, type StreetRun } from '../streets';
 import { techFor, TRACK_NAMES } from '../tech';
 import { VALUE_NAMES, VALUE_COUNT, topValues, valuesOf } from '../motivation';
 import { RUNWAY_COST, RUNWAY_MIN, RUNWAY_MAX, TERMINAL_ROW } from '../airport';
@@ -150,6 +151,8 @@ export interface DemoSection {
   water?: DemoRect[];
   /** straight road drags as the road tool lays them, on own dry land (bridges are `bridges`, laid after) */
   roads?: readonly (readonly [DemoXY, DemoXY])[];
+  /** names given to streets (shared/src/streets.ts), as an owner renames them: the street through road tile `at` (east-west unless `ns`) */
+  streets?: readonly { at: DemoXY; ns?: boolean; name: string }[];
   placements?: DemoPlacement[];
   runways?: DemoRunway[];
   tracks?: DemoTrack[];
@@ -354,6 +357,7 @@ export const SECTIONS: DemoSection[] = [
       { id: 'big-screens', kind: 'big-screens', door: [HS.north.corner + 1, HS.road - 1], rot: 0, hour: 21, aside: 0.8 },
     ],
     spots: [{ id: 'high-street', spot: 'high-street', name: 'High Street', rect: HS.rect, inspect: [-47, -16] }],
+    streets: [{ at: [HS.x0 + 2, HS.road], name: 'High Street' }],
   },
   {
     id: 'transport', name: 'Buses and parking',
@@ -1144,6 +1148,8 @@ export interface SeededDemo {
   focusAt?: (x: number, y: number) => { people: number; pct: readonly number[] } | undefined;
   /** ad slots (docs/adverts.md): how many open slots of each size stand in the town, and the wear of every rented poster */
   ads?: { slots: Partial<Record<AdSize, number>>; wears: readonly number[]; screensRented?: number };
+  /** every street in the town (shared/src/streets.ts) with the name the server gives it */
+  streets?: readonly (StreetRun & { name: string })[];
 }
 
 /**
@@ -1269,6 +1275,16 @@ const takesAfter = (vs: readonly { vals: number; parent?: number }[]) => {
 };
 /** Halls of residence stand within this many tiles of a university (students would walk). */
 const HALLS_WALK = 12;
+/** Every street is named, the names a scenario gives stand, and no street shares a name with one crossing it or alongside it. */
+const namedStreets = (d: SeededDemo) => {
+  const st = d.streets ?? [];
+  if (!st.length) return false;
+  const along = (r: StreetRun, x: number, y: number) => (r.ns ? r.line === x && y >= r.from && y <= r.to : r.line === y && x >= r.from && x <= r.to);
+  for (const sec of demoSections('showcase')) for (const n of sec.streets ?? []) {
+    if (!st.some((r) => r.ns === !!n.ns && along(r, n.at[0], n.at[1]) && r.name === n.name)) return false;
+  }
+  return streetClashes(st) === 0;
+};
 const studentQuarter = (d: SeededDemo) => d.schools.some((u) => SCHOOL_SPECS[u.kind]?.stage === Study.Degree
   && d.schools.some((h) => SCHOOL_SPECS[h.kind]?.beds && Math.abs(h.x - u.x) + Math.abs(h.y - u.y) <= HALLS_WALK));
 
@@ -1287,6 +1303,10 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   { id: 'river', caption: 'a river (open water) that the bridges cross', tour: 'river',
     scenario: (ss) => ss.some((s) => s.water?.length), seeded: (d) => anyTile(d, (_x, _y, t) => terrainOf(t) === Terrain.Water) },
   // ---- rail and roads
+  { id: 'street-names', caption: 'named streets (a British name for each by what it is like, none alike side by side, the High Street named by its owner)', tour: 'high-street',
+    scenario: (ss) => ss.some((s) => s.streets?.length), seeded: namedStreets },
+  { id: 'mixed-blocks', caption: 'blocks of several sizes (3, 4, 6 and 8 long) meeting at staggered T-junctions, as the Commons is laid out', tour: 'block-residential',
+    todo: 'the Commons (server/src/seed.ts COMMONS) is in no demo: the showcase is built of seedCity\'s 4×4 grid districts, which the load tests share. It turns on when the showcase districts are rebuilt on the Commons\' mix (roads probe: loadtest/roads.ts checks the Commons)' },
   { id: 'level-crossing', caption: 'a level crossing (a road over track, with barriers)', tour: 'level-crossing',
     seeded: (d) => anyTile(d, (_x, _y, t, a) => isCrossing(t, a)) },
   ...(Object.keys(JUNCTION_TOUR) as DemoJunction['tool'][]).map((tool): ShowcaseFeature => ({
