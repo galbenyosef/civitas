@@ -208,6 +208,7 @@ const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks
 // roads near the camera as geometry, their furniture and the street lamps' map (render/roads.ts)
 const roads = new RoadLayer(atlas); scene.add(roads.group, roads.furniture);
 ChunkView.onTint = (cx, cy, heat) => roads.setHeat(cx, cy, heat);
+roads.kindAt = (x, y) => world.kindIdAt(x, y);
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz) || roads.walkY(x, z); // cars and walkers on a flyover deck or a bridge and their ramps, walkers on a kerbed pavement
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
 landmarks.auxAt = (x, y) => world.auxAt(x, y); // a Tower Bridge span running on into the next chunk

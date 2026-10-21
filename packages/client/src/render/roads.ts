@@ -5,7 +5,7 @@ import {
 import {
   CHUNK_SIZE, Terrain, hash2, isRoad, terrainOf, signalArms, armCount, signalledArms, isMarkedJunction, mouthControl, mouthCrossing,
   boxJunction, leafySide, streetTreeAt, midZebraAt, MouthCrossing, MouthControl, isRingAux, ringPos, isArmPos, RING_POS, isFlyoverAux, deckEW,
-  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, isRailAux, railMask, streetRun, streetLine,
+  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, isRailAux, railMask, streetRun, streetLine, MOTORWAY_KIND,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Geo, buildTile, buildRing, surfaceY, ringSurfaceY, STREET, SIDE, type RoadTile, type RoadProfile } from './roadGeo';
@@ -179,6 +179,8 @@ export class RoadLayer {
   private entries = new Map<number, Entry>();
   private byKey = new Map<string, Entry>();
   private ctx: RoadCtx | null = null;
+  /** the catalogue kind standing on a tile (main.ts: world.kindIdAt), for a road that runs on into a motorway connection's apron */
+  kindAt: (x: number, y: number) => number = () => 0;
   private furnDirty = false;
   private lampDirty = false;
   private lampData = lampTexture.image.data as Uint8Array;
@@ -437,7 +439,8 @@ export class RoadLayer {
     const under = isFlyoverAux(a);
     let m8 = 0;
     const DIAG: [number, number][] = [[1, -1], [1, 1], [-1, 1], [-1, -1]];
-    for (let s = 0; s < 4; s++) if (road(x + SIDE[s][0], z + SIDE[s][1])) m8 |= 1 << s;
+    // a motorway connection's apron carries the carriageway on: no kerb across the end of the road into it
+    for (let s = 0; s < 4; s++) if (road(x + SIDE[s][0], z + SIDE[s][1]) || this.kindAt(x + SIDE[s][0], z + SIDE[s][1]) === MOTORWAY_KIND) m8 |= 1 << s;
     for (let s = 0; s < 4; s++) if (road(x + DIAG[s][0], z + DIAG[s][1])) m8 |= 16 << s;
     if (under) m8 &= deckEW(a) ? ~(2 | 8 | 0xf0) : ~(1 | 4 | 0xf0); // the deck's ramps are not this road's sides
     const arms = under ? (deckEW(a) ? 5 : 10) & m8 : signalArms(road, x, z);
