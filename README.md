@@ -376,7 +376,7 @@ changing behaviour in game time.
   Each rank pays a charter grant ($2,500 to $10,000) and, on a frontier, grows the free charter by a ring of land
   (32 → 48 → 64 → 80 → 96 tiles a side; the holder buys beyond it only as a City, nobody else inside it). The rank
   chip beside the treasury shows the next rank's progress; its card (in the goals column, taking the goals card's
-  place once the chain is done) lists the needs, the grant and a milestone feed, and each new milestone comes up in a
+  place once the chain is done) lists the needs, the grant and a milestone feed (opened from the chip, its ×, Esc or a press elsewhere closes it), and each new milestone comes up in a
   ticker under the top bar. A rank-up gets a banner, fireworks over the town (every shell its own) and the camera
   pulling up to show the new land. Saved with the player (`Player.ranks`); older saves derive their rank on load
   without a grant. None in sandboxes; the showcase tour's "Settlement ranks" stop plays the celebration.

@@ -13,7 +13,12 @@ on a frontier grow the charter by rings of land.
   and (on a frontier) the land it brings, and the last six milestones with their game time. While the goals card is up
   the rank card stays closed (the chip opens it); once the chain is done, skipped or the goals card is hidden, the rank
   card takes its place by itself, so there is always a next step on screen. Opening or closing it by hand is
-  remembered (`msimcity.rankCard`).
+  remembered (`msimcity.rankCard`). Opened from the chip it is a popup: its × button, Esc or a press anywhere else
+  (the map, a camera moment) closes it, and closing puts back what was there before. Shown by itself it is a sidebar
+  card that only its × closes. Its head with the × is built once and only the body is redrawn as the figures tick
+  over, so a close held down while a measurement lands still closes it (playtest 8df08a47: the whole card used to be
+  redrawn, which swallowed the click, most often during a rank-up when several updates land at once). A rank-up with
+  the card open updates the one card; a tall card scrolls its body and keeps the × in view.
 - **The milestone ticker**: each new milestone comes up under the top bar for five to seven seconds (each its own
   stay, a slight lean and offset of its own), at most three at once, a little over a second apart.
 - **The milestone feed** (`RankDTO.feed`, newest first, 40 kept, 12 sent): ranks reached, each need met, residents
