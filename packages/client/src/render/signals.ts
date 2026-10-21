@@ -157,6 +157,7 @@ export class TrafficLights {
     });
     this.litArrow = mk(new ShapeGeometry(arrowShape(LAMP_R * 1.05)).translate(ARROW_DX, LAMP_Y[0], LAMP_Z + 0.004), new MeshBasicMaterial({ color: LIT[0], toneMapped: false }), false);
     this.litArrow.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.arrows.frustumCulled = this.extras.frustumCulled = this.litArrow.frustumCulled = true;
     const haloOf = (src: InstancedMesh, c: number, y: number, x = 0) => {
       const m = mk(new SphereGeometry(LAMP_R * 2.6, 10, 8).translate(x, y, LAMP_Z + 0.01),
         new MeshBasicMaterial({ color: c, transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false, toneMapped: false }), false);
@@ -165,6 +166,7 @@ export class TrafficLights {
       return m;
     };
     this.halo = [...LIT.map((c, i) => haloOf(this.lit[i], c, LAMP_Y[i])), haloOf(this.litArrow, LIT[0], LAMP_Y[0], ARROW_DX)];
+    this.halo[3].frustumCulled = true;
   }
 
   /** Record the junction tiles of a chunk (call after its tiles change). */
@@ -309,6 +311,9 @@ export class TrafficLights {
       m.instanceMatrix.needsUpdate = true;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
+    // the left-arrow heads and the pelicans' boxes are few and far between: culled as a whole when none is in view
+    for (const m of [this.arrows, this.extras]) if (m.count) m.computeBoundingSphere();
+    if (this.arrows.boundingSphere) this.litArrow.boundingSphere = this.halo[3].boundingSphere = this.arrows.boundingSphere;
   }
 
   /** A signal crossing on straight (x, z): a pole each way on the right-hand kerb short of the stop line, the walker's man on each. */
