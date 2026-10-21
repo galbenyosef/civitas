@@ -385,7 +385,7 @@ function renderSpec() {
     ${attrs.length ? `<h4>Attributes</h4><dl class="kv">${attrs.map(([k, v]) => `<dt>${esc(ATTR_LABEL[k] ?? k)}</dt><dd>${esc(fmtAttr(k, v))}</dd>`).join('')}</dl>` : ''}
     ${occ ? `<h4>Who works here</h4><dl class="kv"><dt>Occupation</dt><dd>${esc(occ.name)}</dd>${occ.shifts.map((s) => `<dt>Shift from ${hh(s.start)}</dt><dd>${s.hours} h · ${Math.round((s.weight / occ.shifts.reduce((a, x) => a + x.weight, 0)) * 100)}%</dd>`).join('')}<dt>Rosters</dt><dd>${occ.cycles.map((c) => c.map((d) => (d ? 'W' : '–')).join('')).join(', ')}</dd><dt>Rotating start</dt><dd>${occ.rotate ? 'yes' : 'no'}</dd></dl>` : ''}
     ${tints}
-    <p class="note">Edit <code>packages/shared/src/buildings/${esc(kind.family)}.ts</code>; this page reloads when the catalogue recompiles.</p>`;
+    <p class="note">Edit <code>packages/shared/src/buildings/${kind.landmark && kind.draft ? 'landmark-drafts' : esc(kind.family)}.ts</code>; this page reloads when the catalogue recompiles.</p>`;
   $('spec').querySelectorAll<HTMLTableRowElement>('table.ladder tr[data-key]').forEach((tr) => (tr.onclick = () => { if (tr.dataset.key) { select(tr.dataset.key); document.querySelector<HTMLElement>(`button.thumb[data-key="${tr.dataset.key}"]`)?.scrollIntoView({ block: 'nearest' }); } }));
   $('spec').querySelectorAll<HTMLButtonElement>('[data-tint]').forEach((b) => (b.onclick = () => { state.tint = Number(b.dataset.tint); showCurrent(); renderSpec(); }));
 }

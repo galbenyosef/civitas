@@ -426,7 +426,7 @@ expectError('duplicate tool key', (c) => { c[1].tool!.key = c[0].tool!.key; }, /
 // ---------------------------------------------------------------- 5. leisure family
 section('leisure');
 eq('leisure kind codes', LEISURE_CODES, [...new Set(MANIFEST.filter((m) => m.family === 'leisure').map((m) => m.code))]);
-for (const m of MANIFEST.filter((e) => e.family === 'leisure')) {
+for (const m of MANIFEST.filter((e) => e.family === 'leisure' && !(e.landmark && e.draft))) { // a draft landmark has no live design, so no spec (landmark-drafts.ts)
   eq(`${m.id}: isLeisure`, isLeisure(m.kindId), true);
   for (const l of m.levels) {
     const live = l.designs.filter((d) => !d.draft);

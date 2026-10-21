@@ -1,4 +1,4 @@
-import type { KindDef, Op } from './schema';
+import type { Attributes, KindDef, Op } from './schema';
 import { Zone } from './codes';
 import { repeat } from './helpers';
 import { office } from './office';
@@ -38,7 +38,7 @@ export const asOffice = {
 export const asAttraction = {
   code: library.code, family: 'leisure' as const, flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic' as const,
   occupation: library.occupation, lot: { wage: 16 },
-  attrs: { ...library.attrs, visitorCapacity: 40, ticket: 4, openHours: [9, 18], stay: [0.5, 1.5], leisureValue: 4, radius: 16, dayAppeal: 1.2, eveningAppeal: 0.1, retireeAppeal: 1.8, childAppeal: 1.2 },
+  attrs: { ...library.attrs, visitorCapacity: 40, ticket: 4, openHours: [9, 18], stay: [0.5, 1.5], leisureValue: 4, radius: 16, dayAppeal: 1.2, eveningAppeal: 0.1, retireeAppeal: 1.8, childAppeal: 1.2 } as Attributes,
 };
 
 // ================================================================= TEMPLATE (kind id 230)
@@ -148,5 +148,31 @@ const clockTower: KindDef = {
   }],
 };
 
+// ================================================================= 232 war memorial obelisk (acceptance run: written from docs/landmarks.md and the template alone)
+
+const memorial: KindDef = {
+  ...DRAFT, ...asAttraction,
+  id: 'war-memorial', name: 'the war memorial', kindId: 232,
+  tags: ['draft', 'memorial'],
+  blurb: 'A stone obelisk on a stepped plinth in a railed green with a flag: the town\'s quiet place to remember, where people stop on the way past.',
+  howTo: 'One tile on a corner or square, its front on the street. Visitors come by to pay their respects, mostly in the daytime and mostly the older ones.',
+  levels: [{
+    capacity: 2, wage: 16, cost: 800, upkeep: 8, work: 300, parking: { surface: 0, underground: 0 },
+    designs: [{
+      name: 'stone obelisk on a stepped plinth in a railed green with a flag', height: 0.84, draft: true, author: 'docs example',
+      ops: [
+        slab(1, 1, PAVING),
+        ['box', 0.56, 0.03, 0.56, 0, 0.02, 0, 'stone'], ['box', 0.46, 0.03, 0.46, 0, 0.05, 0, 'stone'],   // two steps
+        ['box', 0.32, 0.12, 0.32, 0, 0.08, 0, 'pale'], ['box', 0.26, 0.08, 0.26, 0, 0.2, 0, 'stone'],     // plinth and die
+        ['taper', 0.17, 0.17, 0.08, 0.08, 0.5, 0, 0.28, 0, 'stone'], ['taper', 0.08, 0.08, 0, 0, 0.06, 0, 0.78, 0, 'pale'], // shaft and tip
+        ...([[-1, -1], [1, -1], [-1, 1], [1, 1]] as const).map(([sx, sz]): Op => ['box', 0.1, 0.06, 0.1, sx * 0.38, 0.02, sz * 0.38, 'hedge']),
+        ...fence(0, 0.45, 0.56, true, 'charcoal', 0.08),
+        ...lampPost(-0.3, 0.38, 0.16, 'yellow'),
+        ['flag', 0.38, 0.08, -0.38, 'red'],
+      ],
+    }],
+  }],
+};
+
 /** The draft landmarks the catalogue includes (catalogue.ts). Add yours at the end. */
-export const LANDMARK_DRAFTS: KindDef[] = [TEMPLATE, clockTower];
+export const LANDMARK_DRAFTS: KindDef[] = [TEMPLATE, clockTower, memorial];

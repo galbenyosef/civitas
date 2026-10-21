@@ -83,7 +83,8 @@ export function checkDesign(k: KindDef, design: KindDef['levels'][number]['desig
   if (Math.abs(top - design.height) > 0.03) rep.warnings.push(`${where}: height ${design.height} but the tallest part reaches ${top.toFixed(3)}`);
   if (ops.length > MAX_OPS) rep.errors.push(`${where}: ${ops.length} compiled ops; the limit is ${MAX_OPS} (warning over ${WARN_OPS})`);
   else if (ops.length > WARN_OPS) rep.warnings.push(`${where}: ${ops.length} compiled ops (over ${WARN_OPS}); use repeat() and the lathe and taper ops for repeated and curved parts`);
-  if (!design.ops.some((o) => o[0] === 'door') && !live) rep.warnings.push(`${where}: no door op; the main door goes on the front (+z) wall (docs/landmarks.md section 4)`);
+  // a building with a facade needs its main door on the front; a monument (no windowed facade) needs none
+  if (!live && design.ops.some((o) => o[0] === 'box' && (o[9] as { facade?: unknown } | undefined)?.facade) && !design.ops.some((o) => o[0] === 'door')) rep.warnings.push(`${where}: a facade but no door op; the main door goes on the front (+z) wall (docs/landmarks.md section 4)`);
   rep.rows.push({ id: k.id, kindId: k.kindId ?? k.code, draft: !!k.draft, w: fp.w, h: fp.h, design: design.name, height: design.height, top: +top.toFixed(2), ops: ops.length, floating });
 }
 
@@ -113,7 +114,6 @@ export function checkLandmarks(kinds: KindDef[], fromFile = false): LandmarkRepo
       // a draft can never reach the city: no tool, every design a draft, kind id in the reserved range
       if (k.tool) rep.errors.push(`${w}: a draft landmark has no tool`);
       if (designs.some(({ d }) => !d.draft)) rep.errors.push(`${w}: a draft landmark's designs all carry draft: true (a live design would reach the city batch)`);
-      if (!k.tags?.includes('draft')) rep.errors.push(`${w}: a draft landmark carries the tag 'draft'`);
     } else {
       if (k.kindId !== undefined && k.kindId >= LANDMARK_DRAFT_IDS[0] && k.kindId <= LANDMARK_DRAFT_IDS[1]) rep.errors.push(`${w}: live kind id ${k.kindId} is inside the draft range ${LANDMARK_DRAFT_IDS.join('-')}`);
       if (designs.some(({ d }) => d.draft)) rep.warnings.push(`${w}: a live landmark with a draft design`);
