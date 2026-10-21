@@ -13,7 +13,8 @@ path as first built and measured, which stays as it is.
 
 ### What the player sees and does, from nothing
 
-A valley from the seed's terrain, no town anywhere. One country road comes in from the west edge and stops in the
+A valley from the seed's terrain, no town anywhere. One country road (a country lane, docs/roads.md "Classes": grass
+verges, no kerbs, cars take it slowly) comes in from the west edge and stops in the
 middle of a free 32×32 land charter that is already theirs. At the road's far end stands the gate, the motorway
 connection the rest of the world arrives through. $18,000 in the treasury ($5,000 when this review was written; raised
 with the cash floor of docs/ranks.md section 3). The clock reads 06:00, dawn: a frontier

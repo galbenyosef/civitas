@@ -1,5 +1,5 @@
 import {
-  FRONT, Zone, isRoad, zoneOf, houseNumber, auxClass, classDef, isDividedAux, auxJunction, auxDir, CDIRS, RoadCls, streetsThrough, streetRun, streetLine, streetLength, streetTile, streetName, streetBase, cleanStreetName,
+  FRONT, Zone, isRoad, zoneOf, houseNumber, auxClass, classDef, namesClass, isDividedAux, auxJunction, auxDir, CDIRS, RoadCls, streetsThrough, streetRun, streetLine, streetLength, streetTile, streetName, streetBase, cleanStreetName,
   type StreetRun, type StreetCharacter,
 } from '@msimcity/shared';
 import type { World } from './world';
@@ -199,8 +199,8 @@ export class StreetBook {
     const along = (r & 1) === 1; // facing ±x: the street runs north-south
     const st = streetRun(nx, ny, along, this.isRoadAt);
     // a road of another class than the street says so (shared/src/roadclass.ts): "12 Mill Lane, one-way street"
-    const cls = auxClass(this.w.auxAt(nx, ny));
-    return `${houseNumber(ox, oy, r)} ${this.nameOf(st)}${cls ? `, ${classDef(cls).name}` : ''}`;
+    const cls = auxClass(this.w.auxAt(nx, ny)), name = this.nameOf(st);
+    return `${houseNumber(ox, oy, r)} ${name}${cls && !namesClass(name, cls) ? `, ${classDef(cls).name}` : ''}`;
   }
 
   // ---- the snapshot ---------------------------------------------------------------------------------------

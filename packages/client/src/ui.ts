@@ -4,7 +4,7 @@ import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, T
 import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, spendableMoney, type KindToolId, type LedgerDTO, type FinanceDTO } from '@msimcity/shared';
-import { FLEET_LABEL, classDef } from '@msimcity/shared';
+import { FLEET_LABEL, classDef, namesClass } from '@msimcity/shared';
 import { WEEKDAY_NAMES } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
 import { mediaHtml } from './news';
@@ -697,7 +697,8 @@ export class UI {
     const [st, other] = info.streets ?? [];
     const what = info.bridge ? 'Bridge' : info.cls ? `${classDef(info.cls).title}` : 'Road';
     // the class leads the rest when the road is not a street (shared/src/roadclass.ts): "Mill Lane, one-way street, northbound"
-    const cls = info.cls && st ? `, ${classDef(info.cls).name}${info.flow !== undefined ? `, ${FLOW_WORDS[info.flow]}` : ''}` : info.flow !== undefined ? ` ${FLOW_WORDS[info.flow]}` : '';
+    const cn = info.cls && st && !namesClass(st.name, info.cls) ? classDef(info.cls).name : '';
+    const cls = [cn, info.flow !== undefined ? FLOW_WORDS[info.flow] : ''].filter(Boolean).map((w) => `, ${w}`).join('');
     const swatch = `#${(info.cls ? classDef(info.cls).colour : 0x6b6f7a).toString(16).padStart(6, '0')}`;
     const jn = info.junction === 'none' ? '' : info.junction === 'signal' ? 'signalled junction' : info.junction === 'roundabout' ? 'roundabout' : info.junction === 'flyover' ? 'flyover' : 'junction';
     let html = `<h3><span class="sw" style="background:${swatch}"></span>${st ? esc(st.name) : what}${cls ? `<span style="color:var(--muted);font-weight:400">${esc(cls)}</span>` : ''} <span style="color:var(--muted);font-weight:400">${st && info.bridge ? 'bridge, ' : ''}${info.bridge ? `${info.bridge.style}, ${info.bridge.span} tile${info.bridge.span === 1 ? '' : 's'} over the water` : jn}</span></h3>`;

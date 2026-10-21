@@ -79,6 +79,9 @@ export const ROAD_CLASS_COUNT = ROAD_CLASS_DEFS.length;
 export const isRoadClass = (cls: number) => Number.isInteger(cls) && cls >= 0 && cls < ROAD_CLASS_COUNT;
 export const classDef = (cls: number): RoadClassDef => ROAD_CLASS_DEFS[cls] ?? ROAD_CLASS_DEFS[0];
 
+/** Does a street's name already say its class ("Kingsway Avenue" on an avenue, "Hedge Lane" on a country lane)? Then the class is not said again. */
+export const namesClass = (name: string, cls: number) => name.toLowerCase().endsWith(` ${classDef(cls).name.split(' ').pop()}`);
+
 /** Hours (game clock) when deliveries may use a pedestrian street: before 10:00 and from 19:00. */
 export const PEDESTRIAN_DELIVERY_HOURS: readonly [number, number] = [10, 19];
 export const pedestrianDeliveryOpen = (hour: number) => hour < PEDESTRIAN_DELIVERY_HOURS[0] || hour >= PEDESTRIAN_DELIVERY_HOURS[1];
