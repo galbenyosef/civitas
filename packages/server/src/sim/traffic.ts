@@ -1128,6 +1128,17 @@ export class Traffic {
     return null;
   }
   /**
+   * Is m the first car in its lane, held at the stop line into a junction box or a level crossing? (The A/B harness's
+   * smoothness measure: a stop there is the junction's, not the stream's.)
+   */
+  headAtStopLine(m: Mover): boolean {
+    if (m.lane < 0 || m.committed || m.pi * 2 + 1 >= m.path.length) return false;
+    const q = this.laneAt(m.lane);
+    if (!q || leaderIn(q, q.indexOf(m), isBike(m))) return false;
+    const bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
+    return (this.degreeOf(bx, by) >= 3 || this.isCrossingAt(bx, by)) && m.prog >= this.stopLine(m) - 0.05;
+  }
+  /**
    * Is anything queued behind m: following it in its own lane, or in the lane that leads into the tile its lane starts
    * from (a bus standing at a stop holds those up)?
    */

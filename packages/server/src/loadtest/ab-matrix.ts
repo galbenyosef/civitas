@@ -7,6 +7,7 @@
  *
  * Each --row is "label=set" where set is the ab.ts --set string (may be empty). Rows run in the order given;
  * a row whose set starts with "+" adds to the previous row's set. --json FILE appends every run's raw result.
+ * --table smooth prints the smoothness columns (stops per 10 tiles, jerk, standing in the stream, ms per tick).
  */
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdtempSync, readFileSync } from 'node:fs';
@@ -54,6 +55,24 @@ process.stderr.write(`[matrix] ${queue.length} runs in ${((Date.now() - t0) / 10
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 const f1 = (v: number) => v.toFixed(1), f3 = (v: number) => v.toFixed(3);
 const json = get('json');
+// --table smooth: the smoothness columns (docs/traffic-tuning.md "Smooth flow") instead of the give-up breakdown
+if (get('table') === 'smooth') {
+  for (const hour of hours) {
+    console.log(`\n**${String(hour).padStart(2, '0')}:00, ${ticks} ticks, mean of seeds ${seeds.join(', ')}**\n`);
+    console.log('| setting | stops / 10 tiles | dead stops / 10 tiles | jerk (tiles/tick²) | harsh % | standing in the stream % | speed % | queued % | give-ups | of which in a box | driver commute (ticks) | junction entries / tick | car–car / tick (path / drawn) | car–ped / tick (drawn) | ms / tick |');
+    console.log('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+    rows.forEach((r, row) => {
+      const rs = seeds.map((s) => results.get(`${row}-${hour}-${s}`)!);
+      if (json) for (const x of rs) appendFileSync(json, JSON.stringify(x) + '\n');
+      const m = (f: (x: AbResult) => number) => mean(rs.map(f));
+      const f2 = (v: number) => v.toFixed(2);
+      console.log(`| ${r.label} | ${f2(m((x) => x.smooth.stopsPer10))} | ${f2(m((x) => (10 * x.smooth.deadStops) / (x.smooth.tiles || 1)))} | ${f3(m((x) => x.smooth.jerk))} | ${f1(m((x) => x.smooth.harshPct))} | ${f1(m((x) => x.smooth.standStreamPct))} | ${f1(m((x) => x.speedPct))} | ${f1(m((x) => x.queuedPct))} | ${f1(m((x) => x.giveUps))} | ${f1(m((x) => x.counters.stuckInBox ?? 0))} | ${f1(m((x) => x.driveCommuteMean))} | ${f1(m((x) => x.junctionEntriesPerTick))} | ${f3(m((x) => x.ccPerTick))} / ${f3(m((x) => x.ccDrawnPerTick))} | ${f3(m((x) => x.cpDrawnPerTick))} | ${f2(m((x) => x.simMsPerTick))} |`);
+    });
+  }
+  console.log('\nSettings:\n');
+  rows.forEach((r) => console.log(`- **${r.label}**: \`${r.set || '(defaults)'}\``));
+  process.exit(0);
+}
 for (const hour of hours) {
   console.log(`\n**${String(hour).padStart(2, '0')}:00, ${ticks} ticks, mean of seeds ${seeds.join(', ')}**\n`);
   console.log('| setting | speed % | queued % | first-hour queued % | give-ups (sent home + removed) | of which inside a box | kerb+walk / withdrawn | commute mean (drivers) ticks | commutes | junction entries / tick | car–car / tick | car–ped / tick | as drawn: car–car / car–ped |');
