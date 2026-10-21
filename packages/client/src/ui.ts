@@ -128,6 +128,8 @@ export interface UICallbacks {
   /** the FPV buttons in the citizen panel: the inset or the whole window */
   onFpv(mode: 'inset' | 'full'): void;
   onCloseBuilding(): void;
+  /** the parcel panel's close button (a frontier's charter fills the view, so a click elsewhere rarely finds other land) */
+  onCloseParcel(): void;
 }
 
 /** Plain-DOM overlay. Keeps three.js code free of UI concerns. */
@@ -384,7 +386,7 @@ export class UI {
     if (this.panelFor !== p.id) {
       this.panelFor = p.id;
       panel.innerHTML = `
-        <h2><span class="sw" style="background:#${(owner?.color ?? 0xffffff).toString(16).padStart(6, '0')}"></span><span id="pName"></span></h2>
+        <h2><span class="sw" style="background:#${(owner?.color ?? 0xffffff).toString(16).padStart(6, '0')}"></span><span id="pName"></span><button class="chip" id="pClose" title="close (Esc)" style="margin-left:auto">✕</button></h2>
         <div class="sub" id="pSub"></div>
         <table>
           <tr><td>Population</td><td id="pPop"></td></tr>
@@ -403,6 +405,7 @@ export class UI {
           <label>Name<input type="text" id="pNameInput" maxlength="24" /></label>
           <div class="hint">Income tax is paid by everyone who works here, wherever they live; property tax by everyone who lives here; sales tax by everyone who drinks or eats here. Above ~20% people start leaving. Services and builders are paid from your treasury.</div>
         ` : `<div class="hint">Citizens from anywhere can work here; their income tax goes to ${esc(owner?.name ?? 'the owner')}.</div>`}`;
+      $('pClose').onclick = () => this.cb.onCloseParcel();
       if (mine) {
         const r = $<HTMLInputElement>('pRateInput');
         r.oninput = () => { $('pRate').textContent = r.value + '%'; };

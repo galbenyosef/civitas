@@ -243,6 +243,7 @@ const ui = new UI({
   onSelectCitizen: (id) => selectCitizen(id),
   onFpv: (mode) => { if (mode === 'inset') fpv.toggleInset(); else fpv.toggleFull(); },
   onCloseBuilding: () => closeBuilding(),
+  onCloseParcel: () => closeParcel(),
 });
 
 net.onStatus = (ok) => { ui.setConn(ok); if (!ok) subscribed.clear(); };
@@ -644,6 +645,7 @@ const input = new Input(canvas, rig, {
     if (code === 'Tab') mapMode.toggle();
     else if (code === 'Escape' && adPanel.isPicking) adPanel.toggle(false);
     else if (code === 'Escape' && selectedBuilding) closeBuilding();
+    else if (code === 'Escape' && selectedParcel) closeParcel();
     else if (code === 'KeyH') overlayMenu.cycle();
     else if (code === 'KeyN') setUnder(!underground.on);
     else if (code === 'KeyT') { ui.toggleTech(); ui.showTech(world.myPlayer); policies.toggle(false); }
@@ -952,6 +954,9 @@ function closeBuilding(refresh = true) {
   ui.hideBuilding();
   if (refresh) { selectedParcel = 0; world.parcelsDirty = true; refreshPanel(); }
 }
+
+/** The parcel panel (the land's tax and name; on a frontier "<name>'s charter") closes: its ✕ or Esc. */
+function closeParcel() { selectedParcel = 0; world.parcelsDirty = true; refreshPanel(); }
 
 function refreshPanel() {
   if (selectedBuilding) return;
