@@ -45,8 +45,10 @@ export interface RoadCtx {
   signalled: (x: number, y: number) => boolean;
 }
 
+/** a profile drawn on every street instead, from the console (RoadLayer.preview), for trying out R3's classes */
+let previewProfile: RoadProfile | null = null;
 /** The class of a road tile. One today; R3 reads the aux class byte here. */
-export const profileOf = (_tile: number, _aux: number): RoadProfile => STREET;
+export const profileOf = (_tile: number, _aux: number): RoadProfile => previewProfile ?? STREET;
 
 // ---- furniture ------------------------------------------------------------------------------------------------------
 
@@ -267,7 +269,7 @@ export class RoadLayer {
         e.near = near;
         if (e.mesh) e.mesh.visible = near;
         if (e.furn.length) this.furnDirty = true;
-        if (!near) this.dropMesh(e);
+        if (!near) { this.dropMesh(e); e.tiles = new Map(); e.ranges = []; } // far: the flat cells; free the cached tiles too
       }
       if (near && (e.dirty || !e.mesh)) todo.push([d, e]);
     }
@@ -291,6 +293,15 @@ export class RoadLayer {
     if (tc.t) return surfaceY(tc.t, x, z);
     if (tc.ring) return ringSurfaceY(tx, tz, tc.ring.pos, tc.ring.arm, STREET, x, z);
     return 0;
+  }
+
+  /**
+   * Draw every street with another cross-section, or back to its own with null: `msc.roads.preview({ carriage: 0.42,
+   * kerb: 0.014, lanes: 2, median: 0.06, oneWay: false })`. Drawing only (the lanes cars drive do not move): for R3.
+   */
+  preview(p: RoadProfile | null) {
+    previewProfile = p;
+    for (const e of this.entries.values()) e.dirty = true;
   }
 
   /** Name plate posts near the camera (the hook for R2's street names). */
@@ -322,8 +333,12 @@ export class RoadLayer {
     this.group.remove(e.mesh); e.mesh.geometry.dispose(); e.mesh = null;
   }
 
+  /** the last chunk builds: time (ms), tiles described, tiles built afresh (the rest reused) */
+  private builds: { ms: number; tiles: number; fresh: number }[] = [];
+
   private build(e: Entry) {
-    const ctx = this.ctx!;
+    const t0 = performance.now();
+    let described = 0, fresh = 0;
     e.dirty = false;
     e.wearBuilt = performance.now();
     const x0 = e.cx * CHUNK_SIZE, z0 = e.cy * CHUNK_SIZE;
@@ -336,9 +351,11 @@ export class RoadLayer {
       e.wearAt[i] = wearLevel(e.wear[i]);
       const d = this.describe(x, z, t, e.chunk.aux[i], e.wearAt[i]);
       if (!d) continue;
+      described++;
       if (d.t?.junction) junctions.push(i, d.t.cross.some((k) => k === MouthCrossing.Signal) ? 1 : 0);
       const old = e.tiles.get(i);
       if (old && old.sig === d.sig) { keep.set(i, old); continue; }
+      fresh++;
       const g = new Geo();
       if (d.t) buildTile(d.t, g); else if (d.ring) buildRing(x, z, d.ring.pos, d.ring.arm, STREET, g);
       keep.set(i, {
@@ -385,6 +402,8 @@ export class RoadLayer {
     }
     e.furn = furn;
     this.furnDirty = true;
+    this.builds.push({ ms: performance.now() - t0, tiles: described, fresh });
+    if (this.builds.length > 64) this.builds.shift();
   }
 
   private tint(e: Entry) {
@@ -433,8 +452,9 @@ export class RoadLayer {
     const box = junction && boxJunction(road, x, z, sig0, wear >= 2);
     const rail = isRailAux(a) ? railMask(a) : 0;
     const zebra = !junction && !under && midZebraAt(road, a, x, z);
-    const t: RoadTile = { x, z, prof: profileOf(tw, a), m8, arms, junction, cross, ctrl, box, nCross, nCtrl, nArms, leafy, rail, under, zebra, wear };
-    const sig = `${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0}${zebra ? 1 : 0},${wear}`;
+    const prof = profileOf(tw, a);
+    const t: RoadTile = { x, z, prof, m8, arms, junction, cross, ctrl, box, nCross, nCtrl, nArms, leafy, rail, under, zebra, wear };
+    const sig = `${prof.carriage},${prof.lanes},${prof.median},${prof.oneWay ? 1 : 0}|${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0}${zebra ? 1 : 0},${wear}`;
     return { sig, t, ring: null };
   }
 
@@ -608,9 +628,10 @@ export class RoadLayer {
         put(F.Bin, dx * 0.468 + (dx === 0 ? along : 0), dz * 0.468 + (dz === 0 ? along : 0), r(54) * 6.28, 1, binC);
       }
     }
-    // a name plate post on the minor road's corner where it meets a junction (R2 names the street on it)
+    // a name plate post on a corner where the street meets a junction: always on a road that gives way, on about half
+    // of the others (R2 names the street on it)
     for (let s = 0; s < 4; s++) {
-      if (t.nCtrl[s] !== MouthControl.GiveWay) continue;
+      if (!t.nArms[s] || (t.nCtrl[s] !== MouthControl.GiveWay && r(70 + s) > 0.5)) continue;
       const [dx, dz] = SIDE[s], rx = -dz, rz = dx;
       const e = r(60 + s) < 0.5 ? -1 : 1;
       if (t.m8 & (1 << (e > 0 ? (s + 1) & 3 : (s + 3) & 3))) continue;
@@ -669,7 +690,12 @@ export class RoadLayer {
       if (e.mesh) { built++; tris += (e.mesh.geometry.index?.count ?? 0) / 3; }
       tiles += e.tiles.size;
     }
-    return { chunks: this.entries.size, near, built, tiles, tris, furniture: this.meshes.reduce((n, m) => n + m.count, 0) };
+    const b = this.builds, fresh = b.filter((q) => q.fresh), cached = b.filter((q) => !q.fresh && q.tiles);
+    const avg = (q: { ms: number }[]) => (q.length ? +(q.reduce((n, x) => n + x.ms, 0) / q.length).toFixed(2) : null);
+    return {
+      chunks: this.entries.size, near, built, tiles, tris, furniture: this.meshes.reduce((n, m) => n + m.count, 0),
+      buildMs: { fresh: avg(fresh), freshMax: fresh.length ? +Math.max(...fresh.map((q) => q.ms)).toFixed(2) : null, cached: avg(cached), n: b.length },
+    };
   }
 }
 

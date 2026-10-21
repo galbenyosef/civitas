@@ -66,6 +66,8 @@ export interface RoadTile {
   under: boolean;
   /** a zebra across the middle of this straight (roadlook midZebraAt) */
   zebra: boolean;
+  /** kerb sides (mask bits) with double yellow lines: R5's parking restrictions set it; nothing does yet */
+  yellow?: number;
   /** 0..3, from the traffic the tile has seen */
   wear: number;
 }
@@ -324,7 +326,34 @@ export function buildTile(t: RoadTile, g: Geo) {
     if (!q.h) edgeFace(g, 0, W, H, c, q, kerb);
     if (!q.v) edgeFace(g, 1, W, H, c, q, kerb);
   }
+  if (t.prof.median > 0 && (t.arms === 5 || t.arms === 10) && !t.zebra && !t.rail) median(t, g, kerb, verge);
   paint(t, g);
+}
+
+/**
+ * A central reservation down a straight (a profile with median > 0; R3's avenues): a kerbed, planted strip along the
+ * centre line, ending in a rounded nose short of a junction next door.
+ */
+function median(t: RoadTile, g: Geo, kerb: Color, grass: Color) {
+  const ox = t.x + 0.5, oz = t.z + 0.5, M = t.prof.median, K = t.prof.kerb, ns = t.arms === 5;
+  // along the street: a from -0.5 to 0.5, shortened at a junction's end; across: -M..M
+  const W = (a: number, b: number): P => (ns ? [ox + b, oz + a] : [ox + a, oz + b]);
+  const lo = t.nArms[ns ? 0 : 3] ? -0.5 + 0.2 : -0.5, hi = t.nArms[ns ? 2 : 1] ? 0.5 - 0.2 : 0.5;
+  const outline: [number, number][] = [];
+  const nose = (end: number, dir: number) => { for (let i = 0; i <= 6; i++) { const a = (i / 6) * Math.PI; outline.push([end + dir * Math.sin(a) * M, -dir * Math.cos(a) * M]); } };
+  if (hi < 0.5) nose(hi, 1); else outline.push([hi, -M], [hi, M]);
+  if (lo > -0.5) nose(lo, -1); else outline.push([lo, M], [lo, -M]);
+  g.setCell(Cell.Grass);
+  const pts = outline.map(([a, b]) => W(a, b));
+  for (let i = 1; i + 1 < pts.length; i++) g.tri(pts[0], pts[i], pts[i + 1], K, K, K, grass);
+  g.setCell(Cell.Paint);
+  for (let i = 0; i < outline.length; i++) {
+    const [a0, b0] = outline[i], [a1, b1] = outline[(i + 1) % outline.length];
+    if ((a0 === a1 && Math.abs(a0) === 0.5)) continue; // open ends carry on into the next tile's strip
+    const mx = (a0 + a1) / 2, mb = (b0 + b1) / 2, L = Math.hypot(mx, mb) || 1;
+    const p0 = W(a0, b0), p1 = W(a1, b1), n = W(mx + (mx / L) * 0.1, mb + (mb / L) * 0.1), m = W(mx, mb);
+    g.wall(p0, p1, 0, K, 0, K, n[0] - m[0], n[1] - m[1], kerb.clone().multiplyScalar(0.8));
+  }
 }
 
 /** The kerb along `line` (quarter frame): its face down to the road, a granite strip along its top, a concrete gutter at its foot. */
@@ -445,7 +474,14 @@ function paint(t: RoadTile, g: Geo) {
       const m = ((a0 + a1) / 2) * sgn, L = a1 - a0;
       decal(ns ? rect(ox, oz, 0, m, 0, 1, L, 0.024) : rect(ox, oz, m, 0, 1, 0, L, 0.024), white);
     }
+    // more than one lane each way: dashed lane lines between them, out from the centre (or the reservation)
+    const { lanes, median } = t.prof;
+    if (lanes > 1) for (const sd of [-1, 1]) for (let k = 1; k < lanes; k++) {
+      const off = sd * (median + ((c - median) * k) / lanes);
+      for (const m of [-0.25, 0.25]) decal(ns ? rect(ox, oz, off, m, 0, 1, 0.2, 0.02) : rect(ox, oz, m, off, 1, 0, 0.2, 0.02), white);
+    }
     for (const s of toJ) approachPaint(t, s, decal, white);
+    if (t.yellow) yellowLines(t, decal);
   } else if (!t.under && (t.m8 & 15) === t.arms) {
     // (a corner of a wide road's crossing, where twin lanes meet, has no line of its own)
     const bits = t.arms;
@@ -467,6 +503,17 @@ function paint(t: RoadTile, g: Geo) {
 }
 
 type Decal = (poly: P[], color: Color, y?: number) => void;
+
+/** Double yellow lines along the kerbs of a straight in t.yellow (no waiting at any time): R5 turns them on. */
+function yellowLines(t: RoadTile, decal: Decal) {
+  const ox = t.x + 0.5, oz = t.z + 0.5, c = t.prof.carriage, ns = t.arms === 5;
+  const yel = YELLOW.clone().multiplyScalar(0.95);
+  for (let s = 0; s < 4; s++) {
+    if (!(t.yellow! & (1 << s)) || (ns ? s === 0 || s === 2 : s === 1 || s === 3)) continue;
+    const sd = s === 1 || s === 2 ? 1 : -1;
+    for (const o of [c - 0.045, c - 0.072]) decal(ns ? rect(ox, oz, sd * o, 0, 0, 1, 1, 0.014) : rect(ox, oz, 0, sd * o, 1, 0, 1, 0.014), yel);
+  }
+}
 
 /** A zebra across the middle of a straight: stripes along the traffic across the carriageway, a give-way line each side. */
 function zebraPaint(t: RoadTile, decal: Decal, white: Color) {

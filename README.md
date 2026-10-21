@@ -457,9 +457,29 @@ aftermath go to everyone as one short list (`fires`) whenever it changes; the cl
 
 - *Ground.* One mesh per chunk, UV-mapped into a procedurally drawn atlas
   (`atlas.ts`): grass, water, sand, pavement, zone markers, dirt, and 16 road
-  tiles auto-selected from each tile's N/E/S/W neighbours, with curbs, dashed
-  centre lines and crosswalks at junctions. Chunk edges re-tile when a
-  neighbour arrives.
+  tiles auto-selected from each tile's N/E/S/W neighbours, which is how a road
+  looks from far off. Chunk edges re-tile when a neighbour arrives.
+- *Streets.* Within about 75 tiles of the camera every road tile is geometry
+  (`roads.ts`, `roadGeo.ts`, one mesh per chunk in the ground's material, so
+  lamp pools, overlays and the underground fade come with it). Pavements stand
+  behind a kerb with a granite top and a gutter. Corners are rounded where roads
+  meet and round the outside of bends, and every junction mouth has dropped kerbs
+  with tactile paving. Verges lie beside gardens and open grass. The paint
+  follows the layout and the lights (`shared/src/roadlook.ts`): centre lines that
+  turn to warning lines before a junction, stop lines and turn arrows at lights,
+  give-way lines and triangles where the side road or the shorter road gives way,
+  signal crossings, zebras with flashing Belisha beacons (at a third of quiet
+  junction mouths and mid-block on quiet straights), and yellow boxes on busy
+  crossroads. Roundabout rings, level crossings and the road under a flyover
+  have their own shapes. Lamp columns of three designs, street trees (species,
+  size and lean per tree), bollards, bins and name-plate posts are instanced
+  across the near chunks. Patches, manholes, gullies and wheel-track wear vary
+  per tile, and wear follows the traffic a street carries. Street lamps are
+  placed for every loaded chunk into a lamp map (one texel a tile) that the
+  ground shader pools light from, and each lantern glows from the same bytes.
+  The cross-section is a profile (carriageway width, lanes, a central
+  reservation, one-way) ready for road classes; `msc.roads.preview(profile)`
+  draws every street with another one.
 - *Buildings.* Low-poly models built from boxes, prisms and cylinders with
   baked vertex colours (`kit.ts`, `models.ts`): four designs per kind and
   level, chosen per tile by hash, so a street mixes cottages, bungalows and
@@ -491,9 +511,10 @@ aftermath go to everyone as one short list (`fires`) whenever it changes; the cl
   every window keeps its own hours: homes light up as people get in and go dark
   at bedtime, shops close through the evening, offices empty early with a few
   cleaners left, hospitals and stations stay lit, factories run night shifts,
-  TVs flicker, early risers switch on before dawn. Street lamps pool warm light
-  along roads, each coming on at its own moment, a few dead or sputtering
-  (`materials.ts`, `lighting.ts`). Shadow quality adapts to frame time; `?fx=0|1|2`
+  TVs flicker, early risers switch on before dawn. Street lamps pool light
+  along roads from their columns, sodium-warm or LED-white by street, each coming
+  on at its own moment, a few dead or sputtering (`roads.ts`, `materials.ts`,
+  `lighting.ts`). Shadow quality adapts to frame time; `?fx=0|1|2`
   pins it.
 
   **Standing rule: every effect gets an organic distribution.** Nothing in the
