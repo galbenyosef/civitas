@@ -6,6 +6,7 @@ import {
 import type { ClientChunk, ClientWorld } from '../world';
 import { Kit } from './kit';
 import { RING_ISLAND } from './atlas';
+import { JunctionSigns } from './junctionSigns';
 
 /**
  * Roundabouts and flyovers (shared/src/junctions.ts) above the ground: the planted island of each roundabout with
@@ -85,7 +86,11 @@ export class JunctionView {
   private lift = new Map<number, [boolean, number]>();
   private liftByChunk = new Map<string, number[]>();
 
-  constructor(private world: ClientWorld) {}
+  /** turn-ban and no-entry signs (R4), one merged mesh for them all, and the Turn rules tool's ghost (render/junctionSigns.ts) */
+  readonly signs: JunctionSigns;
+  constructor(private world: ClientWorld) { this.signs = new JunctionSigns(world); this.group.add(this.signs.group); }
+  /** The road rule records changed (main.ts, on 'roadRules'): the signs go up again. */
+  rulesChanged() { this.signs.rebuild(); }
 
   /** Rebuild a chunk's islands and decks (after its tiles or aux bytes change). */
   scanChunk(key: string, chunk: ClientChunk) {
@@ -126,6 +131,7 @@ export class JunctionView {
       }
     }
     if (lifts.length) this.liftByChunk.set(key, lifts);
+    if (this.world.roadRules.size) this.signs.rebuild(); // a sign's tiles may have just arrived
     if (!any) return;
     const m = new Mesh(k.build(), this.mat);
     m.castShadow = true; m.receiveShadow = true;

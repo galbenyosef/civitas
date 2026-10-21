@@ -11,7 +11,7 @@ import { mulberry32 } from '@msimcity/shared';
  * the *End cells), canvas y runs across it, away from the runway centre on shoulders and towards the terminal on
  * taxiway rows. chunkView turns and mirrors the UVs per tile.
  */
-export const CELL = 128, COLS = 8, ROWS = 14;
+export const CELL = 128, COLS = 8, ROWS = 16;
 export const Cell = {
   Grass: 0, Water: 1, Sand: 2, Pavement: 3, Lot: 4, Dirt: 5, Road: 8,
   /** the road geometry's surfaces (render/roadGeo.ts): plain asphalt, flat white for paint and stone (tinted by vertex colour), tactile paving, setts */
@@ -37,6 +37,12 @@ export const Cell = {
   LaneRoad: 64, OneWay: 80, OneWayArrow: 81, Avenue: 82, Motorway: 83, PedStraight: 84, Ped: 85,
   /** a class road's crossroads (where avenues cross, or a street crosses one): pavement corners only where the diagonal is not road (NE 1, SE 2, SW 4, NW 8 set: road) */
   Cross: 96,
+  /**
+   * R4 junctions from far off: a 5×5 roundabout's ring drawn as the 3×3's are (the east side, island to the west, plain
+   * or with an arm; the north-east corner, the island's corner at the cell's bottom left; chunkView turns them); a
+   * mini-roundabout on a crossroads, and on a T (no road to the south; turned)
+   */
+  BigRingSide: 112, BigRingArm: 113, BigRingCorner: 114, MiniCross: 115, MiniT: 116,
 } as const;
 /** Roundabout geometry in tiles out from the island tile's edge (render/junctions.ts draws the island to RING_ISLAND). */
 export const RING_ISLAND = 0.3, RING_APRON = 0.44, RING_OUTER = 0.92;
@@ -367,6 +373,7 @@ export function buildAtlas() {
   }
 
   drawClassCells(at);
+  drawJunctionCells(at, (i) => [(i % COLS) * CELL, Math.floor(i / COLS) * CELL]);
 
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
@@ -525,6 +532,74 @@ function drawClassCells(at: (i: number, draw: (g: CanvasRenderingContext2D) => v
       if (dm & bit) continue;
       g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, SW, 0, Math.PI * 2); g.fill();
       g.beginPath(); g.arc(cx, cy, SW, 0, Math.PI * 2); g.stroke();
+    }
+  });
+}
+
+/**
+ * The R4 junctions' cells, drawn last with their own random stream so every earlier cell is as it was: the 5×5 ring to
+ * the plan render/roadGeo.ts buildBigRing draws near the camera (an apron of setts against the island, two lanes with a
+ * dashed line between, a pavement round the outside), and the mini-roundabout's disc and arrows over the street's own
+ * crossroads and T cells (copied from where they were drawn).
+ */
+function drawJunctionCells(at: (i: number, draw: (g: CanvasRenderingContext2D) => void) => void, origin: (i: number) => [number, number]) {
+  const rand = mulberry32(8765);
+  const speckle = (g: CanvasRenderingContext2D, colors: string[], n: number, r = 2) => {
+    for (let i = 0; i < n; i++) { g.fillStyle = colors[Math.floor(rand() * colors.length)]; const s = r * (0.6 + rand()); g.fillRect(rand() * CELL, rand() * CELL, s, s); }
+  };
+  const A = 0.1 * CELL, O = 0.875 * CELL, SW = 16;
+  const ASPHALT = '#3d3f45', VERGE = '#a3a7ae', KERB = '#7f838a', APRON = '#8a8379', PAINT = 'rgba(255,255,255,0.86)';
+  const setts = (g: CanvasRenderingContext2D) => { g.fillStyle = 'rgba(0,0,0,0.13)'; for (let y = 0; y < CELL; y += 6) for (let x = (y / 6) % 2 ? 3 : 0; x < CELL; x += 6) g.fillRect(x + rand(), y + rand(), 1.2, 5); };
+  const side = (g: CanvasRenderingContext2D, arm: boolean) => {
+    g.fillStyle = ASPHALT; g.fillRect(0, 0, CELL, CELL); speckle(g, ['#404248', '#393b41'], 80, 3);
+    g.fillStyle = APRON; g.fillRect(0, 0, A, CELL);
+    g.save(); g.beginPath(); g.rect(0, 0, A, CELL); g.clip(); setts(g); g.restore();
+    g.fillStyle = VERGE;
+    if (arm) { g.fillRect(O, 0, CELL - O, SW); g.fillRect(O, CELL - SW, CELL - O, SW); }
+    else g.fillRect(O, 0, CELL - O, CELL);
+    g.strokeStyle = KERB; g.lineWidth = 2;
+    for (const [y0, y1] of arm ? [[0, SW], [CELL - SW, CELL]] : [[0, CELL]]) { g.beginPath(); g.moveTo(O, y0); g.lineTo(O, y1); g.stroke(); }
+    g.beginPath(); g.moveTo(A, 0); g.lineTo(A, CELL); g.stroke();
+    g.fillStyle = PAINT; g.fillRect(A + 3, 0, 2, CELL);
+    for (const y of [8, 72]) g.fillRect(CELL / 2 - 1.2, y, 2.4, 30); // the line between the lanes
+    if (!arm) for (const x of [0.31 * CELL, 0.69 * CELL]) { g.fillRect(x - 1.2, 50, 2.4, 22); g.beginPath(); g.moveTo(x, 40); g.lineTo(x - 5, 52); g.lineTo(x + 5, 52); g.closePath(); g.fill(); }
+  };
+  at(Cell.BigRingSide, (g) => side(g, false));
+  at(Cell.BigRingArm, (g) => side(g, true));
+  at(Cell.BigRingCorner, (g) => {
+    g.fillStyle = VERGE; g.fillRect(0, 0, CELL, CELL);
+    const disc = (r: number, c: string) => { g.fillStyle = c; g.beginPath(); g.moveTo(0, CELL); g.arc(0, CELL, r, -Math.PI / 2, 0); g.closePath(); g.fill(); };
+    disc(O, ASPHALT);
+    g.save(); g.beginPath(); g.moveTo(0, CELL); g.arc(0, CELL, O, -Math.PI / 2, 0); g.closePath(); g.clip(); speckle(g, ['#404248', '#393b41'], 60, 3); g.restore();
+    disc(A, APRON);
+    g.strokeStyle = KERB; g.lineWidth = 2;
+    for (const r of [A, O]) { g.beginPath(); g.arc(0, CELL, r, -Math.PI / 2, 0); g.stroke(); }
+    g.strokeStyle = PAINT; g.lineWidth = 2;
+    g.beginPath(); g.arc(0, CELL, A + 4, -Math.PI / 2, 0); g.stroke();
+    g.setLineDash([22, 18]); g.beginPath(); g.arc(0, CELL, CELL / 2, -Math.PI / 2, 0); g.stroke(); g.setLineDash([]);
+    // a curved arrow in each lane, anticlockwise: in from the bottom edge, out by the left
+    g.strokeStyle = 'rgba(255,255,255,0.7)'; g.fillStyle = 'rgba(255,255,255,0.7)'; g.lineWidth = 2.5;
+    for (const R of [0.31 * CELL, 0.69 * CELL]) {
+      const a0 = 0.35, a1 = 1.05;
+      g.beginPath(); g.arc(0, CELL, R, -a0, -a1, true); g.stroke();
+      const hx = R * Math.cos(a1), hy = CELL - R * Math.sin(a1), tx = -Math.sin(a1), ty = -Math.cos(a1);
+      g.beginPath(); g.moveTo(hx + tx * 8, hy + ty * 8); g.lineTo(hx - ty * 5, hy + tx * 5); g.lineTo(hx + ty * 5, hy - tx * 5); g.closePath(); g.fill();
+    }
+  });
+  // the mini-roundabout: the street's own crossroads (mask 15) and T (no south arm, mask 11) cells, a disc and arrows on top
+  for (const [cell, mask] of [[Cell.MiniCross, 15], [Cell.MiniT, 11]] as const) at(cell, (g) => {
+    const [sx, sy] = origin(Cell.Road + mask);
+    g.drawImage(g.canvas, sx, sy, CELL, CELL, 0, 0, CELL, CELL);
+    const c = CELL / 2;
+    g.fillStyle = '#f2f2ee'; g.beginPath(); g.arc(c, c, 0.12 * CELL, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = 'rgba(242,242,238,0.9)'; g.fillStyle = 'rgba(242,242,238,0.9)'; g.lineWidth = 2.5;
+    const R = 0.21 * CELL;
+    for (let k = 0; k < 3; k++) {
+      // anticlockwise seen from above (y down the cell): the angle on the canvas falls
+      const a0 = -k * (Math.PI * 2) / 3 + 0.4, a1 = a0 - 1.1;
+      g.beginPath(); g.arc(c, c, R, a0, a1, true); g.stroke();
+      const hx = c + R * Math.cos(a1), hy = c + R * Math.sin(a1), tx = Math.sin(a1), ty = -Math.cos(a1);
+      g.beginPath(); g.moveTo(hx + tx * 7, hy + ty * 7); g.lineTo(hx + Math.cos(a1) * 4.5, hy + Math.sin(a1) * 4.5); g.lineTo(hx - Math.cos(a1) * 4.5, hy - Math.sin(a1) * 4.5); g.closePath(); g.fill();
     }
   });
 }

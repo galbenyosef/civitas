@@ -113,6 +113,8 @@ export interface RoadTile {
   box: boolean;
   /** the junction next door, per side: its crossing and control on the mouth facing us, and its arms (0: none) */
   nCross: number[]; nCtrl: number[]; nArms: number[];
+  /** R4: per side, the sides (mask bits) a car going into the junction next door may leave it by (its group's ways out, less a U-turn and any turn ban): the lane arrows */
+  nTurns?: number[];
   /** sides (mask bits) with a verge: a home's lot or open grass beyond the pavement */
   leafy: number;
   /** a level crossing: the track's mask (0: none) */
@@ -131,6 +133,8 @@ export interface RoadTile {
   mini?: boolean;
   /** R4: a signal crossing (pelican) across this tile, and the axis of the road it crosses: studs, stop lines, zigzags */
   pelican?: 'ns' | 'ew';
+  /** R4: sides (bits) of this straight with a signal crossing next door: its zigzags run on over the near half */
+  zig?: number;
 }
 
 // ---- colours (linear, via Color.setHex) -----------------------------------------------------------------------
@@ -537,8 +541,10 @@ function paint(t: RoadTile, g: Geo) {
     if (t.zebra) zebraPaint(t, decal, white);
     else if (!t.prof.oneWay && t.prof.median === 0) for (const [a0, a1] of dashes) {
       const m = ((a0 + a1) / 2) * sgn, L = a1 - a0;
+      if (t.zig && t.zig & (1 << (ns ? (m < 0 ? 0 : 2) : (m < 0 ? 3 : 1)))) continue; // that half has the crossing's zigzags
       decal(ns ? rect(ox, oz, 0, m, 0, 1, L, 0.024) : rect(ox, oz, m, 0, 1, 0, L, 0.024), white);
     }
+    if (t.zig) for (let s = 0; s < 4; s++) if (t.zig & (1 << s)) zigzags(t, s, decal, white);
     // more than one lane each way: dashed lane lines between them, out from the centre (or the reservation)
     const { lanes, median } = t.prof;
     if (lanes > 1) for (const sd of [-1, 1]) for (let k = 1; k < lanes; k++) {
@@ -616,7 +622,7 @@ function approachPaint(t: RoadTile, s: number, decal: Decal, white: Color) {
   }
   if (ctrl !== MouthControl.GiveWay && t.nArms[s]) {
     // turn arrows: which ways the junction lets this lane go (straight on, left, right: traffic drives on the right)
-    const arms = t.nArms[s];
+    const arms = t.nTurns?.[s] ?? t.nArms[s];
     const has = (dx: number, dz: number) => { const i = SIDE.findIndex(([x, z]) => x === dx && z === dz); return i >= 0 && !!(arms & (1 << i)); };
     const straight = has(f[0], f[1]), right = has(r[0], r[1]), left = has(-r[0], -r[1]);
     const mid = 0.19, base = 0.04, top = 0.3, w = 0.02;
@@ -734,6 +740,20 @@ function pelicanPaint(t: RoadTile, decal: Decal, white: Color) {
       }
       if (pts.length > 1) strip(decal, pts, 0.009, white);
     }
+  }
+}
+
+/** A signal crossing's zigzags run on over the near half of the straight next to it (side s of this tile is the crossing). */
+function zigzags(t: RoadTile, s: number, decal: Decal, white: Color) {
+  const ox = t.x + 0.5, oz = t.z + 0.5, c = t.prof.carriage;
+  const f: P = [SIDE[s][0], SIDE[s][1]], rr: P = [-f[1], f[0]];
+  const P2 = (a: number, b: number): P => [ox + f[0] * a + rr[0] * b, oz + f[1] * a + rr[1] * b];
+  const amp = 0.012 + 0.004 * hk(t, 140), per = 0.058 + 0.008 * hk(t, 141);
+  for (const b of [-(c - 0.04), 0, c - 0.04]) {
+    const pts: P[] = [];
+    let i = 0;
+    for (let a = 0.5; a >= 0.02; a -= per / 2, i++) pts.push(P2(a, b + (i % 2 ? amp : -amp)));
+    strip(decal, pts, 0.009, white);
   }
 }
 
@@ -1216,7 +1236,7 @@ function oneWayApproach(t: RoadTile, s: number, decal: Decal, white: Color, lo: 
     }
   }
   if (ctrl !== MouthControl.GiveWay && t.nArms[s] && !t.cl?.hold) {
-    const arms = t.nArms[s];
+    const arms = t.nTurns?.[s] ?? t.nArms[s];
     const has = (dx: number, dz: number) => { const i = SIDE.findIndex(([x, z]) => x === dx && z === dz); return i >= 0 && !!(arms & (1 << i)); };
     const straight = has(f[0], f[1]), right = has(r[0], r[1]), left = has(-r[0], -r[1]);
     // the left lane turns left and goes on, the right lane turns right and goes on; a lane with neither takes what there is
