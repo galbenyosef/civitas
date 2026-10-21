@@ -69,12 +69,35 @@ export interface PlayerDTO {
   fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'adrent' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'grant' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', builders: "Builders' fees",
-  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advertising',
-  bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees', other: 'Other',
+  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advert campaigns',
+  adrent: 'Billboard rent', bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees',
+  grant: 'Charter grants and rewards', other: 'Other',
 };
+/**
+ * Which money comes in or goes out every day whatever the player does (running) and which only when they choose to
+ * build, buy or research, or when something happens once (one-off). The ledger (client finance.ts) shows the two apart
+ * with a total each, and the daily running balance is what says whether the town pays for itself; the books goal and
+ * the ranks' days in the black (server goals.ts `running`) judge the same sum.
+ *
+ * Running: taxes; fares and fees (transit, taxis, parking, couriers, freight, port dues, school fees, refuse); staff
+ * wages; upkeep (buildings by level, roads by tile, school meals and buses, learners' fees); utility bills and fuel or
+ * grid import; overdraft interest; funeral and burial fees; billboard rent (each midnight, for a rented slot).
+ * One-off: construction (buildings, zoning, roads, junctions, rail, metro, lines and cables, with demolition refunds);
+ * builders' fees (a yard's charge for the building it does); land (bought, or sold back); technology; advert
+ * campaigns (the artwork); fire and explosion damage; charter grants and goal rewards; other (policy set-up, dev funds).
+ * No category mixes the two (billboard rent was split from campaigns, `adrent`).
+ */
+export const LEDGER_GROUP: Record<LedgerCat, 'running' | 'oneoff'> = {
+  tax: 'running', fees: 'running', wages: 'running', upkeep: 'running', interest: 'running', bills: 'running', fuel: 'running',
+  funeral: 'running', burial: 'running', adrent: 'running',
+  build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff',
+};
+/** A day's running balance (LEDGER_GROUP): positive when taxes and fees cover wages, upkeep and the rest. */
+export const runningBalance = (r: Partial<Record<LedgerCat, number>>) =>
+  (Object.keys(r) as LedgerCat[]).reduce((a, k) => a + (LEDGER_GROUP[k] === 'running' ? r[k] ?? 0 : 0), 0);
 /**
  * Money that can run out (docs/start-from-zero.md B3): the overdraft line, the count of midnights below zero, and
  * administration with its recovery plan. The figures are the server's estimates, worked out at most once a game hour.

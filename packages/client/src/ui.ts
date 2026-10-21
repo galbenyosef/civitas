@@ -3,11 +3,12 @@ import { TOOL_KINDS, DEV_TOOLS, type ToolId } from './input';
 import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo, type HarbourInfo } from '@msimcity/shared';
 import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
-import { MANIFEST, LEDGER_LABELS, ECONOMY_TUNING, spendableMoney, type KindToolId, type LedgerDTO, type LedgerCat, type FinanceDTO } from '@msimcity/shared';
+import { MANIFEST, spendableMoney, type KindToolId, type LedgerDTO, type FinanceDTO } from '@msimcity/shared';
 import { FLEET_LABEL } from '@msimcity/shared';
 import { WEEKDAY_NAMES } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
 import { mediaHtml } from './news';
+import { chipBalance, ledgerText, ledgerHtml } from './finance';
 import { deceasedHtml, remembranceHtml, mourningHtml } from './remembrance';
 import type { DeceasedInfo } from '@msimcity/shared';
 import { utilitiesHtml } from './utilities';
@@ -290,43 +291,15 @@ export class UI {
       el.style.cursor = 'pointer';
       el.addEventListener('click', () => { this.ledgerOpen = !this.ledgerOpen; this.setMoney(this.money); });
     }
-    const L = this.ledger;
-    const net = (r: LedgerDTO['today']) => Object.values(r).reduce((a: number, v) => a + (v ?? 0), 0);
-    const y = L ? net(L.yesterday) : 0, hasY = !!L && Object.keys(L.yesterday).length > 0;
-    el.innerHTML = `treasury <b class="${n < 0 ? 'bad' : ''}">${n < 0 ? '−' : ''}${fmt(Math.abs(n))}</b>${hasY ? ` <b class="${y < 0 ? 'bad' : ''}">${y >= 0 ? '+' : '−'}${fmt(Math.abs(y))}</b>/day` : ''}`;
-    el.title = L ? `${this.ledgerText(L)}\n(click for the ledger)` : 'Your treasury (the ledger arrives on the next game hour)';
+    const L = this.ledger, bal = chipBalance(L);
+    el.innerHTML = `treasury <b class="${n < 0 ? 'bad' : ''}">${n < 0 ? '−' : ''}${fmt(Math.abs(n))}</b>${bal ? ` <b class="${bal.v < 0 ? 'bad' : ''}">${bal.v >= 0 ? '+' : '−'}${fmt(Math.abs(bal.v))}</b>/day` : ''}`;
+    el.title = L ? `${ledgerText(L)}\n(click for the ledger)` : 'Your treasury (the ledger arrives on the next game hour)';
     let box = document.getElementById('ledgerBox');
     if (!this.ledgerOpen || !L) { box?.remove(); return; }
     if (!box) { box = document.createElement('div'); box.id = 'ledgerBox'; $('ui').appendChild(box); box.addEventListener('click', (e) => { this.ledgerOpen = false; this.setMoney(this.money); if ((e.target as HTMLElement).closest('[data-chart]')) this.onOpenChart?.('money'); }); }
     const r = el.getBoundingClientRect();
     box.style.left = `${Math.round(r.left)}px`;
-    box.innerHTML = this.ledgerHtml(L, n);
-  }
-  private ledgerRows(L: LedgerDTO) {
-    const cats = (Object.keys(LEDGER_LABELS) as LedgerCat[]).filter((k) => L.today[k] || L.yesterday[k]);
-    const sum = (r: LedgerDTO['today'], sign: number) => Object.values(r).reduce((a: number, v) => a + (Math.sign(v ?? 0) === sign ? v! : 0), 0);
-    return { cats, inY: sum(L.yesterday, 1), outY: sum(L.yesterday, -1), inT: sum(L.today, 1), outT: sum(L.today, -1) };
-  }
-  private ledgerText(L: LedgerDTO) {
-    const { inY, outY, inT, outT } = this.ledgerRows(L);
-    return `Yesterday: in ${fmt(inY)}, out ${fmt(-outY)}, net ${inY + outY >= 0 ? '+' : '−'}${fmt(Math.abs(inY + outY))}\nToday so far: in ${fmt(inT)}, out ${fmt(-outT)}`;
-  }
-  private ledgerHtml(L: LedgerDTO, money: number) {
-    const { cats, inY, outY, inT, outT } = this.ledgerRows(L);
-    const cell = (v: number | undefined) => (v ? `<td class="${v < 0 ? 'bad' : ''}">${v < 0 ? '−' : '+'}${fmt(Math.abs(v))}</td>` : '<td class="z">·</td>');
-    const netY = inY + outY;
-    // days of cash left at yesterday's rate, counting only the running costs (building and buying are choices)
-    const running = (['wages', 'upkeep', 'interest', 'bills', 'fuel'] as LedgerCat[]).reduce((a, k) => a + (L.yesterday[k] ?? 0), 0) + (L.yesterday.tax ?? 0) + (L.yesterday.fees ?? 0);
-    // the overdraft (server sim/finance.ts) is spendable too: days until the limit
-    const limit = ECONOMY_TUNING.overdraftLimit;
-    const left = running < 0 ? Math.max(0, Math.floor((money + limit) / -running)) : -1;
-    return `<table><tr><th></th><th>yesterday</th><th>today</th></tr>${cats.map((k) => `<tr><th>${LEDGER_LABELS[k]}</th>${cell(L.yesterday[k])}${cell(L.today[k])}</tr>`).join('')}
-      <tr class="sum"><th>Income</th>${cell(inY)}${cell(inT)}</tr><tr class="sum"><th>Spending</th>${cell(outY)}${cell(outT)}</tr>
-      <tr class="sum"><th>Net</th>${cell(netY || undefined)}${cell(inT + outT || undefined)}</tr></table>
-      <div class="note"><span class="chartlink" data-chart="money">Treasury and income charts ›</span></div>
-      ${money < 0 ? `<div class="note bad">Overdrawn: ${fmt(-money)} of the ${fmt(limit)} overdraft used, interest ${Math.round(ECONOMY_TUNING.overdraftInterestPerDay * 100)}% a day at midnight. ${this.fin?.admin !== undefined ? 'In administration until a midnight finds the treasury at zero or above.' : `${ECONOMY_TUNING.adminAfterDays} midnights below zero and the city goes into administration.`}</div>` : ''}
-      <div class="note">${left < 0 ? 'Taxes and fees cover the running costs (wages, upkeep).'
-        : `<span class="${left < 30 ? 'bad' : ''}">Running costs exceed taxes and fees${left < 30 ? `: about ${left} day${left === 1 ? '' : 's'} to the end of the ${fmt(limit)} overdraft at this rate` : ''}.</span> Raise the tax rate in a parcel, add homes, or hold off on services.`}</div>`;
+    box.innerHTML = ledgerHtml(L, n, this.fin);
   }
   /** main.ts: a power node's switches (the `utilNode` message): protect it in rolling cuts, or the owner's grid import */
   onUtil: ((x: number, y: number, what: 'protect' | 'import', on: boolean) => void) | null = null;

@@ -847,7 +847,7 @@ export class Net {
     const touched = new Set<number>();
     for (let i = 0; i < plan.tiles!.length; i += 4) { const q = this.w.parcelIdAt(plan.tiles![i], plan.tiles![i + 1]); if (q) touched.add(q); }
     for (const q of touched) this.w.recountRoads(q);
-    if (plan.cost) this.w.credit(p.id, -plan.cost);
+    if (plan.cost) this.w.credit(p.id, -plan.cost, 'build'); // construction, not upkeep (the credit default for a cost)
     this.toast(c, swap ? 'The other road is on the deck now' : tool === 'roundabout' ? `Roundabout built for $${plan.cost}: traffic goes round anticlockwise and gives way to the ring` : `Flyover built for $${plan.cost}: nobody turns here now`, 'info');
   }
 

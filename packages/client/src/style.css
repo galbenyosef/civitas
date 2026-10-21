@@ -380,6 +380,10 @@ body.spectate #tools, body.spectate #picker, body.spectate #money, body.spectate
 #ledgerBox td.z { color: var(--muted); }
 #ledgerBox tr.sum th, #ledgerBox tr.sum td { border-top: 1px solid var(--line); color: var(--fg); }
 #ledgerBox .note { margin-top: 6px; max-width: 280px; color: var(--muted); font-size: 12px; }
+#ledgerBox tr.grp th { padding-top: 7px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+#ledgerBox tr.net th, #ledgerBox tr.net td { border-top: 1px solid var(--muted); padding-top: 3px; font-weight: 600; }
+#ledgerBox .lbal { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 5px 8px; border-radius: 7px; background: rgba(255,255,255,0.05); color: var(--fg); }
+#ledgerBox .lbal b { color: var(--accent); }
 
 /* ---- right-click menu (contextmenu.ts) ---- */
 #ctxmenu { position: fixed; z-index: 20; min-width: 210px; max-width: 300px; padding: 5px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;

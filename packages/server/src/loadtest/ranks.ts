@@ -104,7 +104,7 @@ const ownedBy = (w: World, r: { x: number; y: number; w: number; h: number }, id
   a.clear(); measure();
   const up = a.last();
   ok(up?.up?.rank === 1 && p.ranks?.rank === 1, `the last need met: ${RANKS[1].name}`);
-  ok(p.money - m0 === RANKS[1].grant && (world.ledgerDTO(p).today.other ?? 0) >= RANKS[1].grant, `the grant: +$${p.money - m0} through the ledger`);
+  ok(p.money - m0 === RANKS[1].grant && (world.ledgerDTO(p).today.grant ?? 0) >= RANKS[1].grant, `the grant: +$${p.money - m0} through the ledger`);
   const r1 = charterRing(ch, 1);
   ok(ownedBy(world, r1, a.id) && up?.up?.land?.w === r1.w, `the charter grows to ${r1.w}×${r1.h}, all Ada's`);
   const mine = [...world.parcels.values()].filter((q) => q.owner === a.id);
