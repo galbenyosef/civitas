@@ -1551,7 +1551,8 @@ export class Traffic {
     const lead = idx > 0 ? leaderIn(q, idx, bike) : null;
     let tailNext: Mover | null = null;
     if (lead) gap = lead.prog - m.prog - (lead.len + m.len) / 2;
-    else if (!last) {
+    // into a building, also behind a car pulling out of it the same way (it starts at the middle, where this one ends)
+    else if (!last || !this.isRoadAt(bx, by)) {
       const nq = this.laneQ(bx, by, nextDir);
       tailNext = nq && nq.length ? leaderIn(nq, nq.length, bike) : null;
       if (tailNext) gap = 1 - m.prog + tailNext.prog - (tailNext.len + m.len) / 2;
@@ -1578,7 +1579,7 @@ export class Traffic {
     if (TT.follow) {
       // car following: speed up gently, and slow in time for whatever is ahead rather than stopping dead at it
       const v = m.v ?? 0, dec = TT.brake;
-      let want = Math.min(base, v + this.accelOf(m, heavy));
+      let want = v >= base ? base : Math.min(base, v + this.accelOf(m, heavy));
       if (ahead) {
         const vl = ahead.v ?? 0;
         want = Math.min(want, safeSpeed(room, vl, dec));

@@ -16,7 +16,8 @@
  * give-ups by kind (Traffic.counters), junction entries per tick, mean commute time, and true body overlaps
  * every tick (oriented rectangles VEHICLE_LEN × VEHICLE_WIDTH with the heading from the lane geometry, and
  * pedestrians as 0.07-radius discs; the same test as the live probe-obb.mjs).
- * Options: --hour H (default 8), --ticks N (1500), --seed S (1), --set k=v,..., --label L, --json FILE, --quiet.
+ * Options: --hour H (default 8), --ticks N (1500), --seed S (1), --set k=v,..., --then k=v,... (changed after the fill, for the
+ * measured window only: a tick-cost comparison on the same traffic), --label L, --json FILE, --quiet.
  */
 import { writeFileSync } from 'node:fs';
 import { DRIVE_SPEED, TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, SKILLS, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, type TrafficTuning, type StopRef } from '@msimcity/shared';
@@ -161,7 +162,7 @@ export function parseSet(spec: string | undefined): Record<string, number> {
   return out;
 }
 
-export function runAb(opts: { hour: number; ticks: number; seed: number; set: Record<string, number>; label?: string; log?: (s: string) => void }): AbResult {
+export function runAb(opts: { hour: number; ticks: number; seed: number; set: Record<string, number>; then?: Record<string, number>; label?: string; log?: (s: string) => void }): AbResult {
   const t0 = performance.now();
   const log = opts.log ?? (() => {});
   Math.random = mulberry32(opts.seed * 2654435761);
@@ -198,6 +199,8 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
 
   const start = DAY + Math.round(opts.hour * TPH);
   while (w.tick < start) sim.tick();
+  // --then: tunables changed only for the measured window (the same city and traffic, for a fair tick cost)
+  for (const [k, v] of Object.entries(opts.then ?? {})) if (k in TRAFFIC_TUNING) (TRAFFIC_TUNING as Record<string, number>)[k] = v;
   log(`[ab] filled to day ${Math.floor(w.tick / DAY)} ${opts.hour}:00, ${w.citizens.size} citizens`);
 
   const c0 = { ...tr.counters };
@@ -434,7 +437,7 @@ if (isMain) {
   const get = (n: string) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : undefined; };
   const r = runAb({
     hour: Number(get('hour') ?? 8), ticks: Number(get('ticks') ?? 1500), seed: Number(get('seed') ?? 1),
-    set: parseSet(get('set')), label: get('label'), log: argv.includes('--quiet') ? undefined : (s) => process.stderr.write(s + '\n'),
+    set: parseSet(get('set')), then: parseSet(get('then')), label: get('label'), log: argv.includes('--quiet') ? undefined : (s) => process.stderr.write(s + '\n'),
   });
   console.log(summary(r));
   if (argv.includes('--examples')) console.log(r.examples.join('\n'));
