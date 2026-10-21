@@ -1419,7 +1419,8 @@ function busLanePaint(t: RoadTile, decal: Decal, white: Color, P2: (along: numbe
   const red = BUS_RED.clone().multiplyScalar(0.92 + 0.14 * hk(t, 140) - 0.04 * t.wear); // the organic rule: each tile's red its own
   decal(quad(-0.5, 0.5, 0.016, c - 0.006), red, Y_PATCH + 0.0003);
   decal(quad(-0.5, 0.5, -0.013, 0.013), white);
-  if (t.busText) { words(decal, P2, 'BUS', 0.13, 0.19, 0.05, 0.11, 1, white); words(decal, P2, 'LANE', -0.12, 0.19, 0.045, 0.11, 1, white); }
+  // read as a driver comes up to it: BUS first, LANE beyond
+  if (t.busText) { words(decal, P2, 'BUS', -0.12, 0.19, 0.05, 0.11, 1, white); words(decal, P2, 'LANE', 0.13, 0.19, 0.045, 0.11, 1, white); }
 }
 /**
  * A speed hump across the carriageway (a 20 zone, R5): a raised band, and on each lane white triangles on the slope a

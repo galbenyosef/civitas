@@ -1005,3 +1005,25 @@ every vehicle (`moveVehicles` 218 to 466 ms in a profile); the holds now live in
 (0.5, the visitors a limited gateway lets in), `ZONE20_SPEED` (0.6), `ZONE20_COST` (1.4), `ZONE20_FREIGHT` (1.5),
 `POLICY.curfewFrom` / `curfewTo` (22, 6) and `curfewPerDay` ($10); the rules' costs and upkeep are `STREET_RULE_DEFS`
 (`shared/src/roadrules.ts`).
+
+**The Showcase's bus lane** (`loadtest/showbus.ts`: bus line 4, a small loop of two buses round North Parade's bus lane,
+Market Street, South Parade and the west street, 24 game hours after the fill, seeds 1 and 2; with the bus lane and with
+it taken off before the fill):
+
+| Seed | bus lane | laps | lap (ticks) | North Parade legs | leg (ticks) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | off | 24 | 177 | 9 | 23 |
+| 1 | on | 22 | 162 | 13 | 16 |
+| 2 | off | 21 | 210 | 8 | 22 |
+| 2 | on | 34 | 232 | 12 | 28 |
+
+Mixed, and within what two seeds can tell apart. The buses lose their time waiting to get into the Market Street
+junction and are withdrawn by the stuck rule now and then (a bus on a one-way street before a busy junction: a follow-up),
+not in a queue along North Parade. Measured where a bus lane can help (the probe's queued link) it takes a bus a third
+less time.
+
+**Drawing** (the Showcase at the road classes section, 40 tiles out, after the town's fill): the road mesh in view has
+262,544 triangles with the street rules drawn against 262,402 without them (+0.05%: the bus lanes, yellow lines, humps and
+roundels are a few hundred decals over 57 tiles), the same nine road meshes, and the junction signs' one merged mesh goes
+from 4,387 to 8,579 triangles (the HGV and 20 signs; no new draw call). Frame times at street zoom with and without the
+rules differ by less than the live scene moves from one pass to the next.
