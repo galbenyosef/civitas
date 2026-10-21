@@ -32,8 +32,9 @@ import { Kit } from './kit';
  * Nothing here touches the simulation: the road bit, the routing graph and the lanes cars drive are as they were.
  */
 export const NEAR_IN = 74, NEAR_OUT = 84;
-/** chunks built per frame at most, and the time budget for them (ms) */
-const BUILD_BUDGET = 3, BUILD_MS = 8;
+/** the time a frame may spend building road tiles (ms), and the road tiles it builds whatever the time; a chunk's build
+ *  carries on over as many frames as it needs */
+const BUILD_MS = 6, BUILD_MIN = 16;
 const N = CHUNK_SIZE * CHUNK_SIZE;
 const UP = new Vector3(0, 1, 0);
 
@@ -160,6 +161,8 @@ interface Entry {
   /** junction tiles and whether they were signalled at the last build (local index, 0/1 pairs) */
   junctions: number[];
   furn: Furn[];
+  /** a build under way (time-sliced over frames): the next tile, the tiles so far, what it has seen */
+  job: { i: number; keep: Map<number, TileCache>; junctions: number[]; described: number; fresh: number; ms: number } | null;
 }
 const ckey = (cx: number, cy: number) => (cx + 32768) * 65536 + (cy + 32768);
 
@@ -210,10 +213,10 @@ export class RoadLayer {
     let e = this.byKey.get(key);
     if (!e) {
       e = { key, cx: chunk.cx, cy: chunk.cy, chunk, dirty: true, near: false, mesh: null, tiles: new Map(), ranges: [], heat: undefined,
-        wear: new Float32Array(N), wearAt: new Uint8Array(N), wearSeen: false, wearBuilt: 0, junctions: [], furn: [] };
+        wear: new Float32Array(N), wearAt: new Uint8Array(N), wearSeen: false, wearBuilt: 0, junctions: [], furn: [], job: null };
       this.byKey.set(key, e); this.entries.set(ckey(chunk.cx, chunk.cy), e);
     }
-    e.chunk = chunk; e.dirty = true;
+    e.chunk = chunk; e.dirty = true; // a build under way finishes, and another follows
     this.placeLamps(e);
   }
 
@@ -259,8 +262,7 @@ export class RoadLayer {
   /** Tiers for the cameras drawing this frame, chunk builds within the budget, the furniture and the lamp map. */
   frame(cams: readonly Camera[], signalled: (x: number, y: number) => boolean) {
     if (this.ctx) this.ctx.signalled = signalled;
-    const t0 = performance.now();
-    let budget = BUILD_BUDGET;
+    const deadline = performance.now() + BUILD_MS;
     const todo: [number, Entry][] = [];
     for (const e of this.entries.values()) {
       const d = this.distance(e, cams);
@@ -269,15 +271,12 @@ export class RoadLayer {
         e.near = near;
         if (e.mesh) e.mesh.visible = near;
         if (e.furn.length) this.furnDirty = true;
-        if (!near) { this.dropMesh(e); e.tiles = new Map(); e.ranges = []; } // far: the flat cells; free the cached tiles too
+        if (!near) { this.dropMesh(e); e.tiles = new Map(); e.ranges = []; e.job = null; } // far: the flat cells; free the cached tiles too
       }
-      if (near && (e.dirty || !e.mesh)) todo.push([d, e]);
+      if (near && (e.dirty || e.job || !e.mesh)) todo.push([d, e]);
     }
     todo.sort((a, b) => a[0] - b[0]);
-    for (const [, e] of todo) {
-      if (budget-- <= 0 || performance.now() - t0 > BUILD_MS) break;
-      this.build(e);
-    }
+    for (const [, e] of todo) if (!this.build(e, deadline)) break;
     if (this.furnDirty) this.fillFurniture();
     if (this.lampDirty) { lampTexture.needsUpdate = true; this.lampDirty = false; }
   }
@@ -303,6 +302,9 @@ export class RoadLayer {
     previewProfile = p;
     for (const e of this.entries.values()) e.dirty = true;
   }
+
+  /** Is any near chunk still building? (tests and screenshots wait for it) */
+  busy(): boolean { for (const e of this.entries.values()) if (e.near && (e.dirty || e.job)) return true; return false; }
 
   /** Name plate posts near the camera (the hook for R2's street names). */
   namePlates(): readonly NamePlate[] { return this.plates; }
@@ -336,26 +338,30 @@ export class RoadLayer {
   /** the last chunk builds: time (ms), tiles described, tiles built afresh (the rest reused) */
   private builds: { ms: number; tiles: number; fresh: number }[] = [];
 
-  private build(e: Entry) {
+  /**
+   * Carry a chunk's build on until `deadline` (performance.now ms): its tiles a few at a time, then the mesh. True when
+   * the chunk is done (its new mesh replaces the old, which shows until then); false when the time ran out.
+   */
+  private build(e: Entry, deadline: number): boolean {
     const t0 = performance.now();
-    let described = 0, fresh = 0;
-    e.dirty = false;
-    e.wearBuilt = performance.now();
+    if (!e.job) { e.job = { i: 0, keep: new Map(), junctions: [], described: 0, fresh: 0, ms: 0 }; e.dirty = false; e.wearBuilt = t0; }
+    const job = e.job;
     const x0 = e.cx * CHUNK_SIZE, z0 = e.cy * CHUNK_SIZE;
-    const keep = new Map<number, TileCache>();
-    const junctions: number[] = [];
-    for (let i = 0; i < N; i++) {
+    const keep = job.keep, junctions = job.junctions;
+    let done = 0;
+    for (let i = job.i; i < N; i++) {
       const t = e.chunk.tiles[i];
       if (!isRoad(t)) continue;
+      if (done++ >= BUILD_MIN && performance.now() > deadline) { job.i = i; job.ms += performance.now() - t0; return false; }
       const x = x0 + (i % CHUNK_SIZE), z = z0 + Math.floor(i / CHUNK_SIZE);
       e.wearAt[i] = wearLevel(e.wear[i]);
       const d = this.describe(x, z, t, e.chunk.aux[i], e.wearAt[i]);
       if (!d) continue;
-      described++;
+      job.described++;
       if (d.t?.junction) junctions.push(i, d.t.cross.some((k) => k === MouthCrossing.Signal) ? 1 : 0);
       const old = e.tiles.get(i);
       if (old && old.sig === d.sig) { keep.set(i, old); continue; }
-      fresh++;
+      job.fresh++;
       const g = new Geo();
       if (d.t) buildTile(d.t, g); else if (d.ring) buildRing(x, z, d.ring.pos, d.ring.arm, STREET, g);
       keep.set(i, {
@@ -364,6 +370,7 @@ export class RoadLayer {
         furn: d.t ? this.furnish(d.t) : d.ring ? this.furnishRing(x, z) : [],
       });
     }
+    e.job = null;
     e.tiles = keep; e.junctions = junctions;
     // one mesh for the chunk
     let nv = 0, ni = 0;
@@ -402,8 +409,9 @@ export class RoadLayer {
     }
     e.furn = furn;
     this.furnDirty = true;
-    this.builds.push({ ms: performance.now() - t0, tiles: described, fresh });
+    if (job.described) this.builds.push({ ms: job.ms + performance.now() - t0, tiles: job.described, fresh: job.fresh });
     if (this.builds.length > 64) this.builds.shift();
+    return true;
   }
 
   private tint(e: Entry) {
