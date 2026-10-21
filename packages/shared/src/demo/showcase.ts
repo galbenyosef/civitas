@@ -396,7 +396,7 @@ export const SECTIONS: DemoSection[] = [
       { cls: 1, from: [-51, -10], to: [-60, -10] }, // Hedge Lane, from Queen's Avenue out to the edge
     ],
     zones: [
-      { zone: 'commercial', rect: [-57, -38, 19, 1], level: 2 }, { zone: 'commercial', rect: [-57, -36, 9, 1], level: 2 }, { zone: 'commercial', rect: [-47, -36, 9, 1], level: 2 },
+      { zone: 'commercial', rect: [-57, -38, 19, 1], level: 2 }, { zone: 'commercial', rect: [-54, -36, 6, 1], level: 2 }, { zone: 'commercial', rect: [-47, -36, 9, 1], level: 2 },
       { zone: 'residential', rect: [-57, -33, 9, 3] }, { zone: 'residential', rect: [-47, -33, 11, 3] },
       { zone: 'office', rect: [-57, -29, 9, 3] }, { zone: 'office', rect: [-47, -29, 5, 3] }, { zone: 'office', rect: [-37, -29, 2, 3] },
       { zone: 'residential', rect: [-57, -24, 9, 1], level: 2 }, { zone: 'residential', rect: [-47, -24, 4, 1], level: 2 }, { zone: 'residential', rect: [-36, -24, 1, 1], level: 2 },
@@ -407,9 +407,12 @@ export const SECTIONS: DemoSection[] = [
       { zone: 'commercial', rect: [-59, 2, 4, 1], level: 2 }, { zone: 'commercial', rect: [-54, 2, 4, 1], level: 2 }, { zone: 'commercial', rect: [-48, 2, 8, 1], level: 2 },
     ],
     placements: [{ id: 'motorway-west', kind: 'motorway', door: [-58, -20], rot: 1 },
-      // bus line 4's stops (R5): two on North Parade's kerb (eastbound), two on South Parade's (westbound)
-      ...([[-52, -33], [-42, -33], [-42, -31], [-53, -31]] as DemoXY[]).map((door, i): DemoPlacement => ({ id: `bus-stop-${31 + i}`, kind: 'bus-stop', door }))],
-    lines: [{ id: 'line-bus-4', mode: 'bus', number: 4, colour: 0xc8362e, loop: true, vehicles: 2, stops: [[-52, -33], [-42, -33], [-42, -31], [-53, -31]] }],
+      // bus line 4's depot (R5), facing North Parade at the section's west end, so its buses start on their line
+      { id: 'bus-depot-parades', kind: 'bus-depot', door: [-56, -35], rot: 0 },
+      // bus line 4's stops (R5): two on North Parade's kerb (eastbound, in the bus lane), two on South Parade's (westbound)
+      ...([[-54, -33], [-50, -33], [-50, -31], [-55, -31]] as DemoXY[]).map((door, i): DemoPlacement => ({ id: `bus-stop-${31 + i}`, kind: 'bus-stop', door }))],
+    // a small loop inside the section (North Parade, Market Street, South Parade, the west street), clear of the town's perimeter road
+    lines: [{ id: 'line-bus-4', mode: 'bus', number: 4, colour: 0xc8362e, loop: true, vehicles: 2, stops: [[-54, -33], [-50, -33], [-50, -31], [-55, -31]] }],
     junctions: [
       { id: 'roundabout-big', tool: 'roundabout', at: [-40, -26] }, // on Kingsway: the 5×5 two-lane ring
       { id: 'interchange', tool: 'interchange', at: [-48, -21] }, // Market Street over the motorway

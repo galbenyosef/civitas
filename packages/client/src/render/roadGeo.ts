@@ -1398,7 +1398,9 @@ const GLYPH: Record<string, string[]> = {
  * Words painted on the carriageway for a driver heading +along (`sg` 1) or -along: left to right across, each letter
  * `cw` wide (across) and `ch` long (along, the way road lettering is stretched), the text's middle at (along a, across b).
  */
-function words(decal: Decal, P2: (along: number, across: number) => P, text: string, a: number, b: number, cw: number, ch: number, sg: number, color: Color) {
+function words(decal: Decal, P2: (along: number, across: number) => P, text: string, a: number, b: number, cw: number, ch: number, sg: number, color: Color, mirror = false) {
+  // `mirror`: +across is the driver's left heading +along (a north-south street's L2 frame), not their right
+  const sx = mirror ? -sg : sg;
   const gap = cw * 0.35, w = text.length * cw + (text.length - 1) * gap, px = cw / 3, py = ch / 5;
   for (let i = 0; i < text.length; i++) {
     const g = GLYPH[text[i]];
@@ -1407,7 +1409,7 @@ function words(decal: Decal, P2: (along: number, across: number) => P, text: str
       if (g[r][k] !== '1') continue;
       // across: left to right as the driver sees it (their right is +across heading +along); along: top row furthest
       const c0 = -w / 2 + i * (cw + gap) + k * px, l0 = ch / 2 - (r + 1) * py;
-      const A0 = a + sg * l0, A1 = a + sg * (l0 + py * 0.92), B0 = b + sg * c0, B1 = b + sg * (c0 + px * 0.92);
+      const A0 = a + sg * l0, A1 = a + sg * (l0 + py * 0.92), B0 = b + sx * c0, B1 = b + sx * (c0 + px * 0.92);
       decal([P2(A0, B0), P2(A1, B0), P2(A1, B1), P2(A0, B1)], color);
     }
   }
@@ -1443,7 +1445,7 @@ function zonePaint(t: RoadTile, decal: Decal, white: Color, P2: (along: number, 
       const u0 = (i / n) * Math.PI * 2, u1 = ((i + 1) / n) * Math.PI * 2;
       decal([P2(a + Math.cos(u0) * r0, b + Math.sin(u0) * r0), P2(a + Math.cos(u0) * r1, b + Math.sin(u0) * r1), P2(a + Math.cos(u1) * r1, b + Math.sin(u1) * r1), P2(a + Math.cos(u1) * r0, b + Math.sin(u1) * r0)], ring);
     }
-    words(decal, P2, '20', a, b, 0.04, 0.1, sg, white);
+    words(decal, P2, '20', a, b, 0.04, 0.1, sg, white, ns);
   }
 }
 

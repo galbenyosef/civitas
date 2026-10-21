@@ -378,7 +378,8 @@ freight's last mile and the harbours' early fish; deliveries are not lost, they 
 
 **Showcase.** In "Road classes and junctions": an HGV ban on South Parade, a bus lane on North Parade with bus line 4
 along it, double yellows on Market Street's approach to Cheapside, a 20 zone on Church Lane (the homes south of Regent
-Avenue: the homes behind Kingsway face the avenue and have no street of their own), the motorway connection's visitor
+Avenue: the homes behind Kingsway face the avenue and have no street of their own), a bus depot of its own facing North
+Parade (line 4's buses start on their line; from the town's depot they spent the morning crossing town), the motorway connection's visitor
 limit on, and a stop that opens the Traffic panel with the congestion overlay; a tour stop each and seven features
 (`street-hgv`, `street-bus`, `street-yellow`, `street-zone20`, `bus-lane-line`, `visitor-limit`, `traffic-panel`) that
 demo:check enforces.

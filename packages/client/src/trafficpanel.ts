@@ -63,7 +63,7 @@ export class TrafficPanel {
     html += `<div class="tp-row"><span>Gave up today</span><span>${gTotal ? `${g.residents} residents · ${g.visitors} visitors · ${g.freight} lorries${g.other ? ` · ${g.other} other` : ''}` : 'nobody'}</span></div>`;
     html += `<div class="tp-sect">Gateways <span>arrivals an hour, and visitors by road</span></div>`;
     html += i.gateways.length ? i.gateways.map((w) => `<div class="tp-gw">
-        <span class="tp-name" data-jx="${w.x}" data-jy="${w.y}" title="go there">${esc(w.name)}</span>
+        <span class="tp-name" data-jx="${w.x}" data-jy="${w.y}" title="go there">${esc(w.name.charAt(0).toUpperCase() + w.name.slice(1))}</span>
         <span>up to ${w.perHour}/h · ${w.arrivalsToday} moved in today${w.type === 'motorway' ? ` · ${w.visitorsToday} visitors today (${w.visitorsYesterday} yesterday)` : ''}</span>
         ${w.type === 'motorway' && w.mine ? `<button class="tp-lim${w.limit ? ' on' : ''}" data-lim="${w.limit ? 0 : 1}" data-gx="${w.x}" data-gy="${w.y}" title="${w.limit ? 'every visitor comes in again' : 'half the visitors come in here'}">${w.limit ? 'Visitor limit on · lift it' : `Limit visitors · about $${w.limitCost.toFixed(2)}/day`}</button>` : w.type === 'motorway' && w.limit ? '<span class="tp-on">visitor limit on</span>' : ''}
       </div>`).join('') : `<div class="tp-empty">No gateway yet: visitors come in at the town's farthest roads.</div>`;

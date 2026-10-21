@@ -990,3 +990,18 @@ On this grid the avenue's blocks are four tiles between lights: a bus loses its 
 ahead at a stop, and in the boxes of junctions blocked by the town's gridlock, not in a queue of cars along a link, which is
 the only place a bus lane helps (a trace of what held each bus, `Traffic.whyHeld`: at 08:00 its held ticks on the avenue are mostly at a red). A bus lane
 pays on a long link that queues, as the probe's does.
+
+**Near misses** (a walker on the carriageway within half a tile of a car moving at over 60% of full speed, faster than a 20
+zone allows; twelve seeds): with the 20 zone on the residential streets 1.47 to 1.41 a tick at 08:00 (−0.05 ± 0.04) and
+0.96 to 0.93 at 17:00 (−0.04 ± 0.04), down but within the noise; the contacts above are the firmer sign.
+
+**Tick cost** (the 2×2 city, `districts=2`, plain: no rules, so the output is identical to main's, line for line, eight
+seeds): 0.996 ± 0.008 of main's time a tick, R5 and main run side by side so both had the same machine (its load average
+was 20 to 37 from other work: run one after the other, pairs scattered from 0.77 to 1.26). The first cut cost about 10%:
+a curfew field set only on lorries gave freight vehicles an object shape of their own, and the vehicle loop slowed for
+every vehicle (`moveVehicles` 218 to 466 ms in a profile); the holds now live in a map beside the vehicles.
+
+**The knobs**: `TRAFFIC_TUNING.visitorLimit` (0; 1 the visitor limit at every entry, for ab.ts), `VISITOR_LIMIT_SHARE`
+(0.5, the visitors a limited gateway lets in), `ZONE20_SPEED` (0.6), `ZONE20_COST` (1.4), `ZONE20_FREIGHT` (1.5),
+`POLICY.curfewFrom` / `curfewTo` (22, 6) and `curfewPerDay` ($10); the rules' costs and upkeep are `STREET_RULE_DEFS`
+(`shared/src/roadrules.ts`).

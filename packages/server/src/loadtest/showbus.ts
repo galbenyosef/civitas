@@ -1,11 +1,11 @@
 /**
  * The Showcase's bus lane, measured (R5, docs/traffic-tuning.md "Traffic control"): bus line 4 runs round the one-way pair
  * in the Road classes section, along North Parade's bus lane. This builds the Showcase as demo:check does, fills it as a
- * visitor finds it (fillDemo), then runs `--hours` game hours and times line 4's buses: the lap (from moving on from its
- * first call to the next time) and the North Parade leg (its first call to its second, along the bus lane). Each seed is
+ * visitor finds it (fillDemo), then runs `--hours` game hours and times line 4's buses: the lap (from moving on from a
+ * call to moving on from it again, every call) and the North Parade leg (moving on from its first call to moving on from its second, along the bus lane). Each seed is
  * run with the bus lane and again with it taken off North Parade before the fill; the two runs differ only in that.
  *
- *   npx tsx packages/server/src/loadtest/showbus.ts --seeds 1,2,3 --hours 12
+ *   npx tsx packages/server/src/loadtest/showbus.ts --seeds 1,2 --hours 24
  */
 import { TICKS_PER_HOUR, StreetRule } from '@msimcity/shared';
 import { World, untkey } from '../world';
@@ -17,7 +17,7 @@ import { seedDemoTown, seedDemoNetwork, seededRandom, fillDemo } from '../demo/s
 
 const argv = process.argv.slice(2);
 const arg = (n: string, d: string) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
-const SEEDS = arg('seeds', '1,2,3').split(',').map(Number), HOURS = Number(arg('hours', '12'));
+const SEEDS = arg('seeds', '1,2').split(',').map(Number), HOURS = Number(arg('hours', '24'));
 
 interface Bus { v: { id: number; lane: number }; line: number; call: number; phase: string }
 async function run(seed: number, lane: boolean) {
@@ -35,7 +35,8 @@ async function run(seed: number, lane: boolean) {
   const line = [...w.transitLines.values()].find((l) => l.mode === 'bus' && l.number === 4);
   if (!line) throw new Error('no bus line 4 in the Showcase');
   const buses = (sim.buses as unknown as { buses: Map<number, Bus> }).buses;
-  const prev = new Map<number, number>(), left0 = new Map<number, number>(), laps: number[] = [], legs: number[] = [];
+  // per bus, the tick it last moved on from each call: a lap is the time from moving on from a call to doing so again
+  const prev = new Map<number, number>(), left = new Map<string, number>(), laps: number[] = [], legs: number[] = [];
   const end = w.tick + HOURS * TICKS_PER_HOUR;
   while (w.tick < end) {
     sim.tick(); airports.tick(); harbours.tick();
@@ -44,8 +45,11 @@ async function run(seed: number, lane: boolean) {
       const was = prev.get(b.v.id);
       prev.set(b.v.id, b.call);
       if (was === undefined || was === b.call) continue;
-      if (was === 0 && b.call === 1) { const l = left0.get(b.v.id); if (l !== undefined) laps.push(w.tick - l); left0.set(b.v.id, w.tick); }
-      if (was === 1 && b.call === 2) { const l = left0.get(b.v.id); if (l !== undefined) legs.push(w.tick - l); }
+      const k = `${b.v.id}:${was}`, l = left.get(k);
+      if (l !== undefined) laps.push(w.tick - l);
+      left.set(k, w.tick);
+      // the North Parade leg: moving on from the first call to moving on from the second, along the bus lane
+      if (was === 1) { const l0 = left.get(`${b.v.id}:0`); if (l0 !== undefined && w.tick - l0 < 1000) legs.push(w.tick - l0); }
     }
   }
   const mean = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : NaN);

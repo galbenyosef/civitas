@@ -202,6 +202,17 @@ export function streetRuleTiles(env: StreetEnv, x: number, y: number, ns: boolea
   }
   return out;
 }
+/**
+ * The axis of the street a click on road tile (x, y) means (true: north-south): a one-way tile's or an avenue
+ * carriageway's own way (its twin beside it is no side road), a tile on one street only that street's, and at a
+ * crossroads or a bend `prefer` (the arm the cursor is towards).
+ */
+export function streetAxisAt(env: StreetEnv, x: number, y: number, prefer: boolean): boolean {
+  const a = env.aux(x, y), cls = a > 0 && a < 0x40 ? a & 7 : 0;
+  if ((cls === 2 || cls === 3 || cls === 4) && !(a & 0x20)) return ((a >> 3) & 3) >= 2;
+  const ew = env.road(x - 1, y) || env.road(x + 1, y), ns = env.road(x, y - 1) || env.road(x, y + 1);
+  return ew && !ns ? false : ns && !ew ? true : prefer;
+}
 /** Cost to set rule `bit` on these tiles (only those that lack it, and are road), and the day's upkeep it adds. */
 export function streetRuleCost(env: StreetEnv & { bits(x: number, y: number): number }, tiles: readonly (readonly [number, number])[], bit: number): { tiles: number; cost: number; upkeep: number; on: boolean } {
   const def = streetRuleDef(bit);

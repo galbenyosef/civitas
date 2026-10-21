@@ -1,6 +1,6 @@
 import {
   BULLDOZE_COST, LAND_PRICE_PER_TILE, KIND_NAMES, PRIORITY_NAMES, Terrain, isRoad, isRailAux, isAirfieldAux, kindIdOf, levelOf, priorityOf, stopModeOf,
-  terrainOf, underConstruction, zoneOf, STREET_NAME_MAX, STREET_RULE_DEFS, StreetRule, streetRuleTiles, streetRuleCost, busLaneOk, hasFeature, techFor, type CitizenInfo, type ServerMsg, type PurchaseCheck, type RoadInfo,
+  terrainOf, underConstruction, zoneOf, STREET_NAME_MAX, STREET_RULE_DEFS, StreetRule, streetRuleTiles, streetRuleCost, streetAxisAt, busLaneOk, hasFeature, techFor, type CitizenInfo, type ServerMsg, type PurchaseCheck, type RoadInfo,
 } from '@msimcity/shared';
 import type { NetClient } from './net';
 import type { ClientWorld } from './world';
@@ -328,7 +328,7 @@ export class ContextMenu {
       }));
       // R5 street rules (shared/src/roadrules.ts): each on or off along the street through this tile, as the Street rules tool clicks
       const env = { road: (tx: number, ty: number) => { const tt = w.getTile(tx, ty); return tt !== undefined && isRoad(tt); }, aux: (tx: number, ty: number) => w.auxAt(tx, ty), bits: (tx: number, ty: number) => w.ruleAt(tx, ty)?.st ?? 0 };
-      const ns = !(env.road(x - 1, y) || env.road(x + 1, y));
+      const ns = streetAxisAt(env, x, y, !(env.road(x - 1, y) || env.road(x + 1, y)));
       const me = w.myPlayer;
       const rules: MenuItem[] = STREET_RULE_DEFS.map((def) => {
         const tiles = streetRuleTiles(env, x, y, ns, def.id), c = streetRuleCost(env, tiles, def.bit);

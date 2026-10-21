@@ -354,6 +354,7 @@ const finance = new FinancePanel({
 });
 ui.onUtil = (x, y, what, on) => net.send({ t: 'utilNode', x, y, ...(what === 'protect' ? { protect: on } : { importOn: on }) });
 ui.mineByName = (name) => world.myPlayer?.name === name;
+ui.mayEditByName = (name) => !world.spectate && (world.sandbox || world.myPlayer?.name === name);
 net.on('utilState', (m) => power.setState(m));
 net.on('utilLinks', (m) => power.setLinks(m));
 ui.onMothball = (x, y, on) => net.send({ t: 'recover', action: on ? 'mothball' : 'unmothball', keys: [`${x},${y}`] });
@@ -1479,7 +1480,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { power, tv, tvDebug, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, roads, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, gravesView, openDeceased, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { power, tv, tvDebug, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, roads, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, gravesView, openDeceased, problems, overlayMenu, overlayMap, trafficPanel, streetRules, selectTile, policies, junctions, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------

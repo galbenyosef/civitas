@@ -381,6 +381,8 @@ export class UI {
   onMothball: ((x: number, y: number, on: boolean) => void) | null = null;
   /** main.ts: the visitor limit at the gateway whose door is (x, y) (R5, the `gatewayLimit` message) */
   onGatewayLimit: ((x: number, y: number, on: boolean) => void) | null = null;
+  /** main.ts: may the viewer change a building whose owner has this display name (their own, or anyone's in a sandbox; nobody's in a showcase) */
+  mayEditByName: ((ownerName: string) => boolean) | null = null;
   /** onboarding.ts takes advisor hints (shared/src/goals.ts HINTS) and returns true; false: toast them as before */
   onHint: ((id: 'night') => boolean) | null = null;
   /** charts.ts: open the charts panel on a chart (population and treasury figures link to theirs) */
@@ -666,7 +668,7 @@ export class UI {
     if (info.mothballable && this.onMothball) html += `<button class="chip moth" id="bMoth" title="${info.mothballed ? 'Hire staff again; the upkeep comes back' : 'Let the staff go: no upkeep and no cover until you reopen it'}">${info.mothballed ? 'Reopen' : 'Mothball'}</button>`;
     // a motorway connection of yours (R5): the visitor limit, with what it costs (server sim/control.ts)
     const gw = info.gateway;
-    if (gw && gw.visitorLimit !== undefined && this.onGatewayLimit && info.parcel && this.mineByName?.(info.parcel.owner)) html += `<button class="chip moth" id="bGwLimit" title="${gw.visitorLimit ? 'Every visitor comes in again' : 'Half the visitors come in by this gateway: fewer cars on your streets, less visitor tax'}">${gw.visitorLimit ? 'Lift the visitor limit' : `Limit visitors (about $${(gw.limitCost ?? 0).toFixed(2)} a day)`}</button>`;
+    if (gw && gw.visitorLimit !== undefined && this.onGatewayLimit && info.parcel && this.mayEditByName?.(info.parcel.owner)) html += `<button class="chip moth" id="bGwLimit" title="${gw.visitorLimit ? 'Every visitor comes in again' : 'Half the visitors come in by this gateway: fewer cars on your streets, less visitor tax'}">${gw.visitorLimit ? 'Lift the visitor limit' : `Limit visitors (about $${(gw.limitCost ?? 0).toFixed(2)} a day)`}</button>`;
     const fam = familyOf(info.kind);
     if (p) {
       if (info.residents) {

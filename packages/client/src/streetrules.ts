@@ -1,6 +1,6 @@
 import { Color, InstancedMesh, Matrix4, MeshBasicMaterial, PlaneGeometry, Vector3, type PerspectiveCamera, Group } from 'three';
 import {
-  STREET_RULE_DEFS, STREET_RULE_BY_ID, StreetRule, streetRuleTiles, streetRuleCost, busLaneOk, hasFeature, techFor, TRACK_NAMES, isRoad, PUBLIC_ROAD_COST,
+  STREET_RULE_DEFS, STREET_RULE_BY_ID, StreetRule, streetRuleTiles, streetRuleCost, streetAxisAt, busLaneOk, hasFeature, techFor, TRACK_NAMES, isRoad,
   type StreetRuleDef, type StreetRuleId,
 } from '@msimcity/shared';
 import type { ClientWorld } from './world';
@@ -66,10 +66,8 @@ export class StreetRuleTool {
     if (drag && drag.length > 1) return drag.filter(([x, y]) => this.env().road(x, y));
     if (!h) return [];
     const env = this.env();
-    // a tile on one street only: that street, whatever the cursor's side
-    const ew = env.road(h[0] - 1, h[1]) || env.road(h[0] + 1, h[1]), nsr = env.road(h[0], h[1] - 1) || env.road(h[0], h[1] + 1);
-    const axis = ew && !nsr ? false : nsr && !ew ? true : ns;
-    return streetRuleTiles(env, h[0], h[1], axis, this.rule);
+    // a one-way or an avenue's carriageway: its own way; a tile on one street only: that street, whatever the cursor's side
+    return streetRuleTiles(env, h[0], h[1], streetAxisAt(env, h[0], h[1], ns), this.rule);
   }
   /** Is this tile one the player may set a rule on? */
   private mine(x: number, y: number): boolean {
@@ -117,7 +115,8 @@ export class StreetRuleTool {
     this.chip.style.display = show ? '' : 'none';
     if (!show) return;
     this.chip.innerHTML = this.chipHtml(p, tiles.length);
-    this.chip.style.transform = `translate(${((this.tmp.x + 1) / 2) * vw + 18}px, ${((1 - this.tmp.y) / 2) * vh - 10}px)`;
+    // above the cursor: the road tooltip opens below it
+    this.chip.style.transform = `translate(${((this.tmp.x + 1) / 2) * vw + 18}px, ${((1 - this.tmp.y) / 2) * vh - 64}px)`;
   }
   /** The server's answer to the last probe. */
   probed(m: { seq: number; before: number; after: number }) { if (m.seq === this.probeSeq) this.probeAns = m; }
@@ -229,7 +228,7 @@ export class StreetRulePicker {
       </button>`;
     }).join('');
     const cur = STREET_RULE_BY_ID.get(on)!;
-    const about = (d: StreetRuleDef) => `<b>${esc(d.title)}</b> ${esc(d.blurb)}<br><span>Click a street to put it along the whole street, or drag along part of one; click a street that has it to take it off. Ctrl+Z undoes. Public road with Public works costs no more (roads on unclaimed land cost $${PUBLIC_ROAD_COST} a tile to lay).</span>`;
+    const about = (d: StreetRuleDef) => `<b>${esc(d.title)}</b> ${esc(d.blurb)}<br><span>Click a street to put it along the whole street, or drag along part of one; click a street that has it to take it off. Ctrl+Z undoes. Public road on unclaimed land needs Public works.</span>`;
     this.el.innerHTML = `<div class="ph"><b>Street rules</b><span>${STREET_RULE_DEFS.length} rules · per street, shown on the road</span><button class="x" aria-label="Close">×</button></div>
       <div class="cards">${cards}</div>
       <div class="about">${about(cur)}</div>`;
