@@ -147,8 +147,9 @@ export class TrafficLights {
     };
     const lambert = new MeshLambertMaterial({ vertexColors: true, flatShading: true });
     this.poles = mk(poleGeometry(), lambert, true);
-    this.arrows = mk(arrowHousing(), lambert, true);
-    this.extras = mk(pelicanExtras(), lambert, true);
+    // (the arrow housings and the pelicans' boxes are small beside the pole that carries them: no shadow pass of their own)
+    this.arrows = mk(arrowHousing(), lambert, false);
+    this.extras = mk(pelicanExtras(), lambert, false);
     this.lit = LIT.map((c, i) => {
       const m = mk(new SphereGeometry(LAMP_R * 1.18, 10, 8).translate(0, LAMP_Y[i], LAMP_Z + 0.004), new MeshBasicMaterial({ color: c, toneMapped: false }), false);
       m.instanceMatrix.setUsage(DynamicDrawUsage);

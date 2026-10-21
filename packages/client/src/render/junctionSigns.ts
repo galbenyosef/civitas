@@ -53,7 +53,7 @@ export class JunctionSigns {
     }
     if (!any) return;
     const m = new Mesh(k.build(), this.mat);
-    m.castShadow = true; m.matrixAutoUpdate = false;
+    m.matrixAutoUpdate = false; // (a sign's shadow is a sliver: no shadow pass for them)
     this.mesh = m;
     this.group.add(m);
   }
