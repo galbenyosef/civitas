@@ -22,6 +22,7 @@ import { OFFICE_MERGED } from './office-merged';
 import { INDUSTRIAL_MERGED } from './industrial-merged';
 import { BLOCK_INTERIOR } from './block-interior';
 import { LONDON_LANDMARKS } from './landmarks-london';
+import { LANDMARK_DRAFTS } from './landmark-drafts';
 import { bigScreens } from './bigscreens';
 import { EDUCATION } from './education';
 import { MEDIA } from './media';
@@ -55,7 +56,9 @@ const BASE: KindDef[] = [residential, commercial, industrial, office, police, fi
   // utilities (docs/utilities.md section 2): kind ids 160-166, the power network's nodes, depot and plants, placed sub-kinds of the transport-hub family
   ...POWER,
   // landmarks (docs/buildings.md "Landmarks"): real buildings in a city's collection, placed only where their locked tech is given
-  ...LONDON_LANDMARKS];
+  ...LONDON_LANDMARKS,
+  // draft landmarks (docs/landmarks.md, landmark-drafts.ts): kind ids 230-249, viewer only, never in the city
+  ...LANDMARK_DRAFTS];
 
 /** The catalogue with extra designs (designs/index.ts) appended to their kind+level; the family files stay untouched. */
 export const CATALOGUE: KindDef[] = BASE.map((k) => {

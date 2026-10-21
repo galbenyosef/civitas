@@ -1,5 +1,5 @@
 import { JunctionTools, isJunctionTool } from './junctiontools';
-import { junctionArmAt, nextArmState, armState, JAM_WHY_STRIDE } from '@msimcity/shared';
+import { junctionArmAt, nextArmState, armState, JAM_WHY_STRIDE, VehicleClass } from '@msimcity/shared';
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
@@ -59,6 +59,7 @@ import { ChartsPanel } from './charts';
 import { PolicyPanel } from './policies';
 import { AdPanel } from './adverts';
 import { PerfHud } from './render/perfhud';
+import { Audio, type RideNow } from './audio';
 import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered, serverConfig } from './worlds';
 import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, type DemoInfo } from './tour';
 import { MapMode } from './mapmode';
@@ -675,26 +676,27 @@ document.getElementById('mapBtn')?.addEventListener('click', () => mapMode.toggl
 // ---- input ------------------------------------------------------------------------------------
 const input = new Input(canvas, rig, {
   map: mapMode,
-  onToolChange: (t) => { ui.setTool(t); rectMesh.visible = false; updateStatus(); toolUnder(t); },
+  onToolChange: (t) => { ui.setTool(t); rectMesh.visible = false; updateStatus(); toolUnder(t); audio.ui('click'); },
   ladderKey: (t) => ui.ladderKey(t), // 0, 8, 9, Y, P, G, V, B, L open their size picker on the size last used
   isWater: (x, y) => { const t = world.getTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water; }, // a road drag's end does not snap across water
   isRoad: (x, y) => { const t = world.getTile(x, y); return t !== undefined && isRoad(t); },
   onRoad: (tiles, _shape) => {
     // buildings in the way: ask once, with the cost, and the answer goes for the whole drag (a0902fd7)
     const v = roadTool.plan(tiles);
-    const send = (demolish: boolean) => net.send({ t: 'build', tool: 'road', tiles, cls: roadTool.roadClass, ...(demolish ? { demolish: true } : {}), ...(DEV_TOOLS ? { dev: true } : {}) });
+    const send = (demolish: boolean) => { net.send({ t: 'build', tool: 'road', tiles, cls: roadTool.roadClass, ...(demolish ? { demolish: true } : {}), ...(DEV_TOOLS ? { dev: true } : {}) }); audio.ui('place'); };
     if (!v.demolish.n) { send(false); return; }
     void roadTool.ask(v, mouse.x, mouse.y).then((a) => { if (a !== 'cancel') send(a === 'demolish'); });
   },
-  onUndoRoad: () => net.send({ t: 'undoRoad' }),
+  onUndoRoad: () => { net.send({ t: 'undoRoad' }); audio.ui('undo'); },
   // the Street rules tool (R5): a click sets the whole street, a drag part of one
   onStreetRule: (tiles, street, ns) => { const why = streetRules.release(street ? streetRules.tilesFor(tiles[0], null, ns) : tiles); if (why) ui.toast('error', why); },
-  onUndoStreetRule: () => net.send({ t: 'undoStreetRule' }),
+  onUndoStreetRule: () => { net.send({ t: 'undoStreetRule' }); audio.ui('undo'); },
   onBuild: (tool, tiles) => {
     // a click (not a drag) with a link tool takes down the line through that tile (docs/utilities.md 4.2)
     if ((tool === 'pylons' || tool === 'cable') && tiles.length < 2) { if (tiles[0]) net.send({ t: 'utilLink', op: 'remove', x: tiles[0][0], y: tiles[0][1] }); return; }
     const rot = structureTool(tool) ? input.rotationOf(tool) : undefined; // the orientation chosen with Z/C, else the server faces a road itself
     net.send({ t: 'build', tool: tool as Tool, tiles, ...(rot !== undefined ? { rot } : {}), ...(DEV_TOOLS ? { dev: true } : {}) });
+    audio.ui('place');
   },
   onRotate: (tool, dir) => {
     // the first press starts from the orientation the preview currently shows (auto-chosen or not); later presses turn the chosen one
@@ -1424,6 +1426,7 @@ function frame(now: number) {
   if (fireworks.active) fireworks.frame(dt);
   bridges.frame(landmarks.fixedHours ?? (vehTick * 24) / TICKS_PER_DAY); // Tower Bridge's gates, on the lift schedule the leaves keep
   fpv.update(now, dt, routeInfo?.id === selectedCitizen ? routeInfo.route ?? null : null);
+  audio.frame(now); // the ambient mix every 250 ms and the ridden vehicle's sound every 100 (audio/)
   if ((following || fpv.mode === 'full') && selectedCitizen) {
     const pos = citizens.positionOf(selectedCitizen);
     if (pos) { rig.target.x += (pos[0] - rig.target.x) * Math.min(1, dt * 6); rig.target.z += (pos[1] - rig.target.z) * Math.min(1, dt * 6); }
@@ -1493,8 +1496,34 @@ const autoName = params.get('name') || rejoin || (showcase.spectate ? `Visitor $
 const cityParam = testCityOf(params);
 const viaWs = !!params.get('ws');
 const hud = document.getElementById('worldHud')!;
-const perf = new PerfHud({ net, renderer, agentsDrawn: () => citizens.count, chunksLoaded: () => views.size }, hud, document.getElementById('perfBtn'), { forceOn: cityParam > 0 });
-Object.assign((window as any).msc, { perf, lines });
+const perf = new PerfHud({ net, renderer, agentsDrawn: () => citizens.count, chunksLoaded: () => views.size, audio: () => audio.stats }, hud, document.getElementById('perfBtn'), { forceOn: cityParam > 0 });
+/** Sound (audio/, docs/audio.md): what the client already knows, read every 250 ms; nothing starts before the first click or key */
+const rideNow = (): RideNow | null => {
+  if (fpv.mode === 'off') return null;
+  if (selectedVehicle) {
+    const c = cabEye();
+    if (!c) return null;
+    const k = selectedVehicle.kind;
+    return { key: c.key, kind: k === 'train' ? (c.tunnel ? 'metro' : 'train') : k, x: c.x, z: c.z, doors: c.interior?.doors };
+  }
+  const a = selectedCitizen ? citizens.agents.get(selectedCitizen) : undefined;
+  if (!a || !a.car) return null; // on foot: the city's own sound
+  return { key: `c${selectedCitizen}`, kind: a.cls === VehicleClass.Bus ? 'bus' : a.cls === VehicleClass.Truck ? 'truck' : 'car', x: a.rx, z: a.rz };
+};
+const audio = new Audio({
+  ambience: {
+    hour: liveHour,
+    camera: () => { const e = rig.camera.matrixWorld.elements; return { x: rig.target.x, z: rig.target.z, dist: rig.dist, map: mapMode.on, rightX: e[0], rightZ: e[2] }; },
+    tileAt: (x, y) => world.getTile(x, y),
+    kindIdAt: (x, y) => world.kindIdAt(x, y),
+    agents: () => citizens.agents.values(),
+    pelican: (x, z, r) => lights.redPelicanNear(x, z, r, liveTick()),
+  },
+  fpv: { riding: rideNow },
+  notice: (t) => ui.notice(t),
+});
+ui.onSound = (id) => audio.ui(id);
+Object.assign((window as any).msc, { perf, lines, audio });
 const localUi = local ? mountLocalUi(local, (kind, msg) => ui.toast(kind, msg), () => world.myPlayer?.name ?? localStorage.getItem('msimcity.name') ?? 'Mayor') : null;
 if (local) {
   (window as any).msc.local = local;

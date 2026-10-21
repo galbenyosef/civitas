@@ -738,6 +738,8 @@ export const SECTIONS: DemoSection[] = [
       { id: 'world-map', spot: 'world-map', name: 'World map', rect: [-60, -60, 130, 140], view: 'map' },
       // settlement ranks (docs/ranks.md): the stop plays a rank-up's fireworks over the middle of the town
       { id: 'ranks', spot: 'ranks', name: 'Settlement ranks', rect: [-14, -14, 28, 28], view: 'ranks' },
+      // sound (docs/audio.md): nothing to place; at dawn, so the chorus is the first thing a player hears here
+      { id: 'sound', spot: 'sound', name: 'Sound', rect: [-14, -14, 28, 28], hour: 6 },
     ],
     // the railway land and the quarter beyond it: together 70×26, past the 48-tile parcel edge, so an estate (not a merge)
     estates: [{ name: 'Riverside estate', lands: ['South railway', 'Riverside'] }],
@@ -811,7 +813,7 @@ export const TOUR: string[] = [
   'nursery', 'primary-school', 'secondary-school', 'sixth-form', 'fe-college', 'university', 'halls', 'research-institute',
   'airport', 'runway',
   'block-estate', 'fire-blast', 'freight-yard-west', 'track-freight', 'freight-yard-east', 'line-freight-1',
-  'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3', 'world-map', 'ranks',
+  'river', 'level-crossing', 'bridge-girder', 'bridge-arch', 'bridge-bascule', 'bridge-suspension', 'line-bus-3', 'world-map', 'ranks', 'sound',
   'ind-plant', 'ind-works', 'ind-row', 'ind-depot', 'com-centre', 'com-parade', 'com-store', 'com-hotel',
   'off-tower', 'off-hq', 'off-centre', 'res-estate', 'res-terrace', 'res-midrise', 'res-tower', 'res-block',
   'marina', 'jetty', 'ferry-pier', 'line-ferry-1', 'ferry-pier-2', 'fishing-harbour', 'cargo-port', 'sea-gate',
@@ -946,7 +948,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'road-look' | 'junction-group' | 'traffic-panel' | 'visitor-limit' | 'road-lane' | 'road-oneway' | 'road-avenue' | 'road-motorway' | 'road-pedestrian' | 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
+export type SpotKind = 'road-look' | 'junction-group' | 'traffic-panel' | 'visitor-limit' | 'road-lane' | 'road-oneway' | 'road-avenue' | 'road-motorway' | 'road-pedestrian' | 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'sound' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
 const roadFacts = (cls: number): [string, string][] => {
   const d = ROAD_CLASS_DEFS[cls];
   return [['Tool', `Road (3), ${d.title}`], ['Lanes', d.access === 'pedestrian' ? 'none: paving for walkers and bikes' : d.divided ? `${d.lanes} each way, a tile each way` : d.oneWay ? `${d.lanes}, one way` : 'one each way'],
@@ -1069,6 +1071,12 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
     what: 'A fault on a substation cuts the power to every street its supply runs along: the lamps go out, and the windows drop to a candle here and there, with the odd building on a generator burning bright. The nearest power depot sends a repair van; while the crew digs the streets stay dark, and when they are done the lights come back block by block. Homes in a cut do not grow. In this demo the substation by the perimeter road fails every six game hours, so its streets are dark about half the time.',
     how: `Keep a power depot (Power stations) near the middle of your network: a fault stays dark while its van drives there and the crew works ${UTIL.repairHours} game hours. Without one a contractor takes ${UTIL.contractorHours}. A second substation whose streets overlap keeps a fault's patch on the network's other links.`,
     facts: [['Faults', `about one per substation in 25 game days, none in the first ${UTIL.faultsFromDay} days of a world`], ['Repair', `${UTIL.repairHours} game hours on site`], ['Never cut', 'a patch with a hospital or police station, in rolling cuts']],
+  },
+  sound: {
+    title: 'Sound',
+    what: 'The city is heard as well as seen, all made on the spot with no recordings. Each thing on screen has a bed: traffic rumbles louder with the cars drawn, wind rises as you zoom out, a crowd murmurs by the shops, works and power stations hum, water laps. Birds sing by the hour, with a dawn chorus from half past four over parks and homes; owls call at night. A church or Parliament in view rings the hour, and a signal crossing beeps while it holds the cars. Ride a vehicle in first person and it takes over while the city drops 6 dB: a bus is a diesel rattle with its doors hissing, a train a whine over rail joints, a tube train a boom, a boat a chug.',
+    how: 'Nothing to build. Sound starts on your first click or key press. M mutes and unmutes, Shift+M is the perf readout; the sound switch and volume slider are in the line at the bottom left, and the choice is kept in this browser.',
+    facts: [['Mute', 'M, or the sound chip in the top bar'], ['Volume', 'slider at the bottom left, kept in this browser'], ['Made of', 'oscillators and shaped noise (Web Audio), no files'], ['Cost', 'about 0.3 ms every quarter second']],
   },
   ranks: {
     title: 'Settlement ranks',
@@ -1709,6 +1717,9 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
     scenario: (ss) => placedKind('media-centre')(ss) && ss.some((s) => s.spots?.some((sp) => sp.spot === 'live-tv' && sp.view === 'tv')) },
   { id: 'tv-programmes', caption: 'TV programmes and teletext between the news (any set on the TV stop)', tour: 'live-tv',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'live-tv')) },
+  // ---- sound (docs/audio.md): the ambient beds, first-person vehicle sound and the mute, explained at a stop of their own
+  { id: 'sound', caption: 'sound (the ambient beds, the dawn chorus, first-person vehicle sound and M for mute)', tour: 'sound',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'sound')) },
   // ---- settlement ranks (docs/ranks.md): a sandbox has none, so the tour stop plays the celebration over the town
   { id: 'settlement-ranks', caption: 'settlement ranks (a rank-up celebration over the town)', tour: 'ranks',
     scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'ranks' && sp.view === 'ranks')) },

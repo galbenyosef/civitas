@@ -419,8 +419,17 @@ export class UI {
     $('light').title = mode === 'live' ? 'Lighting follows the in-game clock. Click to freeze it.' : 'Lighting frozen. Click to follow the clock.';
   }
   setConn(ok: boolean) { const c = $('conn'); c.textContent = ok ? 'connected' : 'reconnecting…'; c.className = 'stat ' + (ok ? 'ok' : 'bad'); }
-  setStatus(text: string) { $('status').textContent = text; }
+  private noticeUntil = 0;
+  /** a short notice in the status line ("Sound off") that the hover updates leave alone for `ms` */
+  notice(text: string, ms = 1500) {
+    $('status').textContent = text; this.noticeUntil = performance.now() + ms;
+    setTimeout(() => { if (performance.now() >= this.noticeUntil) $('status').textContent = ''; }, ms + 20);
+  }
+  setStatus(text: string) { if (performance.now() < this.noticeUntil) return; $('status').textContent = text; }
+  /** an interface sound to make (client/src/audio): the refusal that goes with an error toast */
+  onSound?: (id: 'click' | 'place' | 'refuse' | 'undo') => void;
   toast(kind: 'info' | 'error', msg: string) {
+    if (kind === 'error') this.onSound?.('refuse');
     const el = document.createElement('div');
     el.className = `toast ${kind}`; el.textContent = msg;
     $('toasts').appendChild(el);

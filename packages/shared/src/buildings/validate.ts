@@ -2,7 +2,7 @@ import type { KindDef, Op, HelperModel, Attributes, LevelDef, Design } from './s
 import { PALETTE, WINDOW_CLASSES, type WindowClass } from './palette';
 import { FEATURES, FACES, facadeErrors } from './facade';
 import { HELPERS } from './helpers';
-import { MAX_KIND_CODE, MAX_LEVEL_CODE, MAX_FOOTPRINT, MAX_KIND_ID, FIRST_SUB_KIND_ID } from './codes';
+import { MAX_KIND_CODE, MAX_LEVEL_CODE, MAX_FOOTPRINT, MAX_KIND_ID, FIRST_SUB_KIND_ID, LANDMARK_DRAFT_IDS } from './codes';
 import { techFor } from '../tech';
 import { GROUP_BY_ID } from './groups';
 
@@ -267,7 +267,7 @@ export function validateCatalogue(kinds: KindDef[], helpers: HelperModel[]): str
       else for (const f of ['surface', 'underground'] as const) if (!Number.isInteger(pk[f]) || pk[f] < 0 || pk[f] > INT16) errs.push(`${lw}: parking.${f} must be a non-negative integer`);
       if (l.feature !== undefined && !techFor(l.feature)) errs.push(`${lw}: feature '${l.feature}' is not unlocked by any tech node (shared/src/tech.ts)`);
       if (!Array.isArray(l.designs) || !l.designs.length) { errs.push(`${lw}: needs at least one design`); return; }
-      if (!l.designs.some((d) => !d.draft)) errs.push(`${lw}: every design is a draft; at least one must be live`);
+      if (!l.designs.some((d) => !d.draft) && !(k.landmark && k.draft)) errs.push(`${lw}: every design is a draft; at least one must be live`); // a draft landmark (landmark-drafts.ts) is all drafts until it is accepted
       l.designs.forEach((d, di) => {
         checkDesign(d, `${lw} design ${di} (${d?.name ?? '?'})`, errs, k.windows);
         const req = REQUIRED_ATTRS[k.family];
@@ -328,6 +328,13 @@ function landmarkErrors(k: KindDef, w: string): string[] {
   const errs: string[] = [];
   if (!k.flags?.civic) errs.push(`${w}: a landmark is placed by a player and built by builders: it needs the civic flag`);
   if (!k.tags?.length) errs.push(`${w}: a landmark needs tags (its city, e.g. ['london'])`);
+  if (k.draft) {
+    // the draft path (docs/landmarks.md, landmark-drafts.ts): viewer only, so no tool, collection rung or tech node yet; a reserved id range and the 'draft' tag instead
+    if (k.tool) errs.push(`${w}: a draft landmark has no tool (it is never placed); the tool, collection rung and locked tech node come when it is accepted`);
+    if (!k.tags?.includes('draft')) errs.push(`${w}: a draft landmark carries the tag 'draft' (it is what /viewer.html?tag=draft filters by)`);
+    if (!Number.isInteger(k.kindId) || (k.kindId as number) < LANDMARK_DRAFT_IDS[0] || (k.kindId as number) > LANDMARK_DRAFT_IDS[1]) errs.push(`${w}: a draft landmark's kindId must be in the reserved range ${LANDMARK_DRAFT_IDS[0]}-${LANDMARK_DRAFT_IDS[1]} (codes.ts)`);
+    return errs;
+  }
   if (!k.group || !GROUP_BY_ID.get(k.group)?.collection) errs.push(`${w}: a landmark belongs to a collection group (buildings/groups.ts, e.g. 'london')`);
   if (!k.tool) errs.push(`${w}: a landmark needs a tool`);
   else {

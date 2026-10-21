@@ -26,6 +26,7 @@ import { compileCatalogue, emitCatalogue } from '../src/buildings/compile';
 import { validateCatalogue } from '../src/buildings/validate';
 import * as V from '../src/buildings/validate';
 import { WINDOW_CLASSES } from '../src/buildings/palette';
+import { LANDMARK_DRAFT_IDS } from '../src/buildings/codes';
 import { CAPACITY_TABLE, WAGE_TABLE, PARK_SURFACE_TABLE, PARK_UNDERGROUND_TABLE, MANIFEST, KIND_ID, CIVIC_TOOLS } from '../src/buildings/compiled';
 import type { KindDef } from '../src/buildings/schema';
 import { buildModels, allVariants, allDesigns } from '../../client/src/render/models';
@@ -292,7 +293,7 @@ for (const k of MANIFEST) for (const l of k.levels) {
   // merged zone kinds (zones.ts) carry their own work, scaled with level and footprint (checked in 'merged lots')
   // Audit #1: a residential level-1 house is a third of WORK_PER_LEVEL (20), so the first homes rise within minutes
   const firstHouse = k.kindId === T.Zone.Residential && l.level === 1;
-  const want = k.flags.growable ? (isNew(k.kindId) && k.footprint ? l.work : firstHouse ? T.WORK_PER_LEVEL / 3 : T.WORK_PER_LEVEL * l.level) : k.flags.civic ? (isNew(k.kindId) && k.group ? l.work : T.CIVIC_WORK) : 0;
+  const want = k.flags.growable ? (isNew(k.kindId) && k.footprint ? l.work : firstHouse ? T.WORK_PER_LEVEL / 3 : T.WORK_PER_LEVEL * l.level) : k.flags.civic ? (isNew(k.kindId) && (k.group || k.landmark) ? l.work : T.CIVIC_WORK) : 0;
   eq(`work ${k.id} L${l.level}`, T.workOf(k.kindId, l.level), want);
   if (k.kindId === k.code) eq(`constructionWork ${k.id} L${l.level} (code wrapper)`, T.constructionWork(k.code, l.level), want);
   if (k.kindId === T.Zone.Commercial) eq(`visitorCapacity commercial L${l.level}`, l.attrs.visitorCapacity, l.level * T.VENUE_CAPACITY_PER_LEVEL);
@@ -381,6 +382,13 @@ const drafts = allDesigns().filter((d) => d.draft);
 console.log(`  ${identical}/${OLD_MODELS.length} models byte-identical to the old models.ts, ${refixed} deliberately re-snapshotted after facade fixes (${Object.keys(FACADE_FIXED).join(' ')}), helipads (${Object.keys(HELIPAD_FIXED).join(' ')}) and ad slot frames (${Object.keys(ADSLOT_FIXED).join(' ')}); ${drafts.length} draft design(s) built for the viewer only: ${drafts.map((d) => d.key).join(', ')}`);
 if (!drafts.length) fail('expected the kiosk draft');
 if (now.some((v) => drafts.some((d) => d.key === v.key))) fail('a draft leaked into the city batch');
+// draft landmarks (landmark-drafts.ts, docs/landmarks.md): viewer only, so no tool, no live design, and the reserved ids
+for (const m of MANIFEST.filter((k) => k.landmark && k.draft)) {
+  if (m.tool) fail(`${m.id}: a draft landmark has a tool`);
+  if (m.levels.some((l) => l.designs.some((d) => !d.draft))) fail(`${m.id}: a draft landmark has a live design`);
+  if (m.kindId < LANDMARK_DRAFT_IDS[0] || m.kindId > LANDMARK_DRAFT_IDS[1]) fail(`${m.id}: draft landmark kind id ${m.kindId} is outside ${LANDMARK_DRAFT_IDS.join('-')}`);
+}
+for (const m of MANIFEST.filter((k) => !(k.landmark && k.draft) && k.kindId >= LANDMARK_DRAFT_IDS[0] && k.kindId <= LANDMARK_DRAFT_IDS[1])) fail(`${m.id}: kind id ${m.kindId} is in the draft landmark range`);
 
 // ---------------------------------------------------------------- 3. generated files fresh
 section('generated files');
@@ -418,7 +426,7 @@ expectError('duplicate tool key', (c) => { c[1].tool!.key = c[0].tool!.key; }, /
 // ---------------------------------------------------------------- 5. leisure family
 section('leisure');
 eq('leisure kind codes', LEISURE_CODES, [...new Set(MANIFEST.filter((m) => m.family === 'leisure').map((m) => m.code))]);
-for (const m of MANIFEST.filter((e) => e.family === 'leisure')) {
+for (const m of MANIFEST.filter((e) => e.family === 'leisure' && !(e.landmark && e.draft))) { // a draft landmark has no live design, so no spec (landmark-drafts.ts)
   eq(`${m.id}: isLeisure`, isLeisure(m.kindId), true);
   for (const l of m.levels) {
     const live = l.designs.filter((d) => !d.draft);
@@ -595,6 +603,10 @@ section('footprints');
   expectError('mark deeper than the footprint', (c) => { const f = c.find((k) => k.footprint)!.footprint!; f.marks = [{ kind: 'apron', at: { edge: 'back', depth: f.h + 1 } }]; }, /depth \d+ is outside/);
   expectError('rotation key Z is reserved', (c) => { c[1].tool!.key = 'z'; }, /reserved/);
   expectError('rotation key C is reserved', (c) => { c[1].tool!.key = 'C'; }, /reserved/);
+  expectError('a draft landmark with a tool', (c) => { c.find((k) => k.id === 'town-clock-tower')!.tool = { id: 'clocktower', key: '', label: 'Clock tower', color: '#c8a060' }; }, /draft landmark has no tool/);
+  expectError('a draft landmark outside the reserved ids', (c) => { c.find((k) => k.id === 'town-clock-tower')!.kindId = 120; }, /reserved range 230-249/);
+  expectError('a draft landmark without the draft tag', (c) => { c.find((k) => k.id === 'town-clock-tower')!.tags = ['victorian']; }, /tag 'draft'/);
+  expectError('a live landmark still needs its collection rung', (c) => { const k = c.find((x) => x.id === 'town-clock-tower')!; k.draft = false; k.levels[0].designs[0].draft = false; }, /collection group/);
 }
 
 // ---------------------------------------------------------------- 6b. harbours: wet footprints (docs/boats.md section 5)

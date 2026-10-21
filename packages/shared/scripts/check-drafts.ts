@@ -4,6 +4,8 @@
  *
  *   npx tsx packages/shared/scripts/check-drafts.ts <file.ts>
  *
+ * A file of draft landmarks (an exported KindDef[]) is handed to check-landmarks.ts instead (docs/landmarks.md).
+ *
  * Runs the catalogue validator with the designs appended, the window-collision rule (facade.ts), and two rules the
  * brief states that the validator does not: every part stays inside the tile, and nothing floats.
  */
@@ -21,6 +23,11 @@ if (!file) { console.error('usage: check-drafts.ts <file.ts>'); process.exit(2);
 const mod = await import(pathToFileURL(resolve(file)).href) as Record<string, unknown>;
 const list = Object.values(mod).find((v) => Array.isArray(v)) as ExtraDesign[] | undefined;
 if (!list) { console.error(`${file} exports no array of designs`); process.exit(2); }
+// a file of draft landmarks (KindDef[], landmark-drafts.ts) gets the landmark check: footprint bounds, op budget, the draft rules
+if (list.length && list.every((e) => e && typeof e === 'object' && 'levels' in e && 'id' in e)) {
+  const lm = await import('./check-landmarks');
+  process.exit(lm.printReport(lm.checkLandmarks(await lm.loadKindFile(file), true), `landmark kinds in ${file}`));
+}
 
 const errors: string[] = [], warnings: string[] = [];
 const cat = JSON.parse(JSON.stringify(CATALOGUE)) as KindDef[];

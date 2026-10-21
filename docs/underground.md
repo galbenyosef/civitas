@@ -179,7 +179,7 @@ The entrance tooltip lists "change here for" every routed stop within that walk,
 
 ## 5. Rendering
 
-**The underground view.** Key **N** (free: M is the perf HUD) and an **under** chip beside **heat** toggle it. `setUnder(on)` in `client/src/main.ts` follows `setHeat`: it calls `ChunkView.setUnder` and sets `sceneUniforms.uUnder`, eased from 0 to 1 over 0.4 s. The view turns on by itself while a metro tool is picked or a metro line is being edited, and goes back to how it was afterwards.
+**The underground view.** Key **N** (free: M is the sound mute, Shift+M the perf HUD) and an **under** chip beside **heat** toggle it. `setUnder(on)` in `client/src/main.ts` follows `setHeat`: it calls `ChunkView.setUnder` and sets `sceneUniforms.uUnder`, eased from 0 to 1 over 0.4 s. The view turns on by itself while a metro tool is picked or a metro line is being edited, and goes back to how it was afterwards.
 
 - **The surface fades.** Buildings are ghosted: `render/materials.ts` mixes alpha towards 0.12 and desaturates with `uUnder`, and the ghost pass skips depth writes. The ground is semi-transparent (chunkView's ground opacity goes to about 0.3). Roads keep a faint outline. Surface walkers and vehicles dim to 0.3 (`render/citizens.ts`).
 - **The network shows, Tube-map style** (`render/underground.ts`, `UndergroundView`). `scanChunk(key, chunk)` reads the under bytes, like `TrainsView.scanChunk`, into instanced pieces:

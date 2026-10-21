@@ -21,6 +21,7 @@ Every building kind is data. One file per kind family under `packages/shared/src
 | `residential-merged.ts`, `commercial-merged.ts`, `office-merged.ts`, `industrial-merged.ts`, `zonekit.ts` | Merged lots: the bigger zone kinds growth assembles from neighbouring lots (see "Merged lots"), and the recipe parts they are drawn with |
 | `block-interior.ts` | Block interiors: the deep plots that grow back into a block's landlocked middle and the communal garden (see "Block interiors") |
 | `education.ts`, `edukit.ts` | The education ladder (kind ids 101-108: nursery, primary, secondary, sixth form, FE college, university campus, research institute, halls of residence), two designs each, and the recipe parts they share (playground, pitch, cupola, clock, lamp and bench and tree scatter at hashed offsets). Sub-kinds of the library family (code 14), civic and not leisure; placed in the Showcase (docs/education.md sections 3 and 14) |
+| `landmark-drafts.ts` | Draft landmarks for contributors (kind ids 230-249; the template, a town hall clock tower and a war memorial; role presets in `landmark-roles.ts`): viewer only, never placed (docs/landmarks.md) |
 | `landmarks-london.ts` | London landmarks (kind ids 91-100): the Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, and ids 96-100 reserved for the second five (see "Landmarks") |
 | `landmarks-london-3.ts` | London's four universities (kind ids 111-114): UCL, Imperial College, King's College and the LSE, landmarks that work as universities (see "Landmarks", docs/education.md section 14) |
 | `landmarks-london-4.ts` | Piccadilly Circus (kind id 116): the Piccadilly Lights round a curved corner, the Criterion, the Shaftesbury Memorial Fountain with Eros and the Underground stairs; a theatre-family venue with six big screens (see "Landmarks", docs/adverts.md section 9) |
@@ -473,6 +474,8 @@ The garden is a 2×2 park-family structure (civic, no tool, never placed by a pl
 Nothing new is persisted: the kinds live in the sub layer like every merged lot, so older saves load unchanged.
 
 ## Landmarks
+
+**Contributing a landmark?** `docs/landmarks.md` is the self-contained brief (scale, footprints, every op, the viewer, the checks, the review rubric); new landmarks start as drafts in `landmark-drafts.ts` (kind ids 230-249, viewer only, `npm run landmarks:check`). This section describes the London set.
 
 A **landmark** is a recognisable real building: the Gherkin, the Shard, Big Ben. Each is an ordinary placed civic kind (a site, builders, staff, upkeep) that works as an existing role, so the simulation needs nothing new: the towers are office-family kinds (family code 4: office jobs, office visitors and the office car-ownership rate), the Royal Opera House a theatre-family venue (code 12, with the theatre attributes and its own event nights). What makes it a landmark is metadata on the kind:
 

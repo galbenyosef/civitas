@@ -6,6 +6,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { CHUNK_SIZE, KIND_ID, Terrain, hash2, zoneOf, levelOf, kindIdOf, isRoad, terrainOf, isAnchorAux, auxOrientation, placedFromAnchor, FRONT, isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle,
   basculeLiftAt, basculeOpen, basculeSeed, BASCULE_LIFT } from '@msimcity/shared';
 import { LONDON_EYE, BIG_BEN, TOWER_BRIDGE } from '@msimcity/shared/src/buildings/landmarks-london-2';
+import { CLOCK_TOWER } from '@msimcity/shared/src/buildings/landmark-drafts';
 import type { ClientChunk } from '../world';
 import { nightUniform } from './materials';
 
@@ -22,7 +23,10 @@ import { nightUniform } from './materials';
  */
 
 const EYE = LONDON_EYE, BB = BIG_BEN, TB = TOWER_BRIDGE;
-const EYE_KIND = KIND_ID['london-eye'], BIGBEN_KIND = KIND_ID['parliament'], BRIDGE_KIND = KIND_ID['tower-bridge'];
+const EYE_KIND = KIND_ID['london-eye'], BRIDGE_KIND = KIND_ID['tower-bridge'];
+/** Clock towers: kind id to where its dials stand (the constant its recipe file exports, BIG_BEN's shape). A new clock tower is one more row. */
+interface ClockSpec { x: number; z: number; y: number; face: number; r: number }
+const CLOCKS = new Map<number, ClockSpec>([[KIND_ID['parliament'], BB], [KIND_ID['town-clock-tower'], CLOCK_TOWER]]);
 const TAU = Math.PI * 2;
 const UP = new Vector3(0, 1, 0);
 const tmpM = new Matrix4(), tmpQ = new Quaternion(), tmpP = new Vector3(), tmpS = new Vector3(1, 1, 1), tmpC = new Color();
@@ -116,35 +120,37 @@ function updateEye(e: EyeInst, t: number, night: number) {
 
 // ---------------------------------------------------------------- Big Ben
 
-let dialGeo: { face: BufferGeometry; ring: BufferGeometry; hour: BufferGeometry; minute: BufferGeometry } | null = null;
-function dialGeometry() {
-  if (dialGeo) return dialGeo;
-  const r = BB.r - 0.006;
-  dialGeo = {
+const dialGeos = new Map<number, { face: BufferGeometry; ring: BufferGeometry; hour: BufferGeometry; minute: BufferGeometry }>();
+function dialGeometry(radius: number) {
+  const cached = dialGeos.get(radius);
+  if (cached) return cached;
+  const r = radius - 0.006;
+  const dialGeo = {
     face: new CircleGeometry(r, 28),
     ring: mergeGeometries([new RingGeometry(r * 0.8, r * 0.86, 28).translate(0, 0, 0.001), new CircleGeometry(0.012, 10).translate(0, 0, 0.004)], false)!,
     // hands pointing up (12 o'clock) from the centre
     hour: new BoxGeometry(0.014, r * 0.55, 0.003).translate(0, r * 0.22, 0.003),
     minute: new BoxGeometry(0.009, r * 0.85, 0.003).translate(0, r * 0.38, 0.005),
   };
+  dialGeos.set(radius, dialGeo);
   return dialGeo;
 }
 const handMat = new MeshLambertMaterial({ color: 0x1b1d22 });
 
 interface ClockInst { kind: 'clock'; root: Group; dials: { mat: MeshLambertMaterial; hour: Mesh; minute: Mesh; k: number }[]; seed: number; lit: number }
 
-function makeClock(seed: number): ClockInst {
-  const g = dialGeometry();
+function makeClock(seed: number, spec: ClockSpec): ClockInst {
+  const g = dialGeometry(spec.r);
   const root = new Group();
   const dials: ClockInst['dials'] = [];
   // the four faces, each turned to look out of its side of the clock stage
   for (let f = 0; f < 4; f++) {
     const face = new Group();
-    face.position.set(BB.x, BB.y, BB.z);
+    face.position.set(spec.x, spec.y, spec.z);
     face.rotation.y = (f * Math.PI) / 2;
     const mat = new MeshLambertMaterial({ color: 0xf6f1e2, emissive: 0xffe0a0, emissiveIntensity: 0 });
     const disc = new Mesh(g.face, mat), ring = new Mesh(g.ring, handMat), hour = new Mesh(g.hour, handMat), minute = new Mesh(g.minute, handMat);
-    for (const m of [disc, ring, hour, minute]) { m.position.z = BB.face + 0.006; face.add(m); }
+    for (const m of [disc, ring, hour, minute]) { m.position.z = spec.face + 0.006; face.add(m); }
     root.add(face);
     dials.push({ mat, hour, minute, k: 0.85 + 0.3 * hash2(seed + f, 17) });
   }
@@ -228,13 +234,13 @@ function updateBridge(b: BridgeInst, t: number, hidden: ((seed: number, day: num
 
 type Inst = EyeInst | ClockInst | BridgeInst;
 const make = (kind: number, seed: number, river: boolean): Inst[] =>
-  kind === EYE_KIND ? [makeEye(seed)] : kind === BIGBEN_KIND ? [makeClock(seed)] : kind === BRIDGE_KIND ? [makeBridge(seed, river)] : [];
+  kind === EYE_KIND ? [makeEye(seed)] : CLOCKS.has(kind) ? [makeClock(seed, CLOCKS.get(kind)!)] : kind === BRIDGE_KIND ? [makeBridge(seed, river)] : [];
 function update(i: Inst, t: number, night: number, hidden: ((seed: number, day: number) => boolean) | null = null) {
   if (i.kind === 'eye') updateEye(i, t, night); else if (i.kind === 'clock') updateClock(i, t, night); else updateBridge(i, t, hidden);
 }
 
 /** The kinds with moving or lit parts. */
-const MOVING = new Set<number>([EYE_KIND, BIGBEN_KIND, BRIDGE_KIND]);
+const MOVING = new Set<number>([EYE_KIND, BRIDGE_KIND, ...CLOCKS.keys()]);
 
 /**
  * Every landmark with moving parts in the loaded chunks. `scanChunk` after a chunk's tiles change (`getTile` reads
