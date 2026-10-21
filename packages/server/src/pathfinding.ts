@@ -23,6 +23,7 @@ function stepOk(w: World, n: Node, nx: number, ny: number): boolean {
 
 /** Would the step (dx, ·) onto a tile with aux byte a come onto a bridge deck from the side? Decks are entered only at their ends. */
 const sideways = (a: number, dx: number) => isBridgeAux(a) && bridgeNS(a) === (dx !== 0);
+const OPP_D = [1, 0, 3, 2];
 /** A motorway nobody walks along (step dx onto aux a): any motorway tile but along an interchange's street deck (R4). */
 const walkBarred = (a: number, dx: number) => isMotorwayAux(a) && !(isDeckClassAux(a) && deckAxisStep(a, dx));
 
@@ -352,6 +353,9 @@ export function findRoute(
       const nx = x + DIRS[d][0], ny = y + DIRS[d][1];
       if (stepRuleAux(here) && !junctionStepOk(auxFn, x, y, nx, ny, din >= 0 ? DIRS[din][0] : 0, din >= 0 ? DIRS[din][1] : 0)) continue;
       if (rk !== undefined && entry >= 0 && RT!.get(tkey(nx, ny)) !== rk && !turnAllowed(w.roadRules.get(rk), entry, d, emergency)) continue;
+      // never straight back where it came from (a U-turn on the road): the closed parent already stops that everywhere
+      // but where a ruled junction's tile is two nodes, where turning round beside it would get round its signs
+      if (RT && din >= 0 && d === OPP_D[din]) continue;
       const ncx = chunkOf(nx), ncy = chunkOf(ny);
       if (ncx !== lcx || ncy !== lcy) { ls = S.slot(w, ncx, ncy); lcx = ncx; lcy = ncy; }
       if (nx === gx && ny === gy) {

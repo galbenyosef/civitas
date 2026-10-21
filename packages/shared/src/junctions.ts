@@ -269,6 +269,14 @@ export function planBigRoundabout(x: number, y: number, env: JunctionEnv): Junct
   for (let oy = 1; oy < 4; oy++) for (let ox = 1; ox < 4; ox++) tiles.push(X0 + ox, Y0 + oy, BIG_ISLAND_AUX, 0);
   return { ok: true, tiles, cost: BIG_ROUNDABOUT_COST };
 }
+/**
+ * Is (x, y) the junction where an interchange's slips meet its street (two tiles from the deck along the street, the
+ * ramp between)? Its slips give way there: no lights, whatever the owner's technology (Traffic.junction, and the
+ * client's render/signals.ts draws none).
+ */
+export function slipJunction(aux: (x: number, y: number) => number, x: number, y: number): boolean {
+  return isDeckClassAux(aux(x + 2, y)) || isDeckClassAux(aux(x - 2, y)) || isDeckClassAux(aux(x, y + 2)) || isDeckClassAux(aux(x, y - 2));
+}
 /** The 5×5 box (min corner) of the big roundabout one of whose ring or island tiles is (x, y), or null. */
 export function bigRingAt(aux: (x: number, y: number) => number, x: number, y: number): [number, number] | null {
   const a = aux(x, y);

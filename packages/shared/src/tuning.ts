@@ -74,7 +74,8 @@ export const TRAFFIC_TUNING = {
   /**
    * 1: the junction tiles of one avenue crossing work as one junction (shared/src/signals.ts junctionGroup): one
    * controller timed from the group's anchor, the lights gating only cars coming in, a four-phase cycle with protected
-   * lefts where two divided roads cross. 0: every tile its own junction, as in R3.
+   * lefts where two divided roads cross. 0: every tile its own junction, as in R3. 2: groups, but two phases everywhere
+   * (lefts permitted, giving way; for ab.ts only: the client draws the four phases).
    */
   groupSignals: 1,
   /** A four-phase group's protected left phase, as a share of its through phase (shared with the client: signals.ts leftTicks). */
@@ -93,6 +94,11 @@ export const TRAFFIC_TUNING = {
   turnLanes: 1,
   /** A mini-roundabout: an arriving car gives way to a moving car within this many tiles of the box on the arm to its left (0: first come, first served). */
   miniYield: 0.6,
+  /**
+   * A mini-roundabout's box: 1 one car in it at a time (the brief's model; it carries a third of a give-way crossroads,
+   * docs/traffic-tuning.md "Junctions"); 0 the box's own rules, movements that do not cross sharing it.
+   */
+  miniOne: 0,
   /** A 5×5 roundabout: places round the ring (both lanes) a car coming on must leave free, so it never fills and locks. */
   bigRingSpare: 6,
 

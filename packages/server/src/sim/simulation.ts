@@ -2592,7 +2592,9 @@ export class Simulation {
       if (!carStepOk(this.w.auxAt(ax, ay), this.w.auxAt(bx, by), dirBetween(ax, ay, bx, by), service)) broken = true;
     }
     if (!broken && this.w.ruleTiles.size) broken = this.breaksRules(m, Math.max(1, m.pi));
-    if (broken) { const was = m.path; this.maybeReroute(m, leg, true); if (m.path === was) return; }
+    // a way broken by a class change or a road rule: any other way at all, from the tile ahead (not avoiding the one
+    // after it, as the stuck rule does: that tile holds nobody up)
+    if (broken) { const was = m.path; this.maybeReroute(m, leg, true, true); if (m.path === was) return; }
     this.classSeen.set(m, this.classEpoch);
   }
   /**
@@ -2615,7 +2617,7 @@ export class Simulation {
     }
     return false;
   }
-  private maybeReroute(m: Mover, leg: Leg, force = false) {
+  private maybeReroute(m: Mover, leg: Leg, force = false, broken = false) {
     const w = this.w;
     let late = false;
     if (force) { if (w.tick - m.rerouted < 10) return; }
@@ -2636,7 +2638,7 @@ export class Simulation {
     const gx = m.path[(n - 1) * 2], gy = m.path[(n - 1) * 2 + 1];
     // never back through the tile behind: lanes have no U-turns (one would be drawn driving straight through the box)
     const AVOID = 1e4;
-    const cost = force
+    const cost = force && !broken
       ? (x: number, y: number) => ((x === cx && y === cy && m.pi + 1 < n - 1) || (x === ax && y === ay) ? AVOID : this.traffic.cost(x, y))
       : (x: number, y: number) => (x === ax && y === ay ? AVOID : this.traffic.cost(x, y));
     // a new way is taken only when it costs less than `worse`, so the search stops once it cannot find one that does

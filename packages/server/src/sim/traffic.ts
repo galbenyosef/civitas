@@ -5,7 +5,7 @@ import {
   CHUNK_SIZE, chunkOf, localIndex, hash2,
   isClassAux, edgeLanes, classDef, carStepOk, isMotorwayAux, isPedestrianAux, oneWayDir, auxDir, isDividedAux,
   groupPhaseOf, groupArms, inGroup, isRingClassAux, isDeckClassAux, deckAxisStep, isMiniAux, CDIRS, pelicanPhase, pelicanReady, implicitPelican,
-  type JunctionGroup,
+  slipJunction, type JunctionGroup,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
@@ -837,11 +837,11 @@ export class Traffic {
         let bar = false; // a motorway, roundabout or flyover in it: no lights
         for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) if (isMotorwayAux(this.classAux(tx, ty)) || this.junctionAux(tx, ty) || isRingClassAux(this.classAux(tx, ty))) bar = true;
         signal = !bar && signalledArms(groupArms(this.carRoadAt, g)) && this.w.ownerHas(g.x, g.y, 'signals', hasFeature);
-      } else signal = deg >= 3 && !this.junctionAux(x, y) && !isMotorwayAux(ca) && !isRingClassAux(ca) && signalledArms(signalArms(this.w.anyRoadClass ? this.carRoadAt : this.roadAt, x, y)) && this.w.ownerHas(x, y, 'signals', hasFeature);
+      } else signal = deg >= 3 && !this.junctionAux(x, y) && !isMotorwayAux(ca) && !isRingClassAux(ca) && !(this.w.anyRoadClass && slipJunction(this.auxFn, x, y)) && signalledArms(signalArms(this.w.anyRoadClass ? this.carRoadAt : this.roadAt, x, y)) && this.w.ownerHas(x, y, 'signals', hasFeature);
       const was = j?.g;
       j = j ?? { signal, ver: 0, deg, pid, ...signalTiming(x, y) };
       j.signal = signal; j.ver = this.w.techVersion; j.deg = deg; j.pid = pid; j.main = undefined;
-      j.g = g ?? undefined; j.phases = g && TT.groupSignals ? g.phases : 2; j.ctl = undefined;
+      j.g = g ?? undefined; j.phases = g && TT.groupSignals ? (TT.groupSignals === 2 ? 2 : g.phases) : 2; j.ctl = undefined;
       if (g && TT.groupSignals) { const t = signalTiming(g.x, g.y); j.offset = t.offset; j.period = t.period; j.act = undefined; }
       else if (was) { const t = signalTiming(x, y); j.offset = t.offset; j.period = t.period; j.act = undefined; }
       rc.junc[i] = j;
@@ -1770,13 +1770,14 @@ export class Traffic {
     return n <= 16 * 2 * cap - TT.bigRingSpare;
   }
   /**
-   * A mini-roundabout (R4, MINI_AUX): may m, coming in heading inD, go into its box? Only when nobody else is in it, and
-   * not while a moving car is about to come in from the arm on m's left (traffic goes round anticlockwise, so that is
+   * A mini-roundabout (R4, MINI_AUX): may m, coming in heading inD, go into its box? With miniOne only when nobody else is
+   * in it (otherwise the box's own conflict rules decide, after this), and not while a moving car is about to come in from
+   * the arm on m's left (traffic goes round anticlockwise, so that is
    * the way the cars going round come from) within miniYield of the box. Cars that are all standing give way to nobody:
    * the first to move goes, so four waiting at once never lock.
    */
   private miniGiven(m: Mover, bx: number, by: number, inD: number): boolean {
-    if (this.boxBusyExcept(bx, by, m)) return false;
+    if (TT.miniOne && this.boxBusyExcept(bx, by, m)) return false;
     if (TT.miniYield <= 0 || m.wait >= TT.minorWaitMax) return true;
     const e = RIGHT[inD], q = this.laneQ(bx - DIRS[e][0], by - DIRS[e][1], e);
     if (q) for (const c of q) {
