@@ -115,8 +115,8 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString();
-/** build-list rows in the parcel panel before "show more" */
-const SITES_FOLDED = 8;
+/** build-list rows in the parcel panel before "show all", and at most after it */
+const SITES_FOLDED = 8, SITES_MAX = 50;
 
 export interface UICallbacks {
   onTool(t: ToolId): void;
@@ -423,7 +423,7 @@ export class UI {
     if (!el) return;
     if (!sites.length) { el.innerHTML = ''; return; }
     // a long list keeps the panel short: the first few, and "all" on a click (playtest 8df08a47)
-    const shown = this.sitesAll ? 25 : SITES_FOLDED;
+    const shown = Math.min(sites.length, this.sitesAll ? SITES_MAX : SITES_FOLDED);
     const rows = sites.slice(0, shown).map((s) => {
       const pct = Math.round((100 * s.done) / s.total);
       const what = isCivicId(s.kind) ? KIND_NAMES[s.kind] : `${KIND_NAMES[s.kind]} → L${s.target}`;
@@ -438,7 +438,7 @@ export class UI {
         <span class="n">${s.builders ? `${s.builders}👷` : ''}</span>
         <span class="ctl">${ctl}</span></div>`;
     }).join('');
-    const more = sites.length > SITES_FOLDED ? `<a class="sitesmore" href="#">${this.sitesAll ? 'show fewer' : `show ${Math.min(25, sites.length) - SITES_FOLDED} more`}</a>` : '';
+    const more = sites.length > SITES_FOLDED ? `<a class="sitesmore" href="#">${this.sitesAll ? 'show fewer' : sites.length <= SITES_MAX ? `show all ${sites.length}` : `show ${SITES_MAX - SITES_FOLDED} more`}</a>` : '';
     el.innerHTML = `<div class="buildhead">Build list <span>${sites.length}${sites.length > shown ? `, showing ${shown}` : ''}</span></div>${rows}${more}`;
     el.querySelector<HTMLElement>('.sitesmore')?.addEventListener('click', (e) => { e.preventDefault(); this.sitesAll = !this.sitesAll; this.showSites(parcelId, sites, mine); });
     el.querySelectorAll<HTMLButtonElement>('button[data-p]').forEach((b) => {
