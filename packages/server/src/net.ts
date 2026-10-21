@@ -12,7 +12,7 @@ import {
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
   isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction, Cause, nameFor,
   planRoad, isRoadClass, ROAD_CLASSES, CLASS_JUNCTION, describeDemolition, ROAD_DRAG_MAX, ROAD_UNDO_MS, MSG_ROAD_MONEY, cleanStreetName, type RoadEnv,
-  STREET_RULE_BY_ID, StreetRule, isStreetRuleId, busLaneProblem, busLaneOk, GATEWAY_OF, MOTORWAY_KIND, VISITOR_LIMIT_SHARE,
+  STREET_RULE_BY_ID, StreetRule, isStreetRuleId, busLaneProblem, GATEWAY_OF, MOTORWAY_KIND, VISITOR_LIMIT_SHARE,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -903,7 +903,7 @@ export class Net {
     }
     if (!ok.length) return this.toast(c, why ?? 'Click a street');
     if (on && def.bit === StreetRule.BusLane) { const no = busLaneProblem(this.ruleEnv, ok); if (no) return this.toast(c, no); }
-    const fresh = on ? ok.filter(([x, y]) => !(this.w.streetAt(x, y) & def.bit) && (def.bit !== StreetRule.BusLane || busLaneOk(this.w.auxAt(x, y)))) : ok.filter(([x, y]) => this.w.streetAt(x, y) & def.bit);
+    const fresh = on ? ok.filter(([x, y]) => !(this.w.streetAt(x, y) & def.bit) && (def.bit !== StreetRule.BusLane || this.w.busLaneTile(x, y))) : ok.filter(([x, y]) => this.w.streetAt(x, y) & def.bit);
     if (!fresh.length) return this.toast(c, on ? `That street has ${def.words} already` : `There is no ${def.title.toLowerCase()} there`);
     const cost = on ? fresh.length * def.cost : 0;
     if (cost && this.w.spendable(p) < cost) return this.toast(c, this.w.shortOf(p, cost, `for ${def.words}`));

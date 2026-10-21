@@ -716,7 +716,7 @@ export class World {
     for (const [x, y] of tiles) {
       const t = this.peekTile(x, y);
       if (t === undefined || !isRoad(t)) continue;
-      if (on && bit === StreetRule.BusLane && !busLaneOk(this.auxAt(x, y))) continue;
+      if (on && bit === StreetRule.BusLane && !this.busLaneTile(x, y)) continue;
       const k = tkey(x, y), r = this.roadRules.get(k), st = r?.st ?? 0, nst = on ? st | bit : st & ~bit;
       if (nst === st) continue;
       const nr: RoadRule = { ...(r ?? {}) };
@@ -736,6 +736,13 @@ export class World {
   }
   /** gateways with the visitor limit on (records with `gw`): Simulation.dispatch looks only when there are some */
   gatewayLimits = 0;
+  /** May a bus lane go on road tile (x, y)? Two lanes one way (busLaneOk), and not a junction (it stops short of one). */
+  busLaneTile(x: number, y: number): boolean {
+    if (!busLaneOk(this.auxAt(x, y))) return false;
+    let n = 0;
+    for (const [dx, dy] of DIRS) { const t = this.peekTile(x + dx, y + dy); if (t !== undefined && isRoad(t)) n++; }
+    return n <= 2;
+  }
   private indexStreetRules() {
     this.streetBits.clear();
     let any = 0, gw = 0;
@@ -780,7 +787,7 @@ export class World {
         // a street rule goes with its road tile; a bus lane with the two lanes one way it needs
         const t = this.peekTile(ax, ay);
         if (t === undefined || !isRoad(t)) { delete r.st; changed = true; streets = true; }
-        else if (r.st & StreetRule.BusLane && !busLaneOk(this.auxAt(ax, ay))) { r.st &= ~StreetRule.BusLane; if (!r.st) delete r.st; changed = true; streets = true; }
+        else if (r.st & StreetRule.BusLane && !this.busLaneTile(ax, ay)) { r.st &= ~StreetRule.BusLane; if (!r.st) delete r.st; changed = true; streets = true; }
       }
       if (ruleEmpty(r)) this.roadRules.delete(k);
     }

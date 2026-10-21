@@ -261,17 +261,31 @@ export class TrafficControl {
   probeBan(tiles: [number, number][]): { before: number; after: number } {
     const w = this.w;
     if (tiles.length < 2) return { before: -1, after: -1 };
-    const [ax, ay] = tiles[0], [bx, by] = tiles[tiles.length - 1];
-    const ends: [number, number][] = [];
-    for (const [ex, ey, ox, oy] of [[ax, ay, bx, by], [bx, by, ax, ay]] as const) {
-      // the road beyond the end, away from the other end
-      const dx = Math.sign(ex - ox), dy = Math.sign(ey - oy), nx = ex + dx, ny = ey + dy, t = w.peekTile(nx, ny);
-      ends.push(t !== undefined && isRoad(t) ? [nx, ny] : [ex, ey]);
+    // the first straight run of the tiles (a click on an avenue sends its twin row after it)
+    let n = 1;
+    while (n < tiles.length && Math.abs(tiles[n][0] - tiles[n - 1][0]) + Math.abs(tiles[n][1] - tiles[n - 1][1]) === 1) n++;
+    const line = tiles.slice(0, n);
+    // a lorry passing through: from the first junction along it to the last (the street between them closed to it), or,
+    // with one junction or none, from the road beyond one end to the road beyond the other
+    const junc: number[] = [];
+    line.forEach(([x, y], i) => { if (this.traffic.degreeOf(x, y) >= 3) junc.push(i); });
+    let ends: [number, number][], walls: [number, number][];
+    if (junc.length >= 2 && junc.at(-1)! - junc[0] >= 2) {
+      ends = [line[junc[0]], line[junc.at(-1)!]];
+      walls = line.slice(junc[0] + 1, junc.at(-1)!);
+    } else {
+      const [ax, ay] = line[0], [bx, by] = line[line.length - 1];
+      ends = [];
+      for (const [ex, ey, ox, oy] of [[ax, ay, bx, by], [bx, by, ax, ay]] as const) {
+        const dx = Math.sign(ex - ox), dy = Math.sign(ey - oy), nx = ex + dx, ny = ey + dy, t = w.peekTile(nx, ny);
+        ends.push(t !== undefined && isRoad(t) ? [nx, ny] : [ex, ey]);
+      }
+      walls = line.filter(([x, y]) => !ends.some(([ex, ey]) => ex === x && ey === y));
     }
     const [s, g] = ends;
     // before: a lorry's way with no ban at all; after: with these tiles (and every ban there is) closed to it
     const before = findRoute(w, s[0], s[1], g[0], g[1], this.freightCost, 0.4, 6000);
-    const after = findRoute(w, s[0], s[1], g[0], g[1], this.freightCost, 0.4, 6000, -1, Infinity, false, false, new Set(tiles.map(([x, y]) => tkey(x, y))));
+    const after = findRoute(w, s[0], s[1], g[0], g[1], this.freightCost, 0.4, 6000, -1, Infinity, false, false, new Set(walls.map(([x, y]) => tkey(x, y))));
     return { before: before ? Math.round(before.cost) : -1, after: after ? Math.round(after.cost) : -1 };
   }
 }
