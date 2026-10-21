@@ -772,21 +772,24 @@ Six seeds (1-6), 08:00, 1,500 ticks; give-ups are the window's, means over the s
 | Variant | Lights: give-ups, mainRoad 0 → 1 | Give-way everywhere (`noSignals=1`): give-ups, mainRoad 0 → 1 | Drivers' commute (ticks) | Car-car overlaps |
 | --- | --- | --- | --- | --- |
 | plain (doubled edge streets) | 431 → 445 (+14 ± 32) | 378 → 388 (+10 ± 20) | 97 | 0 |
-| `avenues=2` (edge pairs as avenues) | 508 → 461 (**−46 ± 32**) | 443 → 420 (−23 ± 51) | 103 | 0 |
+| `avenues=2` (edge pairs as avenues) | 436 → 467 (+31) | 443 → 420 (−23 ± 51) | 105 | 0 |
 | `avenues=1` (and the middle streets widened) | 566 → 571 (+4 ± 7) | | 125 | 0 |
 | `oneway=1` (inner streets one-way) | 621 → 603 (−18 ± 14) | 599 → 609 (+10 ± 24) | 179 | 0 |
 
 Reading it:
 
-- **mainRoad with real hierarchy** (`Traffic.roadRank` is the class rank now) helps a little on the avenue grid with
-  lights (about a tenth fewer give-ups, 1.4 standard errors) and on the one-way grid with lights; with give-way
-  everywhere, and on the plain grid, it is within the noise, as it was before classes. It stays off: the gain is not
-  yet clear of the noise, and R4 (turn lanes and signal timing on avenues) changes what an avenue junction is.
-- **An avenue does not beat the two streets it replaces on this grid.** The doubled edge road was already four lanes
-  (two street tiles); as an avenue it has the same lanes, but each carriageway goes one way, so a lot on the far side
-  is reached by going on to the next junction and crossing, and a car crossing the reservation waits in the first
-  carriageway for a gap in the second (the reservation stores no car). On a grid with junctions every five tiles that
-  costs more than the main-road priority wins. Widening the middle streets (`avenues=1`) loses a row of lots and
+- **One controller for an avenue's crossing** (the two junction tiles lit as one junction, one timing, a car already
+  inside not stopped again at the second half: `signalSite`) took the avenue grid from 508 give-ups to 436, level
+  with the doubled streets it replaces (431). Before it, each half had its own lights out of step, and a car crossing
+  waited at the second half's red in the first half's box.
+- **mainRoad with real hierarchy** (`Traffic.roadRank` is the class rank now) is within the noise or worse: +31 on the
+  avenue grid with lights (it was −46 with each half on its own lights, where priority was making up for them), −18
+  ± 14 on the one-way grid with lights, and within the noise with give-way everywhere and on the plain grid. It stays
+  off; R4 (turn lanes and signal timing on avenues) changes what an avenue junction is.
+- **An avenue matches, not beats, the two streets it replaces on this grid.** The doubled edge road was already four
+  lanes (two street tiles); as an avenue it has the same lanes, but each carriageway goes one way, so a lot on the far
+  side is reached by going on to the next junction and crossing (drivers' commute 105 ticks against 97), and the
+  reservation stores no car waiting to cross. Widening the middle streets (`avenues=1`) loses a row of lots and
   lengthens commutes. Where an avenue replaces a single street on a through route it carries more (the corridor bench
   below). R4's turn lanes and wider reservations are where an avenue grid should start to pay.
 - **One-way grids lengthen trips** (drivers' commute 179 ticks against 97): in a 22-tile district most trips are

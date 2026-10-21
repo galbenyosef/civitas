@@ -1,5 +1,5 @@
 import { InstancedMesh, Group, Matrix4, Quaternion, Vector3, Color, SphereGeometry, MeshBasicMaterial, MeshLambertMaterial, DynamicDrawUsage, AdditiveBlending, type BufferGeometry } from 'three';
-import { CHUNK_SIZE, isRoad, isJunctionAux, hash2, signalTiming, signalPhaseOf, signalArms, signalledArms, ARM_STEPS, type SignalTiming, type SignalPhase } from '@msimcity/shared';
+import { CHUNK_SIZE, isRoad, isJunctionAux, hash2, signalTiming, signalPhaseOf, signalArms, signalledArms, signalSite, isPedestrianAux, isMotorwayAux, ARM_STEPS, type SignalTiming, type SignalPhase } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Kit } from './kit';
 import { sceneUniforms } from './materials';
@@ -40,7 +40,7 @@ function poleGeometry(): BufferGeometry {
  */
 export class TrafficLights {
   group = new Group();
-  private cands = new Map<string, number[]>(); // chunk key -> x, y, armMask per junction tile
+  private cands = new Map<string, number[]>(); // chunk key -> x, y, armMask, timing x, timing y per junction tile
   private heads: Head[] = [];
   private poles: InstancedMesh;
   private lit: InstancedMesh[];
@@ -78,15 +78,19 @@ export class TrafficLights {
   }
 
   /** Record the junction tiles of a chunk (call after its tiles change). */
-  scanChunk(key: string, chunk: ClientChunk, getTile: (x: number, y: number) => number | undefined) {
+  scanChunk(key: string, chunk: ClientChunk, getTile: (x: number, y: number) => number | undefined, auxAt: (x: number, y: number) => number = () => 0) {
     const out: number[] = [];
     const x0 = chunk.cx * CHUNK_SIZE, z0 = chunk.cy * CHUNK_SIZE;
-    const road = (x: number, z: number) => { const t = getTile(x, z); return t !== undefined && isRoad(t); };
+    // a road cars use (a pedestrian street is no approach), as the server counts arms (sim/traffic.ts carRoadAt)
+    const road = (x: number, z: number) => { const t = getTile(x, z); return t !== undefined && isRoad(t) && !isPedestrianAux(auxAt(x, z)); };
+    const arms = (x: number, z: number) => signalArms(road, x, z); // the twin lane of a wide road is not an approach
     for (let i = 0; i < chunk.tiles.length; i++) {
       if (!isRoad(chunk.tiles[i]) || isJunctionAux(chunk.aux[i])) continue; // roundabouts and flyovers have no lights
       const x = x0 + (i % CHUNK_SIZE), z = z0 + Math.floor(i / CHUNK_SIZE);
-      const mask = signalArms(road, x, z); // the twin lane of a wide road is not an approach
-      if (signalledArms(mask)) out.push(x, z, mask);
+      // a divided road's crossing is one junction with one timing (shared roadclass.ts signalSite); motorways have no lights
+      if (isMotorwayAux(chunk.aux[i])) continue;
+      const site = signalSite(x, z, road, auxAt, arms, signalledArms);
+      if (site.signalled && site.arms) out.push(x, z, site.arms, site.tx, site.ty);
     }
     if (out.length) this.cands.set(key, out); else this.cands.delete(key);
     this.dirty = true;
@@ -123,10 +127,10 @@ export class TrafficLights {
     this.heads = [];
     const q = new Quaternion(), p = new Vector3(), s = new Vector3(), up = new Vector3(0, 1, 0);
     for (const list of this.cands.values()) {
-      for (let i = 0; i < list.length; i += 3) {
+      for (let i = 0; i < list.length; i += 5) {
         const x = list[i], z = list[i + 1], mask = list[i + 2];
         if (!signalled(x, z)) continue;
-        const timing = signalTiming(x, z);
+        const timing = signalTiming(list[i + 3], list[i + 4]);
         for (const [bit, ax, az] of ARMS) {
           if (!(mask & bit)) continue;
           // cars on this arm drive toward the centre: heading h = -arm; their right is (-hz, hx)

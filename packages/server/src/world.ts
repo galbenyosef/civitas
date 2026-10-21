@@ -3,7 +3,7 @@ import {
   capacity, chunkKey, tileKey, parseKey, localIndex, chunkOf, makeTerrainSampler, hash2, CAR_OWNERSHIP, CAR_OWNERSHIP_OFFICE,
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
-  isClassAux, isDividedAux, divJunction, CLASS_JUNCTION, noFrontageAux, MOTORWAY_KIND, classDef, auxClass, ROAD_UPKEEP,
+  isClassAux, isDividedAux, divJunction, CLASS_JUNCTION, twinTileOf, auxDir, classByte, RoadCls, noFrontageAux, MOTORWAY_KIND, classDef, auxClass, ROAD_UPKEEP,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
   type LedgerCat, type LedgerDTO, type FinanceDTO, ECONOMY_TUNING, spendableMoney, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate, type EduFields, hasPolicy, type PolicyId,
 } from '@msimcity/shared';
@@ -388,7 +388,7 @@ export class World {
     if (c.aux[i] && isStructureAux(c.aux[i]) && this.structureWrite(x, y, packed)) return;
     if (c.aux[i] && isJunctionAux(c.aux[i]) && !isRoad(packed)) this.removeJunction(x, y); // a ring or flyover tile dug up: the junction goes back to a crossroads
     if (c.aux[i] && isBridgeAux(c.aux[i]) && !isRoad(packed)) this.setAux(x, y, 0); // a bridge deck tile taken away: open water again
-    if (c.aux[i] && isClassAux(c.aux[i]) && !isRoad(packed)) this.setAux(x, y, 0); // a road of a class dug up: its class goes with it
+    if (c.aux[i] && isClassAux(c.aux[i]) && !isRoad(packed)) { const was = c.aux[i]; this.setAux(x, y, 0); this.orphanTwin(x, y, was); } // a road of a class dug up: its class goes with it
     if (c.tiles[i] === packed) return;
     const roadChanged = isRoad(c.tiles[i]) !== isRoad(packed);
     if (c.sub[i] && sub === undefined && (zoneOf(packed) !== zoneOf(c.tiles[i]) || isRoad(packed))) this.setSub(x, y, 0);
@@ -408,17 +408,17 @@ export class World {
   setRoadClass(x: number, y: number, byte: number): boolean {
     const t = this.peekTile(x, y), a = this.auxAt(x, y);
     if (t === undefined || !isRoad(t) || (a && !isClassAux(a))) return false;
-    if (a !== byte) { this.setAux(x, y, byte); this.onTileChanged?.(x, y); this.onRoadClass?.(x, y); }
+    if (a !== byte) { this.setAux(x, y, byte); this.onTileChanged?.(x, y); this.onRoadClass?.(x, y); if (!isDividedAux(byte)) this.orphanTwin(x, y, a); }
     if (byte) { this.minRouteCost = Math.min(this.minRouteCost, classDef(auxClass(byte)).routeCost); this.anyRoadClass = true; }
     this.refreshRoadFlags(x, y);
     return true;
   }
   /**
-   * The junction flag of every divided road tile in the 3×3 round (x, y), worked out again (roadclass.ts divJunction:
+   * The junction flag of every divided road tile in the 5×5 round (x, y), worked out again (roadclass.ts divJunction:
    * where a road crosses it, it turns a corner or ends). Called round any change of a road tile or its class.
    */
   refreshRoadFlags(x: number, y: number) {
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
       const tx = x + dx, ty = y + dy, a = this.auxAt(tx, ty);
       if (!isDividedAux(a)) continue;
       const t = this.peekTile(tx, ty);
@@ -426,6 +426,18 @@ export class World {
       const v = (a & ~CLASS_JUNCTION) | (divJunction(tx, ty, this.roadFn, this.auxFn) ? CLASS_JUNCTION : 0);
       if (v !== a) { this.setAux(tx, ty, v); this.onTileChanged?.(tx, ty); this.onRoadClass?.(tx, ty); }
     }
+  }
+  /**
+   * A divided road's tile (x, y), whose byte was `was`, stopped being one (dug up, or made another class): the tile of
+   * the other carriageway beside it (its twin) is left a one-way street going its own way, not half an avenue.
+   */
+  private orphanTwin(x: number, y: number, was: number) {
+    if (!isDividedAux(was)) return;
+    const [tx, ty] = twinTileOf(x, y, was), b = this.auxAt(tx, ty);
+    if (!isDividedAux(b) || (auxDir(b) < 2) !== (auxDir(was) < 2) || auxDir(b) === auxDir(was)) return;
+    const [bx, by] = twinTileOf(tx, ty, b);
+    if (bx !== x || by !== y) return; // its twin is another tile
+    this.setRoadClass(tx, ty, classByte(RoadCls.OneWay, auxDir(b)));
   }
   /** Told when a road tile's class byte or junction flag changes (the simulation has drivers check their way: Simulation.recheckClasses). */
   onRoadClass: ((x: number, y: number) => void) | null = null;

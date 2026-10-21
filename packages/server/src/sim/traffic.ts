@@ -3,7 +3,7 @@ import {
   VehicleClass, BIKE_CLASS, isRoad, hasFeature, signalTiming, signalPhaseOf, signalArms, signalledArms, type SignalPhase,
   isJunctionAux, isRingAux, isFlyoverAux, islandOf, ringPos, isArmPos, RING_POS, isCrossing, isBridgeAux, isDeck, bridgeStyle, BridgeStyle, basculeBarrierAt,
   CHUNK_SIZE, chunkOf, localIndex, hash2,
-  isClassAux, edgeLanes, classDef, carStepOk, isMotorwayAux, isPedestrianAux, oneWayDir, auxDir, isDividedAux,
+  isClassAux, edgeLanes, classDef, carStepOk, auxJunction, signalSite, isMotorwayAux, isPedestrianAux, oneWayDir, auxDir, isDividedAux,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
@@ -121,6 +121,8 @@ interface RoadChunk {
 }
 interface Junction {
   signal: boolean; ver: number; deg: number; pid: number; offset: number; period: number; act?: Actuation;
+  /** one tile of a divided road's crossing (roadclass.ts signalSite): the tile its timing is the crossing's, else absent */
+  gx?: number; gy?: number;
   /** the main road's axis (Traffic.mainAxis) and the tick it was worked out */
   main?: number; mainAt?: number;
 }
@@ -663,6 +665,7 @@ export class Traffic {
   }
   /** A road cars may use (a pedestrian street is not one, for the signals' arms). */
   private carRoadAt = (x: number, y: number) => this.isRoadAt(x, y) && !isPedestrianAux(this.classAux(x, y));
+  private armsFn = (x: number, y: number) => signalArms(this.carRoadAt, x, y);
   /**
    * The lane m takes across the edge from path node k to k + 1 (a strand, Mover.s1), `prev` being the lane it crossed
    * the edge before that in. A single-lane edge: 0. Two lanes (a one-way tile, roadclass.ts edgeLanes): the lane for its
@@ -773,8 +776,12 @@ export class Traffic {
     const deg = this.degreeOf(x, y), pid = this.w.parcelIdAt(x, y);
     if (!j || j.ver !== this.w.techVersion || j.deg !== deg || j.pid !== pid) {
       const ca = this.w.anyRoadClass ? this.classAux(x, y) : 0;
-      const signal = deg >= 3 && !this.junctionAux(x, y) && !isMotorwayAux(ca) && signalledArms(signalArms(this.w.anyRoadClass ? this.carRoadAt : this.roadAt, x, y)) && this.w.ownerHas(x, y, 'signals', hasFeature);
+      // a divided road's crossing is one junction (roadclass.ts signalSite): its arms as a whole, one timing for its tiles
+      const site = ca && auxJunction(ca) ? signalSite(x, y, this.carRoadAt, this.auxFn, this.armsFn, signalledArms) : null;
+      const lit = site ? site.signalled : signalledArms(signalArms(this.w.anyRoadClass ? this.carRoadAt : this.roadAt, x, y));
+      const signal = deg >= 3 && !this.junctionAux(x, y) && !isMotorwayAux(ca) && lit && this.w.ownerHas(x, y, 'signals', hasFeature);
       j = j ?? { signal, ver: 0, deg, pid, ...signalTiming(x, y) };
+      if (site?.group) { Object.assign(j, signalTiming(site.tx, site.ty)); j.gx = site.tx; j.gy = site.ty; } else if (j.gx !== undefined) { Object.assign(j, signalTiming(x, y)); j.gx = j.gy = undefined; }
       j.signal = signal; j.ver = this.w.techVersion; j.deg = deg; j.pid = pid; j.main = undefined;
       rc.junc[i] = j;
     }
@@ -1421,7 +1428,9 @@ export class Traffic {
       if (tail && tail.prog < this.clearAt(tail) + MIN_GAP && !(TT.platoon && (TT.platoon === 1 || this.junction(bx, by).signal) && this.platoonBehind(m, tail, inD))) return false;
     }
     if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
-    const signal = deg >= 3 && this.junction(bx, by).signal && !trapped;
+    const jb = deg >= 3 ? this.junction(bx, by) : null;
+    // inside a divided road's crossing, from one of its tiles to another, the car is already through the lights
+    const signal = !!jb && jb.signal && !trapped && !(jb.gx !== undefined && this.degreeOf(ax, ay) >= 3 && this.junction(ax, ay).gx === jb.gx && this.junction(ax, ay).gy === jb.gy);
     const walkers = trapped ? 0 : this.crossingsAt(bx, by);
     if (walkers && ((!signal && !isRingAux(ja)) || (walkers & movementMask(inD, outD)))) {
       // at lights only the crossings this movement drives over hold it (straight through on green passes people crossing the red road);

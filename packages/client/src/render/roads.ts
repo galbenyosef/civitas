@@ -6,7 +6,7 @@ import {
   CHUNK_SIZE, Terrain, hash2, isRoad, terrainOf, signalArms, armCount, signalledArms, isMarkedJunction, mouthControl, mouthCrossing,
   boxJunction, leafySide, streetTreeAt, midZebraAt, MouthCrossing, MouthControl, isRingAux, ringPos, isArmPos, RING_POS, isFlyoverAux, deckEW,
   isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, isRailAux, railMask, streetRun, streetLine, MOTORWAY_KIND,
-  auxClass, oneWayDir, isDividedAux, isMotorwayAux, auxJunction, RoadCls,
+  auxClass, oneWayDir, isDividedAux, isMotorwayAux, auxJunction, RoadCls, signalSite,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Geo, buildTile, buildRing, surfaceY, ringSurfaceY, STREET, SIDE, CLASS_PROFILES, type RoadTile, type RoadProfile, type ClassInfo } from './roadGeo';
@@ -337,8 +337,10 @@ export class RoadLayer {
   private isSignalled(x: number, z: number): boolean {
     const c = this.ctx!;
     const road = this.roadFn;
-    return signalledArms(signalArms(road, x, z)) && c.signalled(x, z);
+    // a divided road's crossing is one junction, lit or not as a whole (shared roadclass.ts signalSite, as the server and signals.ts)
+    return signalSite(x, z, road, c.aux, this.armsFn, signalledArms).signalled && c.signalled(x, z);
   }
+  private armsFn = (x: number, z: number) => signalArms(this.roadFn, x, z);
   /** road for shapes: an unloaded neighbour is taken as road (the street carries on), as the ground cells do */
   private roadFn = (x: number, z: number) => { const t = this.ctx!.tile(x, z); return t === undefined ? true : isRoad(t); };
 
