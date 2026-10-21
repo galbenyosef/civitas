@@ -5,7 +5,7 @@ import {
 import {
   CHUNK_SIZE, Terrain, hash2, isRoad, terrainOf, signalArms, armCount, signalledArms, isMarkedJunction, mouthControl, mouthCrossing,
   boxJunction, leafySide, streetTreeAt, midZebraAt, MouthCrossing, MouthControl, isRingAux, ringPos, isArmPos, RING_POS, isFlyoverAux, deckEW,
-  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, isRailAux, railMask,
+  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, isRailAux, railMask, streetRun, streetLine,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Geo, buildTile, buildRing, surfaceY, ringSurfaceY, STREET, SIDE, type RoadTile, type RoadProfile } from './roadGeo';
@@ -55,10 +55,14 @@ export const profileOf = (_tile: number, _aux: number): RoadProfile => previewPr
 
 const F = { Post0: 0, Post1: 1, Post2: 2, Lens0: 3, Lens1: 4, Lens2: 5, Trunk: 6, Crown: 7, Column: 8, Bollard: 9, Bin: 10, Sign: 11, Beacon: 12, Globe: 13 } as const;
 const F_COUNT = 14;
-interface Furn { f: number; m: Matrix4; c: Color; lamp?: [number, number, number, number] }
+interface Furn { f: number; m: Matrix4; c: Color; lamp?: [number, number, number, number]; street?: string }
 
 /** A name plate's post (R2 draws the street's name on it): the plate's centre, its yaw (it faces along +z turned by yaw) and the street tile it names. */
-export interface NamePlate { x: number; y: number; z: number; yaw: number; street: [number, number] }
+/**
+ * A name plate's post (R2's street names, shared/src/streets.ts, go on it; drawn blank until then): the plate's centre,
+ * its yaw (it faces along +z turned by yaw) and the street it names, as streetLine(streetRun(...)) keys it.
+ */
+export interface NamePlate { x: number; y: number; z: number; yaw: number; street: string }
 
 const LAMP_H = [0.5, 0.56, 0.38], LAMP_REACH = [0.13, 0.15, 0];
 function postGeometry(design: number) {
@@ -646,6 +650,7 @@ export class RoadLayer {
       const lx = dx * 0.36 + rx * e * 0.468, lz = dz * 0.36 + rz * e * 0.468;
       const yaw = Math.atan2(rx * e, rz * e) + Math.PI / 2;
       put(F.Sign, lx, lz, yaw, 1, new Color(1, 1, 1));
+      out[out.length - 1].street = streetLine(streetRun(t.x, t.z, s === 0 || s === 2, this.roadFn));
     }
     return out;
   }
@@ -676,7 +681,7 @@ export class RoadLayer {
         if (f.f === F.Sign) {
           f.m.decompose(sign, sq, ss);
           const yaw = 2 * Math.atan2(sq.y, sq.w);
-          this.plates.push({ x: sign.x, y: sign.y + 0.053, z: sign.z, yaw, street: [Math.floor(sign.x), Math.floor(sign.z)] });
+          this.plates.push({ x: sign.x, y: sign.y + 0.053, z: sign.z, yaw, street: f.street ?? '' });
         }
       }
     }

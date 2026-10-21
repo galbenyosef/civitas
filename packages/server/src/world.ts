@@ -15,6 +15,7 @@ import type { NewsSave } from './sim/news';
 import type { DeathSave } from './sim/death';
 import type { UtilitiesSave } from '@msimcity/shared';
 
+import { StreetBook } from './streets';
 export interface Chunk {
   cx: number; cy: number;
   tiles: Uint16Array;
@@ -94,6 +95,8 @@ export interface Mover {
   len: number;                          // vehicle length in tiles
   inDir: number;                        // direction the current lane was entered from (for turn geometry)
   committed: boolean;                   // past the stop line, crossing into the next tile
+  /** lane progress moved last tick: the speed car following starts from (TRAFFIC_TUNING.follow); 0 or absent when it pulls out or a save loads */
+  v?: number;
   priority: boolean;                    // emergency vehicles ignore signals
   /** a fire engine on its way to a fire (sim/fires.ts): it pulls out into its forecourt to wait for a gap, and drives on down the middle of the road when traffic stops it */
   call?: boolean;
@@ -293,6 +296,8 @@ export class World {
   underVersion = 0;
   /** station names by tileKey of the entrance (docs/underground.md); persisted (snapshot v8) */
   stopNames = new Map<string, string>();
+  /** street names (streets.ts, docs/roads.md "Street names"): persisted (an optional snapshot field) */
+  streets: StreetBook = new StreetBook(this);
   /**
    * Where bodies of water leave a scenario world (docs/boats.md 2.3): boats come and go there. Written by the seeder,
    * persisted (an optional snapshot field). Empty in a procedural world, where open water gets its own offing.

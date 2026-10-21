@@ -1,4 +1,4 @@
-import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, KIND_ID, isMultiTile, trackDragPath, BRIDGE_MAX_SPAN, type KindToolId } from '@msimcity/shared';
+import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, KIND_ID, isMultiTile, trackDragPath, roadDragPath, snapRoadEnd, type KindToolId, type RoadShape } from '@msimcity/shared';
 import type { CameraRig } from './camera';
 import { Vector3 } from 'three';
 import { pinchFactor, readScrollMode, writeScrollMode, scrollZoom, wheelPixels, type ScrollMode } from './gestures';
@@ -43,9 +43,15 @@ export interface InputCallbacks {
   onContext?(px: number, py: number, cx: number, cy: number): void;
   /** keys that are not tools or camera (e.g. overlays, panels) */
   onKey(code: string): void;
+  /** a road drag let go (input.ts roadPath): the tiles in order and the shape; the handler asks about buildings in the way and sends it */
+  onRoad?(tiles: [number, number][], shape: RoadShape): void;
+  /** Ctrl/Cmd+Z with the road tool: take back the last road drag */
+  onUndoRoad?(): void;
+  /** whether a tile is road, for snapping a road drag's end (unloaded tiles are not) */
+  isRoad?(x: number, y: number): boolean;
   /** a shortcut key of a size ladder (client/src/picker.ts): the size to select instead (the last one used), or undefined */
   ladderKey?(tool: ToolId): ToolId | undefined;
-  /** whether a tile is water (the road tool bridges it: see Input.crossing); unloaded tiles count as dry */
+  /** whether a tile is water (a road drag does not snap across it); unloaded tiles count as dry */
   isWater?(x: number, y: number): boolean;
   /** the world map (mapmode.ts): while it is up it takes the left button, the wheel zooms about the cursor, and the view does not turn */
   map?: MapInput;
@@ -58,13 +64,6 @@ export interface MapInput {
   up(px: number, py: number): void;
   hover(px: number, py: number): void;
 }
-
-/**
- * A road drag out over water (shared/src/bridges.ts): `from` is the last dry tile before it, (dx, dy) the way the
- * bridge goes. Nothing is sent while the cursor is over the water; once it reaches dry land on the far side, in line,
- * the whole straight run and the far bank go in one message. Released over the water, or turned back, nothing is built.
- */
-export interface Crossing { from: [number, number]; dx: number; dy: number }
 
 /** Mouse/keyboard handling: camera control, painting tools and land selection. */
 export class Input {
@@ -88,9 +87,17 @@ export class Input {
   private orbiting = false;
   private pivot = new Vector3();
   painting = false;
-  /** a road drag out over the water, until it reaches the far bank */
-  crossing: Crossing | null = null;
-  private lastDry: [number, number] | null = null;
+  /**
+   * The road being dragged (shared/src/roadtool.ts roadDragPath): straight, or one corner the way the drag first went;
+   * holding Shift during the drag makes it a loop round the rectangle. Nothing is sent until the button comes up; Esc
+   * lets go of it. The end snaps onto a road one tile beyond it.
+   */
+  roadPath: [number, number][] | null = null;
+  roadShape: RoadShape = 'line';
+  private roadStart: [number, number] | null = null;
+  private roadEnd: [number, number] | null = null;
+  /** the axis the road drag first left its start along (undefined until it moves, and again when it comes back) */
+  private roadFirstX: boolean | undefined;
   private painted = new Set<string>();
   private lastPaint: [number, number] | null = null;
   private buyStart: [number, number] | null = null;
@@ -126,7 +133,10 @@ export class Input {
     canvas.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
     canvas.addEventListener('auxclick', (e) => e.preventDefault());
     window.addEventListener('keydown', this.keydown);
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.key === 'Shift' && this.roadStart) { this.roadShape = 'line'; this.layRoad(); this.cb.onHover(this.hover); } // a loop goes back to a line
+    });
     window.addEventListener('blur', () => this.keys.clear());
   }
 
@@ -143,7 +153,7 @@ export class Input {
     this.buyStart = null; this.buyRect = null; this.painting = false;
     this.runwayStart = null; this.runwayLine = null;
     this.railStart = null; this.railPath = null;
-    this.crossing = null; this.lastDry = null;
+    this.roadStart = null; this.roadPath = null;
     this.cb.onToolChange(t);
   }
 
@@ -223,7 +233,8 @@ export class Input {
     if (this.tool === 'runway') { this.runwayStart = tile; this.runwayLine = [tile]; return; }
     // track and trunk links (docs/utilities.md 4.2) drag the same way: along the longer axis, then one corner
     if (this.tool === 'rail' || this.tool === 'pylons' || this.tool === 'cable') { this.railStart = tile; this.railPath = [tile]; return; }
-    this.painting = true; this.painted.clear(); this.lastPaint = null; this.crossing = null; this.lastDry = null;
+    if (this.tool === 'road') { this.roadStart = tile; this.roadEnd = tile; this.roadFirstX = undefined; this.roadShape = 'line'; this.roadPath = [tile]; return; } // Shift at the press pans, as with any tool; held during the drag it makes a loop
+    this.painting = true; this.painted.clear(); this.lastPaint = null;
     this.paint(tile);
   };
 
@@ -254,16 +265,13 @@ export class Input {
       this.runwayLine = Array.from({ length: n + 1 }, (_, i): [number, number] => (alongX ? [sx + d * i, sy] : [sx, sy + d * i]));
     }
     if (tile && this.railStart) this.railPath = trackDragPath(this.railStart, tile);
+    if (tile && this.roadStart) { this.roadEnd = tile; this.roadShape = e.shiftKey ? 'loop' : 'line'; this.layRoad(); }
     if (!tile !== !this.hover || (tile && this.hover && (tile[0] !== this.hover[0] || tile[1] !== this.hover[1]))) {
       this.hover = tile;
       this.cb.onHover(tile);
     }
     if (!tile) return;
-    if (this.painting && !structureTool(this.tool) && this.tool !== 'roundabout' && this.tool !== 'flyover') {
-      const was = this.crossing;
-      this.paint(tile); // junction tools: one click, one junction
-      if (was !== this.crossing) this.cb.onHover(tile); // a crossing began or ended: the status line follows
-    }
+    if (this.painting && !structureTool(this.tool) && this.tool !== 'roundabout' && this.tool !== 'flyover') this.paint(tile); // junction tools: one click, one junction
     if (this.buyStart) {
       const [sx, sy] = this.buyStart;
       let x0 = Math.min(sx, tile[0]), y0 = Math.min(sy, tile[1]);
@@ -288,11 +296,14 @@ export class Input {
     if (this.runwayStart && this.runwayLine) this.cb.onBuild('runway', this.runwayLine);
     if (this.railStart && this.railPath) this.cb.onBuild(this.tool === 'pylons' || this.tool === 'cable' ? this.tool : 'rail', this.railPath);
     this.railStart = null; this.railPath = null;
+    const road = this.roadStart && this.roadPath && e.type === 'pointerup' ? this.roadPath : null;
+    const hadRoad = !!this.roadStart;
+    this.roadStart = null; this.roadPath = null; this.roadEnd = null;
+    if (road) this.cb.onRoad?.(road, this.roadShape);
     this.buyStart = null; this.buyRect = null;
     this.runwayStart = null; this.runwayLine = null;
-    const crossed = !!this.crossing;
-    this.painting = false; this.panning = false; this.crossing = null; this.lastDry = null;
-    if (crossed) this.cb.onHover(this.hover); // the status line drops the bridge preview
+    this.painting = false; this.panning = false;
+    if (hadRoad) this.cb.onHover(this.hover); // the status line drops the drag's cost
     if (this.orbiting) { this.orbiting = false; this.canvas.style.cursor = ''; }
   };
 
@@ -357,6 +368,13 @@ export class Input {
     const el = e.target as HTMLElement | null;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return; // typing
     this.keys.add(e.code);
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z' && this.tool === 'road' && !this.onMap) {
+      // Ctrl+Z (Cmd+Z on a Mac) with the road tool: take back the last road drag (the browser's own undo has nothing here)
+      e.preventDefault();
+      if (!e.repeat) this.cb.onUndoRoad?.();
+      return;
+    }
+    if (e.key === 'Shift' && this.roadStart) { this.roadShape = 'loop'; this.layRoad(); this.cb.onHover(this.hover); }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.code === 'Tab') e.preventDefault(); // the world map's key, not the browser's focus
     if (this.onMap) { this.cb.onKey(e.code); return; } // tools wait for the 3D view
@@ -364,6 +382,12 @@ export class Input {
     if ((key === 'z' || key === 'c') && structureTool(this.tool)) {
       // turn the footprint a quarter: Z anticlockwise, C clockwise (1×1 tools ignore both)
       if (!e.repeat) this.cb.onRotate(this.tool, key === 'z' ? 1 : -1);
+      return;
+    }
+    if (e.code === 'Escape' && this.roadStart) {
+      // Esc mid-drag lets go of the road and keeps the tool; a second Esc goes back to select as ever
+      this.roadStart = null; this.roadPath = null; this.roadEnd = null;
+      this.cb.onHover(this.hover);
       return;
     }
     const tool = TOOL_KEYS[key];
@@ -395,42 +419,19 @@ export class Input {
       if (this.painted.has(k)) return;
       this.painted.add(k); tiles.push(t);
     };
-    // a crossing goes whole, bank to bank (the server checks the run between them), even where this drag has been before
-    if (this.tool === 'road' && this.cb.isWater) this.bridging(line, (t, whole) => { if (whole) { this.painted.add(`${t[0]},${t[1]}`); tiles.push(t); } else push(t); });
-    else for (const t of line) push(t);
+    for (const t of line) push(t);
     if (tiles.length) this.cb.onBuild(this.tool, tiles);
   }
 
-  /**
-   * A stretch of the road tool's drag with water taken out, except a whole straight crossing (see Crossing) once the
-   * drag reaches the far bank: the water run and the bank tile, then the rest of the drag. Sees every tile of the line,
-   * painted before or not, so going back over the same water still makes a crossing.
-   */
-  private bridging(tiles: [number, number][], out: (t: [number, number], whole: boolean) => void) {
-    const wet = this.cb.isWater!;
-    for (const t of tiles) {
-      if (wet(t[0], t[1])) {
-        if (!this.crossing && this.lastDry) {
-          // out over the water: the bridge goes the way the drag stepped off the bank (the wet way, if it stepped diagonally)
-          const [fx, fy] = this.lastDry;
-          let dx = Math.sign(t[0] - fx), dy = Math.sign(t[1] - fy);
-          if (dx && dy) { if (wet(fx + dx, fy)) dy = 0; else dx = 0; }
-          if (dx || dy) this.crossing = { from: [fx, fy], dx, dy };
-        }
-        continue;
-      }
-      const c = this.crossing;
-      if (c) {
-        this.crossing = null;
-        // the far bank along the bridge's line: commit once the drag is at or past it
-        const run: [number, number][] = [];
-        let [x, y] = c.from;
-        for (let i = 0; i <= BRIDGE_MAX_SPAN; i++) { x += c.dx; y += c.dy; if (!wet(x, y)) break; run.push([x, y]); }
-        const along = (t[0] - c.from[0]) * c.dx + (t[1] - c.from[1]) * c.dy;
-        if (run.length && !wet(x, y) && along >= run.length + 1) for (const q of [c.from, ...run, [x, y] as [number, number]]) out(q, true);
-      }
-      out(t, false);
-      this.lastDry = t;
-    }
+  /** The road drag's tiles from its start to the cursor, in its shape, the end snapped onto a road one tile beyond. */
+  private layRoad() {
+    const a = this.roadStart, b = this.roadEnd;
+    if (!a || !b) return;
+    // the first axis is the way the drag first left the start (along the longer one when it went diagonally)
+    if (b[0] === a[0] && b[1] === a[1]) this.roadFirstX = undefined;
+    else if (this.roadFirstX === undefined) this.roadFirstX = Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]);
+    const path = roadDragPath(a, b, this.roadShape, this.roadFirstX);
+    const road = this.cb.isRoad, wet = this.cb.isWater;
+    this.roadPath = road && this.roadShape === 'line' ? snapRoadEnd(path, road, (x, y) => !wet?.(x, y)) : path;
   }
 }

@@ -43,21 +43,50 @@ export class RanksUI {
   private tickAt = 0;
   private ringKey = '';
   private cardHtml = '';
+  /** the card's body, redrawn as the figures change; its head (with the close button) is never redrawn */
+  private body: HTMLDivElement;
+  /** the setting before the chip opened the card, put back when the popup is closed */
+  private before: 'open' | 'closed' | '' = '';
 
   constructor(private d: RanksDeps) {
     injectStyle();
     this.chip = document.createElement('button'); this.chip.id = 'rankBtn'; this.chip.className = 'chip hidden';
     document.getElementById('clock')!.before(this.chip);
-    this.chip.onclick = () => { this.pref = this.cardShown() ? 'closed' : 'open'; this.save(); this.render(); };
+    this.chip.onclick = () => {
+      if (this.cardShown()) this.close();
+      else { this.before = this.pref; this.pref = 'open'; this.save(); this.render(); }
+    };
     this.card = document.createElement('div'); this.card.id = 'rankCard'; this.card.className = 'hidden';
+    // the head is built once: a figure ticking over while the close button is held down no longer swallows the click
+    this.card.innerHTML = '<div class="ghead"><span class="gnum">Settlement rank</span><button class="gx" id="rHide" title="Close (Esc; the rank chip at the top brings it back)">×</button></div><div class="rbody"></div>';
+    this.body = this.card.querySelector('.rbody')!;
+    this.card.querySelector<HTMLButtonElement>('#rHide')!.onclick = () => this.close();
     const col = document.getElementById('onb'); // the goals column (onboarding.ts), else the ui root
     if (col) col.prepend(this.card); else document.getElementById('ui')!.append(this.card);
     this.ticker = document.createElement('div'); this.ticker.id = 'rankTicker';
     document.getElementById('ui')!.append(this.ticker);
     try { const v = localStorage.getItem(PREF); this.pref = v === 'open' || v === 'closed' ? v : ''; } catch { /* storage blocked */ }
     d.net.on('rank', (m) => this.onRank(m));
+    // opened from the chip it is a popup: Esc or a press anywhere else closes it (shown by itself it is a sidebar
+    // card, closed by its button only). Capture, so nothing under it (the map, a camera moment) can swallow them.
+    window.addEventListener('keydown', (e) => { if (e.code === 'Escape' && this.popup()) this.close(); }, { capture: true });
+    window.addEventListener('pointerdown', (e) => {
+      const t = e.target as Node | null;
+      if (this.popup() && t && !this.card.contains(t) && !this.chip.contains(t)) this.close();
+    }, { capture: true });
     // the goals card comes and goes (collapsed, skipped, the chain finished): the rank card takes its place
     setInterval(() => { this.render(); this.pump(); }, 1000);
+  }
+
+  /** the card is up because the player opened it from the chip */
+  private popup() { return this.pref === 'open' && !!this.dto; }
+
+  /** The close button, Esc, a press outside or the chip again: the card goes, and stays gone. */
+  close() {
+    // a popup goes back to the setting it was opened from (the goals card's column), unless that would show it again
+    this.pref = this.pref === 'open' ? this.before : 'closed';
+    if (this.cardShown()) this.pref = 'closed';
+    this.save(); this.render();
   }
 
   private save() { try { localStorage.setItem(PREF, this.pref); } catch { /* not remembered */ } }
@@ -98,7 +127,6 @@ export class RanksUI {
     const short = needs.find((q, i) => (r.have[i] ?? 0) < q.target);
     const feed = r.feed.slice(0, 6).map((f) => `<li class="k-${f.kind}"><span class="fi">${KIND_ICON[f.kind]}</span><span class="ft">${esc(f.text)}</span><span class="fw">${when(f.tick)}</span></li>`).join('');
     const html = `
-      <div class="ghead"><span class="gnum">Settlement rank</span><button class="gx" id="rHide" title="Hide (the rank chip at the top brings it back)">–</button></div>
       <div class="rtitle"><i class="rcrest r${r.rank}">${ROMAN[r.rank] || '·'}</i>${esc(def.name)}</div>
       <div class="gwhy">${esc(def.blurb)}</div>
       ${next ? `<div class="rnexthead">To become a <b>${esc(next.name)}</b></div>${bars}${short ? `<div class="rstep">Next step: ${esc(NEED_HOW[short.id])}</div>` : ''}
@@ -106,8 +134,7 @@ export class RanksUI {
       ${feed ? `<div class="rfeedhead">Milestones</div><ul class="rfeed">${feed}</ul>` : ''}`;
     if (html === this.cardHtml) return; // the 1 s refresh: only when something changed
     this.cardHtml = html;
-    this.card.innerHTML = html;
-    this.card.querySelector<HTMLButtonElement>('#rHide')!.onclick = () => { this.pref = 'closed'; this.save(); this.render(); };
+    this.body.innerHTML = html;
   }
 
   // ---- the milestone ticker -------------------------------------------------------------------
@@ -210,9 +237,12 @@ function injectStyle() {
 .rcrest.r1 { background: linear-gradient(160deg, #f0c48a, #b0763c); } .rcrest.r2 { background: linear-gradient(160deg, #e8edf2, #9aa6b2); }
 .rcrest.r3 { background: linear-gradient(160deg, #ffe08a, #c9962a); } .rcrest.r4 { background: linear-gradient(160deg, #d9c2ff, #7b5ea7); color: #fff; }
 #rankCard { padding: 10px 12px; background: var(--panel); border: 1px solid rgba(255,212,121,0.35); border-radius: 10px; backdrop-filter: blur(8px);
-  font-size: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+  font-size: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); display: flex; flex-direction: column; max-height: calc(100vh - 130px); }
 #rankCard .ghead { display: flex; align-items: center; color: var(--muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
-#rankCard .gx { margin-left: auto; border: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 4px; }
+#rankCard .rbody { overflow-y: auto; min-height: 0; }
+#rankCard .gx { margin: -4px -6px -4px auto; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 18px; line-height: 1;
+  cursor: pointer; padding: 4px 8px; }
+#rankCard .gx:hover { color: var(--fg); background: rgba(255,255,255,0.08); }
 #rankCard .rtitle { display: flex; align-items: center; gap: 7px; margin: 4px 0 3px; font-size: 16px; font-weight: 600; color: #ffd479; }
 #rankCard .rtitle .rcrest { width: 22px; height: 22px; font-size: 10px; }
 #rankCard .gwhy { margin: 0 0 8px; color: var(--muted); line-height: 1.35; }

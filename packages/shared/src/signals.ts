@@ -11,6 +11,8 @@ import { hash2 } from './noise';
 export interface SignalTiming { offset: number; period: number }
 export function signalTiming(x: number, y: number): SignalTiming {
   const P = TRAFFIC_TUNING.signalPeriod;
+  // green waves (TRAFFIC_TUNING.greenWave): one period, offsets along the diagonal timed for waveSpeed
+  if (TRAFFIC_TUNING.greenWave) { const o = Math.round(-(x + y) / TRAFFIC_TUNING.waveSpeed); return { offset: ((o % (2 * P)) + 2 * P) % (2 * P), period: P }; }
   return { offset: Math.floor(hash2(x, y) * 2 * P), period: Math.round(P * (0.8 + 0.4 * hash2(y, x))) };
 }
 export interface SignalPhase {

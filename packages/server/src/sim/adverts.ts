@@ -227,8 +227,8 @@ export class Adverts {
   /** The renter pays a day's rent for the slot on (x, y); the parcel's owner gets it (renting your own frontage is free). */
   private pay(renter: string, x: number, y: number, rent: number) {
     const owner = this.w.parcelAt(x, y)?.owner;
-    if (owner && this.w.players.has(owner)) this.w.transfer(renter, owner, rent, 'ads');
-    else this.w.credit(renter, -rent, 'ads');
+    if (owner && this.w.players.has(owner)) this.w.transfer(renter, owner, rent, 'adrent');
+    else this.w.credit(renter, -rent, 'adrent');
     this.stats.rentPaid += rent;
   }
 

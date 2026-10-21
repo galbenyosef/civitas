@@ -2,10 +2,16 @@ import {
   DRIVE_SPEED, MIN_GAP, LANE_OFFSET, SIDEWALK_OFFSET, VEHICLE_LEN, VEHICLE_WIDTH, TRAFFIC_TUNING as TT,
   VehicleClass, BIKE_CLASS, isRoad, hasFeature, signalTiming, signalPhaseOf, signalArms, signalledArms, type SignalPhase,
   isJunctionAux, isRingAux, isFlyoverAux, islandOf, ringPos, isArmPos, RING_POS, isCrossing, isBridgeAux, isDeck, bridgeStyle, BridgeStyle, basculeBarrierAt,
-  CHUNK_SIZE, chunkOf, localIndex,
+  CHUNK_SIZE, chunkOf, localIndex, hash2,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
+
+// a test server may override TRAFFIC_TUNING for its whole run, as ab.ts --set does offline: TRAFFIC=follow=1,lookAhead=1
+for (const kv of (env('TRAFFIC') ?? '').split(',').filter(Boolean)) {
+  const [k, v] = kv.split('=');
+  if (k in TT && Number.isFinite(Number(v))) (TT as Record<string, number>)[k] = Number(v);
+}
 
 /**
  * Two-wheelers (fleet.ts BIKE_CLASS: delivery bicycles and mopeds, docs/mobile-jobs.md) ride at the kerb edge of the
@@ -27,6 +33,16 @@ const marginOf = (m: Mover) => (isBike(m) ? 0 : GUARD_MARGIN);
 function leaderIn(q: Mover[], i: number, bike: boolean): Mover | null {
   for (let j = i - 1; j >= 0; j--) if (isBike(q[j]) === bike) return q[j];
   return null;
+}
+
+/**
+ * Car following (TRAFFIC_TUNING.follow): the fastest a driver may go this tick and still stop, braking at `dec` a tick,
+ * within `s` of an obstacle ahead that itself moves at `vl` and can brake as hard: v²/2dec + headway·v ≤ s + vl²/2dec.
+ * With headway 0.5 and vl 0 that is exactly a stop braking by dec each tick (s 0.3, dec 0.1: 0.2, then 0.1, then 0).
+ */
+export function safeSpeed(s: number, vl: number, dec: number): number {
+  const se = s + (vl * vl) / (2 * dec), T = TT.headway;
+  return se <= 0 ? 0 : dec * (Math.sqrt(T * T + (2 * se) / dec) - T);
 }
 
 /**
@@ -95,7 +111,13 @@ interface RoadChunk {
    */
   xm: Uint8Array; xmAt: Uint32Array;
 }
-interface Junction { signal: boolean; ver: number; deg: number; pid: number; offset: number; period: number; act?: Actuation }
+interface Junction {
+  signal: boolean; ver: number; deg: number; pid: number; offset: number; period: number; act?: Actuation;
+  /** the main road's axis (Traffic.mainAxis) and the tick it was worked out */
+  main?: number; mainAt?: number;
+}
+/** Ticks a junction's main road (Traffic.mainAxis) is kept before it is worked out again (roads further along may change). */
+const MAIN_TTL = 500;
 /** Actuated signal state: the axis on green, when that green began and when it is due to end. */
 interface Actuation { green: 'ns' | 'ew'; start: number; end: number; decided: boolean; at: number }
 /** Running totals for the A/B harness and diagnostics (read-only outside Traffic; see Traffic.counters). */
@@ -624,7 +646,7 @@ export class Traffic {
     if (!j || j.ver !== this.w.techVersion || j.deg !== deg || j.pid !== pid) {
       const signal = deg >= 3 && !this.junctionAux(x, y) && signalledArms(signalArms(this.roadAt, x, y)) && this.w.ownerHas(x, y, 'signals', hasFeature);
       j = j ?? { signal, ver: 0, deg, pid, ...signalTiming(x, y) };
-      j.signal = signal; j.ver = this.w.techVersion; j.deg = deg; j.pid = pid;
+      j.signal = signal; j.ver = this.w.techVersion; j.deg = deg; j.pid = pid; j.main = undefined;
       rc.junc[i] = j;
     }
     return j;
@@ -639,7 +661,7 @@ export class Traffic {
   signalPhase(x: number, y: number): SignalPhase {
     const j = this.junction(x, y);
     if (TT.signalActuated && j.signal) return this.actuated(j, x, y);
-    return signalPhaseOf(j, this.w.tick, this.phase);
+    return signalPhaseOf(j, this.w.tick + this.lookTicks, this.phase);
   }
   /**
    * Actuated lights (TRAFFIC_TUNING.signalActuated, server-side only: the
@@ -825,7 +847,7 @@ export class Traffic {
     const tail = q && q.length ? leaderIn(q, q.length, isBike(m)) : null;
     if (tail && tail.prog < (tail.len + m.len) / 2 + MIN_GAP * m.gapMul) return 'blocked';
     if (TT.spawnClear && this.boxBusyExcept(m.path[0], m.path[1], m)) return 'blocked';
-    m.pi = 1; m.prog = 0; m.wait = 0; m.stuck = 0; m.committed = false;
+    m.pi = 1; m.prog = 0; m.wait = 0; m.stuck = 0; m.committed = false; m.v = 0;
     m.inDir = d;
     if (TT.meterCongestion < 1 && !this.isRoadAt(m.path[0], m.path[1]) && this.congestionAt(m.path[2], m.path[3]) >= TT.meterCongestion) return 'blocked';
     if (TT.spawnClear >= 2 && m.path.length >= 6 && !this.isRoadAt(m.path[0], m.path[1]) && !(m.priority && m.call)) {
@@ -1128,6 +1150,30 @@ export class Traffic {
     return null;
   }
   /**
+   * Is m the first car in its lane, held at the stop line into a junction box or a level crossing? (The A/B harness's
+   * smoothness measure: a stop there is the junction's, not the stream's.)
+   */
+  headAtStopLine(m: Mover): boolean { return this.standing(m) === 'junction'; }
+  /**
+   * Where a standing car stands (the A/B harness's stop breakdown): first in its lane at the stop line into a junction
+   * box or a level crossing ('junction'), into a plain road tile ('line') or its destination ('dest'); behind another
+   * car ('queue'); anywhere else ('other': the body guard, a bus halt, a lane it has just come into).
+   */
+  standing(m: Mover): 'junction' | 'line' | 'dest' | 'queue' | 'other' {
+    if (m.lane < 0 || m.pi * 2 + 1 >= m.path.length) return 'other';
+    const q = this.laneAt(m.lane);
+    if (q && leaderIn(q, q.indexOf(m), isBike(m))) return 'queue';
+    if (m.committed || m.prog < this.stopLine(m) - 0.05) {
+      // the tail of the next lane close ahead holds it like a car in its own lane
+      const n = m.path.length / 2;
+      if (m.pi + 1 < n) { const nq = this.laneQ(m.path[m.pi * 2], m.path[m.pi * 2 + 1], this.nextDirOf(m)); if (nq && nq.length && 1 - m.prog + nq[nq.length - 1].prog < 0.6) return 'queue'; }
+      return 'other';
+    }
+    if (m.pi + 1 >= m.path.length / 2) return 'dest';
+    const bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
+    return this.degreeOf(bx, by) >= 3 || this.isCrossingAt(bx, by) ? 'junction' : 'line';
+  }
+  /**
    * Is anything queued behind m: following it in its own lane, or in the lane that leads into the tile its lane starts
    * from (a bus standing at a stop holds those up)?
    */
@@ -1209,7 +1255,7 @@ export class Traffic {
   private canEnter(m: Mover, bx: number, by: number, inD: number, outD: number): boolean {
     const nextKey = Traffic.laneKey(bx, by, outD);
     const nq = this.laneAt(nextKey);
-    if (!this.laneRoom(bx, by, nextKey, m)) return false;
+    if (!this.laneRoom(bx, by, nextKey, m, TT.platoon ? this.goingInAhead(m, outD) : null)) return false;
     // level crossings: never onto one with the barriers down, and only with room to get right off it on the far side;
     // a car still on one when they come down drives off whatever is ahead (lights, give-way, people waiting)
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1], onXing = this.isCrossingAt(ax, ay);
@@ -1223,7 +1269,7 @@ export class Traffic {
       // at a junction the car ahead in the exit lane must be out of the box before we go in behind it;
       // on plain road the following gap in step() is all that is needed, so cars can close up inside a tile
       const tail = leaderIn(nq, nq.length, isBike(m));
-      if (tail && tail.prog < this.clearAt(tail) + MIN_GAP) return false;
+      if (tail && tail.prog < this.clearAt(tail) + MIN_GAP && !(TT.platoon && (TT.platoon === 1 || this.junction(bx, by).signal) && this.platoonBehind(m, tail, inD))) return false;
     }
     if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
     const signal = deg >= 3 && this.junction(bx, by).signal && !trapped;
@@ -1232,7 +1278,7 @@ export class Traffic {
       // at lights only the crossings this movement drives over hold it (straight through on green passes people crossing the red road);
       // on a roundabout people cross the arms, which cars going round never drive over
       if (TT.carYieldMax <= 0 || m.wait < TT.carYieldMax) return false;
-      this.cnt.carNosed++;
+      if (!this.predicting) this.cnt.carNosed++;
     }
     if (signal && !m.priority) {
       // green for my approach axis, and not its amber: cars already committed clear the box before the other axis goes
@@ -1240,8 +1286,86 @@ export class Traffic {
       if ((ph.green === 'ew') !== isEW(inD) || ph.amber) return false;
     }
     if (TT.ringYield > 0 && isRingAux(ja) && !m.priority && !trapped && !this.ringGiven(m, bx, by, inD, outD, ja)) return false;
+    // main-road priority without lights: from a side road, give way to cars coming along the main one
+    if (TT.mainRoad && deg >= 3 && !signal && !ja && !m.priority && !trapped && m.wait < TT.minorWaitMax) {
+      const main = this.mainAxis(bx, by);
+      if (main >= 0 && (isEW(inD) ? 1 : 0) !== main && this.mainComing(m, bx, by, inD, outD, main)) return false;
+    }
     return !this.boxConflict(m, bx, by, inD, outD, trapped);
   }
+  /**
+   * The main road through junction (x, y) (TRAFFIC_TUNING.mainRoad): 0 north-south, 1 east-west, -1 none (every arm
+   * gives way to whatever is in the box, first come first served). At a T-junction the two arms in line are the main
+   * road; at a crossroads (mainRoad 2) the road with the longer straight run either side (by at least 3 tiles), worked
+   * out again every MAIN_TTL ticks. Road classes (R3) are the hook: `roadRank`, when set, ranks each arm's road and a
+   * higher rank wins before straightness is looked at.
+   */
+  private mainAxis(x: number, y: number): number {
+    const j = this.junction(x, y), t = this.w.tick;
+    if (j.main !== undefined && t - (j.mainAt ?? 0) < MAIN_TTL) return j.main;
+    const road = (dx: number, dy: number) => this.isRoadAt(x + dx, y + dy);
+    const ns = road(0, -1) && road(0, 1), ew = road(1, 0) && road(-1, 0);
+    let main = -1;
+    if (this.roadRank) {
+      const r = this.roadRank, rn = Math.max(r(x, y - 1), r(x, y + 1)), re = Math.max(r(x + 1, y), r(x - 1, y));
+      if (rn !== re) main = rn > re ? 0 : 1;
+    }
+    if (main < 0 && ns !== ew) main = ns ? 0 : 1; // a T: the arms in line
+    else if (main < 0 && ns && ew && TT.mainRoad >= 2) {
+      const run = (dx: number, dy: number) => { let n = 0; while (n < 16 && this.isRoadAt(x + dx * (n + 1), y + dy * (n + 1))) n++; return n; };
+      const ln = Math.min(run(0, -1), run(0, 1)), le = Math.min(run(1, 0), run(-1, 0));
+      if (Math.abs(ln - le) >= 3) main = ln > le ? 0 : 1;
+    }
+    j.main = main; j.mainAt = t;
+    return main;
+  }
+  /** Road classes, when they come (R3): the rank of the road on tile (x, y), higher for a bigger road. Null: straightness decides. */
+  roadRank: ((x: number, y: number) => number) | null = null;
+  /**
+   * Is a car coming along the main road (axis `main`) into box B, moving, within mainGap tiles of its stop line, whose
+   * movement through the box crosses m's (inD -> outD)?
+   */
+  private mainComing(m: Mover, bx: number, by: number, inD: number, outD: number, main: number): boolean {
+    for (let d = 0; d < 4; d++) {
+      if ((isEW(d) ? 1 : 0) !== main) continue;
+      const ax = bx - DIRS[d][0], ay = by - DIRS[d][1];
+      for (let back = 0; back < 2; back++) {
+        const q = this.laneQ(ax - back * DIRS[d][0], ay - back * DIRS[d][1], d);
+        if (q) for (const c of q) {
+          if (c === m || c.committed || c.wait >= 2) continue;
+          const k = c.pi + back;
+          if (k * 2 + 1 >= c.path.length || c.path[k * 2] !== bx || c.path[k * 2 + 1] !== by) continue;
+          const to = back ? (k + 1 < c.path.length / 2 ? dirBetween(bx, by, c.path[(k + 1) * 2], c.path[(k + 1) * 2 + 1]) : d) : this.nextDirOf(c);
+          if (back + this.stopLine(c) - c.prog > TT.mainGap) continue;
+          if (conflicts(inD, outD, d, to)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Platoons (TRAFFIC_TUNING.platoon): may m follow `t`, the tail of its exit lane still in the box, straight in? Only
+   * when t came in by the same approach (so the same movement: one lane per approach), is moving at platoonV or more,
+   * and m's nose is within platoonGap of t's tail.
+   */
+  private platoonBehind(m: Mover, t: Mover, inD: number): boolean {
+    return t.inDir === inD && (t.v ?? 0) >= TT.platoonV && 1 - m.prog + t.prog - (t.len + m.len) / 2 <= TT.platoonGap;
+  }
+  /**
+   * The cars ahead of m in its own lane already committed into the lane heading outD after the next tile (they will
+   * take room there before m: with platoons a car may commit while the one ahead is still on its way in), or null.
+   */
+  private goingInAhead(m: Mover, outD: number): Mover[] | null {
+    const q = this.laneAt(m.lane);
+    let out: Mover[] | null = null;
+    if (q) for (const o of q) {
+      if (o === m) break;
+      if (o.committed && o.path[o.pi * 2] === m.path[m.pi * 2] && o.path[o.pi * 2 + 1] === m.path[m.pi * 2 + 1] && this.nextDirOf(o) === outD) (out ??= []).push(o);
+    }
+    return out;
+  }
+
   /**
    * Give way on entry to a roundabout: may m come onto ring tile B (aux a) by heading inD, to leave it heading outD?
    * Always when it is already on the ring; from an arm or a driveway only while no car circulating towards B that
@@ -1358,6 +1482,43 @@ export class Traffic {
     return this.laneRoom(cx, cy, Traffic.laneKey(cx, cy, d2), m, ahead);
   }
 
+  /** A driver's acceleration (TRAFFIC_TUNING.follow): accel × their own style, slower for trucks and buses. */
+  private accelOf(m: Mover, heavy: boolean): number {
+    return TT.accel * (1 + TT.accelVar * (2 * hash2(m.id, 0x5a17) - 1)) * (heavy ? TT.heavyAccel : 1);
+  }
+  /**
+   * Look-ahead (TRAFFIC_TUNING.lookAhead): would m, `ds` short of its stop line and wanting to go at v, be let into
+   * tile B on arrival? The entry rules as they stand now (2: only what will still be there; 3: only the lights and the
+   * barriers), with the light as it will be when m gets there at that speed.
+   */
+  private wouldEnter(m: Mover, bx: number, by: number, dir: number, nextDir: number, last: boolean, ds: number, v: number): boolean {
+    if (last) return this.forecourtFree(m, bx, by, dir);
+    // step() decides at the line on the tick whose move would take it over, a tick before it is there
+    this.lookTicks = Math.min(4 * TT.signalPeriod, Math.max(0, Math.ceil(ds / Math.max(v, 0.05)) - 1));
+    this.predicting = true;
+    const ok = TT.lookAhead >= 2 ? !this.heldAhead(m, bx, by, dir, nextDir, TT.lookAhead >= 3) : this.canEnter(m, bx, by, dir, nextDir);
+    this.predicting = false; this.lookTicks = 0;
+    return ok;
+  }
+  /**
+   * Look-ahead 2: only what will still hold m when it gets to the line, not what is passing now (a car crossing the box,
+   * the one ahead still in it): a red or amber light then, barriers down, people on the crossing, an exit lane full of
+   * cars that are standing.
+   */
+  private heldAhead(m: Mover, bx: number, by: number, inD: number, outD: number, lightsOnly: boolean): boolean {
+    const deg = this.degreeOf(bx, by), signal = deg >= 3 && this.junction(bx, by).signal;
+    if (signal && !m.priority) { const ph = this.signalPhase(bx, by); if ((ph.green === 'ew') !== isEW(inD) || ph.amber) return true; }
+    if (this.isCrossingAt(bx, by) && this.crossingClosed(bx, by, inD)) return true;
+    if (lightsOnly) return false;
+    const walkers = this.crossingsAt(bx, by);
+    if (walkers && ((!signal && !isRingAux(this.junctionAux(bx, by))) || (walkers & movementMask(inD, outD)))) return true;
+    const key = Traffic.laneKey(bx, by, outD);
+    if (!this.laneRoom(bx, by, key, m)) { const nq = this.laneAt(key); if (nq && nq.every((o) => (o.v ?? 0) < 0.05)) return true; }
+    return false;
+  }
+  /** while wouldEnter asks canEnter: ticks ahead to read the lights at, and no counting */
+  private lookTicks = 0; private predicting = false;
+
   /**
    * Advance a driver one tick. 'arrived' once the final node is reached (the
    * mover is then off the road), 'stuck' when it has waited past the limit.
@@ -1371,8 +1532,10 @@ export class Traffic {
     const last = m.pi + 1 >= n;
     const nextDir = this.nextDirOf(m);
 
-    let base = DRIVE_SPEED * m.speedMul * (m.cls === VehicleClass.Truck || m.cls === VehicleClass.Bus ? 0.8 : 1);
+    const heavy = m.cls === VehicleClass.Truck || m.cls === VehicleClass.Bus;
+    let base = DRIVE_SPEED * m.speedMul * (heavy ? 0.8 : 1);
     if (this.kerbAt(ax, ay)) base *= 0.6;
+    const free = base; // before the turns: what the turn ahead is slowed from
     // turns slow a car for each half; on a roundabout the ring's wide corners not at all, the turns on and off less
     if (nextDir !== dir && m.prog > 0.3) base *= this.turnSlow(bx, by);
     if (m.inDir !== dir && m.prog < 0.3) base *= this.turnSlow(ax, ay);
@@ -1388,30 +1551,56 @@ export class Traffic {
     const lead = idx > 0 ? leaderIn(q, idx, bike) : null;
     let tailNext: Mover | null = null;
     if (lead) gap = lead.prog - m.prog - (lead.len + m.len) / 2;
-    else if (!last) {
+    // into a building, also behind a car pulling out of it the same way (it starts at the middle, where this one ends)
+    else if (!last || !this.isRoadAt(bx, by)) {
       const nq = this.laneQ(bx, by, nextDir);
       tailNext = nq && nq.length ? leaderIn(nq, nq.length, bike) : null;
       if (tailNext) gap = 1 - m.prog + tailNext.prog - (tailNext.len + m.len) / 2;
     }
-    let allowed = Math.min(base, gap - MIN_GAP * m.gapMul);
+    let room = gap - MIN_GAP * m.gapMul;
     // progress is a fraction of the lane, and a right-turn arc is shorter than a straight, so also
     // hold the real distance to the car ahead (the chord never overstates the arc, so this is safe)
     const ahead = lead ?? tailNext;
     if (ahead) {
       const dist = hypot(ahead.x - m.x, ahead.y - m.y) - (ahead.len + m.len) / 2 - MIN_GAP * m.gapMul * 0.5;
-      if (dist < allowed) allowed = dist;
+      if (dist < room) room = dist;
     }
-    if (allowed < 0) allowed = 0;
+    let allowed = Math.max(0, Math.min(base, room));
     // a bus pulling in at a stop (sim/transit.ts): never past the centre of the stop's road tile, path node m.halt
     const halt = m.halt ?? -1;
+    let haltLim = Infinity;
     if (halt >= 0) {
       const at = this.turnsAtHalt(m) ? HALT_TURNED : HALT_AT;
-      const lim = halt === m.pi ? 1 - m.prog + at : halt === m.pi - 1 ? at - m.prog : Infinity;
-      if (lim < allowed) allowed = Math.max(0, lim);
+      haltLim = halt === m.pi ? 1 - m.prog + at : halt === m.pi - 1 ? at - m.prog : Infinity;
+      if (haltLim < allowed) allowed = Math.max(0, haltLim);
+    }
+
+    const stop = this.stopLine(m);
+    if (TT.follow) {
+      // car following: speed up gently, and slow in time for whatever is ahead rather than stopping dead at it
+      const v = m.v ?? 0, dec = TT.brake;
+      let want = v >= base ? base : Math.min(base, v + this.accelOf(m, heavy));
+      if (ahead) {
+        const vl = ahead.v ?? 0;
+        want = Math.min(want, safeSpeed(room, vl, dec));
+        // standing in a queue: move up only once there is room worth moving into, or the car ahead moves off
+        if (TT.startGap > 0 && v < 0.01 && vl < 0.01 && room < TT.startGap) want = 0;
+      }
+      if (haltLim < Infinity) want = Math.min(want, safeSpeed(haltLim, 0, dec));
+      // a turn through the next tile begins at progress 0.3: be down to its speed by then
+      if (TT.followTurn && !last && nextDir !== dir && m.prog < 0.3 && (TT.followTurn === 1 || this.junction(bx, by).signal)) {
+        const vt = free * this.turnSlow(bx, by) * (nextDir === OPP[dir] ? UTURN_SLOW : 1);
+        want = Math.min(want, safeSpeed(0.3 - m.prog, vt, dec));
+      }
+      // look ahead to the stop line: brake for it only when the next tile will not take me on arrival
+      if (TT.lookAhead && !m.committed && stop > m.prog) {
+        const ds = stop - m.prog, vs = safeSpeed(ds, 0, dec);
+        if (vs < want && !this.wouldEnter(m, bx, by, dir, nextDir, last, ds, want)) want = vs;
+      }
+      if (want < allowed) allowed = Math.max(0, want);
     }
 
     // the stop line: decide once, at the edge of the next tile, whether to go in
-    const stop = this.stopLine(m);
     if (!m.committed && m.prog + allowed >= stop) {
       // into the next road tile: the full entry rules; into the destination building: one vehicle in its forecourt at a time
       const ok = last ? this.forecourtFree(m, bx, by, dir) : this.canEnter(m, bx, by, dir, nextDir);
@@ -1450,6 +1639,7 @@ export class Traffic {
     } else {
       m.prog += allowed; moved = allowed;
     }
+    m.v = arrived ? 0 : moved;
     if (!arrived) {
       this.place(m);
       // remember the direction it last moved in: the client draws a car facing its motion, not its path tangent

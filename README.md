@@ -100,13 +100,14 @@ still selects.
 
 | Action | Input |
 | --- | --- |
+| Panels | the panel on the right (land, a building, a person) keeps its head with ✕ in view while its body scrolls; **Esc** or ✕ closes it. A parcel's panel (on a frontier "<name>'s charter") also folds to its title (–), and its build list shows eight sites with "show all" for the rest (up to 50; the head counts them: "30, showing 8"). `client/src/ui.ts` |
 | Context menu | right-**click** (press and release without dragging) a person, car, train, plane, building, road, track or land for the actions that exist for it: inspect, follow, first-person view, go to home or work, build priority, parcel settings, buy this tile, demolish (asks again to confirm, shows the cost). Greyed entries say why in a tooltip. Esc closes; also on the FPV inset. `client/src/contextmenu.ts` |
-| Tools | 1 select · 2 buy land · 3 road (drag across water for a bridge) · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
+| Tools | 1 select · 2 buy land · 3 road (drag: straight or one corner, Shift held while dragging for a loop, Esc lets go, built on release with its cost shown; across water for a bridge; Ctrl/Cmd+Z undoes the last drag for 30 s; docs/roads.md) · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
 | Turn a footprint | Z turns the footprint of a building bigger than 1×1 anticlockwise, C clockwise, in quarter turns, while its tool is active (airport terminal, bus depot, rail halt and station). The choice sticks for that tool until you change it; before the first press the footprint faces a road by itself. The preview shows each tile's outline, an arrow from the door towards the road (green with a road, red without) and the building's marked parts (platform, apron, stands, vehicle gate); hovering a placed structure shows them faintly |
 | People and cars | hover anyone for who they are and what they are doing; click to select them in a side panel with a **follow** camera |
 | Trains and planes | hover a train or plane to highlight it; click to select it: a panel with its line or flight, what it is doing, speed, its crew and everyone on board (a train's riders are clickable citizens; plane passengers are visitors), and **follow**. `client/src/vehicles.ts`, docs/rail.md and docs/airport.md |
 | First person | with someone selected, **FPV** in the panel or I opens a 16:9 inset (bottom right) from their eyes, **full** or O fills the window (Esc leaves); the view follows their heading and leans into corners, walkers bob, drivers sway, and it ends when they go indoors or arrive. With a train selected it rides in the driver's cab, with a plane in the cockpit. `render/fpv.ts` |
-| Money | click the treasury chip for the ledger (yesterday and today by category, overdraft interest included). While the treasury is below zero, in administration or with a service mothballed, a chip beside it opens the money panel: the balance, the $5,000 overdraft limit, the interest a day, midnights below zero or days in administration, and the recovery plan as buttons (raise tax, sell land back, mothball services, each with what it would raise or save; in local mode also "Start again from the last autosave"). It opens by itself when administration begins. A police, fire or health building or a builders' yard of yours has **Mothball** / **Reopen** in its panel. `client/src/finance.ts` |
+| Money | click the treasury chip for the ledger (yesterday and today by category, grouped into running costs and one-off spending with a total each, and the daily running balance that leaves building and buying out; overdraft interest included). While the treasury is below zero, in administration or with a service mothballed, a chip beside it opens the money panel: the balance, the $5,000 overdraft limit, the interest a day, midnights below zero or days in administration, the running balance a day, and the recovery plan as buttons (raise tax, sell land back, mothball services, each with what it would raise or save; in local mode also "Start again from the last autosave"). It opens by itself when administration begins. A police, fire or health building or a builders' yard of yours has **Mothball** / **Reopen** in its panel. `client/src/finance.ts` |
 | Overlays | H cycles the overlays: traffic congestion on the roads (green → red), then service coverage, leisure, happiness and jobs against homes tinted on the ground and the buildings (colour-blind safe ramps: viridis, and blue against orange for jobs/homes), then off; the top-bar **overlay** chip opens a menu to pick one, with its legend. `client/src/overlays.ts`, `server/src/overlays.ts`. T opens the technology tree; M shows the perf readout |
 | Problems | a badge floats over any of your buildings or lots that is stuck: on fire, no road, no builders, unstaffed, parking full, no customers, very unhappy; hover it for what is wrong and what fixes it, click it to open the building. The top-bar **problems N** chip (red while there are any) lists them by kind, each with **show me**. `server/src/sim/issues.ts`, `client/src/render/issues.ts`, `client/src/problems.ts` |
 | Fires | homes and works catch fire now and then (bigger and older ones more often). The nearest staffed fire post or station within 14 tiles sends its engine on blue lights; it drives down the middle of the road past stopped traffic, and the damage is what had burnt when it arrived. With no engine in reach the building burns down. Flames, smoke and a scorch show on the building, an **On fire** badge leads the problems list, a toast names who is coming, and the bill is **Fire damage** in the ledger. Your first fire is a warning the neighbours always put out. docs/incidents.md, `server/src/sim/fires.ts`, `client/src/render/fires.ts` |
@@ -124,9 +125,12 @@ the open country around your holdings, or if it would enclose a pocket of
 unclaimed land bigger than four tiles. Small notches are fine and water never
 counts as an enclosure. The buy rectangle turns red and the status line says
 why before you let go; the server makes the same check and is the authority.
-Roads and zones are painted by dragging; zoning and parking lots go round road tiles and buildings
-(bulldoze first to rebuild there), and the server says how many lots it left alone and which newly zoned
-lots have no road beside them.
+Roads are dragged and built on release: the ghost shows each tile's cost and, in red, why anything will be refused,
+and a road over a building asks first (demolish it, or build round it). Zones are painted by dragging; zoning and
+parking lots go round road tiles and buildings (bulldoze first to rebuild there), and the server says how many lots
+it left alone and which newly zoned lots have no road beside them (the hover turns amber over such a lot: it builds
+only once the building in front grows back into it, or a road reaches it). Streets are named, British style, and
+their owners can rename them (right-click a road); a building's panel gives its address (docs/roads.md).
 Roads can be laid on unclaimed land too (at a premium) so parcels can be joined
 up; zoning needs land you own. Nothing gets built until builders can reach it:
 connect to a road network that has a builders' yard, or place your own (your
@@ -209,7 +213,12 @@ changing behaviour in game time.
   re-routing after a long wait with hysteresis), that the heat overlay shows,
   and that road tooltips report. Behind all of these rules a body guard is the
   last resort: no car moves its body onto another car or a pedestrian, and no
-  pedestrian steps into a car. A driver who has not reached a new tile for 60
+  pedestrian steps into a car. Each car keeps a speed and brakes in time for
+  the car ahead, a bus halt and a turn into lights rather than stopping dead;
+  at lights a car close behind one going the same way follows it into the box;
+  and the client draws cars along a curve between the server's five positions a
+  second so their speed changes smoothly (`client/src/render/glide.ts`). A
+  driver who has not reached a new tile for 60
   ticks gives up, so a jam can always clear. The rules and their values live in
   `TRAFFIC_TUNING` (`shared/src/tuning.ts`); `docs/traffic-tuning.md` has the
   measurements they were chosen from. With Junction design (Transport tier 3) a
@@ -354,9 +363,12 @@ changing behaviour in game time.
   parcel), sales tax (to the venue parcel), road upkeep, civic upkeep and public
   payroll (police, fire, hospital and builders are paid by the parcel that
   hosts them; public services' wages are half grant-funded, `ECONOMY_TUNING.civicPayroll`
-  in `shared/src/tuning.ts`). The treasury chip shows yesterday's net and, on
-  click, the ledger: income and spending by category (taxes, fees, wages, upkeep,
-  builders' fees, construction, land, technology) for yesterday and today, sent
+  in `shared/src/tuning.ts`). The treasury chip shows yesterday's running balance and, on
+  click, the ledger: income and spending by category for yesterday and today in two groups, each with its
+  total: **running** (taxes, fees, wages, upkeep, utility bills and fuel, interest, funeral fees, billboard rent)
+  and **one-off** (construction, builders' fees, land, technology, advert campaigns, fire damage, charter grants
+  and rewards), then the net and the **daily running balance**, which says whether the town pays for itself
+  (`shared/src/protocol.ts` `LEDGER_GROUP`, `client/src/finance.ts`). Sent
   with the players message once a game hour (`PlayerDTO.ledger`). High taxes make workers quit and residents leave; nearby staffed
   services raise what people will put up with.
 - *The first five minutes* (`docs/first-five.md`, `server/src/sim/firstfive.ts`, `shared/src/buildings/camp.ts`,
@@ -376,7 +388,7 @@ changing behaviour in game time.
   Each rank pays a charter grant ($2,500 to $10,000) and, on a frontier, grows the free charter by a ring of land
   (32 → 48 → 64 → 80 → 96 tiles a side; the holder buys beyond it only as a City, nobody else inside it). The rank
   chip beside the treasury shows the next rank's progress; its card (in the goals column, taking the goals card's
-  place once the chain is done) lists the needs, the grant and a milestone feed, and each new milestone comes up in a
+  place once the chain is done) lists the needs, the grant and a milestone feed (opened from the chip, its ×, Esc or a press elsewhere closes it), and each new milestone comes up in a
   ticker under the top bar. A rank-up gets a banner, fireworks over the town (every shell its own) and the camera
   pulling up to show the new land. Saved with the player (`Player.ranks`); older saves derive their rank on load
   without a grant. None in sandboxes; the showcase tour's "Settlement ranks" stop plays the celebration.

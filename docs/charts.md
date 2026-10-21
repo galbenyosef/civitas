@@ -12,14 +12,18 @@ series lists. `server/src/history.ts` fills it.
   `loop()`, so fast-fills and local mode record too). A sample reads counters the simulation already keeps and costs about
   20 microseconds; nothing is allocated per tick. Hours never go backwards; a skipped hour is a gap (shown as a break in the line).
 - **Tiers.** hourly x 192 (8 days), daily x 120 (the mean of the day's hours), weekly x 260 (5 years). Each tier is a ring, so
-  the whole history is bounded (about 573 points per series, 30 world series and 9 per player, a few tens of KB as JSON).
+  the whole history is bounded (about 573 points per series, 31 world series and 17 per player, a few tens of KB as JSON).
 - **World series** (`WORLD_SERIES`): population, jobs filled and open, buildings, sites under construction, newcomers and
   leavers per hour (gateways), citizens on the move, cars driving and parked, average speed, share held up, transit boardings
   per hour (all modes), tick time (average and p95 over the last minute), and 15 education series (index, adults by level, enrolment
-  by stage, results over the last 24 hours: `docs/education.md` section 15).
+  by stage, results over the last 24 hours: `docs/education.md` section 15), and the share of homes on a substation's streets
+  in a power cut, fault, no supply or brownout (`pwrOutPct`).
 - **Per player** (`PLAYER_SERIES`): treasury, income and spending per day (a rolling 24 hours, worked out from the hourly
   change of the ledger in `World.credit`), the population, job capacity and filled jobs of the parcels they own, and the pupils,
-  school places and graduates on them.
+  school places and graduates on them, and power (playtest a7ba07e8): units an hour your networks drew from power stations
+  (gas and coal), wind, solar and the grid, what their streets wanted and were supplied, and the shares of your homes left
+  dark (a cut, a fault, no supply) or in a brownout. These read the last hourly solve (`Utilities.hourly`, server
+  sim/utilities.ts `PowerHour`; `History.power`), so they lag it by under an hour.
 - **Adding a series.** Append it to `WORLD_SERIES` / `PLAYER_SERIES`, set it in `History.sample`, add a chart in `client/src/charts.ts`.
   Saves match series by key, so old saves load and the new series starts empty.
 
@@ -41,7 +45,8 @@ an older build ignores the field. Unreadable history is dropped, never fatal. Lo
 ## Panel (client)
 
 `client/src/charts.ts`: the **charts** chip beside lines and tech, the **`** (backquote) key (every letter is a tool or camera
-key; N is for the underground view), Esc closes. Tabs City, Economy (yours), Traffic and transport and Education (an attainment funnel, then charts); a range switch Day (24 hours,
+key; N is for the underground view), Esc closes. Tabs City, Economy (yours), Traffic and transport, Education (an attainment funnel, then charts) and Power (generation by
+source, wanted and supplied, your homes in a cut or brownout, the world's); a range switch Day (24 hours,
 hourly), Week (7 days, hourly), Month (30 days, daily), All (daily; weekly once the daily record is full). Small-multiple line
 charts on canvas: nice axis ticks, game day and hour labels, a crosshair shared by all the charts on the tab with the values in
 each chart's header (and a tooltip on the chart under the pointer). Two measures are never on one axis scale: a chart with two

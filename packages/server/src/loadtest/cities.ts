@@ -5,13 +5,14 @@ import { settleInteriors } from '../sim/blocks';
 /**
  * Test cities for load testing: an N×N grid of Commons-style districts.
  *
- * Each district is the same 22×22 block as `seedCommons` (roads every 5 tiles plus the far edge, the same zone
- * pattern, police / fire / hospital / builders' yard and four parking lots). Districts sit on a stride of
+ * Each district is the 22×22 block `seedCommons` laid until 2026-10-21 (roads every 5 tiles plus the far edge, its zone
+ * pattern, police / fire / hospital / builders' yard and four parking lots); the Commons itself is on a mix of block
+ * sizes now (seed.ts COMMONS), and the test cities keep the old grid so load-test results stay comparable. Districts sit on a stride of
  * 22 + gap tiles. In the gap every street of the district carries straight on to the next district, so the whole
  * city is one connected road network on a regular grid; the rest of the gap is open land. Each district is its own
  * parcel (it also covers the gap to its right and below), all owned by one system player with every technology.
  *
- * With `flatten: false`, N=1 is tile-for-tile the Commons. Each block's landlocked 2×2 middle is settled as growth would
+ * With `flatten: false`, N=1 is tile-for-tile the old Commons. Each block's landlocked 2×2 middle is settled as growth would
  * (sim/blocks.ts settleInteriors): a communal garden inside a ring of homes, else deep plots built from the frontage, so no
  * door is left without a road. Fully grown (built=3) a district has 1,228 beds (it was 1,248 with stranded middles) and
  * ~1,670 jobs; after a game day the population sits at about 950. N=2/3/4/6 therefore

@@ -66,6 +66,23 @@ export const UTIL = {
   repairHours: 2, contractorHours: 10,
 };
 
+/**
+ * What the owner of a power fault can expect and do, in words (playtest 37299b96: the game never said a contractor
+ * fixes it, nor that a power depot's van is quicker). The notice when it opens, the panels while it is open.
+ * `crew`: a van of the owner's is on its way or at work; `depot`: the owner has a power depot; `tech`: the owner has
+ * the technology that brings one (`techName`); `hoursLeft`: until the contractor comes.
+ */
+export function faultAdvice(o: { crew?: 'coming' | 'working'; depot: boolean; tech: boolean; techName: string; hoursLeft: number }): string {
+  const h = Math.max(1, Math.round(o.hoursLeft)), van = `${UTIL.repairHours}–${UTIL.repairHours + 1} hours`;
+  const contractor = `a contractor fixes it in about ${h} hour${h === 1 ? '' : 's'}`;
+  if (o.crew === 'working') return `A repair crew is at work: power back within about ${UTIL.repairHours} hours.`;
+  if (o.crew === 'coming') return `A repair van is on its way: fixed in about ${van}.`;
+  if (o.depot) return `Your power depot sends a repair van (about ${van}); if none can come, ${contractor}.`;
+  const c = contractor[0].toUpperCase() + contractor.slice(1);
+  return o.tech ? `${c}. A power depot of your own sends a repair van in ${van}.`
+    : `${c}. A power depot of your own would send a repair van in ${van}: it needs ${o.techName} (T).`;
+}
+
 /** Storms (docs/utilities.md section 4.4): there is no weather system yet. Both are 1; a weather card fills them in. */
 export const UTIL_WEATHER = {
   /** multiplies the fault rate at (x, y): a storm raises overhead faults about 10× for a few hours */
@@ -469,7 +486,9 @@ export const isMotorwayAt = (env: UtilEnv, x: number, y: number) => {
 /** A building's utilities in its panel (BuildingInfo.utilities). */
 export interface UtilityInfo {
   /** power to this building: its node's state (UtilState), the node's door and kind, its bill */
-  power?: { state: number; node?: [number, number]; nodeKind?: number; steps?: number; units: number; bill: number; needed: boolean };
+  power?: { state: number; node?: [number, number]; nodeKind?: number; steps?: number; units: number; bill: number; needed: boolean;
+    /** its node is faulted: who fixes it and when (faultAdvice); absent from older servers */
+    repair?: string };
   /** a node, plant or depot: its network */
   network?: NetworkInfo;
 }
@@ -487,6 +506,8 @@ export interface NetworkInfo {
   protect?: boolean;
   /** open faults in this network, in words */
   faults: string[];
+  /** beside each fault: who fixes it and when (faultAdvice, the contractor's hours counting down); absent from older servers */
+  repair?: string[];
   /** a depot: vans out now and repairs today */
   vans?: number; repairs?: number;
 }

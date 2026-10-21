@@ -8,8 +8,9 @@ import { vehicleMaterial, sceneUniforms } from './materials';
 import { HeadlightPools, IndicatorFlares, LAMP, lampSeed, lampShader, lampAttribute, lampLenses, blinkLit } from './headlights';
 import { Crowd, lookOf, dressFor, EYE, type Look } from './people';
 import { FleetMeshes } from './fleet';
+import { glide, glideFrom, STRETCH, type Glider } from './glide';
 
-interface Agent {
+interface Agent extends Glider {
   x: number; y: number; px: number; py: number; tx: number; ty: number; t: number;
   hx: number; hy: number;
   state: number; drives: boolean; kind: number; cls: number; queued: boolean; emergency: boolean; last: number;
@@ -76,6 +77,9 @@ const BLINKER: Record<VType | 'bus', [number, number, number, number]> = {
 };
 const UP = new Vector3(0, 1, 0);
 const LERP_SECONDS = TICK_MS / 1000;
+/** ?glide=0 draws drivers the old way, straight lines at a constant speed from one server position to the next (an A/B control) */
+const GLIDE = typeof location === 'undefined' || new URLSearchParams(location.search).get('glide') !== '0';
+
 const tmpC = new Color();
 
 // vehicles are sized to the server's VEHICLE_LEN / VEHICLE_WIDTH so two fit a tile with daylight between them
@@ -249,7 +253,16 @@ export class CitizensView {
     this.lamp.get(mesh)!.setXYZW(at, lampSeed(id), brake, a.ind, a.rev ? 1 : 0);
   }
 
+  /** the mean time between position messages, ms (one a tick: TICK_MS at normal speed), and when the last came */
+  private gapMs = TICK_MS; private msgAt = 0;
+  /** when the last frame was drawn (glide's stretches start there) */
+  private frameAt = 0;
   update(c: number[], now: number) {
+    // the pace of the messages: not a chunk's first message after subscribing (in the same tick as the tick's own), nor
+    // a gap after a pause or a lost tab
+    const gap = now - this.msgAt;
+    if (gap > 20 && gap < 2.5 * this.gapMs) this.gapMs += (gap - this.gapMs) * 0.2;
+    this.msgAt = now;
     for (let i = 0; i < c.length; i += 4) {
       const id = c[i], x = c[i + 1], y = c[i + 2], f = c[i + 3];
       const state = citizenState(f);
@@ -258,18 +271,20 @@ export class CitizensView {
       const a = this.agents.get(id);
       const ind = drives ? citizenIndicator(f) : Indicator.None, rev = citizenReversing(f);
       const fleet = citizenFleet(f), loaded = fleetLoaded(f), working = fleetWorking(f);
-      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f), ind, rev, brake: 0, fleet, loaded, working, under: citizenUnder(f), study: citizenStudy(f) }); continue; }
+      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f), ind, rev, brake: 0, fleet, loaded, working, under: citizenUnder(f), study: citizenStudy(f), gx: x, gy: y, m0x: 0, m0y: 0, m1x: 0, m1y: 0, vx: 0, vy: 0, g0: now }); continue; }
       const dx = x - a.tx, dy = y - a.ty;
       // slowing hard since the last tick: the brake lights come on for a moment
       if (drives && (dx * dx + dy * dy) < 0.5 * ((a.tx - a.px) ** 2 + (a.ty - a.py) ** 2) && (a.tx - a.px) ** 2 + (a.ty - a.py) ** 2 > 1e-4) a.brake = now + 700;
       // facing the way it moves, except a bus backing up in a three-point turn (server sim/traffic.ts)
       if (dx * dx + dy * dy > 1e-4) { const d = Math.hypot(dx, dy) * (rev ? -1 : 1); a.hx = dx / d; a.hy = dy / d; }
-      a.px = a.x; a.py = a.y; a.tx = x; a.ty = y; a.t = 0; a.state = state; a.drives = drives; a.kind = kind; a.cls = cls; a.queued = queued; a.emergency = emergency; a.last = now; a.stage = stage; a.study = citizenStudy(f); a.bag = citizenBag(f); a.ind = ind; a.rev = rev;
+      if (GLIDE && drives) { a.px = a.tx; a.py = a.ty; a.tx = x; a.ty = y; glideFrom(a, this.gapMs * STRETCH, this.frameAt || now); } else { a.px = a.x; a.py = a.y; a.tx = x; a.ty = y; }
+      a.t = 0; a.state = state; a.drives = drives; a.kind = kind; a.cls = cls; a.queued = queued; a.emergency = emergency; a.last = now; a.stage = stage; a.study = citizenStudy(f); a.bag = citizenBag(f); a.ind = ind; a.rev = rev;
       a.fleet = fleet; a.loaded = loaded; a.working = working; a.under = citizenUnder(f);
     }
   }
 
   frame(now: number, dt: number) {
+    this.frameAt = now;
     this.people.begin(); this.crowd.begin(); this.selPerson.begin(); this.luggage.begin(); this.platform.begin();
     const evening = sceneUniforms.uNight.value > 0.5, cull = this.seen;
     const easeGait = 1 - Math.exp(-dt * 7), easePose = 1 - Math.exp(-dt * 3);
@@ -282,7 +297,8 @@ export class CitizensView {
     for (const [id, a] of this.agents) {
       if (now - a.last > 6000) { this.agents.delete(id); continue; }
       a.t = Math.min(1, a.t + dt / LERP_SECONDS);
-      a.x = a.px + (a.tx - a.px) * a.t; a.y = a.py + (a.ty - a.py) * a.t;
+      if (GLIDE && a.drives) glide(a, (now - a.g0) / (this.gapMs * STRETCH), this.gapMs * STRETCH);
+      else { a.x = a.px + (a.tx - a.px) * a.t; a.y = a.py + (a.ty - a.py) * a.t; }
       const travelling = a.state === CitizenState.ToWork || a.state === CitizenState.ToHome || a.state === CitizenState.ToSite || a.state === CitizenState.ToVenue;
       const car = travelling && a.drives;
       a.trav = travelling; a.car = car;
@@ -485,7 +501,8 @@ export class CitizensView {
       const look = this.dress(id, a, sceneUniforms.uNight.value > 0.5);
       height = EYE * look.height * Math.cos(look.stoop) - (a.stage === LifeStage.Child ? 0 : 0.004); pace = look.pace;
     }
-    const speed = a.t < 1 ? Math.hypot(a.tx - a.px, a.ty - a.py) / LERP_SECONDS : 0;
+    // a driver's speed as drawn (render/glide.ts), tiles per second; otherwise the last step's
+    const speed = GLIDE && a.drives ? Math.hypot(a.vx, a.vy) * 1000 : a.t < 1 ? Math.hypot(a.tx - a.px, a.ty - a.py) / LERP_SECONDS : 0;
     return { x: a.rx, z: a.rz, ang: a.ang, height, car: a.car, travelling: a.trav, speed, pace, color: a.car ? (a.fleet ? FleetMeshes.color(a.fleet, id) : this.carColor(id, a, 0).getHex()) : undefined };
   }
 

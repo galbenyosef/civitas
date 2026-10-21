@@ -1,6 +1,6 @@
 import {
   BULLDOZE_COST, LAND_PRICE_PER_TILE, KIND_NAMES, PRIORITY_NAMES, Terrain, isRoad, isRailAux, isAirfieldAux, kindIdOf, levelOf, priorityOf, stopModeOf,
-  terrainOf, underConstruction, zoneOf, type CitizenInfo, type ServerMsg, type PurchaseCheck,
+  terrainOf, underConstruction, zoneOf, STREET_NAME_MAX, type CitizenInfo, type ServerMsg, type PurchaseCheck, type RoadInfo,
 } from '@msimcity/shared';
 import type { NetClient } from './net';
 import type { ClientWorld } from './world';
@@ -60,7 +60,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const money = (n: number) => `$${n.toLocaleString('en-US')}`;
 const MARGIN = 8;
 /** entries that change the world: left out in a read-only showcase (world.spectate) */
-const CHANGES = new Set(['demolish', 'raise', 'lower', 'pause', 'buy']);
+const CHANGES = new Set(['demolish', 'raise', 'lower', 'pause', 'buy', 'rename-h', 'rename-v']);
 
 /** The right-click menu: a small list of the actions that exist for whatever was clicked, each greyed out with its reason when it cannot be done. */
 export class ContextMenu {
@@ -71,6 +71,8 @@ export class ContextMenu {
   private armed = '';
   private focus = -1;
   private info: CitizenInfo | null = null;
+  /** a road tile's live answer (its streets' names), asked for when the menu opens on one */
+  private road: RoadInfo | null = null;
   private flat: MenuItem[] = [];
   private html = '';
 
@@ -113,8 +115,9 @@ export class ContextMenu {
     this.pos = { x: cx, y: cy };
     this.armed = '';
     this.focus = -1;
-    this.info = null;
+    this.info = null; this.road = null;
     if (target.k === 'agent') this.d.net.send({ t: 'inspectCitizen', id: target.id });
+    if (target.k === 'tile') { const t = this.d.world.getTile(target.x, target.y); if (t !== undefined && isRoad(t)) this.d.net.send({ t: 'inspect', x: target.x, y: target.y }); }
     this.model = this.build();
     this.render();
     this.el.classList.remove('hidden');
@@ -124,10 +127,16 @@ export class ContextMenu {
   hide() {
     if (!this.isOpen) return;
     this.el.classList.add('hidden');
-    this.model = null; this.target = null; this.armed = ''; this.info = null; this.html = '';
+    this.model = null; this.target = null; this.armed = ''; this.info = null; this.road = null; this.html = '';
   }
 
   private onMessage(m: ServerMsg) {
+    const tg = this.target;
+    if (this.isOpen && tg?.k === 'tile' && m.t === 'road' && m.x === tg.x && m.y === tg.y && m.info) {
+      this.road = m.info;
+      this.model = this.build(); this.render(); this.place();
+      return;
+    }
     if (!this.isOpen || this.target?.k !== 'agent') return;
     if (m.t !== 'citizen' || m.id !== this.target.id) return;
     if (!m.info) { this.hide(); return; } // gone while the menu was up
@@ -307,7 +316,17 @@ export class ContextMenu {
       return { title: 'Runway or taxiway', sub, swatch, groups: [[demolish('Lift this paving tile', 0)], [...parcelItem(), view]] };
     }
     if (isRoad(t)) {
-      return { title: 'Road', sub, swatch, groups: [[demolish('Demolish this road tile', levelOf(t) > 0 ? BULLDOZE_COST : 0)], [...parcelItem(), view]] };
+      // its streets by name (server/src/streets.ts), each renamable by its owner
+      const streets = this.road?.streets ?? [];
+      const rename: MenuItem[] = streets.map((st) => ({
+        key: `rename-${st.ns ? 'v' : 'h'}`, label: streets.length > 1 ? `Rename ${st.name}` : 'Rename street', hint: st.mine ? st.name : 'not yours',
+        disabled: st.mine ? undefined : 'Only the owner of most of a street can rename it',
+        run: () => {
+          const name = prompt(`A new name for ${st.name} (up to ${STREET_NAME_MAX} letters; leave it empty for the name it had)`, st.name);
+          if (name !== null && name.trim() !== st.name) d.net.send({ t: 'renameStreet', x, y, ns: st.ns, name: name.trim() });
+        },
+      }));
+      return { title: streets[0]?.name ?? 'Road', sub: streets[1] ? `${streets[0].name} at ${streets[1].name} · ${sub}` : sub, swatch, groups: [rename, [demolish('Demolish this road tile', levelOf(t) > 0 ? BULLDOZE_COST : 0)], [...parcelItem(), view]] };
     }
     if (zoneOf(t) !== 0) {
       const kind = kindIdOf(zoneOf(t), w.subAt(dx, dy));

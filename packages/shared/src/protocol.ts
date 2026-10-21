@@ -69,12 +69,35 @@ export interface PlayerDTO {
   fin?: FinanceDTO;
 }
 /** What a treasury movement was for. Positive amounts are income, negative ones spending. */
-export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'other';
+export type LedgerCat = 'tax' | 'fees' | 'wages' | 'upkeep' | 'builders' | 'build' | 'land' | 'tech' | 'interest' | 'fire' | 'blast' | 'ads' | 'adrent' | 'bills' | 'fuel' | 'funeral' | 'burial' | 'grant' | 'other';
 export const LEDGER_LABELS: Record<LedgerCat, string> = {
   tax: 'Taxes', fees: 'Fares and fees', wages: 'Staff wages', upkeep: 'Upkeep', builders: "Builders' fees",
-  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advertising',
-  bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees', other: 'Other',
+  build: 'Construction', land: 'Land', tech: 'Technology', interest: 'Overdraft interest', fire: 'Fire damage', blast: 'Explosion damage', ads: 'Advert campaigns',
+  adrent: 'Billboard rent', bills: 'Utility bills', fuel: 'Fuel and grid import', funeral: 'Funeral fees', burial: 'Burial and cremation fees',
+  grant: 'Charter grants and rewards', other: 'Other',
 };
+/**
+ * Which money comes in or goes out every day whatever the player does (running) and which only when they choose to
+ * build, buy or research, or when something happens once (one-off). The ledger (client finance.ts) shows the two apart
+ * with a total each, and the daily running balance is what says whether the town pays for itself; the books goal and
+ * the ranks' days in the black (server goals.ts `running`) judge the same sum.
+ *
+ * Running: taxes; fares and fees (transit, taxis, parking, couriers, freight, port dues, school fees, refuse); staff
+ * wages; upkeep (buildings by level, roads by tile, school meals and buses, learners' fees); utility bills and fuel or
+ * grid import; overdraft interest; funeral and burial fees; billboard rent (each midnight, for a rented slot).
+ * One-off: construction (buildings, zoning, roads, junctions, rail, metro, lines and cables, with demolition refunds);
+ * builders' fees (a yard's charge for the building it does); land (bought, or sold back); technology; advert
+ * campaigns (the artwork); fire and explosion damage; charter grants and goal rewards; other (policy set-up, dev funds).
+ * No category mixes the two (billboard rent was split from campaigns, `adrent`).
+ */
+export const LEDGER_GROUP: Record<LedgerCat, 'running' | 'oneoff'> = {
+  tax: 'running', fees: 'running', wages: 'running', upkeep: 'running', interest: 'running', bills: 'running', fuel: 'running',
+  funeral: 'running', burial: 'running', adrent: 'running',
+  build: 'oneoff', builders: 'oneoff', land: 'oneoff', tech: 'oneoff', ads: 'oneoff', fire: 'oneoff', blast: 'oneoff', grant: 'oneoff', other: 'oneoff',
+};
+/** A day's running balance (LEDGER_GROUP): positive when taxes and fees cover wages, upkeep and the rest. */
+export const runningBalance = (r: Partial<Record<LedgerCat, number>>) =>
+  (Object.keys(r) as LedgerCat[]).reduce((a, k) => a + (LEDGER_GROUP[k] === 'running' ? r[k] ?? 0 : 0), 0);
 /**
  * Money that can run out (docs/start-from-zero.md B3): the overdraft line, the count of midnights below zero, and
  * administration with its recovery plan. The figures are the server's estimates, worked out at most once a game hour.
@@ -192,6 +215,8 @@ export interface BuildingPeople {
 /** Live detail for one building, answered on hover. */
 export interface BuildingInfo {
   x: number; y: number;
+  /** the street address: the number on the door and the street it faces ('12 Mill Lane'; shared/src/streets.ts) */
+  address?: string;
   /** kind id (docs/sub-kinds.md) */
   kind: number; level: number;
   capacity: number; occupants: number;
@@ -392,6 +417,8 @@ export interface RoadInfo {
   parcel?: { name: string; owner: string };
   /** on a bridge deck (shared/src/bridges.ts): its style name and length in tiles */
   bridge?: { style: string; span: number };
+  /** the streets through this tile (shared/src/streets.ts), the longer first: two at a crossroads or a bend; `mine` when the viewer may rename it */
+  streets?: { name: string; ns: boolean; length: number; mine?: boolean }[];
 }
 
 /** Live detail for one person or vehicle. */
@@ -539,7 +566,13 @@ export type ClientMsg =
       /** multi-tile kinds: the orientation the player chose (0-3, the direction the front faces: 0 = +y, 1 = +x, 2 = -y, 3 = -x); left out = the server picks the road side */
       rot?: number;
       /** bulldoze in the underground view: fill unused tunnel instead of clearing the surface (docs/underground.md) */
-      under?: true }
+      under?: true;
+      /** the road tool (shared/src/roadtool.ts): the class to lay (0, a street, until R3), and whether the player agreed to demolish the buildings in the way (otherwise the road goes round them) */
+      cls?: number; demolish?: boolean }
+  /** the road tool's Ctrl/Cmd+Z: take back the player's last road drag (ROAD_UNDO_MS), refunded, while its tiles are still bare road */
+  | { t: 'undoRoad' }
+  /** rename the street through road tile (x, y) along `ns` (shared/src/streets.ts); an empty name gives back the generated one */
+  | { t: 'renameStreet'; x: number; y: number; ns: boolean; name: string }
   /** `color` -1 clears it back to the owner's colour; on an estate member every setting applies to the whole estate */
   | { t: 'parcel'; id: number; taxRate?: number; name?: string; color?: number }
   /** parcel management on the world map (docs/world-map.md section 2, shared/src/parcelops.ts) */
