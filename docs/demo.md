@@ -114,6 +114,11 @@ tick average 100-170 ms under that load); the main server with the live world ab
 
 ## London
 
+**Road classes in London (R3).** London's main roads are painted as doubled streets (two street tiles side by side, as
+the test cities' edge roads are), not avenues: turning them into avenues needs each pair oriented into two one-way
+carriageways with junction flags at every side street and turn, through `londonPlan`'s street layer, which was not cheap
+for R3. A follow-up (the ARTERIALS as avenues, the M4 and A13 approaches as motorways from gateways).
+
 London is a sample city rather than a teaching town: the Thames runs through it with its recognisable meander, and the
 land round it is zoned roughly as London is. It is a `DEMOS` entry like the others (slot 94, port 8194, `?demo=london`),
 with `town: 'london'`, its own tour order (`tour`) and welcome view (`view`). Its sections are ordinary demo sections, so
@@ -319,6 +324,7 @@ A section (`DemoSection`) lists:
 | `placements` | `{ kind, door, rot }`: the catalogue kind's string id, the tile a player would click, and the FRONT rotation (0 the door faces south, 1 east, 2 north, 3 west). `id` defaults to the kind and must be unique. Bus stops are placements too |
 | `water` | rectangles painted as open water: a scenario's river (no tool makes water) |
 | `roads` | straight road drags, laid as the road tool lays them on the owner's dry land. Track drawn later straight across one makes a level crossing |
+| `classRoads` | `{ cls, from, to }`: road drags of a class (docs/roads.md "Classes"), planned and laid as the road tool does (`planRoad`: an avenue's or motorway's twin row on the drag's left, a drag across a one-way or divided road keeping it), in order after `roads`. The Road classes section lays one of each |
 | `runways` | `{ from, to }`: a runway drag |
 | `tracks` | drags as a player makes them; each runs along its longer axis first and turns once |
 | `junctions` | a roundabout or flyover clicked on a junction (`deck` picks the road on top) |

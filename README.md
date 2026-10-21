@@ -102,7 +102,7 @@ still selects.
 | --- | --- |
 | Panels | the panel on the right (land, a building, a person) keeps its head with ✕ in view while its body scrolls; **Esc** or ✕ closes it. A parcel's panel (on a frontier "<name>'s charter") also folds to its title (–), and its build list shows eight sites with "show all" for the rest (up to 50; the head counts them: "30, showing 8"). `client/src/ui.ts` |
 | Context menu | right-**click** (press and release without dragging) a person, car, train, plane, building, road, track or land for the actions that exist for it: inspect, follow, first-person view, go to home or work, build priority, parcel settings, buy this tile, demolish (asks again to confirm, shows the cost). Greyed entries say why in a tooltip. Esc closes; also on the FPV inset. `client/src/contextmenu.ts` |
-| Tools | 1 select · 2 buy land · 3 road (drag: straight or one corner, Shift held while dragging for a loop, Esc lets go, built on release with its cost shown; across water for a bridge; Ctrl/Cmd+Z undoes the last drag for 30 s; docs/roads.md) · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
+| Tools | 1 select · 2 buy land · 3 road (opens its class picker on the class last used: country lane, street, one-way street, avenue, motorway, pedestrian street, locked ones greyed with their technology; drag: straight or one corner, the way the traffic goes on a one-way, Shift held while dragging for a loop, Esc lets go, built on release with its cost shown; over a road of another class to upgrade it in place; across water for a bridge; Ctrl/Cmd+Z undoes the last drag for 30 s; docs/roads.md) · 4 residential · 5 commercial · 6 industrial · 7 office · 8 police · 9 fire · 0 health · Y builders · P parking · G parks · L libraries · cinemas (tool bar only) · B sport · V theatres (each opens its size picker on the size last used; docs/buildings.md "Groups and tiers") · J airport terminal · U runway (drag) · [ rail halt · ] rail station · `\` freight yard · railway track (drag, tool bar only) · K bus depot · bus stop (tool bar only) · roundabout, flyover (click a junction, tool bar only; a flyover clicked again swaps the deck) · X bulldoze · Esc back to select |
 | Turn a footprint | Z turns the footprint of a building bigger than 1×1 anticlockwise, C clockwise, in quarter turns, while its tool is active (airport terminal, bus depot, rail halt and station). The choice sticks for that tool until you change it; before the first press the footprint faces a road by itself. The preview shows each tile's outline, an arrow from the door towards the road (green with a road, red without) and the building's marked parts (platform, apron, stands, vehicle gate); hovering a placed structure shows them faintly |
 | People and cars | hover anyone for who they are and what they are doing; click to select them in a side panel with a **follow** camera |
 | Trains and planes | hover a train or plane to highlight it; click to select it: a panel with its line or flight, what it is doing, speed, its crew and everyone on board (a train's riders are clickable citizens; plane passengers are visitors), and **follow**. `client/src/vehicles.ts`, docs/rail.md and docs/airport.md |
@@ -195,7 +195,8 @@ changing behaviour in game time.
   legs: walk to the car, drive, park, walk the last stretch. Walkers use the
   sidewalk side; routes are re-planned if a road disappears.
 - *Traffic* (`server/src/sim/traffic.ts`). Every road tile has one lane per
-  direction holding two cars. The server works out real positions: right-hand
+  direction holding two cars, and a one-way tile (a one-way street, or one
+  carriageway of an avenue or motorway) two lanes its way. The server works out real positions: right-hand
   lanes 0.19 from the centreline, tight arcs round right turns and wide arcs
   round left turns, so a car's corners stay where a car's corners would be.
   Drivers follow bumper to bumper plus a personal gap (never closer than the
@@ -232,6 +233,16 @@ changing behaviour in game time.
   deck tile): plain straight road to the traffic, nothing joins it from the side,
   bulldozing any of it removes the whole bridge (`shared/src/bridges.ts`, aux
   bytes 0xd8–0xdf, drawn by `client/src/render/bridges.ts`).
+  **Road classes** (`shared/src/roadclass.ts`, docs/roads.md "Classes"): a
+  country lane (cheap, slow, grass verges; the frontier's first road), the
+  street, a one-way street (two lanes the way it was dragged), an avenue and a
+  motorway (each two tiles wide, a one-way carriageway either side of the
+  reservation, two lanes each; the motorway fast, with no frontage, joined by
+  slip roads and never crossed) and a pedestrian street (walkers, bikes,
+  emergencies and deliveries out of shop hours). Routers never go against a
+  one-way or across a reservation but at a junction; the class sets speed,
+  lanes and route cost, and `Traffic.roadRank` its rank at a junction. Classes
+  live in aux bytes 0x01–0x3d; the street has none, so old worlds are streets.
   Besides commuters the roads carry delivery trucks (industry → commerce, a
   fee per drop), visitors driving in from the edge of the network at peak
   hours, and, with the Patrols technology, police patrols, fire engines and

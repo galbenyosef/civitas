@@ -200,5 +200,22 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
   key('keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
   ok(undos === 2, 'Ctrl+Z with another tool: nothing');
 }
+{ // road classes (docs/roads.md "Classes"): 3 opens the road tool's class picker (the ladder hook, ui.ts), a drag's tiles go in drag order (a one-way street goes the way it was dragged), and a drag along a road sends every tile (an upgrade in place)
+  const roads: [number, number][][] = [];
+  const keyed: string[] = [];
+  const road = new Set(Array.from({ length: 10 }, (_, x) => `${x},5`));
+  const m = make(() => {}, {
+    ladderKey: (t: string) => { keyed.push(t); return t; }, onRoad: (tiles: [number, number][]) => roads.push(tiles),
+    isRoad: (x: number, y: number) => road.has(`${x},${y}`), isWater: () => false,
+  });
+  (m.input as any).tileAt = (px: number, py: number) => [Math.floor(px / 10), Math.floor(py / 10)];
+  const pd = (type: string, tx: number, ty: number) => m.handlers.get(type)!({ type, button: 0, clientX: tx * 10 + 5, clientY: ty * 10 + 5, offsetX: tx * 10 + 5, offsetY: ty * 10 + 5, movementX: 0, movementY: 0, altKey: false, shiftKey: false, pointerId: 1 });
+  m.win.get('keydown')!({ code: 'Digit3', key: '3', target: null, repeat: false, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, preventDefault() {} });
+  ok(m.input.tool === 'road' && keyed.includes('road'), '3: the road tool, through the ladder hook that opens its class picker on the class last picked');
+  pd('pointerdown', 9, 0); pd('pointermove', 2, 0); pd('pointerup', 2, 0);
+  ok(roads[0]?.[0]?.join() === '9,0' && roads[0]?.at(-1)?.join() === '2,0', 'a drag from east to west sends its tiles east first: a one-way street laid by it goes west');
+  pd('pointerdown', 0, 5); pd('pointermove', 9, 5); pd('pointerup', 9, 5);
+  ok(roads[1]?.length === 10 && roads[1].every(([, y]) => y === 5), 'a drag along a road sends every tile of it: the server upgrades them in place');
+}
 console.log(fails ? `${fails} FAILED` : 'all passed');
 process.exit(fails ? 1 : 0);

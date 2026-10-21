@@ -3,6 +3,7 @@ import {
   capacity, chunkKey, tileKey, parseKey, localIndex, chunkOf, makeTerrainSampler, hash2, CAR_OWNERSHIP, CAR_OWNERSHIP_OFFICE,
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
+  isClassAux, isDividedAux, divJunction, CLASS_JUNCTION, noFrontageAux, MOTORWAY_KIND, classDef, auxClass, ROAD_UPKEEP,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
   type LedgerCat, type LedgerDTO, type FinanceDTO, ECONOMY_TUNING, spendableMoney, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate, type EduFields, hasPolicy, type PolicyId,
 } from '@msimcity/shared';
@@ -94,6 +95,13 @@ export interface Mover {
   cls: number;                          // VehicleClass for rendering
   len: number;                          // vehicle length in tiles
   inDir: number;                        // direction the current lane was entered from (for turn geometry)
+  /**
+   * Lanes of a multi-lane road (R3 classes, Traffic): the lane the mover crosses each tile edge in, 0 the right-hand
+   * lane (where every single-lane road's one is) and 1 the left: `s0` at the edge into the tile its lane starts on,
+   * `s1` at the lane's middle (the edge between its two tiles), `s2` at the edge out of the tile it is heading into.
+   * Absent is 0, so a mover on plain roads never has them.
+   */
+  s0?: number; s1?: number; s2?: number;
   committed: boolean;                   // past the stop line, crossing into the next tile
   /** lane progress moved last tick: the speed car following starts from (TRAFFIC_TUNING.follow); 0 or absent when it pulls out or a save loads */
   v?: number;
@@ -380,7 +388,9 @@ export class World {
     if (c.aux[i] && isStructureAux(c.aux[i]) && this.structureWrite(x, y, packed)) return;
     if (c.aux[i] && isJunctionAux(c.aux[i]) && !isRoad(packed)) this.removeJunction(x, y); // a ring or flyover tile dug up: the junction goes back to a crossroads
     if (c.aux[i] && isBridgeAux(c.aux[i]) && !isRoad(packed)) this.setAux(x, y, 0); // a bridge deck tile taken away: open water again
+    if (c.aux[i] && isClassAux(c.aux[i]) && !isRoad(packed)) this.setAux(x, y, 0); // a road of a class dug up: its class goes with it
     if (c.tiles[i] === packed) return;
+    const roadChanged = isRoad(c.tiles[i]) !== isRoad(packed);
     if (c.sub[i] && sub === undefined && (zoneOf(packed) !== zoneOf(c.tiles[i]) || isRoad(packed))) this.setSub(x, y, 0);
     if (isRoad(c.tiles[i]) !== isRoad(packed)) this.noteJobEdit(x, y);
     c.tiles[i] = packed;
@@ -388,6 +398,55 @@ export class World {
     this.dirtyTiles.set(tileKey(x, y), [x, y]);
     this.syncBuilding(x, y, packed);
     this.onTileChanged?.(x, y);
+    if (roadChanged) this.refreshRoadFlags(x, y);
+  }
+  /**
+   * Write a road tile's class byte (shared/src/roadclass.ts; 0 makes it a street) and keep the junction flags of the
+   * divided roads round it. Only on a road tile with no other kind of byte (a bridge deck, a level crossing, a ring or a
+   * flyover keeps its own and stays a street).
+   */
+  setRoadClass(x: number, y: number, byte: number): boolean {
+    const t = this.peekTile(x, y), a = this.auxAt(x, y);
+    if (t === undefined || !isRoad(t) || (a && !isClassAux(a))) return false;
+    if (a !== byte) { this.setAux(x, y, byte); this.onTileChanged?.(x, y); this.onRoadClass?.(x, y); }
+    if (byte) { this.minRouteCost = Math.min(this.minRouteCost, classDef(auxClass(byte)).routeCost); this.anyRoadClass = true; }
+    this.refreshRoadFlags(x, y);
+    return true;
+  }
+  /**
+   * The junction flag of every divided road tile in the 3×3 round (x, y), worked out again (roadclass.ts divJunction:
+   * where a road crosses it, it turns a corner or ends). Called round any change of a road tile or its class.
+   */
+  refreshRoadFlags(x: number, y: number) {
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const tx = x + dx, ty = y + dy, a = this.auxAt(tx, ty);
+      if (!isDividedAux(a)) continue;
+      const t = this.peekTile(tx, ty);
+      if (t === undefined || !isRoad(t)) continue;
+      const v = (a & ~CLASS_JUNCTION) | (divJunction(tx, ty, this.roadFn, this.auxFn) ? CLASS_JUNCTION : 0);
+      if (v !== a) { this.setAux(tx, ty, v); this.onTileChanged?.(tx, ty); this.onRoadClass?.(tx, ty); }
+    }
+  }
+  /** Told when a road tile's class byte or junction flag changes (the simulation has drivers check their way: Simulation.recheckClasses). */
+  onRoadClass: ((x: number, y: number) => void) | null = null;
+  private roadFn = (x: number, y: number) => { const t = this.peekTile(x, y); return t !== undefined && isRoad(t); };
+  /**
+   * The cheapest any road tile is to drive for a router (roadclass.ts routeCost): 1 while every road is a street or
+   * dearer, lower once an avenue or motorway is laid. A* scales its distance estimate by it so the estimate never
+   * overestimates (pathfinding.ts findRoute). It only ever falls; a loaded world is scanned once (scanRoadClasses).
+   */
+  minRouteCost = 1;
+  /**
+   * Has any road had a class other than the street (shared/src/roadclass.ts)? Until one has, the traffic model skips
+   * its lanes-per-class work, so a world of streets runs exactly as before classes. Never goes back to false.
+   */
+  anyRoadClass = false;
+  /** Work out minRouteCost and anyRoadClass from every loaded chunk's class bytes (after a load). */
+  scanRoadClasses() {
+    for (const c of this.chunks.values()) for (let i = 0; i < c.aux.length; i++) {
+      const a = c.aux[i];
+      if (a && isClassAux(a)) { this.minRouteCost = Math.min(this.minRouteCost, classDef(a & 7).routeCost); this.anyRoadClass = true; }
+    }
   }
   /** Aux byte at a tile; 0 where the chunk does not exist yet. */
   auxAt(x: number, y: number): number {
@@ -651,11 +710,17 @@ export class World {
     const id = this.parcelIdAt(x, y);
     return id ? this.parcels.get(id) : undefined;
   }
-  /** A road beside the lot. A bridge deck (road on water, shared/src/bridges.ts) is nobody's road access: it is entered only at its ends. */
+  /**
+   * A road beside the lot. A bridge deck (road on water, shared/src/bridges.ts) is nobody's road access: it is entered
+   * only at its ends. Nor is a motorway (no frontage, shared/src/roadclass.ts), except to the motorway connection it
+   * runs from.
+   */
   hasRoadAccess(x: number, y: number): boolean {
     for (const [dx, dy] of DIRS) {
       const t = this.peekTile(x + dx, y + dy);
-      if (t !== undefined && isRoad(t) && (t & 3) !== Terrain.Water) return true;
+      if (t === undefined || !isRoad(t) || (t & 3) === Terrain.Water) continue;
+      if (noFrontageAux(this.auxAt(x + dx, y + dy)) && this.kindIdAt(x, y) !== MOTORWAY_KIND) continue;
+      return true;
     }
     return false;
   }
@@ -1025,13 +1090,20 @@ export class World {
     if (rest.length === 1) { delete rest[0].group; this.dirtyParcels.add(rest[0].id); }
     return null;
   }
+  /** Each parcel's road upkeep a day where it differs from its road tiles at ROAD_UPKEEP (roads of other classes), from recountRoads. */
+  roadUpkeep = new Map<number, number>();
+  /** The road upkeep a parcel pays a day: its road tiles at their classes' upkeep. */
+  roadUpkeepOf(p: Parcel): number { return this.roadUpkeep.get(p.id) ?? p.stats.roads * ROAD_UPKEEP; }
   recountRoads(id: number) {
     const parcel = this.parcels.get(id);
     if (!parcel) return;
-    let n = 0;
+    let n = 0, up = 0;
     for (let yy = parcel.y; yy < parcel.y + parcel.h; yy++)
-      for (let xx = parcel.x; xx < parcel.x + parcel.w; xx++) if (isRoad(this.getTile(xx, yy))) n++;
+      for (let xx = parcel.x; xx < parcel.x + parcel.w; xx++) if (isRoad(this.getTile(xx, yy))) { n++; up += classDef(auxClass(this.auxAt(xx, yy))).upkeep; }
     if (n !== parcel.stats.roads) { parcel.stats.roads = n; this.dirtyParcels.add(id); }
+    // the day's road upkeep by class (roadclass.ts), kept only when a road of another class than the street is there
+    const extra = Math.abs(up - n * ROAD_UPKEEP) > 1e-9 ? up : undefined;
+    if (extra !== this.roadUpkeep.get(id)) { if (extra === undefined) this.roadUpkeep.delete(id); else this.roadUpkeep.set(id, extra); }
   }
   /** Pay into (or, negative, take out of) a player's treasury; `cat` files it in the day's ledger (by default income is tax, spending upkeep). */
   credit(playerId: string, amount: number, cat: LedgerCat = amount >= 0 ? 'tax' : 'upkeep') {

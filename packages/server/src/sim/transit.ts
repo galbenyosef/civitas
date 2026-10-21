@@ -1250,6 +1250,7 @@ export class BusService implements ModeService {
     if (!r || r.path.length < 2) { this.withdraw(b); return; }
     v.path = [...head, ...r.path.slice(2)];
     if (v.leg) v.leg.path = v.path;
+    this.traffic.restrand(v);
     if (v.path.length < 4) { this.withdraw(b); }
   }
   /** Take a bus off the road where it is (stuck for good, or no way on): its riders walk on from there. */

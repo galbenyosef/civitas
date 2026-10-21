@@ -31,6 +31,7 @@ import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REF
 import { zoneOf, levelOf, Zone, isRoad } from '../tile';
 import { isMarkedJunction, mouthCrossing, MouthCrossing, boxJunction, sandboxSignalled, streetTreeAt, midZebraAt } from '../roadlook';
 import { signalArms } from '../signals';
+import { ROAD_CLASS_DEFS, RoadCls, auxClass, oneWayDir, isMotorwayAux, isPedestrianAux, auxJunction } from '../roadclass';
 import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
 import { FIRE } from '../fires';
 import { DEATH } from '../remembrance';
@@ -56,7 +57,7 @@ import { AD } from '../adverts';
  * would click (the door) and its rotation (FRONT order: 0 the door faces +y/south, 1 east, 2 north, 3 west).
  */
 
-export type SectionId = 'downtown' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media' | 'power' | 'remembrance'
+export type SectionId = 'downtown' | 'roads' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media' | 'power' | 'remembrance'
   | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-rail' | 'london-buses' | 'london-river' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
@@ -137,6 +138,8 @@ export interface DemoBlock {
   /** how it comes about, in place of the kind's howTo */
   how?: string;
 }
+/** A road of a class laid by a scenario (DemoSection.classRoads): `cls` a RoadCls id, the drag from `from` to `to`. */
+export interface DemoClassRoad { cls: number; from: DemoXY; to: DemoXY }
 export interface DemoSection {
   id: SectionId; name: string; blurb: string;
   /** extra land outside the districts, owned by the town */
@@ -153,6 +156,11 @@ export interface DemoSection {
   water?: DemoRect[];
   /** straight road drags as the road tool lays them, on own dry land (bridges are `bridges`, laid after) */
   roads?: readonly (readonly [DemoXY, DemoXY])[];
+  /**
+   * road drags of a class (shared/src/roadclass.ts), laid after `roads` in this order as the road tool lays them: from
+   * `from` to `to`, one corner at most, the drag's row going its way and, for an avenue or a motorway, the twin on its left
+   */
+  classRoads?: readonly DemoClassRoad[];
   /** names given to streets (shared/src/streets.ts), as an owner renames them: the street through road tile `at` (east-west unless `ns`) */
   streets?: readonly { at: DemoXY; ns?: boolean; name: string }[];
   placements?: DemoPlacement[];
@@ -204,6 +212,22 @@ const FIRE_DRILL: DemoXY = [-29, -31];
 const FIRE_DRILL_RECT: DemoRect = [-31, -33, 9, 6];
 /** the road-look stop (client render/roads.ts): east of downtown, tree-lined streets beside open lots, two box junctions and a mid-block zebra */
 const ROAD_LOOK_RECT: DemoRect = [23, 7, 11, 8];
+/**
+ * The road classes (docs/roads.md "Classes", shared/src/roadclass.ts): open land west of district A1's north half, its
+ * streets joining the perimeter road at x = -35. North to south: a pedestrian high street of shops (Cheapside, y -37)
+ * that a street ends at; a one-way pair round a block of homes (North and South Parade, y -34 east and y -30 west); an
+ * avenue through offices and homes (Kingsway, y -25 west and -24 east), crossed by Market Street (x -48); a motorway from
+ * a motorway connection of its own at the west edge (y -21 west and -20 east) that Market Street joins by a slip road,
+ * running on into the town's street at y -20 at the perimeter road; and a country lane out to the edge (Hedge Lane, y -18).
+ */
+export const ROAD_CLASSES_LAND: DemoRect = [-60, -40, 25, 23];
+export const ROAD_CLASS_STOPS = {
+  pedestrian: { rect: [-57, -39, 19, 4] as DemoRect, inspect: [-52, -37] as DemoXY },
+  oneway: { rect: [-58, -35, 23, 7] as DemoRect, inspect: [-44, -34] as DemoXY },
+  avenue: { rect: [-58, -29, 23, 7] as DemoRect, inspect: [-48, -25] as DemoXY },
+  motorway: { rect: [-60, -23, 25, 5] as DemoRect, inspect: [-48, -21] as DemoXY },
+  lane: { rect: [-60, -19, 25, 2] as DemoRect, inspect: [-50, -18] as DemoXY },
+};
 /** the news helicopter's orbit over the drill (shared newsHelis.ts NEWS_HELI.radius), framed from above */
 const NEWS_HELI_RECT: DemoRect = [-33, -35, 9, 9];
 /**
@@ -320,6 +344,40 @@ const mobileRoleAt = (spot: MobileSpot, x: number, y: number, t: number, a: numb
 };
 
 export const SECTIONS: DemoSection[] = [
+  {
+    id: 'roads', name: 'Road classes',
+    blurb: 'One street of every road class, west of the town: a pedestrian high street, a one-way pair, an avenue, a motorway from its own connection with a slip road, and a country lane out to the edge.',
+    land: [{ name: 'Road classes', rect: ROAD_CLASSES_LAND }],
+    classRoads: [
+      { cls: 5, from: [-57, -37], to: [-39, -37] }, // Cheapside, the pedestrian street, first: the streets that meet it end at it
+      { cls: 0, from: [-58, -37], to: [-58, -26] }, // the west street, joining the one-way pair and the avenue's end
+      { cls: 0, from: [-38, -37], to: [-38, -35] }, // Cheapside's east end to North Parade
+      { cls: 2, from: [-57, -34], to: [-36, -34] }, // North Parade, one way east
+      { cls: 2, from: [-36, -30], to: [-57, -30] }, // South Parade, one way west
+      { cls: 3, from: [-36, -25], to: [-57, -25] }, // Kingsway: the drag's row west at y -25, its twin east at -24
+      { cls: 4, from: [-57, -20], to: [-36, -20] }, // the motorway: its row east at y -20 (on into the town's street), its twin west at -21
+      { cls: 0, from: [-48, -36], to: [-48, -22] }, // Market Street, across both Parades and Kingsway to the motorway's slip
+      { cls: 1, from: [-36, -18], to: [-60, -18] }, // Hedge Lane, out to the edge
+    ],
+    zones: [
+      { zone: 'commercial', rect: [-57, -38, 19, 1], level: 2 }, { zone: 'commercial', rect: [-57, -36, 9, 1], level: 2 }, { zone: 'commercial', rect: [-47, -36, 9, 1], level: 2 },
+      { zone: 'residential', rect: [-57, -33, 9, 3] }, { zone: 'residential', rect: [-47, -33, 11, 3] },
+      { zone: 'office', rect: [-57, -29, 9, 4] }, { zone: 'office', rect: [-47, -29, 11, 4] },
+      { zone: 'residential', rect: [-57, -23, 9, 1], level: 2 }, { zone: 'residential', rect: [-47, -23, 11, 1], level: 2 },
+    ],
+    placements: [{ id: 'motorway-west', kind: 'motorway', door: [-58, -20], rot: 1 }],
+    streets: [
+      { at: [-52, -37], name: 'Cheapside' }, { at: [-44, -34], name: 'North Parade' }, { at: [-44, -30], name: 'South Parade' },
+      { at: [-52, -25], name: 'Kingsway' }, { at: [-52, -24], name: 'Kingsway' }, { at: [-48, -32], ns: true, name: 'Market Street' }, { at: [-50, -18], name: 'Hedge Lane' },
+    ],
+    spots: [
+      { id: 'road-pedestrian', spot: 'road-pedestrian', name: 'Pedestrian street', ...ROAD_CLASS_STOPS.pedestrian },
+      { id: 'road-oneway', spot: 'road-oneway', name: 'One-way streets', ...ROAD_CLASS_STOPS.oneway },
+      { id: 'road-avenue', spot: 'road-avenue', name: 'Avenue', ...ROAD_CLASS_STOPS.avenue },
+      { id: 'road-motorway', spot: 'road-motorway', name: 'Motorway', ...ROAD_CLASS_STOPS.motorway },
+      { id: 'road-lane', spot: 'road-lane', name: 'Country lane', ...ROAD_CLASS_STOPS.lane },
+    ],
+  },
   {
     id: 'downtown', name: 'Downtown',
     blurb: 'Nine districts of homes, shops, offices and industry, pre-built to level 3. Nobody places these: you zone land and it grows when there is demand and builders can reach it. District B1 is all homes: its people commute downtown, many by bus.',
@@ -666,6 +724,7 @@ export const TOUR: string[] = [
   'block-residential', 'focus-groups', 'block-commercial', 'high-street', 'big-screens', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
   'cab-office', 'takeaway', 'waste-depot', 'parcel-depot',
   'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover', 'road-look',
+  'road-pedestrian', 'road-oneway', 'road-avenue', 'road-motorway', 'road-lane',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
   'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
   'fire-post', 'house-fire', 'fire-spread', 'fire', 'large-fire-station', 'fire-hq',
@@ -689,7 +748,7 @@ export const TOUR: string[] = [
 ];
 
 export const DEMOS: DemoDef[] = [
-  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'media', 'power', 'remembrance', 'education', 'airport', 'industry', 'riverside', 'harbour'],
+  { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'roads', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'media', 'power', 'remembrance', 'education', 'airport', 'industry', 'riverside', 'harbour'],
     blurb: 'A lived-in town with one of every large building and every merged lot, buses, trains, an underground and river buses, an airport every plane type flies to, helicopters, a river with every style of bridge, and a harbour with every kind of boat, all running. Take the guided tour.' },
   { id: 'transport', name: 'Transport demo', slot: 91, sections: ['downtown', 'transport', 'rail', 'airport', 'industry'],
     blurb: 'Buses, parking, rail, freight and the airport, in the same town.' },
@@ -780,8 +839,38 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'road-look' | 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
+export type SpotKind = 'road-look' | 'road-lane' | 'road-oneway' | 'road-avenue' | 'road-motorway' | 'road-pedestrian' | 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
+const roadFacts = (cls: number): [string, string][] => {
+  const d = ROAD_CLASS_DEFS[cls];
+  return [['Tool', `Road (3), ${d.title}`], ['Lanes', d.access === 'pedestrian' ? 'none: paving for walkers and bikes' : d.divided ? `${d.lanes} each way, a tile each way` : d.oneWay ? `${d.lanes}, one way` : 'one each way'],
+    ['Speed', `${Math.round(d.speed * 100)}% of a street's`], ['Cost', `${money(d.cost)} a tile${d.divided ? ' (two tiles a length)' : ''}, ${money(d.upkeep)} a day`], ['Technology', d.feature ? techLine(d.feature) : 'available from the start']];
+};
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
+  'road-lane': {
+    title: 'Country lane',
+    what: 'Hedge Lane runs out to the edge of the land between grass verges: no kerbs, no centre line, no lamps, and cars take it at four fifths of a street\'s pace. It is the cheapest road there is, and every frontier starts with one from its motorway connection.',
+    how: ROAD_CLASS_DEFS[1].howTo, facts: roadFacts(1),
+  },
+  'road-oneway': {
+    title: 'One-way streets',
+    what: 'North Parade runs east and South Parade west, a pair round a block of homes: each has two lanes going its way, so a junction on it has half the crossing movements of a street\'s. Drivers keep to the lane for their next turn. Routes never go against the arrows, so a pair carries a busy route both ways.',
+    how: ROAD_CLASS_DEFS[2].howTo, facts: roadFacts(2),
+  },
+  'road-avenue': {
+    title: 'Avenue',
+    what: 'Kingsway is two tiles wide: two lanes each way either side of a planted reservation, twice what a street carries, and the main road at a junction. Cars cross the reservation and turn round only at junctions; Market Street crosses it here. A car crossing waits in the first carriageway for a gap in the second.',
+    how: `${ROAD_CLASS_DEFS[3].howTo} Dragged over a street it widens it in place, keeping its junctions, and asks before demolishing what stands in the new row.`, facts: roadFacts(3),
+  },
+  'road-motorway': {
+    title: 'Motorway',
+    what: 'A motorway from its own connection at the west edge: two lanes each way at a quarter faster than a street, with no buildings on it. Market Street joins it by a slip road, giving way, and cannot cross it; at the perimeter road it runs on into the town\'s street. The homes beside it face Kingsway, not the motorway.',
+    how: ROAD_CLASS_DEFS[4].howTo, facts: roadFacts(4),
+  },
+  'road-pedestrian': {
+    title: 'Pedestrian street',
+    what: 'Cheapside is paved from wall to wall for walkers and bikes, with bollards where Market Street ends at it. No cars but fire engines and ambulances on a call, and delivery lorries before 10:00 and after 19:00. Its shops see every passer-by: the footfall bonus is left for the leisure and commerce cards to use.',
+    how: ROAD_CLASS_DEFS[5].howTo, facts: roadFacts(5),
+  },
   'road-look': {
     title: 'Streets',
     what: 'Close up, every road is drawn as a street: pavements raised behind a kerb, corners rounded where roads meet, dropped kerbs with tactile paving at each crossing, and the paint a driver reads. Centre lines turn to long warning dashes before a junction. Lights get stop lines and turn arrows, junctions without them get give-way lines and triangles, zebras have flashing Belisha beacons, and busy crossroads get a yellow box. Lamp columns line the pavements and each lamp comes on at its own dusk. Trees line the verges beside gardens and open land. Busier streets wear darker and gather patches.',
@@ -1330,11 +1419,49 @@ const studentQuarter = (d: SeededDemo) => d.schools.some((u) => SCHOOL_SPECS[u.k
   && d.schools.some((h) => SCHOOL_SPECS[h.kind]?.beds && Math.abs(h.x - u.x) + Math.abs(h.y - u.y) <= HALLS_WALK));
 
 /**
+ * What the road classes section shows in a seeded demo (shared/src/roadclass.ts): tiles of each class, a one-way pair
+ * (both ways within a few rows), an avenue junction tile with a crossing street, a motorway tile beside a motorway
+ * connection and one a street meets (a slip), and pedestrian street tiles with shops beside them.
+ */
+const roadClassSeen = new WeakMap<SeededDemo, { n: number[]; ways: Set<number>; avenueCross: boolean; motorwayGate: boolean; slip: boolean; pedShops: number }>();
+function roadClasses(d: SeededDemo) {
+  const had = roadClassSeen.get(d);
+  if (had) return had;
+  const tiles = new Map<string, number>();
+  d.scan((x, y, t) => tiles.set(`${x},${y}`, t));
+  const road = (x: number, y: number) => { const t = tiles.get(`${x},${y}`); return t !== undefined && isRoad(t); };
+  const out = { n: [0, 0, 0, 0, 0, 0], ways: new Set<number>(), avenueCross: false, motorwayGate: false, slip: false, pedShops: 0 };
+  const near = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  d.scan((x, y, t, a) => {
+    if (!isRoad(t)) return;
+    const c = auxClass(a);
+    out.n[c]++;
+    if (c === RoadCls.OneWay && oneWayDir(a) >= 0) out.ways.add(oneWayDir(a));
+    if (c === RoadCls.Avenue && auxJunction(a) && near.some(([dx, dy]) => road(x + dx, y + dy) && auxClass(d.aux(x + dx, y + dy)) === RoadCls.Street)) out.avenueCross = true;
+    if (isMotorwayAux(a)) for (const [dx, dy] of near) {
+      // beside a structure tile (a motorway connection: nothing else may face a motorway)
+      if (!road(x + dx, y + dy)) { const na = d.aux(x + dx, y + dy); if (d.kinds.has(MOTORWAY_KIND) && na >= 0x40 && na < 0xc0) out.motorwayGate = true; continue; }
+      if (!isMotorwayAux(d.aux(x + dx, y + dy)) && auxClass(d.aux(x + dx, y + dy)) === RoadCls.Street && !auxJunction(a)) out.slip = true;
+    }
+    if (isPedestrianAux(a)) for (const [dx, dy] of near) { const n = tiles.get(`${x + dx},${y + dy}`); if (n !== undefined && !isRoad(n) && zoneOf(n) === Zone.Commercial && levelOf(n) > 0) out.pedShops++; }
+  });
+  roadClassSeen.set(d, out);
+  return out;
+}
+const classRoad = (cls: number) => (ss: readonly DemoSection[]) => ss.some((s) => s.classRoads?.some((r) => r.cls === cls));
+
+/**
  * The feature registry: everything interesting the showcase must show that is not a catalogue kind (those are checked
  * by kind: every placeable kind, ladder rung, surface tool and line mode, below). A new feature lands with its entry
  * here, its placement in a section and its tour stop, or demo:check fails (docs/demo.md "Keeping it complete").
  */
 export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
+  // ---- road classes (docs/roads.md "Classes", shared/src/roadclass.ts): one street of each, each at its own stop
+  { id: 'road-class-lane', caption: 'a country lane', tour: 'road-lane', scenario: classRoad(RoadCls.Lane), seeded: (d) => roadClasses(d).n[RoadCls.Lane] >= 10 },
+  { id: 'road-class-oneway', caption: 'a one-way pair (two one-way streets going opposite ways)', tour: 'road-oneway', scenario: classRoad(RoadCls.OneWay), seeded: (d) => roadClasses(d).n[RoadCls.OneWay] >= 10 && roadClasses(d).ways.size >= 2 },
+  { id: 'road-class-avenue', caption: 'an avenue (a pair of carriageways) crossed by a street', tour: 'road-avenue', scenario: classRoad(RoadCls.Avenue), seeded: (d) => roadClasses(d).n[RoadCls.Avenue] >= 20 && roadClasses(d).avenueCross },
+  { id: 'road-class-motorway', caption: 'a motorway from a motorway connection, with a slip road joining it', tour: 'road-motorway', scenario: classRoad(RoadCls.Motorway), seeded: (d) => roadClasses(d).n[RoadCls.Motorway] >= 20 && roadClasses(d).motorwayGate && roadClasses(d).slip },
+  { id: 'road-class-pedestrian', caption: 'a pedestrian street with shops along it', tour: 'road-pedestrian', scenario: classRoad(RoadCls.Pedestrian), seeded: (d) => roadClasses(d).n[RoadCls.Pedestrian] >= 8 && roadClasses(d).pedShops >= 8 },
   // ---- bridges: every style, laid as the road tool lays them, carrying real traffic
   ...(Object.keys(BRIDGE_TOUR) as (keyof typeof BridgeStyle)[]).map((style): ShowcaseFeature => ({
     id: `bridge-${style.toLowerCase()}`, caption: `a ${BRIDGE_STYLE_NAMES[BridgeStyle[style]]}`, tour: BRIDGE_TOUR[style],

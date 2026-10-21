@@ -4,7 +4,7 @@ import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, T
 import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, spendableMoney, type KindToolId, type LedgerDTO, type FinanceDTO } from '@msimcity/shared';
-import { FLEET_LABEL } from '@msimcity/shared';
+import { FLEET_LABEL, classDef, namesClass } from '@msimcity/shared';
 import { WEEKDAY_NAMES } from '@msimcity/shared';
 import { schoolHtml, educationHtml, eduTotals, eduIndexLabel } from './eduView';
 import { mediaHtml } from './news';
@@ -15,12 +15,15 @@ import { utilitiesHtml } from './utilities';
 import { UTIL } from '@msimcity/shared';
 import { POLICIES } from '@msimcity/shared';
 import { SizePicker, ladderOfTool, ladderById, rememberedTool, TOOL_LADDERS } from './picker';
+import type { RoadClassPicker } from './roadpicker';
 /** Panel icons of the vehicles of mobile workers (shared FLEET_LABEL, docs/mobile-jobs.md). */
 const FLEET_ICON: Record<string, string> = { taxi: '🚕', 'private hire car': '🚘', 'delivery bicycle': '🚲', 'delivery moped': '🛵', 'courier van': '🚐', 'bin lorry': '🚛', 'street sweeper': '🧹', 'trades van': '🚐', 'school bus': '🚌', 'repair van': '🚐', hearse: '⚰️' };
 
 /** Tool bar groups: land and roads first, then the catalogue kinds by what they are, bulldoze last. */
 const toolGroup = (k: (typeof TOOL_KINDS)[number]) => (k.landmark ? 'Landmarks' : k.family === 'leisure' ? 'Leisure' : k.flags.growable || k.family === 'residential' ? 'Zones' : k.family === 'transport' ? 'Transport' : 'Services');
 const GROUP_ORDER = ['Zones', 'Services', 'Transport', 'Leisure', 'Landmarks'];
+/** The way a one-way road's traffic goes, by DIRS index (E, W, S, N): the road tooltip's words. */
+const FLOW_WORDS = ['eastbound', 'westbound', 'southbound', 'northbound'];
 export const TOOLS: { id: ToolId; label: string; key: string; cost?: string; color?: string; group?: string }[] = [
   { id: 'select', label: 'Select / inspect', key: '1' },
   { id: 'buy', label: 'Buy land', key: '2', cost: `$${LAND_PRICE_PER_TILE}/tile`, color: '#62d2a2' },
@@ -184,8 +187,9 @@ export class UI {
         continue;
       }
       b.dataset.tool = t.id;
-      b.innerHTML = `<span class="sw" style="background:${t.color ?? 'var(--muted)'}"></span><span>${t.label}</span>${t.cost ? `<span class="cost">${t.cost}</span>` : ''}<span class="key">${t.key}</span>`;
-      b.onclick = () => cb.onTool(t.id);
+      b.innerHTML = `<span class="sw" style="background:${t.color ?? 'var(--muted)'}"></span><span>${t.label}${t.id === 'road' ? ' <em class="tier"></em>' : ''}</span>${t.cost ? `<span class="cost">${t.cost}</span>` : ''}<span class="key">${t.key}</span>`;
+      // the road tool opens its class picker (roadpicker.ts) as a building tool opens its size picker
+      b.onclick = t.id === 'road' ? () => this.roadClick() : () => cb.onTool(t.id);
       tools.appendChild(b);
     }
     this.picker = new SizePicker({
@@ -194,6 +198,30 @@ export class UI {
       locked: (msg) => this.toast('error', msg),
     });
     this.setTool('select');
+  }
+
+  // ---- the road tool's class picker (client/src/roadpicker.ts): set by main.ts once the road tool exists ----
+  roadPicker: RoadClassPicker | null = null;
+  /** the class the road tool lays now, for its button (main.ts keeps it) */
+  roadClassName: () => string = () => '';
+  /** what a tile of that class costs, for the button */
+  roadClassCost: () => number = () => ROAD_COST;
+  private roadButton() { return $('tools').querySelector<HTMLButtonElement>('button[data-tool="road"]'); }
+  /** The road button: select the road tool and open its class picker, or close it again. */
+  private roadClick() {
+    const rp = this.roadPicker;
+    if (rp?.open) { rp.close(); return; }
+    this.cb.onTool('road');
+    const b = this.roadButton();
+    if (rp && b) rp.show(b);
+  }
+  /** The class picked changed: the road button names it. */
+  roadClassChanged() {
+    const em = this.roadButton()?.querySelector('em.tier');
+    if (em) { const n = this.roadClassName(); em.textContent = n ? `· ${n}` : ''; }
+    const cost = this.roadButton()?.querySelector('.cost');
+    if (cost) cost.textContent = `$${this.roadClassCost()}`;
+    this.roadPicker?.refresh();
   }
 
   // ---- size ladders: one tool bar button per group, a picker of sizes (client/src/picker.ts) ----
@@ -216,6 +244,12 @@ export class UI {
    * select, or undefined when the key is not a ladder's.
    */
   ladderKey(tool: string): ToolId | undefined {
+    if (tool === 'road') {
+      // 3: the road tool with its class picker open on the class last picked
+      const b = this.roadButton(), rp = this.roadPicker;
+      queueMicrotask(() => { if (b && rp && !rp.open) rp.show(b); });
+      return 'road';
+    }
     const l = ladderOfTool(tool);
     if (!l) return undefined;
     const pick = ladderOfTool(this.tool)?.group.id === l.group.id ? this.tool : (rememberedTool(l) as ToolId);
@@ -256,6 +290,8 @@ export class UI {
     }
     if (this.picker.open && lad?.group.id !== this.picker.open) this.picker.close();
     else this.picker.refresh(t);
+    if (t !== 'road') this.roadPicker?.close();
+    this.roadClassChanged();
   }
   /** Grey out tools the player has not unlocked yet, naming the tier that opens them. */
   setLocks(tech: readonly string[]) {
@@ -268,6 +304,7 @@ export class UI {
       b.title = open.length ? `${l.group.label}: ${open.length} of ${l.tiers.length} ${l.group.collection ? 'landmarks' : 'sizes'} unlocked` : `Needs ${techFor(l.tiers[0].tool!.id)?.name ?? ''} (press T for the tech tree)`;
     }
     this.picker.refresh();
+    this.roadClassChanged();
     for (const b of $('tools').querySelectorAll<HTMLButtonElement>('button[data-tool]')) {
       const id = b.dataset.tool!;
       const locked = !DEV_TOOLS && !hasFeature(tech, id); // ?dev: a dev server skips technology locks
@@ -662,8 +699,13 @@ export class UI {
     const grade = pct < 15 ? 'flowing' : pct < 40 ? 'busy' : pct < 70 ? 'congested' : 'jammed';
     // the street's name leads (server/src/streets.ts); a crossroads or a bend names both streets
     const [st, other] = info.streets ?? [];
-    const what = info.bridge ? 'Bridge' : 'Road';
-    let html = `<h3><span class="sw" style="background:#6b6f7a"></span>${st ? esc(st.name) : what} <span style="color:var(--muted);font-weight:400">${st && info.bridge ? 'bridge, ' : ''}${info.bridge ? `${info.bridge.style}, ${info.bridge.span} tile${info.bridge.span === 1 ? '' : 's'} over the water` : info.junction === 'none' ? '' : info.junction === 'signal' ? 'signalled junction' : info.junction === 'roundabout' ? 'roundabout' : info.junction === 'flyover' ? 'flyover' : 'junction'}</span></h3>`;
+    const what = info.bridge ? 'Bridge' : info.cls ? `${classDef(info.cls).title}` : 'Road';
+    // the class leads the rest when the road is not a street (shared/src/roadclass.ts): "Mill Lane, one-way street, northbound"
+    const cn = info.cls && st && !namesClass(st.name, info.cls) ? classDef(info.cls).name : '';
+    const cls = [cn, info.flow !== undefined ? FLOW_WORDS[info.flow] : ''].filter(Boolean).map((w) => `, ${w}`).join('');
+    const swatch = `#${(info.cls ? classDef(info.cls).colour : 0x6b6f7a).toString(16).padStart(6, '0')}`;
+    const jn = info.junction === 'none' ? '' : info.junction === 'signal' ? 'signalled junction' : info.junction === 'roundabout' ? 'roundabout' : info.junction === 'flyover' ? 'flyover' : 'junction';
+    let html = `<h3><span class="sw" style="background:${swatch}"></span>${st ? esc(st.name) : what}${cls ? `<span style="color:var(--muted);font-weight:400">${esc(cls)}</span>` : ''} <span style="color:var(--muted);font-weight:400">${st && info.bridge ? 'bridge, ' : ''}${info.bridge ? `${info.bridge.style}, ${info.bridge.span} tile${info.bridge.span === 1 ? '' : 's'} over the water` : jn}</span></h3>`;
     if (other) html += `<div class="sub">${info.junction === 'none' ? 'corner of' : 'meets'} ${esc(other.name)}</div>`;
     html += `<div class="sub">${info.parcel ? `${esc(info.parcel.name)} · ${esc(info.parcel.owner)}` : 'public road'}</div>`;
     html += `<div class="row"><span>Traffic</span><span class="${pct >= 40 ? 'bad' : ''}">${grade} (${pct}%)</span></div>`;

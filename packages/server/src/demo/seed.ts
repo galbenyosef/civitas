@@ -4,7 +4,7 @@ import {
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
   isMergedKind, planBridge, BridgeStyle, isDemoOwner, firstLevelOf, isRailAux, isMetroStationKind, SCHOOL_SPECS, capacityOf, Study, EduLevel, LifeStage, CitizenState, ALL_TECH_IDS, TECH_BY_ID,
   demoGraves, plotCapacity,
-  demoUtilLinks, UTIL_ROLE_OF, UtilRole, MOTORWAY_KIND, tileKey, type UtilLinkDTO,
+  demoUtilLinks, UTIL_ROLE_OF, UtilRole, MOTORWAY_KIND, tileKey, type UtilLinkDTO, planRoad, roadDragPath, ROAD_CLASS_DEFS,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, type Building, type Citizen } from '../world';
 import { ageOf, stageFor } from '../sim/life';
@@ -109,6 +109,18 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
         else if (!isBuildable(t)) problems.push(`${s.id}: road at ${at([x, y])} is on water (lay a bridge)`);
         else if (w.auxAt(x, y) && !isRailAux(w.auxAt(x, y))) problems.push(`${s.id}: road at ${at([x, y])} is on a structure, runway or junction`);
         else { unmerge(x, y); w.setTile(x, y, packTile(terrainOf(t), true, 0, 0)); }
+      }
+    }
+    // roads of a class (shared/src/roadclass.ts), as the road tool plans and lays them, twins and all
+    for (const r of s.classRoads ?? []) {
+      const plan = planRoad(roadDragPath(r.from, r.to), {
+        tile: (x, y) => w.getTile(x, y), aux: (x, y) => w.auxAt(x, y), kindId: (x, y) => w.kindIdAt(x, y),
+        land: env.land, claimed: () => true, structure: (x, y) => { const q = w.structureAt(x, y); return q ? KIND_NAMES[q.kind] : undefined; }, bridgeLock: null,
+      }, { cls: r.cls, demolish: true });
+      for (const tp of plan.tiles) {
+        if (tp.state === 'refused') { problems.push(`${s.id}: ${ROAD_CLASS_DEFS[r.cls]?.name ?? 'road'} at ${at([tp.x, tp.y])}: ${tp.reason}`); continue; }
+        if (tp.state === 'new' || tp.state === 'demolish') { unmerge(tp.x, tp.y); w.setTile(tp.x, tp.y, packTile(terrainOf(w.getTile(tp.x, tp.y)), true, 0, 0)); }
+        if ((tp.state === 'new' || tp.state === 'demolish' || tp.state === 'upgrade') && tp.byte !== undefined) w.setRoadClass(tp.x, tp.y, tp.byte);
       }
     }
     for (const z of s.zones ?? []) {

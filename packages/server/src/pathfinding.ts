@@ -1,4 +1,4 @@
-import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS, CHUNK_SIZE } from '@msimcity/shared';
+import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS, CHUNK_SIZE, isMotorwayAux, isPedestrianAux, carStepOk, MOTORWAY_KIND } from '@msimcity/shared';
 import { DIRS, tkey, type Chunk, type World } from './world';
 
 /** `a`: the tile's aux byte (roundabouts and flyovers restrict the steps out of it, shared/src/junctions.ts) */
@@ -57,7 +57,7 @@ export function findPath(
       const s = S.slot(w, chunkOf(nx), chunkOf(ny));
       if (s < 0) continue;
       const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
-      if (isRoad(t) && !sideways(a, dx)) {
+      if (isRoad(t) && !sideways(a, dx) && !isMotorwayAux(a)) {
         visited[s * NODES + routeLayer(a, dx) * CELLS + li] = st;
         queue.push({ x: nx, y: ny, parent: root, depth: 1, a });
       }
@@ -80,7 +80,7 @@ export function findPath(
       const key = s * NODES + routeLayer(a, dx) * CELLS + li;
       if (visited[key] === st || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
       if (isGoal(nx, ny)) return { path: unwind({ x: nx, y: ny, parent: n, depth: n.depth + 1, a }), gx: nx, gy: ny };
-      if (!isRoad(t)) continue;
+      if (!isRoad(t) || isMotorwayAux(a)) continue; // nobody walks along a motorway
       visited[key] = st;
       queue.push({ x: nx, y: ny, parent: n, depth: n.depth + 1, a });
     }
@@ -121,7 +121,7 @@ export function findPaths(
       const s = S.slot(w, chunkOf(nx), chunkOf(ny));
       if (s < 0) continue;
       const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
-      if (isRoad(t) && !sideways(a, dx)) {
+      if (isRoad(t) && !sideways(a, dx) && !isMotorwayAux(a)) {
         visited[s * NODES + routeLayer(a, dx) * CELLS + li] = st;
         queue.push({ x: nx, y: ny, parent: root, depth: 1, a });
       }
@@ -149,7 +149,7 @@ export function findPaths(
       const key = s * NODES + routeLayer(a, dx) * CELLS + li;
       if (visited[key] === st || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
       if (isGoal(nx, ny)) { found(nx, ny, n, a); continue; }
-      if (!isRoad(t)) continue;
+      if (!isRoad(t) || isMotorwayAux(a)) continue;
       visited[key] = st;
       queue.push({ x: nx, y: ny, parent: n, depth: n.depth + 1, a });
     }
@@ -193,7 +193,7 @@ export function findBest(
   else for (const [dx, dy] of DIRS) {
     const nx = sx + dx, ny = sy + dy;
     const t = peek(w, nx, ny);
-    if (t !== undefined && isRoad(t) && !sideways(peekedAux, dx)) { visited.add(tkey(nx, ny) + routeLayer(peekedAux, dx) * LAYER); queue.push({ x: nx, y: ny, parent: root, depth: 1, a: peekedAux }); }
+    if (t !== undefined && isRoad(t) && !sideways(peekedAux, dx) && !isMotorwayAux(peekedAux)) { visited.add(tkey(nx, ny) + routeLayer(peekedAux, dx) * LAYER); queue.push({ x: nx, y: ny, parent: root, depth: 1, a: peekedAux }); }
   }
   const early = maxScore !== Infinity || maxTotal !== Infinity;
   let expanded = 0;
@@ -208,6 +208,7 @@ export function findBest(
       const key = tkey(nx, ny) + routeLayer(a, dx) * LAYER;
       if (visited.has(key) || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
       if (t === undefined || !isRoad(t)) { if (!goals.has(key)) { goals.add(key); consider(nx, ny, n); } continue; }
+      if (isMotorwayAux(a)) continue;
       visited.add(key);
       queue.push({ x: nx, y: ny, parent: n, depth: n.depth + 1, a });
     }
@@ -252,15 +253,26 @@ export function pathStillValid(w: World, path: number[]): boolean {
  * road beneath are separate nodes. `startDir` (a DIRS index) is the way a driver
  * re-routing from the road tile ahead is already heading into it, -1 when unknown. With `maxCost` the search gives up
  * (null) once every route it could still find would cost at least that much.
+ *
+ * Road classes (shared/src/roadclass.ts carStepOk): never against a one-way tile or across a divided road's
+ * reservation, never onto a pedestrian street unless `service` (an emergency, or a delivery out of hours), and no
+ * building's way in or out is a motorway (no frontage) but the motorway connection's. Where roads cheaper than a street
+ * to drive exist (World.minRouteCost) the distance estimate is scaled down by the cheapest, so it never overestimates.
  */
 export function findRoute(
   w: World, sx: number, sy: number, gx: number, gy: number,
-  cost: (x: number, y: number) => number, turnCost = 0.4, maxNodes = 4000, startDir = -1, maxCost = Infinity,
+  cost: (x: number, y: number) => number, turnCost = 0.4, maxNodes = 4000, startDir = -1, maxCost = Infinity, service = false,
 ): { path: number[]; cost: number } | null {
   if (sx === gx && sy === gy) return { path: [sx, sy], cost: 0 };
-  for (const [dx, dy] of DIRS) if (sx + dx === gx && sy + dy === gy) return { path: [sx, sy, gx, gy], cost: 1 };
-  if (!w.hasRoadAccess(gx, gy)) return null; // the goal is reached only from a road beside it: without one, skip the search
   const goalRoad = (() => { const t = w.peekTile(gx, gy); return t !== undefined && isRoad(t); })();
+  // next door: the one step, unless a road's class forbids it (a one-way, a reservation, a pedestrian street, a motorway's frontage)
+  for (let d = 0; d < 4; d++) if (sx + DIRS[d][0] === gx && sy + DIRS[d][1] === gy) {
+    const as = w.auxAt(sx, sy), ag = w.auxAt(gx, gy), st = w.peekTile(sx, sy), startRoad = st !== undefined && isRoad(st);
+    if (!(as > 0 && as < 0x40) && !(ag > 0 && ag < 0x40)) return { path: [sx, sy, gx, gy], cost: 1 };
+    const ok = startRoad && goalRoad ? carStepOk(as, ag, d, service) : startRoad ? !isMotorwayAux(as) || w.kindIdAt(gx, gy) === MOTORWAY_KIND : goalRoad ? !isMotorwayAux(ag) || w.kindIdAt(sx, sy) === MOTORWAY_KIND : true;
+    if (ok) return { path: [sx, sy, gx, gy], cost: 1 };
+  }
+  if (!goalRoad && !w.hasRoadAccess(gx, gy)) return null; // a building is reached only from a road beside it: without one, skip the search
   const S = slotsOf(w), st = nextStamp();
   // open set: binary heap on f
   let hn = 0;
@@ -288,7 +300,9 @@ export function findRoute(
     }
     return k;
   };
-  const h = (x: number, y: number) => Math.abs(x - gx) + Math.abs(y - gy);
+  const hk = w.minRouteCost, h = hk === 1 ? (x: number, y: number) => Math.abs(x - gx) + Math.abs(y - gy) : (x: number, y: number) => hk * (Math.abs(x - gx) + Math.abs(y - gy));
+  /** a building's way on or off the road by tile aux a: not by a motorway (but the motorway connection's), nor a pedestrian street for a car */
+  const frontOk = (a: number, bx: number, by: number) => !(a > 0 && a < 0x40) || ((!isMotorwayAux(a) || w.kindIdAt(bx, by) === MOTORWAY_KIND) && (service || !isPedestrianAux(a)));
   // the start's node, or START when its chunk is not loaded (it is then never expanded, only the end of the path)
   let start = START;
   const s0 = S.slot(w, chunkOf(sx), chunkOf(sy));
@@ -303,7 +317,7 @@ export function findRoute(
     const s = S.slot(w, chunkOf(nx), chunkOf(ny));
     if (s < 0) continue;
     const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
-    if (!isRoad(t) || sideways(a, DIRS[d][0])) continue;
+    if (!isRoad(t) || sideways(a, DIRS[d][0]) || !frontOk(a, sx, sy)) continue;
     const k = s * NODES + routeLayer(a, DIRS[d][0]) * CELLS + li, c = cost(nx, ny);
     seen[k] = st; gScore[k] = c; parent[k] = start; dirIn[k] = d; push(k, c + h(nx, ny));
   }
@@ -327,6 +341,7 @@ export function findRoute(
       const ncx = chunkOf(nx), ncy = chunkOf(ny);
       if (ncx !== lcx || ncy !== lcy) { ls = S.slot(w, ncx, ncy); lcx = ncx; lcy = ncy; }
       if (nx === gx && ny === gy) {
+        if (goalRoad ? !carStepOk(here, w.auxAt(gx, gy), d, service) : !frontOk(here, gx, gy)) continue;
         const path: number[] = [gy, gx];
         let cur = k;
         for (; cur >= 0; cur = parent[cur]) { const c = S.chunks[(cur / NODES) | 0], i = cur & (CELLS - 1); path.push(c.cy * CHUNK_SIZE + ((i / CHUNK_SIZE) | 0), c.cx * CHUNK_SIZE + (i % CHUNK_SIZE)); }
@@ -339,6 +354,7 @@ export function findRoute(
       const nk = ls * NODES + routeLayer(a, DIRS[d][0]) * CELLS + li2;
       if (closed[nk] === st) continue;
       if (!isRoad(t) || sideways(a, DIRS[d][0])) continue;
+      if (((here > 0 && here < 0x40) || (a > 0 && a < 0x40)) && !carStepOk(here, a, d, service)) continue;
       const ng = gk + cost(nx, ny) + (din >= 0 && din !== d && k !== start ? turnCost : 0); // startDir restricts, it does not charge
       if (seen[nk] === st && gScore[nk] <= ng) continue;
       seen[nk] = st; gScore[nk] = ng; parent[nk] = k; dirIn[nk] = d;

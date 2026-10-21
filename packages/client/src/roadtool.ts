@@ -1,6 +1,7 @@
-import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PlaneGeometry, Vector3, type PerspectiveCamera } from 'three';
+import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PlaneGeometry, Quaternion, Vector3, type PerspectiveCamera } from 'three';
 import {
   KIND_NAMES, BRIDGE_STYLE_NAMES, hasFeature, techFor, isRoad, spendableMoney, planRoad, parallelGap, describeDemolition, ROAD_DRAG_MAX,
+  ROAD_CLASS_DEFS, classDef, isRoadClass, isOneWayAux, auxDir, CDIRS,
   type RoadPlan, type RoadEnv, type RoadShape, type RoadTileState,
 } from '@msimcity/shared';
 import type { ClientWorld } from './world';
@@ -24,6 +25,18 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 /** What the player answered when asked about the buildings in a drag's way. */
 export type DemolishAnswer = 'demolish' | 'round' | 'cancel';
 
+const CLASS_STORE = 'msimcity.roadClass';
+/** An arrow lying flat, pointing along +x, for a one-way tile of the ghost (half a tile long). */
+function arrowGeometry(): BufferGeometry {
+  const pts = [
+    // shaft
+    -0.22, 0, -0.045, 0.06, 0, -0.045, 0.06, 0, 0.045, -0.22, 0, -0.045, 0.06, 0, 0.045, -0.22, 0, 0.045,
+    // head
+    0.06, 0, -0.13, 0.25, 0, 0, 0.06, 0, 0.13,
+  ];
+  return new BufferGeometry().setAttribute('position', new Float32BufferAttribute(pts, 3));
+}
+
 export class RoadTool {
   readonly group = new Group();
   private quads: InstancedMesh;
@@ -36,10 +49,17 @@ export class RoadTool {
   private tmp = new Vector3();
   /** the depth of the block the drag makes with the road alongside it, for the chip */
   private depth = 0;
+  /** one-way tiles of the ghost: an arrow the way the traffic will go */
+  private arrows: InstancedMesh;
+  /**
+   * The class the road tool lays (shared/src/roadclass.ts), picked from the class picker hung off the tool (ui.ts) and
+   * remembered between sessions; a class the player has not unlocked lays a street.
+   */
+  private cls = 0;
 
   constructor(private world: ClientWorld, private dev: boolean) {
     // drawn over everything (no depth test), so a building in the way shows its amber tile through the model
-    this.quads = new InstancedMesh(new PlaneGeometry(0.9, 0.9).rotateX(-Math.PI / 2), new MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, depthTest: false }), ROAD_DRAG_MAX);
+    this.quads = new InstancedMesh(new PlaneGeometry(0.9, 0.9).rotateX(-Math.PI / 2), new MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, depthTest: false }), ROAD_DRAG_MAX * 2);
     this.quads.count = 0;
     this.quads.frustumCulled = false;
     this.quads.renderOrder = 18;
@@ -47,7 +67,12 @@ export class RoadTool {
     this.guide = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ color: GUIDE, transparent: true, opacity: 0.45, depthWrite: false, side: DoubleSide }));
     this.guide.frustumCulled = false;
     this.guide.renderOrder = 19;
-    this.group.add(this.quads, this.guide);
+    this.arrows = new InstancedMesh(arrowGeometry(), new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false, depthTest: false, side: DoubleSide }), ROAD_DRAG_MAX * 2);
+    this.arrows.count = 0;
+    this.arrows.frustumCulled = false;
+    this.arrows.renderOrder = 20;
+    this.group.add(this.quads, this.guide, this.arrows);
+    try { const c = Number(localStorage.getItem(CLASS_STORE)); if (isRoadClass(c)) this.cls = c; } catch { /* storage blocked: a street */ }
     this.chip = document.createElement('div');
     this.chip.id = 'roadChip';
     this.chip.style.display = 'none';
@@ -57,6 +82,24 @@ export class RoadTool {
     this.dialog.setAttribute('role', 'dialog');
     document.body.append(this.chip, this.dialog);
   }
+
+  /** The class a drag lays now: the one picked, or a street while it is locked. */
+  get roadClass(): number { return this.locked(this.cls) ? 0 : this.cls; }
+  /** The class picked (even if locked), for the picker. */
+  get picked(): number { return this.cls; }
+  pick(cls: number) {
+    if (!isRoadClass(cls)) return;
+    this.cls = cls;
+    this.memo = null;
+    try { localStorage.setItem(CLASS_STORE, String(cls)); } catch { /* not remembered */ }
+  }
+  /** The technology a class still needs for this player, or null (a dev client skips locks, as the server does for it). */
+  lockOf(cls: number): string | null {
+    const f = classDef(cls).feature, me = this.world.myPlayer;
+    if (!f || this.dev || !me) return null;
+    return hasFeature(me.tech, f) ? null : techFor(f)?.name ?? 'a technology';
+  }
+  private locked(cls: number) { return this.lockOf(cls) !== null; }
 
   /** The rules the server lays a drag by, on the loaded chunks, for the player at this client. */
   private env(): RoadEnv {
@@ -77,9 +120,10 @@ export class RoadTool {
   /** The plan for a drag as it would be laid with a yes to any demolition (so the ghost shows what is in the way), cached briefly. */
   plan(path: [number, number][], demolish = true): RoadPlan {
     const me = this.world.myPlayer;
-    const key = `${path.length}|${path[0]}|${path[path.length - 1]}|${path[Math.floor(path.length / 2)]}|${demolish}`, now = performance.now();
+    const cls = this.roadClass;
+    const key = `${path.length}|${path[0]}|${path[path.length - 1]}|${path[Math.floor(path.length / 2)]}|${demolish}|${cls}`, now = performance.now();
     if (this.memo && this.memo.key === key && now - this.memo.at < 200) return this.memo.v;
-    const v = planRoad(path, this.env(), { demolish, budget: me ? spendableMoney(me.money, me.devUnlimited) : 0 });
+    const v = planRoad(path, this.env(), { cls, demolish, budget: me ? spendableMoney(me.money, me.devUnlimited) : 0 });
     this.memo = { key, at: now, v };
     return v;
   }
@@ -108,20 +152,31 @@ export class RoadTool {
 
   /** Once per frame: the ghost, guide and chip for the drag in progress (null when there is none). */
   frame(path: [number, number][] | null, camera: PerspectiveCamera, vw: number, vh: number) {
-    if (!path) { this.quads.count = 0; this.guide.visible = false; this.chip.style.display = 'none'; return; }
+    if (!path) { this.quads.count = 0; this.arrows.count = 0; this.guide.visible = false; this.chip.style.display = 'none'; return; }
     const v = this.plan(path);
-    const m = new Matrix4(), c = new Color();
-    let n = 0;
+    const m = new Matrix4(), c = new Color(), q = new Quaternion(), up = new Vector3(0, 1, 0), at = new Vector3(), one = new Vector3(1, 1, 1);
+    // new road in the class's colour (a street's new road as before, lilac on unclaimed land); one-way tiles get an arrow
+    const cls = this.roadClass, own = cls ? classDef(cls).colour : COLOUR.new;
+    let n = 0, na = 0;
     for (const t of v.tiles) {
-      if (n >= ROAD_DRAG_MAX) break;
+      if (n >= ROAD_DRAG_MAX * 2) break;
       m.makeTranslation(t.x + 0.5, t.state === 'have' ? 0.04 : 0.06, t.y + 0.5);
       this.quads.setMatrixAt(n, m);
-      this.quads.setColorAt(n, c.setHex(t.state === 'new' && t.unclaimed ? UNCLAIMED : COLOUR[t.state]).multiplyScalar(t.state === 'have' ? 0.45 : 1));
+      const hex = t.state === 'new' ? (t.unclaimed && !cls ? UNCLAIMED : own) : COLOUR[t.state];
+      this.quads.setColorAt(n, c.setHex(hex).multiplyScalar(t.state === 'have' ? 0.45 : 1));
       n++;
+      if ((t.state === 'new' || t.state === 'upgrade' || t.state === 'demolish') && t.byte && isOneWayAux(t.byte)) {
+        const [dx, dy] = CDIRS[auxDir(t.byte)];
+        q.setFromAxisAngle(up, Math.atan2(-dy, dx));
+        m.compose(at.set(t.x + 0.5, 0.07, t.y + 0.5), q, one);
+        this.arrows.setMatrixAt(na++, m);
+      }
     }
     this.quads.count = n;
     this.quads.instanceMatrix.needsUpdate = true;
     if (this.quads.instanceColor) this.quads.instanceColor.needsUpdate = true;
+    this.arrows.count = na;
+    this.arrows.instanceMatrix.needsUpdate = true;
     this.drawGuide(path);
     // the chip at the drag's end
     const [ex, ey] = path[path.length - 1];
@@ -160,8 +215,9 @@ export class RoadTool {
 
   private chipHtml(v: RoadPlan): string {
     const parts: string[] = [];
-    const laid = v.fresh || v.upgrade;
-    parts.push(laid ? `<b>${money(v.cost)}</b> · ${plural(v.fresh, 'tile')}${v.unclaimed ? ` · ${v.unclaimed} on unclaimed land` : ''}` : v.have && !v.refused ? 'road already' : '');
+    const laid = v.fresh || v.upgrade, cls = this.roadClass;
+    if (cls) parts.push(`<span class="cls" style="color:#${classDef(cls).colour.toString(16).padStart(6, '0')}">${esc(classDef(cls).title)}</span>`);
+    parts.push(laid ? `<b>${money(v.cost)}</b> · ${plural(v.fresh, 'tile')}${v.upgrade ? ` · ${v.upgrade} upgraded` : ''}${v.unclaimed ? ` · ${v.unclaimed} on unclaimed land` : ''}` : v.have && !v.refused ? `${cls ? classDef(cls).name : 'road'} already` : '');
     if (this.depth) parts.push(`<span class="guide">block ${this.depth} deep</span>`);
     let html = parts.filter(Boolean).join(' · ');
     if (v.demolish.n) html += `<div class="ask">${describeDemolition(v.demolish.kinds)} in the way: you'll be asked</div>`;
@@ -171,9 +227,10 @@ export class RoadTool {
 
   /** Status-line text for the road tool: the drag's cost and refusals, or how to use it. */
   status(path: [number, number][] | null, shape: RoadShape): string {
-    if (!path) return ' · drag to lay road: one corner like track, hold Shift while dragging for a loop; Ctrl/Cmd+Z undoes the last drag';
+    const cn = classDef(this.roadClass).name;
+    if (!path) return ` · ${cn}: drag to lay it${classDef(this.roadClass).oneWay ? ' (the way the traffic goes)' : ''}, one corner like track, hold Shift while dragging for a loop; drag over a road to upgrade it; Ctrl/Cmd+Z undoes the last drag; 3 again picks the class`;
     const v = this.plan(path);
-    let s = v.fresh || v.upgrade ? ` · ${money(v.cost)} · ${plural(v.fresh, 'tile')}${v.unclaimed ? ` · ${v.unclaimed} on unclaimed land` : ''}` : ' · road already';
+    let s = v.fresh || v.upgrade ? ` · ${cn} · ${money(v.cost)} · ${plural(v.fresh, 'tile')}${v.upgrade ? ` · ${v.upgrade} upgraded` : ''}${v.unclaimed ? ` · ${v.unclaimed} on unclaimed land` : ''}` : ` · ${cn} already`;
     for (const b of v.bridges) if (b.plan.ok && b.plan.tiles?.length) s += ` · a ${BRIDGE_STYLE_NAMES[b.plan.style!]} of ${plural(b.plan.tiles.length / 3, 'tile')}, ${money(b.plan.cost!)}`;
     if (v.demolish.n) s += ` · ${describeDemolition(v.demolish.kinds)} in the way`;
     if (v.refused) s += ` · ${plural(v.refused, 'tile')} refused: ${v.reason}`;

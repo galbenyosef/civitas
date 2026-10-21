@@ -1,5 +1,5 @@
 import {
-  FRONT, Zone, isRoad, zoneOf, houseNumber, streetsThrough, streetRun, streetLine, streetLength, streetTile, streetName, streetBase, cleanStreetName,
+  FRONT, Zone, isRoad, zoneOf, houseNumber, auxClass, classDef, namesClass, isDividedAux, isMotorwayAux, auxJunction, auxDir, CDIRS, RoadCls, streetsThrough, streetRun, streetLine, streetLength, streetTile, streetName, streetBase, cleanStreetName,
   type StreetRun, type StreetCharacter,
 } from '@msimcity/shared';
 import type { World } from './world';
@@ -26,8 +26,31 @@ export class StreetBook {
 
   private isRoadAt = (x: number, y: number) => { const t = this.w.peekTile(x, y); return t !== undefined && isRoad(t); };
 
-  /** The streets through a road tile, longer first (none for a tile that is not road). */
-  streetsAt(x: number, y: number): StreetRun[] { return streetsThrough(x, y, this.isRoadAt); }
+  /**
+   * The streets through a road tile, longer first (none for a tile that is not road). Across a divided road (an
+   * avenue's or a motorway's two carriageways, shared/src/roadclass.ts) away from its junctions, the step from one
+   * carriageway to the other is no street of its own.
+   */
+  streetsAt(x: number, y: number): StreetRun[] {
+    const out = streetsThrough(x, y, this.isRoadAt);
+    const a = this.w.auxAt(x, y);
+    if (out.length < 2 || !isDividedAux(a) || auxJunction(a)) return out;
+    const along = auxDir(a) < 2; // the road runs east-west
+    return out.filter((r) => r.ns !== along || streetLength(r) > 2 || !this.allDivided(r));
+  }
+  private allDivided(r: StreetRun) { for (let i = 0; i < streetLength(r); i++) { const [x, y] = streetTile(r, i); const a = this.w.auxAt(x, y); if (!isDividedAux(a) || auxJunction(a)) return false; } return true; }
+  /**
+   * The other carriageway of a street on a divided road: the same stretch on the line beside it, on the left of the
+   * traffic (roadclass.ts twinRow); undefined for any other street.
+   */
+  private twinOf(r: StreetRun): StreetRun | undefined {
+    const [mx, my] = streetTile(r, Math.floor(streetLength(r) / 2));
+    const a = this.w.auxAt(mx, my);
+    if (!isDividedAux(a) || (auxDir(a) < 2) === r.ns) return undefined;
+    const [dx, dy] = CDIRS[auxDir(a)], tx = mx + dy, ty = my - dx; // left of the traffic, y down
+    if (!this.isRoadAt(tx, ty) || !isDividedAux(this.w.auxAt(tx, ty))) return undefined;
+    return streetRun(tx, ty, r.ns, this.isRoadAt);
+  }
 
   /** The named stretch a street takes its name from: on its line, overlapping it most (the earlier on a tie). */
   private entryFor(r: StreetRun): Entry | undefined {
@@ -54,8 +77,12 @@ export class StreetBook {
       }
       return e.name;
     }
+    // a divided road's two carriageways are one street: the twin's name if it has one, else both named now
+    const tw = this.twinOf(r), te = tw && this.entryFor(tw);
+    if (te) { this.add(r, this.ownerOf(r), te.name); return te.name; }
     const name = streetName(this.w.seed, r, this.character(r), this.takenAround(r));
     this.add(r, this.ownerOf(r), name);
+    if (tw) this.add(tw, this.ownerOf(tw), name);
     return name;
   }
 
@@ -92,12 +119,21 @@ export class StreetBook {
     }
     if (e) { e.name = clean; e.from = Math.min(e.from, r.from); e.to = Math.max(e.to, r.to); }
     else this.add(r, this.ownerOf(r), clean);
+    // and the other carriageway of a divided road with it
+    const tw = this.twinOf(r);
+    if (tw) { const te = this.entryFor(tw); if (te) te.name = clean; else this.add(tw, this.ownerOf(tw), clean); }
     return clean;
   }
 
   /** What a street is like now: its length, whether its ends meet other road, and what fronts it. */
   character(r: StreetRun): StreetCharacter {
     const c: StreetCharacter = { length: streetLength(r), joined: 0, homes: 0, shops: 0, works: 0, offices: 0 };
+    // its class (shared/src/roadclass.ts), by most of its tiles: an avenue, a lane or a pedestrian street names itself so
+    const cls = [0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < c.length; i++) { const [x, y] = streetTile(r, i); cls[auxClass(this.w.auxAt(x, y))]++; }
+    if (cls[RoadCls.Avenue] * 2 > c.length) c.avenue = true;
+    else if (cls[RoadCls.Lane] * 2 > c.length) c.lane = true;
+    else if (cls[RoadCls.Pedestrian] * 2 > c.length) c.pedestrian = true;
     const ax = r.ns ? 1 : 0, ay = r.ns ? 0 : 1; // across
     let joined = 0;
     for (let i = 0; i < c.length; i++) {
@@ -121,9 +157,10 @@ export class StreetBook {
   /** The bases of the names round a street (those crossing it and those alongside within NEAR tiles), which it must not share. */
   private takenAround(r: StreetRun): Set<string> {
     const out = new Set<string>(), seen = new Set<string>();
+    const tw = this.twinOf(r);
     const note = (n: StreetRun) => {
       const k = `${streetLine(n)}:${n.from}`;
-      if (seen.has(k) || (n.ns === r.ns && n.line === r.line)) return;
+      if (seen.has(k) || (n.ns === r.ns && n.line === r.line) || (tw && n.ns === tw.ns && n.line === tw.line)) return;
       seen.add(k);
       out.add(streetBase(this.peek(n)));
     };
@@ -155,13 +192,16 @@ export class StreetBook {
       r = s.r & 3; [nx, ny] = [s.doorX + FRONT[r][0], s.doorY + FRONT[r][1]]; ox = s.ax; oy = s.ay;
       if (!this.isRoadAt(nx, ny)) return undefined;
     } else {
-      for (const q of [0, 1, 3, 2]) if (this.isRoadAt(x + FRONT[q][0], y + FRONT[q][1])) { r = q; break; }
+      // the road it faces: never a motorway (no frontage, shared/src/roadclass.ts), as the client turns it
+      for (const q of [0, 1, 3, 2]) if (this.isRoadAt(x + FRONT[q][0], y + FRONT[q][1]) && !isMotorwayAux(this.w.auxAt(x + FRONT[q][0], y + FRONT[q][1]))) { r = q; break; }
       if (r < 0) return undefined;
       [nx, ny] = [x + FRONT[r][0], y + FRONT[r][1]];
     }
     const along = (r & 1) === 1; // facing ±x: the street runs north-south
     const st = streetRun(nx, ny, along, this.isRoadAt);
-    return `${houseNumber(ox, oy, r)} ${this.nameOf(st)}`;
+    // a road of another class than the street says so (shared/src/roadclass.ts): "12 Mill Lane, one-way street"
+    const cls = auxClass(this.w.auxAt(nx, ny)), name = this.nameOf(st);
+    return `${houseNumber(ox, oy, r)} ${name}${cls && !namesClass(name, cls) ? `, ${classDef(cls).name}` : ''}`;
   }
 
   // ---- the snapshot ---------------------------------------------------------------------------------------

@@ -73,6 +73,14 @@ References: Skylines turns elevated roads into bridges [S1]; OpenTTD bridges spa
 | Motorway and interchange | 2-wide one-way pair; 6 x 10 diamond, 8 x 8 trumpet | L | No frontage, fast, noisy; ramps join streets. Hook: freight and visitors reach the city, but neighbours pay in noise [S5][S12]. | E2, E3, E6, E8 |
 | Level crossing | 1 tile | S | Barriers and lights; trains stop cars. | E6, E12 |
 
+> **Built (R3, 2026-10-21): road classes** (docs/roads.md "Classes", `shared/src/roadclass.ts`). Six classes: country
+> lane, street, one-way street, avenue, motorway, pedestrian street. The byte is `cls | dir << 3 | junction << 5` in
+> 0x01-0x3d (3 bits class, 2 bits one-way direction, a junction flag for divided roads); no cycle-lane or bus-stop flag
+> yet (R5). The avenue and the motorway are two-tile one-way pairs as sketched here, two lanes each carriageway; the
+> pier and the bridge are not classes (a bridge deck keeps its own byte and is a street to traffic). `hasRoadAccess`
+> ignores motorways; pathfinding drops edges against one-way direction and across reservations, and pedestrian streets
+> for cars; speed and route cost are per class.
+
 **Implications.**
 - **Road classes** use the aux byte: 3 bits class (street, avenue, motorway, pedestrian, pier, bridge, ring), 2 bits direction for one-way, 3 bits flags (cycle lane, bus stop, no-frontage). `hasRoadAccess` must ignore no-frontage roads, otherwise buildings face motorways. Pathfinding drops edges against one-way direction and excludes pedestrian roads for cars. `DRIVE_SPEED` gets a per-class multiplier.
 - **Roundabout** fits the tile-box model. Each ring tile is one-way with a "ring" flag. The conflict table already makes an entering car wait for a circulating one. Ring tiles with a side arm must not count as a signalled T, because `junction()` assigns lights at degree 3. Corners reuse the wide-left arc. The island is a non-road tile, so it takes any structure.

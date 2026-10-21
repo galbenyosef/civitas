@@ -5,7 +5,8 @@
  * time anyone asks (a hover, a building's address) and keeps the name from then on, so it never changes under the
  * player as the town grows; the owner can rename it (server/src/streets.ts). Names are British and chosen by what the
  * street is like: a lane for a short residential street, a close for a short dead end, a road for a long through
- * route, a street or parade for shops; the avenue waits for R3's avenues. No two neighbouring streets share a name.
+ * route, a street or parade for shops, an avenue for an avenue (R3 classes: both its carriageways share the name), a
+ * lane for a country lane and a walk or row for a pedestrian street. No two neighbouring streets share a name.
  */
 
 /** A straight run of road: along x (`ns` false, `line` is y) or along y (`ns` true, `line` is x), tiles `from`..`to`. */
@@ -50,6 +51,8 @@ export interface StreetCharacter {
   homes: number; shops: number; works: number; offices: number;
   /** R3: an avenue class names itself an Avenue */
   avenue?: boolean;
+  /** R3: most of it is a country lane (a Lane) or a pedestrian street (a Walk or a Row) */
+  lane?: boolean; pedestrian?: boolean;
 }
 
 const BASES = [
@@ -81,11 +84,15 @@ const SUFFIX = {
   through: ['Road', 'Road', 'Road', 'Way'],
   street: ['Street', 'Road', 'Terrace', 'Street'],
   avenue: ['Avenue'],
+  country: ['Lane'],
+  pedestrian: ['Walk', 'Row', 'Walk'],
 } as const;
 
 /** The suffix list for a street of this character. */
 export function streetSuffixes(c: StreetCharacter): readonly string[] {
   if (c.avenue) return SUFFIX.avenue;
+  if (c.lane) return SUFFIX.country;
+  if (c.pedestrian) return SUFFIX.pedestrian;
   if (c.length <= 3 && c.joined <= 1) return SUFFIX.mews;
   const front = c.homes + c.shops + c.works + c.offices;
   if (c.joined <= 1 && c.length <= 10 && c.homes >= c.shops + c.works + c.offices) return SUFFIX.close;
@@ -149,6 +156,7 @@ export function streetClashes(list: readonly (StreetRun & { name: string })[], n
   for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
     const a = list[i], b = list[j];
     if (streetBase(a.name) !== streetBase(b.name)) continue;
+    if (a.ns === b.ns && a.name === b.name && Math.abs(a.line - b.line) === 1) continue; // a dual carriageway's two rows: one street
     const meet = a.ns === b.ns
       ? a.line !== b.line && Math.abs(a.line - b.line) <= near && a.from <= b.to && b.from <= a.to
       : b.line >= a.from - 1 && b.line <= a.to + 1 && a.line >= b.from - 1 && a.line <= b.to + 1;

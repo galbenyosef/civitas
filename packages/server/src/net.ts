@@ -9,7 +9,7 @@ import {
   isBridgeAux, BRIDGE_STYLE_NAMES,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
   isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction, Cause, nameFor,
-  planRoad, isRoadClass, describeDemolition, ROAD_DRAG_MAX, ROAD_UNDO_MS, MSG_ROAD_MONEY, cleanStreetName, type RoadEnv,
+  planRoad, isRoadClass, ROAD_CLASSES, CLASS_JUNCTION, describeDemolition, ROAD_DRAG_MAX, ROAD_UNDO_MS, MSG_ROAD_MONEY, cleanStreetName, type RoadEnv,
 } from '@msimcity/shared';
 import { World, emptyStats, DEV_FUNDS, untkey, tkey, type Player } from './world';
 import type { Simulation } from './sim/simulation';
@@ -51,6 +51,8 @@ interface Client {
 interface RoadUndo {
   at: number;
   tiles: { x: number; y: number; was: number; sub: number; aux: number }[];
+  /** road tiles whose class the drag changed (R3 upgrade in place), with the byte they had and the one it gave them */
+  classes: { x: number; y: number; was: number; now: number }[];
   /** each bridge by its first deck tile, and its deck tiles */
   bridges: { x: number; y: number; n: number }[];
   refund: number;
@@ -743,6 +745,8 @@ export class Net {
     const p = c.player!;
     if (!Array.isArray(tiles)) return;
     if (!isRoadClass(cls)) return this.toast(c, 'There is no such class of road');
+    const lock = dev || !ROAD_CLASSES[cls].feature ? null : this.locked(p, ROAD_CLASSES[cls].feature);
+    if (lock) return this.toast(c, `${lock} is needed before you can lay ${ROAD_CLASSES[cls].name === 'avenue' ? 'an avenue' : `${ROAD_CLASSES[cls].name}s`}`);
     const path: [number, number][] = [];
     for (const pair of tiles.slice(0, ROAD_DRAG_MAX)) {
       const x = Math.floor(Number(pair?.[0])), y = Math.floor(Number(pair?.[1]));
@@ -750,9 +754,13 @@ export class Net {
     }
     const plan = planRoad(path, this.roadEnv(p, dev), { cls, demolish, budget: this.w.spendable(p) });
     const recount = new Set<number>();
-    const undo: RoadUndo = { at: this.now(), tiles: [], bridges: [], refund: 0, beside: new Set() };
+    const undo: RoadUndo = { at: this.now(), tiles: [], classes: [], bridges: [], refund: 0, beside: new Set() };
     for (const tp of plan.tiles) {
-      if (tp.state === 'upgrade') { this.upgradeRoad(tp.x, tp.y, cls); continue; }
+      if (tp.state === 'upgrade') {
+        const was = this.w.auxAt(tp.x, tp.y);
+        if (this.upgradeRoad(tp.x, tp.y, tp.byte ?? 0)) { undo.classes.push({ x: tp.x, y: tp.y, was, now: this.w.auxAt(tp.x, tp.y) }); undo.refund += tp.cost; const q = this.w.parcelIdAt(tp.x, tp.y); if (q) recount.add(q); }
+        continue;
+      }
       if (tp.state !== 'new' && !(tp.state === 'demolish' && demolish)) continue;
       const t = this.w.getTile(tp.x, tp.y), sub = this.w.subAt(tp.x, tp.y);
       if (tp.state === 'demolish') this.sim.start.campCleared(tp.x, tp.y); // a camp's people find beds nearby first (sim/firstfive.ts)
@@ -762,6 +770,7 @@ export class Net {
       if (q) recount.add(q);
       // what undo puts back: a zoned lot as it was, empty (a building that came down stays down); anything else bare land
       const lot = isGrowable(zoneOf(t));
+      if (tp.byte) this.w.setRoadClass(tp.x, tp.y, tp.byte);
       undo.tiles.push({ x: tp.x, y: tp.y, was: packTile(terrainOf(t), false, lot ? zoneOf(t) : 0, 0), sub: lot ? sub : 0, aux: this.w.auxAt(tp.x, tp.y) });
       undo.refund += tp.cost - (tp.state === 'demolish' && levelOf(t) > 0 ? BULLDOZE_COST : 0);
     }
@@ -777,7 +786,7 @@ export class Net {
     }
     for (const id of recount) this.w.recountRoads(id);
     if (plan.cost) this.w.credit(p.id, -plan.cost, 'build');
-    if (undo.tiles.length || undo.bridges.length) {
+    if (undo.tiles.length || undo.bridges.length || undo.classes.length) {
       // what stands beside the new road now: a building that appears beside it later makes the drag too late to undo
       for (const u of undo.tiles) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (this.standing(u.x + dx, u.y + dy)) undo.beside.add(tkey(u.x + dx, u.y + dy));
       this.lastRoad.set(p.id, undo);
@@ -794,11 +803,14 @@ export class Net {
   private standing(x: number, y: number) { const t = this.w.peekTile(x, y); return t !== undefined && !isRoad(t) && zoneOf(t) !== Zone.None && (levelOf(t) > 0 || underConstruction(t)); }
 
   /**
-   * Upgrade a road tile to another class in place, keeping its junction (R3, shared/src/roadtool.ts ROAD_CLASSES):
-   * a no-op while every road is a street. R3 writes the class's aux byte here (0x01-0x3f, docs/aux-layer.md); a tile
-   * with a junction, crossing or bridge byte keeps it.
+   * Upgrade (or downgrade) a road tile to another class in place, keeping its junction (R3, shared/src/roadclass.ts):
+   * the tile stays road, so its junction, signals and street name stay, and only its class byte changes (0x01-0x3f,
+   * docs/aux-layer.md; 0 for a street). A tile with a junction, crossing or bridge byte keeps it (planRoad never asks).
+   * The cars on it carry on; routes worked out before see the new rules at their next search.
    */
-  private upgradeRoad(_x: number, _y: number, _cls: number) {}
+  private upgradeRoad(x: number, y: number, byte: number): boolean {
+    return this.w.setRoadClass(x, y, byte);
+  }
 
   /** Each player's last road drag, for Ctrl/Cmd+Z (not saved: the window is half a minute). */
   private lastRoad = new Map<string, RoadUndo>();
@@ -818,15 +830,17 @@ export class Net {
     if (age > ROAD_UNDO_MS) { this.lastRoad.delete(p.id); return this.toast(c, `Too late to undo: a road drag can be taken back for ${ROAD_UNDO_MS / 1000} seconds`); }
     for (const t of u.tiles) {
       const now = this.w.peekTile(t.x, t.y);
-      if (now === undefined || !isRoad(now) || this.w.auxAt(t.x, t.y) !== t.aux) { this.lastRoad.delete(p.id); return this.toast(c, 'Cannot undo that road: part of it has changed since (bulldozed, or a junction on it)'); }
+      if (now === undefined || !isRoad(now) || ((this.w.auxAt(t.x, t.y) ^ t.aux) & ~CLASS_JUNCTION) !== 0) { this.lastRoad.delete(p.id); return this.toast(c, 'Cannot undo that road: part of it has changed since (bulldozed, or a junction on it)'); }
     }
     for (const b of u.bridges) if (!isBridgeAux(this.w.auxAt(b.x, b.y))) { this.lastRoad.delete(p.id); return this.toast(c, 'Cannot undo that road: its bridge has gone'); }
+    for (const k of u.classes) if (((this.w.auxAt(k.x, k.y) ^ k.now) & ~CLASS_JUNCTION) !== 0) { this.lastRoad.delete(p.id); return this.toast(c, 'Cannot undo that road: part of it has changed since'); }
     for (const t of u.tiles) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const k = tkey(t.x + dx, t.y + dy);
       if (!u.beside.has(k) && this.standing(t.x + dx, t.y + dy)) { this.lastRoad.delete(p.id); return this.toast(c, 'Cannot undo that road: a building is going up beside it now'); }
     }
     this.lastRoad.delete(p.id);
     const recount = new Set<number>();
+    for (const k of u.classes) { this.w.setRoadClass(k.x, k.y, k.was & ~CLASS_JUNCTION); const q = this.w.parcelIdAt(k.x, k.y); if (q) recount.add(q); }
     for (const t of u.tiles) {
       this.w.setTile(t.x, t.y, t.was, t.sub);
       const q = this.w.parcelIdAt(t.x, t.y);
@@ -841,7 +855,7 @@ export class Net {
     this.w.bump(p.id, 'roads', -(u.tiles.length + decks));
     for (const id of recount) this.w.recountRoads(id);
     if (u.refund) this.w.credit(p.id, u.refund, 'build');
-    const what = [u.tiles.length ? `${u.tiles.length} tile${u.tiles.length === 1 ? '' : 's'} of road` : '', u.bridges.length ? `${u.bridges.length === 1 ? 'a bridge' : `${u.bridges.length} bridges`}` : ''].filter(Boolean).join(' and ');
+    const what = [u.tiles.length ? `${u.tiles.length} tile${u.tiles.length === 1 ? '' : 's'} of road` : '', u.classes.length ? `${u.classes.length} tile${u.classes.length === 1 ? '' : 's'} upgraded` : '', u.bridges.length ? `${u.bridges.length === 1 ? 'a bridge' : `${u.bridges.length} bridges`}` : ''].filter(Boolean).join(' and ');
     this.toast(c, `Undone: ${what}, $${u.refund.toLocaleString('en-GB')} back`, 'info');
   }
 
