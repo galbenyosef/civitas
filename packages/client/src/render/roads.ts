@@ -131,7 +131,7 @@ function beaconMaterial() {
 }
 
 /** Leaf colours of street trees: plane and lime greens, a copper beech now and then, cherries in blossom. */
-const LEAF = [0x6aa84f, 0x5e9a46, 0x78b45a, 0x6f9e3f, 0x8a4a3c, 0xf2b8c6, 0xffffff].map((c) => new Color(c));
+const LEAF = [0x6aa84f, 0x5e9a46, 0x78b45a, 0x6f9e3f, 0x8a4a3c, 0xf0b4c4, 0xf4dde4].map((c) => new Color(c));
 
 // ---- per chunk ------------------------------------------------------------------------------------------------------
 
@@ -653,6 +653,7 @@ export class RoadLayer {
     }
     this.meshes.forEach((m, i) => {
       m.count = counts[i];
+      m.visible = counts[i] > 0; // no draw call (nor shadow pass) for a kind with nothing to show
       m.instanceMatrix.needsUpdate = true;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
       const al = m.geometry.attributes.aLamp as InstancedBufferAttribute | undefined;

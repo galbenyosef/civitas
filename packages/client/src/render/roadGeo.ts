@@ -85,7 +85,7 @@ const LOW = 0.22;
 const RAMP_LEN = 0.11;
 /** the band of a junction mouth's crossing, from the junction tile's centre (walkers cross on the sidewalk line, 0.42) */
 const BAND0 = 0.33, BAND1 = 0.49;
-const KERB_W = 0.016, GUTTER_W = 0.022, VERGE_W = 0.036;
+const KERB_W = 0.016, GUTTER_W = 0.022, VERGE_W = 0.05;
 
 // ---- the vertex buffer --------------------------------------------------------------------------------------------
 
