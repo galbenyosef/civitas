@@ -4,7 +4,7 @@ import {
   isPartAux, isAnchorAux, partDx, partDy, auxOrientation, isMultiTile, placedFromAnchor, footprintOf, type Placed,
   isAirfieldAux, airfieldOrientation, airfieldRow, FRONT, isRailAux, railMask,
   isRingAux, ringPos, isArmPos, isIslandAux, isFlyoverAux, deckEW, RING_POS,
-  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, KIND_ID, isClassAux, auxClass, oneWayDir, RoadCls, isMotorwayAux,
+  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, KIND_ID, isClassAux, auxClass, oneWayDir, RoadCls, isMotorwayAux, isMiniAux, isRingClassAux, bigRingAt, isPedestrianAux,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Cell, cellUV } from './atlas';
@@ -75,8 +75,22 @@ function classCell(a: number, mask: number, x: number, z: number, roadAt: (x: nu
     const line = ns ? x : z, pos = ns ? z : x, per = 4 + Math.floor(hash2(line * 3 + 1, 9) * 3), ph = Math.floor(hash2(line * 5 + 2, 11) * per);
     return { cell: (((pos + ph) % per) + per) % per === 0 ? Cell.OneWayArrow : Cell.OneWay, turn };
   }
-  return { cell: cls === RoadCls.Motorway ? Cell.Motorway : Cell.Avenue, turn };
+  return { cell: cls === RoadCls.Motorway || cls === RoadCls.Deck ? Cell.Motorway : Cell.Avenue, turn }; // (under an interchange's deck: the motorway)
 }
+/**
+ * A 5×5 roundabout's ring tile (R4) from far off: its place round the island (the cells are the east side and the
+ * north-east corner, turned anticlockwise), a side with or without a road joining; null when its island has gone.
+ */
+function bigRingCell(x: number, z: number, auxAt: (x: number, y: number) => number, roadAt: (x: number, z: number) => boolean): { cell: number; turn: number } | null {
+  const box = bigRingAt(auxAt, x, z);
+  if (!box) return null;
+  const ox = x - box[0], oz = z - box[1];
+  if ((ox === 0 || ox === 4) && (oz === 0 || oz === 4)) return { cell: Cell.BigRingCorner, turn: ox === 4 && oz === 0 ? 0 : ox === 0 && oz === 0 ? 1 : ox === 0 ? 2 : 3 };
+  const turn = ox === 4 ? 0 : oz === 0 ? 1 : ox === 0 ? 2 : 3, [dx, dz] = [[1, 0], [0, -1], [-1, 0], [0, 1]][turn];
+  return { cell: roadAt(x + dx, z + dz) && !isPedestrianAux(auxAt(x + dx, z + dz)) ? Cell.BigRingArm : Cell.BigRingSide, turn };
+}
+/** A mini-roundabout's cell (R4): on a crossroads, or a T turned to its missing arm (the cell has no road to the south). */
+const miniCell = (mask: number) => (mask === 15 ? { cell: Cell.MiniCross, turn: 0 } : { cell: Cell.MiniT, turn: mask === 13 ? 1 : mask === 14 ? 2 : mask === 7 ? 3 : 0 });
 
 /**
  * One chunk = one textured, vertex-tinted ground mesh (1024 quads, UVs into
@@ -166,6 +180,8 @@ export class ChunkView {
           turn = p >> 1;
         } else if (ja && isFlyoverAux(ja)) cell = Cell.Road + (deckEW(ja) ? 5 : 10);
         else if (ja && isRailAux(ja)) { cell = Cell.Crossing; turn = railMask(ja) === 10 ? 1 : 0; } // a level crossing (shared/src/rail.ts)
+        else if (ja && isMiniAux(ja)) { const k = miniCell(mask); cell = k.cell; turn = k.turn; } // a mini-roundabout (R4)
+        else if (ja && isRingClassAux(ja) && bigRingCell(x, z, auxAt, roadAt)) { const k = bigRingCell(x, z, auxAt, roadAt)!; cell = k.cell; turn = k.turn; } // a 5×5 roundabout's ring (R4)
         else if (ja && isClassAux(ja)) { const k = classCell(ja, mask, x, z, roadAt); cell = k.cell; turn = k.turn; } // a road class (shared/src/roadclass.ts)
       } else if (building && terrainOf(t) === Terrain.Water) {
         // a harbour's wet rows (docs/boats.md section 5): open water under the pontoons and quays the model draws

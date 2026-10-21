@@ -1,4 +1,5 @@
 import { JunctionTools, isJunctionTool } from './junctiontools';
+import { junctionArmAt, nextArmState, armState } from '@msimcity/shared';
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
@@ -212,6 +213,7 @@ const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks
 const roads = new RoadLayer(atlas); scene.add(roads.group, roads.furniture);
 ChunkView.onTint = (cx, cy, heat) => roads.setHeat(cx, cy, heat, !roadsOverlay && !power.overlayOn); // the overlays' bytes wear nothing
 roads.kindAt = (x, y) => world.kindIdAt(x, y);
+roads.rules = world; lights.world = world; // signal crossings and their walk phases (R4)
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz) || roads.walkY(x, z); // cars and walkers on a flyover deck or a bridge and their ramps, walkers on a kerbed pavement
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
 landmarks.auxAt = (x, y) => world.auxAt(x, y); // a Tower Bridge span running on into the next chunk
@@ -304,7 +306,7 @@ net.on('chunk', (m) => {
   }
 });
 net.on('aux', (m) => world.applyAux(m.u));
-net.on('roadRules', (m) => { world.applyRoadRules(m.r); roads.invalidate(); lights.invalidate(); });
+net.on('roadRules', (m) => { world.applyRoadRules(m.r); roads.invalidate(); lights.invalidate(); junctions.rulesChanged(); updateStatus(); });
 net.on('walks', (m) => world.applyWalks(m.u));
 net.on('sub', (m) => world.applySub(m.u));
 net.on('under', (m) => world.applyUnder(m.u));
@@ -1039,6 +1041,8 @@ function buyVerdict(r: Rect) {
  * placement verdict, worked out on the loaded chunks), the whole structure under the cursor, else the tile.
  */
 let placeMemo: { key: string; kind: number; at: number; v: PlaceVerdict } | null = null;
+/** the tiles as the road rule tools read them (shared/src/junctions.ts junctionArmAt) */
+const ruleEnv = { road: (x: number, y: number) => { const t = world.getTile(x, y); return t !== undefined && isRoad(t); }, aux: (x: number, y: number) => world.auxAt(x, y) };
 /** A zoning tool over land with no road on any side (797ee40a): such a lot builds only when the building in front grows back into it. */
 const NO_ROAD_LOT = 'no road beside this lot: it stays empty until the building in front of it grows back into it (two storeys: Masonry and power) or a road reaches it';
 function zoneNoRoad(x: number, y: number): boolean {
@@ -1096,6 +1100,10 @@ function runwayVerdict(line: [number, number][]): RunwayPlan {
 
 function updateStatus() {
   const h = input.hover;
+  // the Turn rules tool's ghost: the sign the next click would put up on the hovered arm (render/junctionSigns.ts)
+  const arm = input.tool === 'turnrule' && h ? junctionArmAt(ruleEnv, h[0], h[1]) : null;
+  if (arm && typeof arm !== 'string') junctions.signs.preview(arm.g, arm.arm, nextArmState(armState(world.ruleAt(arm.g.x, arm.g.y), arm.arm)));
+  else junctions.signs.preview(null, 0, null);
   if (!h) { ui.setStatus(''); return; }
   const [x, y] = h;
   const t = world.getTile(x, y);
@@ -1324,7 +1332,7 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { roads.scanChunk(key, c, getTile, auxAt); v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) { roads.scanChunk(key, c, getTile, auxAt); v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile, auxAt); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (eduDirty && eduHeat.on) { eduHeat.rebuild(world.parcels.values()); eduDirty = false; }
