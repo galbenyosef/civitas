@@ -118,12 +118,12 @@ export class ChunkView {
       let cell: number;
       tmpC.setScalar(0.92 + 0.16 * h);
       const mask = (roadAt(x, z - 1) ? 1 : 0) | (roadAt(x + 1, z) ? 2 : 0) | (roadAt(x, z + 1) ? 4 : 0) | (roadAt(x - 1, z) ? 8 : 0);
-      // a bridge deck (shared/src/bridges.ts) is drawn over open water by render/bridges.ts, with its own lamps: no lamp
-      // pools from the ground shader on it or on the water round it
+      // a bridge deck (shared/src/bridges.ts) is drawn over open water by render/bridges.ts, with its own lamps
       const deck = road && terrainOf(t) === Terrain.Water;
-      const deckAt = (dx: number, dz: number) => { const q = getTile(x + dx, z + dz); return q !== undefined && isRoad(q) && terrainOf(q) === Terrain.Water; };
-      const lampMask = mask & ~((deckAt(0, -1) ? 1 : 0) | (deckAt(1, 0) ? 2 : 0) | (deckAt(0, 1) ? 4 : 0) | (deckAt(-1, 0) ? 8 : 0));
-      this.roads.fill(deck ? 0 : (road ? 16 : 0) | lampMask, i * 4, i * 4 + 4); // lets the shader place street lamps on this and neighbouring road tiles
+      // the ground shader pools street lamps (render/roads.ts, lampTexture) on road tiles (16 + their road sides) and on
+      // tiles with a road among their eight neighbours (1 or more), where a lamp's light can reach
+      const near = mask || roadAt(x + 1, z + 1) || roadAt(x - 1, z + 1) || roadAt(x + 1, z - 1) || roadAt(x - 1, z - 1) ? 1 : 0;
+      this.roads.fill(deck ? 0 : road ? 16 + mask : Math.max(mask, near), i * 4, i * 4 + 4);
       let turn = 0; // quarter turns anticlockwise of a roundabout cell
       if (deck) {
         cell = Cell.Water;
@@ -291,11 +291,15 @@ export class ChunkView {
   static setHeat(on: boolean) { heatEnabled = on; }
   static get heatOn() { return heatEnabled; }
 
+  /** the road geometry's hook for the same bytes (render/roads.ts: the overlay on its mesh, and wear) */
+  static onTint: ((cx: number, cy: number, heat: Uint8Array | undefined) => void) | null = null;
+
   /** Feed the congestion bytes to the ground shader's overlay (a per-tile attribute; the colours stay as they are). */
   tintRoads() {
     const h = this.heat;
     for (let i = 0; i < N; i++) this.heats.fill(h ? h[i] / 255 : 0, i * 4, i * 4 + 4);
     this.geo.attributes.aHeat.needsUpdate = true;
+    ChunkView.onTint?.(this.cx, this.cy, h);
   }
 
   dispose() { this.geo.dispose(); }
