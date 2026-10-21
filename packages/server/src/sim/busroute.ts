@@ -1,4 +1,4 @@
-import { isRoad, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS, isRingAux, terrainOf, zoneOf, Terrain } from '@msimcity/shared';
+import { isRoad, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS, isRingAux, terrainOf, zoneOf, Terrain, carStepOk } from '@msimcity/shared';
 import { DIRS, tkey, type World } from '../world';
 
 /**
@@ -171,6 +171,7 @@ export function busLegs(
       if (here >= STEP_RULE_AUX && !junctionStepOk(auxFn, x, y, nx, ny, head !== ANY ? DIRS[head][0] : 0, head !== ANY ? DIRS[head][1] : 0)) continue;
       const isGoal = nx === gx && ny === gy;
       if (!isGoal && (!roadAt(nx, ny) || sideways(nx, ny, DIRS[d][0]))) continue;
+      if (!isGoal && !carStepOk(here, w.auxAt(nx, ny), d)) continue; // one-way streets, reservations, pedestrian streets (roadclass.ts)
       if (!isGoal && opts.avoid?.(nx, ny)) continue;
       const ng = gk + (roadAt(nx, ny) ? net.cost(nx, ny) : 1) + (head !== ANY && d !== head ? 0.4 : 0) + (prevTurn && d === prevTurn[head] ? DOUBLE_TURN : 0);
       reach(keyOf(nx, ny, DIRS[d][0], d), nx, ny, ng, k, 0);

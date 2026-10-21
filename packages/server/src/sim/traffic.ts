@@ -3,6 +3,7 @@ import {
   VehicleClass, BIKE_CLASS, isRoad, hasFeature, signalTiming, signalPhaseOf, signalArms, signalledArms, type SignalPhase,
   isJunctionAux, isRingAux, isFlyoverAux, islandOf, ringPos, isArmPos, RING_POS, isCrossing, isBridgeAux, isDeck, bridgeStyle, BridgeStyle, basculeBarrierAt,
   CHUNK_SIZE, chunkOf, localIndex, hash2,
+  isClassAux, edgeLanes, classDef, carStepOk, isMotorwayAux, isPedestrianAux, oneWayDir, auxDir, isDividedAux,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
@@ -29,9 +30,12 @@ const BIKE_SIDE = 0.125, BIKE_WIDTH = 0.05;
 /** body width of a mover, and the guard's margin round a pedestrian (none for a bike, which passes in its own strip) */
 const widthOf = (m: Mover) => (isBike(m) ? BIKE_WIDTH : VEHICLE_WIDTH);
 const marginOf = (m: Mover) => (isBike(m) ? 0 : GUARD_MARGIN);
-/** The nearest mover of the given kind (bike or not) before index i of a lane queue: the one m follows. */
-function leaderIn(q: Mover[], i: number, bike: boolean): Mover | null {
-  for (let j = i - 1; j >= 0; j--) if (isBike(q[j]) === bike) return q[j];
+/**
+ * The nearest mover of the given kind (bike or not) before index i of a lane queue: the one m follows. On a two-lane
+ * road (R3 classes) a car follows only cars in its own lane of it (`strand`, Mover.s1); bikes keep to the right-hand one.
+ */
+function leaderIn(q: Mover[], i: number, bike: boolean, strand = 0): Mover | null {
+  for (let j = i - 1; j >= 0; j--) { const o = q[j]; if (isBike(o) === bike && (bike || (o.s1 ?? 0) === strand)) return o; }
   return null;
 }
 
@@ -77,6 +81,8 @@ const laneTile = (k: number) => Math.floor(k / 4);
 /** x and y of tile key t (tkey), likewise without `%` */
 const tileX = (t: number) => Math.floor(t / 65536) - 0x8000;
 const tileY = (t: number) => t - Math.floor(t / 65536) * 65536 - 0x8000;
+/** How far back (lane progress, tiles) a car coming along a motorway makes one joining it by a slip road wait. */
+const SLIP_GAP = 2;
 /** what a level crossing adds to a road tile's cost for the router: the expected wait for the barriers */
 const CROSSING_DELAY = 1.5;
 /** what a bascule bridge's deck tile adds to a road tile's cost while it is lifting (shared/src/bridges.ts) */
@@ -90,7 +96,7 @@ interface Cong { v: number; at: number }
  * (0: not worked out, else 1 | 2 for a junction of three or more | 4 a level crossing | 8 a bascule deck), cleared by
  * invalidate as the degree and crossing caches are; `kerb` 1 where a car is parked at the kerb, kept by World.kerb.
  */
-interface CostChunk { cong: Float64Array; at: Float64Array; flags: Uint8Array; kerb: Uint8Array }
+interface CostChunk { cong: Float64Array; at: Float64Array; flags: Uint8Array; kerb: Uint8Array; base: Float32Array }
 const CELLS = CHUNK_SIZE * CHUNK_SIZE;
 /**
  * One chunk's lanes and road geometry caches, as dense arrays: `lanes` the queue of each lane (tile index × 4 + direction;
@@ -99,6 +105,8 @@ const CELLS = CHUNK_SIZE * CHUNK_SIZE;
  */
 interface RoadChunk {
   lanes: (Mover[] | undefined)[]; deg: Int8Array; jaux: Int16Array; xing: Int8Array;
+  /** the class byte of each tile (roadclass.ts; 0 a street or any other byte, -1 not worked out), dropped by invalidate */
+  caux: Int16Array;
   /** junction control by tile (Traffic.junction), dropped round any road change */
   junc: (Junction | undefined)[];
   /** the congestion entries of Traffic.cong by tile (the same objects; cong keeps their order) */
@@ -285,9 +293,12 @@ function uturnPoint(s: number, o: number, out: [number, number]): [number, numbe
  * arrives heading `inD` and leaves heading `outD`, keeping `o` to the right of
  * the centreline. Straight across, or a quarter arc: tight around the near
  * corner for a right turn, wide around the far corner for a left turn; back
- * out the way it came, a three-point turn (uturnPoint).
+ * out the way it came, a three-point turn (uturnPoint). `o2`, when it differs
+ * from `o`, is the offset it leaves by (a lane change on a multi-lane road, R3):
+ * the offset eases from one to the other across the tile (smoothstep, so the
+ * heading at both edges is the lane's own), round the corner on a turn.
  */
-export function pathPoint(tx: number, ty: number, inD: number, outD: number, s: number, o: number, out: [number, number]): [number, number] {
+export function pathPoint(tx: number, ty: number, inD: number, outD: number, s: number, o: number, out: [number, number], o2 = o): [number, number] {
   const cx = tx + 0.5, cy = ty + 0.5;
   const ix = DIRS[inD][0], iy = DIRS[inD][1];
   const rx = -iy, ry = ix; // right of the incoming direction
@@ -298,6 +309,7 @@ export function pathPoint(tx: number, ty: number, inD: number, outD: number, s: 
     out[1] = cy - 0.5 * iy + u * iy - w * ry;
     return out;
   }
+  if (o2 !== o) o += (o2 - o) * s * s * (3 - 2 * s);
   if (outD === inD) {
     out[0] = cx - 0.5 * ix + o * rx + ix * s;
     out[1] = cy - 0.5 * iy + o * ry + iy * s;
@@ -313,6 +325,11 @@ export function pathPoint(tx: number, ty: number, inD: number, outD: number, s: 
   }
   return out;
 }
+/**
+ * A lane's offset right of the centre line: strand 0 (the right-hand lane, where a single-lane road's one is) at
+ * LANE_OFFSET, strand 1 (the left lane of a one-way tile, roadclass.ts) as far left of it.
+ */
+export const strandOffset = (k: number) => (k ? -LANE_OFFSET : LANE_OFFSET);
 
 /**
  * Which movements through one tile cannot share the box. Same approach, same
@@ -349,8 +366,10 @@ const conflicts = (i1: number, o1: number, i2: number, o2: number) => CONFLICT[(
 const CONFLICT_LAST = new Float32Array(256).fill(-1);
 /** Clearance between centrelines (beyond a car's width) that still counts as in the way, for the rest of a path. */
 const CONFLICT_LAST_MARGIN = Number(env('CONFLICT_LAST_MARGIN') ?? 0.04);
-/** Path length per unit of s for a movement (straight 1, right-turn arc shorter, left-turn arc longer). */
+/** Path length per unit of s for a movement (straight 1, right-turn arc shorter, left-turn arc longer), in the right-hand lane. */
 const ARC = (inD: number, outD: number) => (outD === inD ? 1 : outD === OPP[inD] ? KTURN.len : outD === RIGHT[inD] ? (Math.PI / 2) * (0.5 - LANE_OFFSET) : (Math.PI / 2) * (0.5 + LANE_OFFSET));
+/** ARC for a movement in by lane (strand) a and out by lane b: a turn's arc is as long as its mean radius makes it. */
+const ARC_S = (inD: number, outD: number, a: number, b: number) => (!(a | b) || outD === inD || outD === OPP[inD] ? ARC(inD, outD) : (Math.PI / 2) * (0.5 + (outD === RIGHT[inD] ? -1 : 1) * (strandOffset(a) + strandOffset(b)) / 2));
 (() => {
   const a: [number, number] = [0, 0], b: [number, number] = [0, 0];
   const thr = (VEHICLE_WIDTH + CONFLICT_LAST_MARGIN) ** 2;
@@ -370,6 +389,62 @@ const ARC = (inD: number, outD: number) => (outD === inD ? 1 : outD === OPP[inD]
 })();
 /** The movement conflict table (approach/exit pairs that cannot share a box), for diagnostics. */
 export const conflictsFor = conflicts;
+
+/**
+ * The same tables for movements on multi-lane roads (R3 classes): each movement also has the lane it comes in by and
+ * the lane it leaves by (strands, strandOffset). Index `movement pair × 16 + sIn1 << 3 | sOut1 << 2 | sIn2 << 1 | sOut2`;
+ * with every strand 0 the entry is CONFLICT's and CONFLICT_LAST's own, so plain roads read the tables they always did.
+ * The rest are worked out the first time they are asked for (0xff and NaN: not yet). Two movements that come in by the
+ * same lane follow the old rule (a different exit, or a different lane out, conflicts: the one ahead slows in front of
+ * the other); two side by side, or from different approaches, conflict where their paths come within a car's width.
+ */
+const CONFLICT_S = new Uint8Array(4096).fill(0xff);
+const CONFLICT_LAST_S = new Float32Array(4096).fill(NaN);
+for (let i = 0; i < 256; i++) { CONFLICT_S[i * 16] = CONFLICT[i] ? 1 : 0; CONFLICT_LAST_S[i * 16] = CONFLICT_LAST[i]; }
+function strandConflict(idx: number): number {
+  const m = idx >> 4, sb = idx & 15;
+  const i1 = m >> 6, o1 = (m >> 4) & 3, i2 = (m >> 2) & 3, o2 = m & 3;
+  const a1 = strandOffset((sb >> 3) & 1), b1 = strandOffset((sb >> 2) & 1), a2 = strandOffset((sb >> 1) & 1), b2 = strandOffset(sb & 1);
+  if (o1 === OPP[i1] || o2 === OPP[i2]) return !(i1 === i2 && o1 === o2 && sb >> 2 === (sb & 3)) ? 1 : 0;
+  if (i1 === i2 && a1 === a2) return o1 !== o2 || b1 !== b2 ? 1 : 0;
+  const p: [number, number] = [0, 0], q: [number, number] = [0, 0], thr = (VEHICLE_WIDTH + 0.1) ** 2;
+  for (let s1 = 0.04; s1 < 1; s1 += 0.08) {
+    pathPoint(0, 0, i1, o1, s1, a1, p, b1);
+    for (let s2 = 0.04; s2 < 1; s2 += 0.08) { pathPoint(0, 0, i2, o2, s2, a2, q, b2); if ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 < thr) return 1; }
+  }
+  return 0;
+}
+function strandConflictLast(idx: number): number {
+  const m = idx >> 4, sb = idx & 15;
+  const i1 = m >> 6, o1 = (m >> 4) & 3, i2 = (m >> 2) & 3, o2 = m & 3;
+  if (o1 === OPP[i1] || o2 === OPP[i2]) return 1;
+  const a1 = strandOffset((sb >> 3) & 1), b1 = strandOffset((sb >> 2) & 1), a2 = strandOffset((sb >> 1) & 1), b2 = strandOffset(sb & 1);
+  const a: [number, number] = [0, 0], b: [number, number] = [0, 0], thr = (VEHICLE_WIDTH + CONFLICT_LAST_MARGIN) ** 2;
+  let last = -1;
+  for (let s2 = 0; s2 <= 1.0001; s2 += 0.02) {
+    pathPoint(0, 0, i2, o2, s2, a2, b, b2);
+    for (let s1 = 0; s1 <= 1.0001; s1 += 0.02) {
+      pathPoint(0, 0, i1, o1, s1, a1, a, b1);
+      if ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 < thr) { last = s2; break; }
+    }
+  }
+  return last;
+}
+/** conflicts() for movements with their lanes in and out (strands); all strands 0 is conflicts() itself. */
+function conflictsS(i1: number, o1: number, a1: number, b1: number, i2: number, o2: number, a2: number, b2: number): boolean {
+  const idx = (((i1 * 4 + o1) * 4 + i2) * 4 + o2) * 16 + ((a1 << 3) | (b1 << 2) | (a2 << 1) | b2);
+  let v = CONFLICT_S[idx];
+  if (v === 0xff) v = CONFLICT_S[idx] = strandConflict(idx);
+  return v === 1;
+}
+/** CONFLICT_LAST for movements with their strands. */
+function conflictLastS(i1: number, o1: number, a1: number, b1: number, i2: number, o2: number, a2: number, b2: number): number {
+  const idx = (((i1 * 4 + o1) * 4 + i2) * 4 + o2) * 16 + ((a1 << 3) | (b1 << 2) | (a2 << 1) | b2);
+  let v = CONFLICT_LAST_S[idx];
+  if (v !== v) v = CONFLICT_LAST_S[idx] = strandConflictLast(idx);
+  return v;
+}
+export const conflictsForStrands = conflictsS;
 
 /**
  * Road traffic. Every road tile has one lane per direction; a lane is a FIFO
@@ -419,6 +494,8 @@ export class Traffic {
 
   constructor(private w: World) {
     w.onTileChanged = (x, y) => this.invalidate(x, y);
+    // main-road priority (TRAFFIC_TUNING.mainRoad) by road class: a bigger road's arms are the main road (roadclass.ts rank)
+    this.roadRank = (x, y) => (this.isRoadAt(x, y) ? classDef(this.classAux(x, y) & 7).rank : -1);
     w.kerb.onSet = (k, n) => { const c = this.costChunkOfKey(k); if (c) c.kerb[this.costCell] = n > 0 ? 1 : 0; };
   }
 
@@ -428,7 +505,7 @@ export class Traffic {
     let rc = this.roadChunkIf(x, y);
     if (!rc) {
       rc = {
-        lanes: new Array(CELLS * 4), deg: new Int8Array(CELLS).fill(-1), jaux: new Int16Array(CELLS).fill(-1), xing: new Int8Array(CELLS).fill(-1),
+        lanes: new Array(CELLS * 4), deg: new Int8Array(CELLS).fill(-1), jaux: new Int16Array(CELLS).fill(-1), xing: new Int8Array(CELLS).fill(-1), caux: new Int16Array(CELLS).fill(-1),
         junc: new Array(CELLS), cong: new Array(CELLS), pres: new Uint16Array(CELLS), stop: new Uint16Array(CELLS), presAt: new Uint32Array(CELLS),
         xm: new Uint8Array(CELLS * 2), xmAt: new Uint32Array(CELLS * 2),
       };
@@ -491,8 +568,12 @@ export class Traffic {
     if (cc.at[i] === this.congEpoch) g = cc.cong[i];
     else { g = cc.cong[i] = this.congestionAt(x, y); cc.at[i] = this.congEpoch; }
     let f = cc.flags[i];
-    if (!f) f = cc.flags[i] = 1 | (this.degreeOf(x, y) >= 3 ? 2 : 0) | (this.isCrossingAt(x, y) ? (this.xingOf(x, y) === 1 ? 4 : 8) : 0);
-    let c = 1 + TT.congestionWeight * g;
+    if (!f) {
+      f = cc.flags[i] = 1 | (this.degreeOf(x, y) >= 3 ? 2 : 0) | (this.isCrossingAt(x, y) ? (this.xingOf(x, y) === 1 ? 4 : 8) : 0);
+      const ca = this.classAux(x, y);
+      cc.base[i] = ca ? classDef(ca & 7).routeCost : 1; // the road's class: the hierarchy routers prefer (roadclass.ts)
+    }
+    let c = cc.base[i] + TT.congestionWeight * g;
     if (f & 2) c += 0.6;
     if (cc.kerb[i]) c += 0.5;
     // a level crossing: the expected wait for its barriers. A bascule lifts only a few times a day: nothing, but while it
@@ -508,7 +589,7 @@ export class Traffic {
     const nk = tkey(cx, cy);
     let cc = this.costChunks.get(nk);
     if (!cc) {
-      cc = { cong: new Float64Array(CELLS), at: new Float64Array(CELLS).fill(-1), flags: new Uint8Array(CELLS), kerb: new Uint8Array(CELLS) };
+      cc = { cong: new Float64Array(CELLS), at: new Float64Array(CELLS).fill(-1), flags: new Uint8Array(CELLS), kerb: new Uint8Array(CELLS), base: new Float32Array(CELLS).fill(1) };
       for (let ly = 0; ly < CHUNK_SIZE; ly++) for (let lx = 0; lx < CHUNK_SIZE; lx++) if ((this.w.kerb.get(tkey(cx * CHUNK_SIZE + lx, cy * CHUNK_SIZE + ly)) ?? 0) > 0) cc.kerb[ly * CHUNK_SIZE + lx] = 1;
       this.costChunks.set(nk, cc);
     }
@@ -556,11 +637,58 @@ export class Traffic {
     let d = rc.deg[i];
     if (d < 0) {
       d = 0;
-      for (const [dx, dy] of DIRS) { const t = this.w.peekTile(x + dx, y + dy); if (t !== undefined && isRoad(t)) d++; }
+      for (let k = 0; k < 4; k++) { const t = this.w.peekTile(x + DIRS[k][0], y + DIRS[k][1]); if (t !== undefined && isRoad(t) && this.linked(x, y, k)) d++; }
       if (isFlyoverAux(this.junctionAux(x, y))) d = 2; // two roads straight through on two levels: no junction box
       rc.deg[i] = d;
     }
     return d;
+  }
+  /**
+   * Do road tile (x, y) and its road neighbour heading d join for cars (roadclass.ts)? Always between streets; not
+   * across a divided road's reservation, nor between a pedestrian street and a road cars use (a pedestrian street's
+   * mouth is no junction to traffic).
+   */
+  private linked(x: number, y: number, d: number): boolean {
+    const a = this.classAux(x, y), b = this.classAux(x + DIRS[d][0], y + DIRS[d][1]);
+    if (!a && !b) return true;
+    if (isPedestrianAux(a) !== isPedestrianAux(b)) return false;
+    return carStepOk(a, b, d, true) || carStepOk(b, a, OPP[d], true);
+  }
+  /** The class byte of tile (x, y) (shared/src/roadclass.ts), 0 for a street or any other byte; cached like the rest. */
+  classAux(x: number, y: number): number {
+    const rc = this.roadChunk(x, y), i = localIndex(x, y);
+    let a = rc.caux[i];
+    if (a < 0) { a = this.w.auxAt(x, y); if (!isClassAux(a)) a = 0; rc.caux[i] = a; }
+    return a;
+  }
+  /** A road cars may use (a pedestrian street is not one, for the signals' arms). */
+  private carRoadAt = (x: number, y: number) => this.isRoadAt(x, y) && !isPedestrianAux(this.classAux(x, y));
+  /**
+   * The lane m takes across the edge from path node k to k + 1 (a strand, Mover.s1), `prev` being the lane it crossed
+   * the edge before that in. A single-lane edge: 0. Two lanes (a one-way tile, roadclass.ts edgeLanes): the lane for its
+   * next turn within six tiles (left: 1, right: 0); straight on, the lane it is in, or coming off a single lane one of
+   * the two by its own hash, so traffic spreads over both. Bikes keep to the right.
+   */
+  strandFor(m: Mover, k: number, prev: number): number {
+    const p = m.path, n = p.length / 2;
+    if (k + 1 >= n || k < 0 || isBike(m)) return 0;
+    const ax = p[k * 2], ay = p[k * 2 + 1], bx = p[k * 2 + 2], by = p[k * 2 + 3];
+    const d = dirBetween(ax, ay, bx, by);
+    if (edgeLanes(this.classAux(ax, ay), this.classAux(bx, by), d) < 2) return 0;
+    for (let j = k + 1; j + 1 < n && j <= k + 6; j++) {
+      const dj = dirBetween(p[j * 2], p[j * 2 + 1], p[j * 2 + 2], p[j * 2 + 3]);
+      if (dj !== d) return dj === LEFT[d] ? 1 : 0;
+    }
+    if (k > 0 && edgeLanes(this.classAux(p[k * 2 - 2], p[k * 2 - 1]), this.classAux(ax, ay), dirBetween(p[k * 2 - 2], p[k * 2 - 1], ax, ay)) === 2) return prev;
+    return hash2(m.id * 7 + 3, ax * 31 + ay * 17 + d) < 0.5 ? 0 : 1;
+  }
+  /**
+   * After m's path changed ahead of it (a re-route), the lane it leaves the tile ahead by. A road's class changing under
+   * a car is caught the same way in step(): a lane that is no longer there is the right-hand one.
+   */
+  restrand(m: Mover) {
+    if (!this.w.anyRoadClass || m.lane < 0) return;
+    m.s2 = this.strandFor(m, m.pi, m.s1 ?? 0);
   }
   /** The roundabout or flyover byte of a tile (shared/src/junctions.ts), 0 for none. */
   junctionAux(x: number, y: number): number {
@@ -612,7 +740,7 @@ export class Traffic {
     return this.isCrossingAt(mx, my) && this.barrierDownAt(mx, my) && !(x0 > mx + 0.02 && x0 < mx + 0.98 && y0 > my + 0.02 && y0 < my + 0.98);
   }
   /** No car is left at the kerb of a roundabout, a flyover, a level crossing or a bridge. */
-  kerbless(x: number, y: number): boolean { return !!this.junctionAux(x, y) || this.isCrossingAt(x, y) || isBridgeAux(this.w.auxAt(x, y)); }
+  kerbless(x: number, y: number): boolean { const ca = this.classAux(x, y); return !!this.junctionAux(x, y) || this.isCrossingAt(x, y) || isBridgeAux(this.w.auxAt(x, y)) || isMotorwayAux(ca) || isPedestrianAux(ca); }
   /** Speed factor for a turn through tile (x, y): 0.6 at a plain junction; on a roundabout 1 round a corner, TRAFFIC_TUNING.ringSlow on or off at an arm. */
   private turnSlow(x: number, y: number) {
     const a = this.junctionAux(x, y);
@@ -625,7 +753,7 @@ export class Traffic {
   isRoadAt(x: number, y: number) { const t = this.w.peekTile(x, y); return t !== undefined && isRoad(t); }
   private invalidate(x: number, y: number) {
     const rc = this.roadChunkIf(x, y);
-    if (rc) { const i = localIndex(x, y); rc.deg[i] = -1; rc.jaux[i] = -1; rc.xing[i] = -1; }
+    if (rc) { const i = localIndex(x, y); rc.deg[i] = -1; rc.jaux[i] = -1; rc.xing[i] = -1; rc.caux[i] = -1; }
     for (const [dx, dy] of DIRS) { const nc = this.roadChunkIf(x + dx, y + dy); if (nc) nc.deg[localIndex(x + dx, y + dy)] = -1; }
     this.dropCostFlags(x, y); for (const [dx, dy] of DIRS) this.dropCostFlags(x + dx, y + dy);
     // signal arms look at diagonal neighbours too (wide-road twins), so re-check the 3x3 around the change
@@ -644,7 +772,8 @@ export class Traffic {
     let j = rc.junc[i];
     const deg = this.degreeOf(x, y), pid = this.w.parcelIdAt(x, y);
     if (!j || j.ver !== this.w.techVersion || j.deg !== deg || j.pid !== pid) {
-      const signal = deg >= 3 && !this.junctionAux(x, y) && signalledArms(signalArms(this.roadAt, x, y)) && this.w.ownerHas(x, y, 'signals', hasFeature);
+      const ca = this.w.anyRoadClass ? this.classAux(x, y) : 0;
+      const signal = deg >= 3 && !this.junctionAux(x, y) && !isMotorwayAux(ca) && signalledArms(signalArms(this.w.anyRoadClass ? this.carRoadAt : this.roadAt, x, y)) && this.w.ownerHas(x, y, 'signals', hasFeature);
       j = j ?? { signal, ver: 0, deg, pid, ...signalTiming(x, y) };
       j.signal = signal; j.ver = this.w.techVersion; j.deg = deg; j.pid = pid; j.main = undefined;
       rc.junc[i] = j;
@@ -709,8 +838,8 @@ export class Traffic {
     for (let d = 0; d < 4; d++) n += this.laneCount(x, y, d);
     return n;
   }
-  private capacityInto(x: number, y: number) {
-    return Math.max(1, TT.laneCap - (this.kerbAt(x, y) ? 1 : 0));
+  private capacityInto(x: number, y: number, strand = 0) {
+    return Math.max(1, TT.laneCap - (!strand && this.kerbAt(x, y) ? 1 : 0)); // a car at the kerb takes room in the right-hand lane only
   }
   /**
    * Is there room for `m` in lane `key` on tile (x,y)? A fixed count of cars
@@ -719,19 +848,20 @@ export class Traffic {
    * the newcomer's included, within laneRoom tiles (less a car's worth at the kerb).
    * `extra` cars are already on their way in (the lane before, for boxClear).
    */
-  private laneRoom(x: number, y: number, key: number, m: Mover, extra: Mover[] | null = null): boolean {
+  private laneRoom(x: number, y: number, key: number, m: Mover, extra: Mover[] | null = null, strand = 0): boolean {
     const q = this.laneAt(key);
     if (!TT.laneByLength) {
       // two-wheelers (fleet.ts BIKE_CLASS) slip into the space a car leaves and take none of a car's: they do not count,
       // and the following gap alone keeps them clear of whatever is ahead (docs/mobile-jobs.md)
       if (m.cls === BIKE_CLASS) return true;
+      // a two-lane road's lanes fill one by one (`strand`); cars on their way in count whichever lane they take
       let n = extra?.length ?? 0;
-      if (q) for (const o of q) if (o.cls !== BIKE_CLASS) n++;
-      return n < this.capacityInto(x, y);
+      if (q) for (const o of q) if (o.cls !== BIKE_CLASS && (o.s1 ?? 0) === strand) n++;
+      return n < this.capacityInto(x, y, strand);
     }
-    const kerb = this.kerbAt(x, y);
+    const kerb = !strand && this.kerbAt(x, y);
     let used = m.len + MIN_GAP;
-    if (q) for (const o of q) used += o.len + MIN_GAP;
+    if (q) for (const o of q) if ((o.s1 ?? 0) === strand) used += o.len + MIN_GAP;
     if (extra) for (const o of extra) used += o.len + MIN_GAP;
     const room = TT.laneRoom - (kerb ? VEHICLE_LEN[0] + MIN_GAP : 0);
     return used <= room + 1e-9 || (!q?.length && !extra?.length); // an empty lane always takes one car
@@ -750,12 +880,12 @@ export class Traffic {
   /** Where a mover must stop in its lane to keep its nose out of the next tile. */
   private stopLine(m: Mover) {
     if (!TT.arcAware) return 0.5 - m.len / 2 - STOP_MARGIN;
-    return 0.5 - (m.len / 2 + STOP_MARGIN) / ARC(m.inDir, laneDir(m.lane));
+    return 0.5 - (m.len / 2 + STOP_MARGIN) / ARC_S(m.inDir, laneDir(m.lane), m.s0 ?? 0, m.s1 ?? 0);
   }
   /** Lane progress at which a car's rear has left the tile its lane starts on (the box it is leaving). */
   private clearAt(m: Mover) {
     if (!TT.arcAware) return 0.5 + m.len / 2;
-    return 0.5 + m.len / 2 / ARC(laneDir(m.lane), this.nextDirOf(m));
+    return 0.5 + m.len / 2 / ARC_S(laneDir(m.lane), this.nextDirOf(m), m.s1 ?? 0, m.s2 ?? 0);
   }
 
   /**
@@ -763,7 +893,7 @@ export class Traffic {
    * their movements in boxIn and boxOut (scratch: read them before the next call).
    */
   private inBox(tx: number, ty: number): number {
-    const M = this.boxM, I = this.boxIn, O = this.boxOut;
+    const M = this.boxM, I = this.boxIn, O = this.boxOut, SI = this.boxSi, SO = this.boxSo;
     let n = 0;
     // inside a chunk, not on its edge: every lane looked at is in this tile's RoadChunk
     const lx = tx - Math.floor(tx / CHUNK_SIZE) * CHUNK_SIZE, ly = ty - Math.floor(ty / CHUNK_SIZE) * CHUNK_SIZE;
@@ -773,13 +903,15 @@ export class Traffic {
     for (let d = 0; d < 4; d++) {
       // arriving lanes: from the neighbour on the opposite side, heading d
       const q = rc ? rc.lanes[(i0 - DIRS[d][0] - DIRS[d][1] * CHUNK_SIZE) * 4 + d] : this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
-      if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m)) { M[n] = m; I[n] = d; O[n] = this.nextDirOf(m); n++; }
+      if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m)) { M[n] = m; I[n] = d; O[n] = this.nextDirOf(m); SI[n] = m.s1 ?? 0; SO[n] = m.s2 ?? 0; n++; }
       const o = rc ? rc.lanes[i0 * 4 + d] : this.laneQ(tx, ty, d);
-      if (o) for (const m of o) if (m.prog < this.clearAt(m)) { M[n] = m; I[n] = m.inDir; O[n] = d; n++; }
+      if (o) for (const m of o) if (m.prog < this.clearAt(m)) { M[n] = m; I[n] = m.inDir; O[n] = d; SI[n] = m.s0 ?? 0; SO[n] = m.s1 ?? 0; n++; }
     }
     return n;
   }
   private boxM: Mover[] = []; private boxIn: number[] = []; private boxOut: number[] = [];
+  /** the lanes (strands) the movers in boxM come into and leave the box by */
+  private boxSi: number[] = []; private boxSo: number[] = [];
   /**
    * Any car in the box of a tile: what a pedestrian checks before stepping
    * onto the carriageway. With a CROSS_* mask, only cars whose movement uses
@@ -844,7 +976,9 @@ export class Traffic {
     const d = dirBetween(m.path[0], m.path[1], m.path[2], m.path[3]);
     const key = Traffic.laneKey(m.path[0], m.path[1], d);
     const q = this.laneQ(m.path[0], m.path[1], d);
-    const tail = q && q.length ? leaderIn(q, q.length, isBike(m)) : null;
+    if (this.w.anyRoadClass) { m.s0 = 0; m.s1 = this.strandFor(m, 0, 0); m.s2 = this.strandFor(m, 1, m.s1); }
+    else if (m.s1 || m.s2) m.s0 = m.s1 = m.s2 = 0;
+    const tail = q && q.length ? leaderIn(q, q.length, isBike(m), m.s1 ?? 0) : null;
     if (tail && tail.prog < (tail.len + m.len) / 2 + MIN_GAP * m.gapMul) return 'blocked';
     if (TT.spawnClear && this.boxBusyExcept(m.path[0], m.path[1], m)) return 'blocked';
     m.pi = 1; m.prog = 0; m.wait = 0; m.stuck = 0; m.committed = false; m.v = 0;
@@ -904,9 +1038,15 @@ export class Traffic {
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1];
     const bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
     const d = dirBetween(ax, ay, bx, by);
-    const off = isBike(m) ? LANE_OFFSET + BIKE_SIDE : LANE_OFFSET;
-    if (prog < 0.5) pathPoint(ax, ay, m.inDir, d, 0.5 + prog, off, p);
-    else pathPoint(bx, by, d, this.nextDirOf(m), prog - 0.5, off, p);
+    if (isBike(m)) {
+      const off = LANE_OFFSET + BIKE_SIDE;
+      if (prog < 0.5) pathPoint(ax, ay, m.inDir, d, 0.5 + prog, off, p);
+      else pathPoint(bx, by, d, this.nextDirOf(m), prog - 0.5, off, p);
+      return p;
+    }
+    // each tile is crossed from the lane it was come into by to the lane it is left by (one lane, LANE_OFFSET, on plain roads)
+    if (prog < 0.5) pathPoint(ax, ay, m.inDir, d, 0.5 + prog, strandOffset(m.s0 ?? 0), p, strandOffset(m.s1 ?? 0));
+    else pathPoint(bx, by, d, this.nextDirOf(m), prog - 0.5, strandOffset(m.s1 ?? 0), p, strandOffset(m.s2 ?? 0));
     return p;
   }
   /** A progress the body guard can test: on into the next lane (as step() would put it there), or short of the destination. */
@@ -920,7 +1060,8 @@ export class Traffic {
     if (p < 1 || m.pi + 1 >= m.path.length / 2) return this.posAt(m, Math.min(p, 0.999), out);
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1];
     const bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
-    return pathPoint(bx, by, dirBetween(ax, ay, bx, by), this.nextDirOf(m), 0.5 + (p - 1), isBike(m) ? LANE_OFFSET + BIKE_SIDE : LANE_OFFSET, out);
+    if (isBike(m)) return pathPoint(bx, by, dirBetween(ax, ay, bx, by), this.nextDirOf(m), 0.5 + (p - 1), LANE_OFFSET + BIKE_SIDE, out);
+    return pathPoint(bx, by, dirBetween(ax, ay, bx, by), this.nextDirOf(m), 0.5 + (p - 1), strandOffset(m.s1 ?? 0), out, strandOffset(m.s2 ?? 0));
   }
   /**
    * The body guard, last resort behind the entry rules: how far m may move this tick (at most `allowed`) without its
@@ -1132,20 +1273,22 @@ export class Traffic {
     const q = this.laneAt(m.lane);
     if (!q) return null;
     const idx = q.indexOf(m);
-    if (idx > 0) return q[idx - 1];
+    if (idx > 0 && !m.s1) return q[idx - 1];
+    if (idx > 0) { const l = leaderIn(q, idx, isBike(m), m.s1); if (l) return l; }
     const n = m.path.length / 2;
     if (m.pi >= n) return null;
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1], bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
     const dir = dirBetween(ax, ay, bx, by), last = m.pi + 1 >= n;
     const fly = isFlyoverAux(this.junctionAux(bx, by));
     const M = this.boxM, I = this.boxIn, O = this.boxOut;
-    if (last) { for (let i = 0, k = this.inBox(bx, by); i < k; i++) if (M[i] !== m && !(fly && isEW(I[i]) !== isEW(dir)) && conflicts(dir, dir, I[i], O[i])) return M[i]; return null; }
+    const SI = this.boxSi, SO = this.boxSo, s1 = m.s1 ?? 0, s2 = m.s2 ?? 0;
+    if (last) { for (let i = 0, k = this.inBox(bx, by); i < k; i++) if (M[i] !== m && !(fly && isEW(I[i]) !== isEW(dir)) && conflictsS(dir, dir, s1, s2, I[i], O[i], SI[i], SO[i])) return M[i]; return null; }
     const outD = this.nextDirOf(m);
     const nq = this.laneQ(bx, by, outD);
     if (m.committed) return nq && nq.length ? nq[nq.length - 1] : null;
-    if (nq && nq.length && !this.laneRoom(bx, by, Traffic.laneKey(bx, by, outD), m)) return nq[0];
+    if (nq && nq.length && !this.laneRoom(bx, by, Traffic.laneKey(bx, by, outD), m, null, s2)) return nq[0];
     if (nq && nq.length && this.degreeOf(bx, by) >= 3) { const t = nq[nq.length - 1]; if (t.prog < this.clearAt(t) + MIN_GAP) return t; }
-    for (let i = 0, k = this.inBox(bx, by); i < k; i++) if (M[i] !== m && !(fly && isEW(I[i]) !== isEW(dir)) && conflicts(dir, outD, I[i], O[i])) return M[i];
+    for (let i = 0, k = this.inBox(bx, by); i < k; i++) if (M[i] !== m && !(fly && isEW(I[i]) !== isEW(dir)) && conflictsS(dir, outD, s1, s2, I[i], O[i], SI[i], SO[i])) return M[i];
     if (nq && nq.length) return nq[nq.length - 1];
     return null;
   }
@@ -1162,7 +1305,7 @@ export class Traffic {
   standing(m: Mover): 'junction' | 'line' | 'dest' | 'queue' | 'other' {
     if (m.lane < 0 || m.pi * 2 + 1 >= m.path.length) return 'other';
     const q = this.laneAt(m.lane);
-    if (q && leaderIn(q, q.indexOf(m), isBike(m))) return 'queue';
+    if (q && leaderIn(q, q.indexOf(m), isBike(m), m.s1 ?? 0)) return 'queue';
     if (m.committed || m.prog < this.stopLine(m) - 0.05) {
       // the tail of the next lane close ahead holds it like a car in its own lane
       const n = m.path.length / 2;
@@ -1190,8 +1333,14 @@ export class Traffic {
     for (let d = 0; d < 4; d++) {
       const q = this.laneQ(x - DIRS[d][0], y - DIRS[d][1], d);
       if (!q || !q.length) continue;
-      const h = q[0];
-      if (!h.committed && h.wait >= ticks && h.pi * 2 + 1 < h.path.length && h.path[h.pi * 2] === x && h.path[h.pi * 2 + 1] === y) return true;
+      // the head of the lane, and on a two-lane road the head of the left-hand lane too
+      for (let j = 0, seen = 0; j < q.length && seen < 2; j++) {
+        const h = q[j];
+        if (j > 0 && (!this.w.anyRoadClass || !h.s1 || q.slice(0, j).some((o) => o.s1))) continue;
+        seen++;
+        if (!h.committed && h.wait >= ticks && h.pi * 2 + 1 < h.path.length && h.path[h.pi * 2] === x && h.path[h.pi * 2 + 1] === y) return true;
+        if (!this.w.anyRoadClass) break;
+      }
     }
     return false;
   }
@@ -1255,7 +1404,7 @@ export class Traffic {
   private canEnter(m: Mover, bx: number, by: number, inD: number, outD: number): boolean {
     const nextKey = Traffic.laneKey(bx, by, outD);
     const nq = this.laneAt(nextKey);
-    if (!this.laneRoom(bx, by, nextKey, m, TT.platoon ? this.goingInAhead(m, outD) : null)) return false;
+    if (!this.laneRoom(bx, by, nextKey, m, TT.platoon ? this.goingInAhead(m, outD) : null, m.s2 ?? 0)) return false;
     // level crossings: never onto one with the barriers down, and only with room to get right off it on the far side;
     // a car still on one when they come down drives off whatever is ahead (lights, give-way, people waiting)
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1], onXing = this.isCrossingAt(ax, ay);
@@ -1268,7 +1417,7 @@ export class Traffic {
     if (nq && nq.length && deg >= 3 && !ring) {
       // at a junction the car ahead in the exit lane must be out of the box before we go in behind it;
       // on plain road the following gap in step() is all that is needed, so cars can close up inside a tile
-      const tail = leaderIn(nq, nq.length, isBike(m));
+      const tail = leaderIn(nq, nq.length, isBike(m), m.s2 ?? 0);
       if (tail && tail.prog < this.clearAt(tail) + MIN_GAP && !(TT.platoon && (TT.platoon === 1 || this.junction(bx, by).signal) && this.platoonBehind(m, tail, inD))) return false;
     }
     if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
@@ -1286,6 +1435,11 @@ export class Traffic {
       if ((ph.green === 'ew') !== isEW(inD) || ph.amber) return false;
     }
     if (TT.ringYield > 0 && isRingAux(ja) && !m.priority && !trapped && !this.ringGiven(m, bx, by, inD, outD, ja)) return false;
+    // a slip road: from any other road onto a motorway, give way to the cars coming along it (roadclass.ts), lights or none
+    if (this.w.anyRoadClass && !m.priority && !trapped && m.wait < TT.minorWaitMax * 3) {
+      const cb = this.classAux(bx, by);
+      if (isMotorwayAux(cb) && !isMotorwayAux(this.classAux(ax, ay)) && this.mainComing(m, bx, by, inD, outD, isEW(auxDir(cb)) ? 1 : 0, SLIP_GAP)) return false;
+    }
     // main-road priority without lights: from a side road, give way to cars coming along the main one
     if (TT.mainRoad && deg >= 3 && !signal && !ja && !m.priority && !trapped && m.wait < TT.minorWaitMax) {
       const main = this.mainAxis(bx, by);
@@ -1325,7 +1479,7 @@ export class Traffic {
    * Is a car coming along the main road (axis `main`) into box B, moving, within mainGap tiles of its stop line, whose
    * movement through the box crosses m's (inD -> outD)?
    */
-  private mainComing(m: Mover, bx: number, by: number, inD: number, outD: number, main: number): boolean {
+  private mainComing(m: Mover, bx: number, by: number, inD: number, outD: number, main: number, gap = TT.mainGap): boolean {
     for (let d = 0; d < 4; d++) {
       if ((isEW(d) ? 1 : 0) !== main) continue;
       const ax = bx - DIRS[d][0], ay = by - DIRS[d][1];
@@ -1336,8 +1490,8 @@ export class Traffic {
           const k = c.pi + back;
           if (k * 2 + 1 >= c.path.length || c.path[k * 2] !== bx || c.path[k * 2 + 1] !== by) continue;
           const to = back ? (k + 1 < c.path.length / 2 ? dirBetween(bx, by, c.path[(k + 1) * 2], c.path[(k + 1) * 2 + 1]) : d) : this.nextDirOf(c);
-          if (back + this.stopLine(c) - c.prog > TT.mainGap) continue;
-          if (conflicts(inD, outD, d, to)) return true;
+          if (back + this.stopLine(c) - c.prog > gap) continue;
+          if (conflictsS(inD, outD, m.s1 ?? 0, m.s2 ?? 0, d, to, back ? c.s2 ?? 0 : c.s1 ?? 0, back ? 0 : c.s2 ?? 0)) return true;
         }
       }
     }
@@ -1361,7 +1515,7 @@ export class Traffic {
     let out: Mover[] | null = null;
     if (q) for (const o of q) {
       if (o === m) break;
-      if (o.committed && o.path[o.pi * 2] === m.path[m.pi * 2] && o.path[o.pi * 2 + 1] === m.path[m.pi * 2 + 1] && this.nextDirOf(o) === outD) (out ??= []).push(o);
+      if (o.committed && o.path[o.pi * 2] === m.path[m.pi * 2] && o.path[o.pi * 2 + 1] === m.path[m.pi * 2 + 1] && this.nextDirOf(o) === outD && (o.s2 ?? 0) === (m.s2 ?? 0)) (out ??= []).push(o);
     }
     return out;
   }
@@ -1409,7 +1563,7 @@ export class Traffic {
    * nothing in its way in the box, the light green and not amber).
    */
   private offCrossing(m: Mover, bx: number, by: number, outD: number, nq: Mover[] | null): boolean {
-    if (nq && nq.length) { const tail = leaderIn(nq, nq.length, isBike(m)); if (tail && tail.prog < this.clearAt(tail) + MIN_GAP) return false; }
+    if (nq && nq.length) { const tail = leaderIn(nq, nq.length, isBike(m), m.s2 ?? 0); if (tail && tail.prog < this.clearAt(tail) + MIN_GAP) return false; }
     const i = m.pi + 1, n = m.path.length / 2;
     if (i + 1 >= n) return true; // C is where it is going: the forecourt rule decides
     const cx = m.path[i * 2], cy = m.path[i * 2 + 1];
@@ -1417,42 +1571,44 @@ export class Traffic {
     if (m.len <= XING_SHORT) return true;
     if (nq && nq.length) return false;
     const d2 = dirBetween(cx, cy, m.path[(i + 1) * 2], m.path[(i + 1) * 2 + 1]);
-    if (!this.laneRoom(cx, cy, Traffic.laneKey(cx, cy, d2), m)) return false;
+    const s3 = m.s2 || m.s1 ? this.strandFor(m, i, m.s2 ?? 0) : 0;
+    if (!this.laneRoom(cx, cy, Traffic.laneKey(cx, cy, d2), m, null, s3)) return false;
     if (this.junction(cx, cy).signal) { const ph = this.signalPhase(cx, cy); if ((ph.green === 'ew') !== isEW(outD) || ph.amber) return false; }
-    return !this.boxConflict(m, cx, cy, outD, d2);
+    return !this.boxConflict(m, cx, cy, outD, d2, false, m.s2 ?? 0, s3);
   }
   /** Is a movement inD -> outD through tile B blocked by a car already in that box? */
-  private boxConflict(m: Mover, bx: number, by: number, inD: number, outD: number, trapped = false): boolean {
+  private boxConflict(m: Mover, bx: number, by: number, inD: number, outD: number, trapped = false, ms1 = m.s1 ?? 0, ms2 = m.s2 ?? 0): boolean {
     const ja = this.junctionAux(bx, by), fly = isFlyoverAux(ja), ring = isRingAux(ja) && TT.ringMerge > 0;
     for (let i = 0, n = this.inBox(bx, by); i < n; i++) {
-      const om = this.boxM[i], oIn = this.boxIn[i], oOut = this.boxOut[i];
+      const om = this.boxM[i], oIn = this.boxIn[i], oOut = this.boxOut[i], si = this.boxSi[i], so = this.boxSo[i];
       if (om === m) continue;
       if (fly && isEW(oIn) !== isEW(inD)) continue; // on the deck or under it: the other road never meets this one
       if (ring && oOut === outD && om.lane === Traffic.laneKey(bx, by, outD)) continue; // ahead of me in the lane I merge into: I follow it
-      if (!conflicts(inD, outD, oIn, oOut)) continue;
+      if (!conflictsS(inD, outD, ms1, ms2, oIn, oOut, si, so)) continue;
       if (TT.conflictRemaining && (oIn !== inD || TT.sameApproachRelax >= 2) && om.lane === Traffic.laneKey(bx, by, oOut)) {
         // already on its way out: only the rest of its path from its rear bumper on can be in my way
-        const rear = 0.5 + om.prog - om.len / 2 / ARC(oIn, oOut);
-        if (rear > CONFLICT_LAST[((inD * 4 + outD) * 4 + oIn) * 4 + oOut] + 0.04) continue;
+        const rear = 0.5 + om.prog - om.len / 2 / ARC_S(oIn, oOut, si, so);
+        if (rear > conflictLastS(inD, outD, ms1, ms2, oIn, oOut, si, so) + 0.04) continue;
       }
       // same approach, other exit: with the relaxation, go once the leader's tail is past the box centre on its way out
       if (TT.sameApproachRelax === 1 && oIn === inD && om.lane === Traffic.laneKey(bx, by, oOut) && om.prog >= om.len / 2 + MIN_GAP) continue;
       // a vehicle getting off a level crossing as the barriers come down goes past anyone standing clear of its path
-      if ((TT.passStationary || trapped) && om.wait >= (trapped ? 1 : 2) && this.pathClearOf(m, bx, by, inD, outD, om)) continue;
+      if ((TT.passStationary || trapped) && om.wait >= (trapped ? 1 : 2) && this.pathClearOf(m, bx, by, inD, outD, om, ms1, ms2)) continue;
       return true;
     }
     return false;
   }
   /** Does m's whole path through tile B (inD -> outD) keep its body clear of o's body where o stands now? */
-  private pathClearOf(m: Mover, bx: number, by: number, inD: number, outD: number, o: Mover): boolean {
+  private pathClearOf(m: Mover, bx: number, by: number, inD: number, outD: number, o: Mover, s1 = 0, s2 = 0): boolean {
     const h: [number, number] = [0, 0];
     if (!this.headingOf(o, h)) return false;
     const ob = { x: o.x, y: o.y, hx: h[0], hy: h[1], len: o.len };
     const a: [number, number] = [0, 0], b: [number, number] = [0, 0], c: [number, number] = [0, 0];
+    const o1 = strandOffset(s1), o2 = strandOffset(s2);
     for (let s = 0; s <= 1.0001; s += 0.1) {
-      pathPoint(bx, by, inD, outD, s, LANE_OFFSET, c);
-      pathPoint(bx, by, inD, outD, Math.max(0, s - 0.02), LANE_OFFSET, a);
-      pathPoint(bx, by, inD, outD, Math.min(1, s + 0.02), LANE_OFFSET, b);
+      pathPoint(bx, by, inD, outD, s, o1, c, o2);
+      pathPoint(bx, by, inD, outD, Math.max(0, s - 0.02), o1, a, o2);
+      pathPoint(bx, by, inD, outD, Math.min(1, s + 0.02), o1, b, o2);
       const dx = b[0] - a[0], dy = b[1] - a[1], d = hypot(dx, dy) || 1;
       if (obbOverlap({ x: c[0], y: c[1], hx: dx / d, hy: dy / d, len: m.len }, ob, GUARD_MARGIN)) return false;
     }
@@ -1479,7 +1635,7 @@ export class Traffic {
       const q = this.laneQ(bx - DIRS[d][0], by - DIRS[d][1], d);
       if (q) for (const o of q) if (o !== m && o.committed && this.nextDirOf(o) === outD) ahead.push(o);
     }
-    return this.laneRoom(cx, cy, Traffic.laneKey(cx, cy, d2), m, ahead);
+    return this.laneRoom(cx, cy, Traffic.laneKey(cx, cy, d2), m, ahead, m.s2 || m.s1 ? this.strandFor(m, i, m.s2 ?? 0) : 0);
   }
 
   /** A driver's acceleration (TRAFFIC_TUNING.follow): accel × their own style, slower for trucks and buses. */
@@ -1513,7 +1669,7 @@ export class Traffic {
     const walkers = this.crossingsAt(bx, by);
     if (walkers && ((!signal && !isRingAux(this.junctionAux(bx, by))) || (walkers & movementMask(inD, outD)))) return true;
     const key = Traffic.laneKey(bx, by, outD);
-    if (!this.laneRoom(bx, by, key, m)) { const nq = this.laneAt(key); if (nq && nq.every((o) => (o.v ?? 0) < 0.05)) return true; }
+    if (!this.laneRoom(bx, by, key, m, null, m.s2 ?? 0)) { const nq = this.laneAt(key); if (nq && nq.every((o) => (o.v ?? 0) < 0.05)) return true; }
     return false;
   }
   /** while wouldEnter asks canEnter: ticks ahead to read the lights at, and no counting */
@@ -1534,6 +1690,14 @@ export class Traffic {
 
     const heavy = m.cls === VehicleClass.Truck || m.cls === VehicleClass.Bus;
     let base = DRIVE_SPEED * m.speedMul * (heavy ? 0.8 : 1);
+    if (this.w.anyRoadClass) {
+      // the class of the road under the car sets its pace (roadclass.ts speed); a lane gone from under it (the road's
+      // class changed) is the right-hand one
+      const ca = m.prog < 0.5 ? this.classAux(ax, ay) : this.classAux(bx, by);
+      if (ca) base *= classDef(ca & 7).speed;
+      if (m.s1 && edgeLanes(this.classAux(ax, ay), this.classAux(bx, by), dir) < 2) m.s1 = 0;
+      if (m.s2 && !last && edgeLanes(this.classAux(bx, by), this.classAux(m.path[(m.pi + 1) * 2], m.path[(m.pi + 1) * 2 + 1]), nextDir) < 2) m.s2 = 0;
+    }
     if (this.kerbAt(ax, ay)) base *= 0.6;
     const free = base; // before the turns: what the turn ahead is slowed from
     // turns slow a car for each half; on a roundabout the ring's wide corners not at all, the turns on and off less
@@ -1548,13 +1712,13 @@ export class Traffic {
     const bike = isBike(m);
     let gap = Infinity;
     // cars follow cars and two-wheelers follow two-wheelers (they filter past each other at the kerb edge)
-    const lead = idx > 0 ? leaderIn(q, idx, bike) : null;
+    const lead = idx > 0 ? leaderIn(q, idx, bike, m.s1 ?? 0) : null;
     let tailNext: Mover | null = null;
     if (lead) gap = lead.prog - m.prog - (lead.len + m.len) / 2;
     // into a building, also behind a car pulling out of it the same way (it starts at the middle, where this one ends)
     else if (!last || !this.isRoadAt(bx, by)) {
       const nq = this.laneQ(bx, by, nextDir);
-      tailNext = nq && nq.length ? leaderIn(nq, nq.length, bike) : null;
+      tailNext = nq && nq.length ? leaderIn(nq, nq.length, bike, m.s2 ?? 0) : null;
       if (tailNext) gap = 1 - m.prog + tailNext.prog - (tailNext.len + m.len) / 2;
     }
     let room = gap - MIN_GAP * m.gapMul;
@@ -1629,6 +1793,7 @@ export class Traffic {
         q.splice(idx, 1); if (q.length === 0) this.dropLane(m.lane);
         this.push(Traffic.laneKey(bx, by, nextDir), m);
         m.inDir = dir; m.pi++; m.prog = Math.min(over, 0.3); m.committed = false;
+        if (this.w.anyRoadClass) { m.s0 = m.s1 ?? 0; m.s1 = m.s2 ?? 0; m.s2 = this.strandFor(m, m.pi, m.s1); }
         // a bus never comes into a lane already past its stop line before a junction: its nose would be in the box,
         // in the way of whatever turns there (a bus turning round sweeps the whole box: sim/busroute.ts)
         if (m.cls === VehicleClass.Bus && m.pi * 2 + 1 < m.path.length && this.degreeOf(m.path[m.pi * 2], m.path[m.pi * 2 + 1]) >= 3) m.prog = Math.min(m.prog, Math.max(0, this.stopLine(m)));

@@ -1,5 +1,5 @@
 import {
-  TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, ROAD_UPKEEP, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
+  TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, pedestrianDeliveryOpen, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
   DRIVE_MIN_TILES, CAR_FETCH_RADIUS, PARK_RADIUS, PARKING_FEE, KERB_CAP, FREIGHT_TRIPS_PER_LEVEL_PER_DAY, VISITORS_PER_100_PEAK_HOUR,
   Zone, CitizenState, VehicleClass, VehicleKind, KIND_COUNT, KIND_ID_COUNT, KIND_NAMES, CIVIC_UPKEEP, CONSTRUCTION_FEE, MAX_BUILDERS_PER_SITE, CAMP_KIND,
   capacityOf, parkingOf, wageOf, upkeepOf, workOf, familyOf, isGrowableId, isCivicId, isServiceId, isParkingId,
@@ -727,7 +727,7 @@ export class Simulation {
     for (const p of w.parcels.values()) {
       p.stats.taxYesterday = p.stats.taxToday;
       p.stats.taxToday = 0;
-      if (p.stats.roads > 0) w.credit(p.owner, -p.stats.roads * ROAD_UPKEEP);
+      if (p.stats.roads > 0) w.credit(p.owner, -w.roadUpkeepOf(p));
       w.dirtyParcels.add(p.id);
     }
     for (const b of w.buildings.values()) {
@@ -2592,6 +2592,7 @@ export class Simulation {
     if (!alt || alt.path.length < 2 || alt.cost >= worse) return;
     m.path = [ax, ay, ...alt.path]; m.pi = 1;
     leg.path = m.path;
+    this.traffic.restrand(m);
     this.traffic.count(force ? 'stuckReroutes' : 'reroutes');
     this.noteReroute(m, leg, force ? 'forced' : late ? 'late' : 'slow');
   }
@@ -2852,7 +2853,9 @@ export class Simulation {
 
   private spawnVehicle(vkind: number, from: [number, number], to: [number, number], owner: string | null, priority = false): Vehicle | null {
     const w = this.w;
-    const route = findRoute(w, from[0], from[1], to[0], to[1], (x, y) => this.traffic.cost(x, y));
+    // a pedestrian street lets in emergencies, and deliveries out of shop hours (shared/src/roadclass.ts)
+    const service = priority || (vkind === VehicleKind.Freight && pedestrianDeliveryOpen((w.tick % TICKS_PER_DAY) / TICKS_PER_HOUR));
+    const route = findRoute(w, from[0], from[1], to[0], to[1], (x, y) => this.traffic.cost(x, y), undefined, undefined, undefined, undefined, service);
     if (!route || route.path.length < 4) return null;
     const id = this.nextVehicleId++;
     const v: Vehicle = {
@@ -2959,7 +2962,9 @@ export class Simulation {
     this.releaseParking(v);
     v.phase = 'back';
     const dest: [number, number] = v.vkind === VehicleKind.Visitor && this.entries.length ? this.entries[Math.floor(Math.random() * this.entries.length)] : v.from;
-    const route = findRoute(w, at[0], at[1], dest[0], dest[1], (x, y) => this.traffic.cost(x, y));
+    // a delivery or an emergency that went down a pedestrian street drives out of it again (roadclass.ts)
+    const service = v.vkind === VehicleKind.Freight || v.vkind === VehicleKind.FireEngine || v.vkind === VehicleKind.Ambulance || v.vkind === VehicleKind.Patrol;
+    const route = findRoute(w, at[0], at[1], dest[0], dest[1], (x, y) => this.traffic.cost(x, y), undefined, undefined, undefined, undefined, service);
     if (!route || route.path.length < 4) { this.despawn(v); return; }
     v.x = at[0] + 0.5; v.y = at[1] + 0.5;
     v.priority = false; v.call = false;

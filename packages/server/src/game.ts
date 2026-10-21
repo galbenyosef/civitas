@@ -68,6 +68,7 @@ export function tuneEconomy(spec: string) {
 /** Wire a loaded or freshly seeded World into a running game: the simulation, airports, rail, the metro and the protocol over `source`. */
 export function createGame(world: World, source: ConnSource, cfg: GameConfig, steps = 1): Game {
   for (const id of world.parcels.keys()) world.recountRoads(id);
+  world.scanRoadClasses();
   // the Commons has every technology (seed.ts, loadtest/cities.ts); top it up when the tree has grown since the world was saved
   const commons = world.players.get('sys');
   if (commons) commons.tech = [...new Set([...commons.tech, ...ALL_TECH_IDS])];

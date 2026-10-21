@@ -4,6 +4,8 @@ import { planBridge, joinsBridgeSide, type BridgePlan } from './bridges';
 import { isRailAux, roadOverTrackProblem, CROSSING_COST } from './rail';
 import { isAirfieldAux } from './airport';
 import { isJunctionAux, isRingAux, isIslandAux } from './junctions';
+import { ROAD_CLASS_DEFS, RoadCls, isRoadClass, roadClassAt, classByte, isClassAux, auxDir, dragDirs, twinRow, type RoadClassDef } from './roadclass';
+import { MOTORWAY_KIND } from './gateways';
 
 /**
  * The road tool (docs/roads.md "The road tool"): the shape a drag lays, and what each tile of it will be, with its
@@ -17,17 +19,14 @@ export const ROAD_DRAG_MAX = 256;
 export const ROAD_UNDO_MS = 30_000;
 
 /**
- * Road classes. Class 0 is the street every road is today; R3 (classes) adds the country lane, one-way street,
- * avenue, motorway and pedestrian street, each with its own aux byte (0x01-0x3f, docs/aux-layer.md), cost and drawing.
- * The tool and the intent already carry a class, and dragging a class over a road of another class upgrades it in
- * place (keeping its junctions), so R3 only fills in this table and roadClassAt.
+ * Road classes (shared/src/roadclass.ts, R3): the tool and the intent carry a class (`cls`), and dragging a class over a
+ * road of another class upgrades it in place, keeping its junctions. The table, the byte and the rules are in
+ * roadclass.ts; these are the names the tool and the server have used since R2.
  */
-export interface RoadClass { id: number; name: string; /** per tile on the player's own land; unclaimed land adds the public premium */ cost: number }
-export const ROAD_CLASSES: readonly RoadClass[] = [{ id: 0, name: 'street', cost: ROAD_COST }];
-export const isRoadClass = (cls: number) => Number.isInteger(cls) && cls >= 0 && cls < ROAD_CLASSES.length;
-/** The class of the road on a tile. Every road is a street (0) until R3 gives classes their aux bytes. */
-export const roadClassAt = (_tile: number, _aux: number) => 0;
-/** What upgrading a tile from one class to another costs (the difference, never negative). */
+export type RoadClass = RoadClassDef;
+export const ROAD_CLASSES: readonly RoadClass[] = ROAD_CLASS_DEFS;
+export { isRoadClass, roadClassAt };
+/** What upgrading a tile from one class to another costs (the difference, never negative: a downgrade is free and refunds nothing). */
 export const roadUpgradeCost = (from: number, to: number) => Math.max(0, (ROAD_CLASSES[to]?.cost ?? 0) - (ROAD_CLASSES[from]?.cost ?? 0));
 
 // ---- shapes ---------------------------------------------------------------------------------------------
@@ -116,6 +115,8 @@ export interface RoadTile {
   unclaimed?: boolean;
   /** demolish: the kind id of the building in the way, and whether it is still being built */
   kind?: number; site?: boolean;
+  /** new and upgrade: the aux byte the tile gets (roadclass.ts classByte: the class and its one-way direction; 0 a street). Unset on a level crossing, which keeps its rail byte */
+  byte?: number;
 }
 export interface RoadPlan {
   tiles: RoadTile[];
@@ -151,27 +152,75 @@ export function roadBlockedBy(t: number, kindId: number): boolean {
   return levelOf(t) > 0 || (underConstruction(t) && isCivicId(kindId));
 }
 
+export const MSG_ROAD_FRONTAGE = 'Buildings face the road here: a motorway has no frontage (clear them, or lay it on open land)';
+/**
+ * Would a motorway on (x, y) have a building facing it: anything standing or being built on a tile beside it that is not
+ * a road or part of the drag? The motorway connection (the gate a motorway runs from) does not count.
+ */
+function frontsBuilding(x: number, y: number, env: RoadEnv, inPlan: Set<string>): boolean {
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = x + dx, ny = y + dy;
+    if (inPlan.has(`${nx},${ny}`)) continue;
+    const t = env.tile(nx, ny);
+    if (t === undefined || isRoad(t) || zoneOf(t) === 0 || (levelOf(t) === 0 && !underConstruction(t))) continue;
+    if (env.kindId(nx, ny) === MOTORWAY_KIND) continue;
+    return true;
+  }
+  return false;
+}
+/**
+ * A divided road goes in as both carriageways or neither: a tile refused (or a building left standing) takes the other
+ * tiles of its pair with it, so no length of avenue is left with one carriageway. Tiles already road stay as they are.
+ */
+function pairUp(tiles: RoadTile[], pairOf: Map<RoadTile, number>, demolish: boolean) {
+  const bad = new Map<number, string>();
+  for (const tp of tiles) if (tp.state === 'refused' || (tp.state === 'demolish' && !demolish)) bad.set(pairOf.get(tp)!, tp.reason ?? 'A building stands in the other carriageway\'s way');
+  for (const tp of tiles) {
+    const why = bad.get(pairOf.get(tp)!);
+    if (why === undefined || tp.state === 'refused' || tp.state === 'have' || (tp.state === 'demolish' && !demolish)) continue;
+    tp.state = 'refused'; tp.reason = why; tp.cost = 0; tp.byte = undefined;
+  }
+}
+
 /** Everything a road drag along `path` (4-adjacent steps, in order) would do: see RoadTile and RoadPlan. */
 export function planRoad(path: readonly (readonly [number, number])[], env: RoadEnv, opts: RoadPlanOpts = {}): RoadPlan {
-  const cls = opts.cls ?? 0;
+  const cls = opts.cls ?? 0, def = ROAD_CLASSES[cls] ?? ROAD_CLASSES[0];
   const plan: RoadPlan = { tiles: [], bridges: [], cost: 0, fresh: 0, unclaimed: 0, demolish: { n: 0, cost: 0, kinds: [] }, refused: 0, short: 0, have: 0, upgrade: 0 };
   const seen = new Set<string>();
   const wet: number[] = []; // indices into plan.tiles of water tiles, in drag order
-  for (const [x, y] of path.slice(0, ROAD_DRAG_MAX)) {
+  // what to lay: the drag's tiles, each with the way the drag goes on from it; a divided class adds its twin row on the
+  // left, each twin after the drag tile it pairs with (`pair`), so the money runs out on both rows together
+  const drag = path.slice(0, ROAD_DRAG_MAX), dirs = dragDirs(drag);
+  const units: { x: number; y: number; dir: number; pair: number }[] = [];
+  const twins = def.divided ? twinRow(drag) : [];
+  for (let i = 0; i < drag.length; i++) {
+    units.push({ x: drag[i][0], y: drag[i][1], dir: dirs[i], pair: i });
+    for (const tw of twins) if (tw.from === i) units.push({ x: tw.x, y: tw.y, dir: tw.dir, pair: i });
+  }
+  const pairOf = new Map<RoadTile, number>();
+  const inPlan = new Set(units.map((u) => `${u.x},${u.y}`));
+  for (const { x, y, dir, pair } of units) {
     const k = `${x},${y}`;
     if (seen.has(k)) continue; // a loop's last side meets its first: each tile once
     seen.add(k);
     const t = env.tile(x, y);
     const tp: RoadTile = { x, y, state: 'refused', cost: 0 };
     plan.tiles.push(tp);
+    pairOf.set(tp, pair);
     if (t === undefined) { tp.reason = 'Not loaded yet'; continue; }
-    if (terrainOf(t) === Terrain.Water) { tp.state = 'bridge'; wet.push(plan.tiles.length - 1); continue; }
+    if (terrainOf(t) === Terrain.Water) {
+      if (def.divided) { tp.reason = `An ${def.name === 'avenue' ? 'avenue' : def.name} cannot cross water yet: lay a street over the bridge`; continue; }
+      tp.state = 'bridge'; wet.push(plan.tiles.length - 1); continue;
+    }
     const a = env.aux(x, y);
+    if (cls === RoadCls.Motorway && frontsBuilding(x, y, env, inPlan)) { tp.reason = MSG_ROAD_FRONTAGE; continue; }
     if (isRoad(t)) {
       if (isAirfieldAux(a)) { tp.reason = 'That is part of a runway; bulldoze it first'; continue; }
+      if (a && !isClassAux(a)) { tp.state = 'have'; continue; } // a bridge deck, level crossing, ring or flyover keeps its byte (and is a street)
       const from = env.roadClass ? env.roadClass(x, y) : roadClassAt(t, a);
-      if (from === cls) { tp.state = 'have'; continue; }
-      tp.state = 'upgrade'; tp.cost = roadUpgradeCost(from, cls); // junction tiles keep their junction: only the class changes
+      // a one-way street dragged the other way is reversed, for nothing
+      if (from === cls && (!def.oneWay || def.divided || auxDir(a) === dir)) { tp.state = 'have'; continue; }
+      tp.state = 'upgrade'; tp.cost = roadUpgradeCost(from, cls); tp.byte = classByte(cls, dir); // junction tiles keep their junction: only the class changes
       continue;
     }
     if (a && !isRailAux(a)) {
@@ -185,14 +234,17 @@ export function planRoad(path: readonly (readonly [number, number])[], env: Road
     if (joinsBridgeSide(x, y, env.aux)) { tp.reason = MSG_ROAD_SIDE; continue; }
     const xing = roadOverTrackProblem(env, x, y);
     if (xing) { tp.reason = xing; continue; }
+    if (isRailAux(a) && def.divided) { tp.reason = `An ${def.name} cannot cross a railway: lay a street over the level crossing`; continue; }
     tp.unclaimed = !env.claimed(x, y);
-    tp.cost = (tp.unclaimed ? PUBLIC_ROAD_COST - ROAD_COST : 0) + (ROAD_CLASSES[cls]?.cost ?? ROAD_COST) + (isRailAux(a) ? CROSSING_COST : 0);
+    tp.cost = (tp.unclaimed ? PUBLIC_ROAD_COST - ROAD_COST : 0) + def.cost + (isRailAux(a) ? CROSSING_COST : 0);
+    if (!isRailAux(a)) tp.byte = classByte(cls, dir);
     const kind = env.kindId(x, y);
     if (roadBlockedBy(t, kind)) {
       tp.state = 'demolish'; tp.kind = kind; tp.site = underConstruction(t);
       tp.cost += levelOf(t) > 0 ? BULLDOZE_COST : 0;
     } else tp.state = 'new';
   }
+  if (def.divided) pairUp(plan.tiles, pairOf, !!opts.demolish);
 
   // water: each run of wet tiles in drag order is one crossing, laid after the land so its banks are road by then
   const planned = new Set<string>();
@@ -243,6 +295,7 @@ export function planRoad(path: readonly (readonly [number, number])[], env: Road
     }
     left -= cost;
   }
+  if (def.divided) pairUp(plan.tiles, pairOf, !!opts.demolish);
 
   for (const tp of plan.tiles) {
     if (tp.state === 'new') { plan.cost += tp.cost; plan.fresh++; if (tp.unclaimed) plan.unclaimed++; }
