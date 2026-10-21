@@ -292,7 +292,7 @@ for (const k of MANIFEST) for (const l of k.levels) {
   // merged zone kinds (zones.ts) carry their own work, scaled with level and footprint (checked in 'merged lots')
   // Audit #1: a residential level-1 house is a third of WORK_PER_LEVEL (20), so the first homes rise within minutes
   const firstHouse = k.kindId === T.Zone.Residential && l.level === 1;
-  const want = k.flags.growable ? (isNew(k.kindId) && k.footprint ? l.work : firstHouse ? T.WORK_PER_LEVEL / 3 : T.WORK_PER_LEVEL * l.level) : k.flags.civic ? (isNew(k.kindId) && k.group ? l.work : T.CIVIC_WORK) : 0;
+  const want = k.flags.growable ? (isNew(k.kindId) && k.footprint ? l.work : firstHouse ? T.WORK_PER_LEVEL / 3 : T.WORK_PER_LEVEL * l.level) : k.flags.civic ? (isNew(k.kindId) && (k.group || k.landmark) ? l.work : T.CIVIC_WORK) : 0;
   eq(`work ${k.id} L${l.level}`, T.workOf(k.kindId, l.level), want);
   if (k.kindId === k.code) eq(`constructionWork ${k.id} L${l.level} (code wrapper)`, T.constructionWork(k.code, l.level), want);
   if (k.kindId === T.Zone.Commercial) eq(`visitorCapacity commercial L${l.level}`, l.attrs.visitorCapacity, l.level * T.VENUE_CAPACITY_PER_LEVEL);
