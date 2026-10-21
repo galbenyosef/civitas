@@ -212,6 +212,7 @@ const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks
 const roads = new RoadLayer(atlas); scene.add(roads.group, roads.furniture);
 ChunkView.onTint = (cx, cy, heat) => roads.setHeat(cx, cy, heat, !roadsOverlay && !power.overlayOn); // the overlays' bytes wear nothing
 roads.kindAt = (x, y) => world.kindIdAt(x, y);
+roads.rules = world; lights.world = world; // signal crossings and their walk phases (R4)
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz) || roads.walkY(x, z); // cars and walkers on a flyover deck or a bridge and their ramps, walkers on a kerbed pavement
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
 landmarks.auxAt = (x, y) => world.auxAt(x, y); // a Tower Bridge span running on into the next chunk
@@ -1324,7 +1325,7 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { roads.scanChunk(key, c, getTile, auxAt); v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) { roads.scanChunk(key, c, getTile, auxAt); v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile, auxAt); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (eduDirty && eduHeat.on) { eduHeat.rebuild(world.parcels.values()); eduDirty = false; }

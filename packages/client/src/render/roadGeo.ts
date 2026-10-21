@@ -54,6 +54,9 @@ export const CLASS_PROFILES: readonly RoadProfile[] = [
   { carriage: 0.375, kerb: 0.014, lanes: 2, median: 0.09, oneWay: true, cls: 3, edge: 'kerb' },
   { carriage: 0.4, kerb: 0, lanes: 2, median: 0.06, oneWay: true, cls: 4, edge: 'shoulder' },
   { carriage: 0.375, kerb: 0, lanes: 1, median: 0, oneWay: false, cls: 5, edge: 'paved' },
+  // R4: a 5×5 roundabout's ring (drawn by buildBigRing; what its neighbours meet), and a motorway under a deck (drawn as the motorway)
+  { carriage: 0.375, kerb: 0.014, lanes: 2, median: 0, oneWay: true, cls: 6, edge: 'kerb' },
+  { carriage: 0.4, kerb: 0, lanes: 2, median: 0.06, oneWay: true, cls: 4, edge: 'shoulder' },
 ];
 const C_LANE = 1, C_ONEWAY = 2, C_AVENUE = 3, C_MOTORWAY = 4, C_PED = 5;
 
@@ -82,6 +85,15 @@ export interface ClassInfo {
   jbox: number;
   /** a divided road's tile whose traffic heads into one of its junction tiles that is not a marked junction (where avenues cross): a stop line */
   jAhead: boolean;
+  /**
+   * R4 turn lanes (TRAFFIC_TUNING.turnLanes): 0, or which of the last two tiles of a one-way approach this is (1 next
+   * to the junction, 2 the one before, where the hold starts): a solid lane line, a hatched taper at the start of 2
+   */
+  hold?: number;
+  /** the arrows in the left and right lanes on a held tile (bits: 1 straight on, 2 left, 4 right, 8 U-turn) */
+  holdL?: number; holdR?: number;
+  /** R4 median box: sides (bits) of a junction group's tile whose edge is a reservation a car crossing may wait on */
+  mbox?: number;
 }
 
 /** Side index s (0..3) is N, E, S, W; its mask bit is 1 << s and its step SIDE[s]. */
@@ -115,6 +127,10 @@ export interface RoadTile {
   wear: number;
   /** R3: a road of a class other than the street (absent on a street, which is drawn as R1 left it) */
   cl?: ClassInfo;
+  /** R4: a mini-roundabout painted on this junction tile (shared/src/junctions.ts MINI_AUX) */
+  mini?: boolean;
+  /** R4: a signal crossing (pelican) across this tile, and the axis of the road it crosses: studs, stop lines, zigzags */
+  pelican?: 'ns' | 'ew';
 }
 
 // ---- colours (linear, via Color.setHex) -----------------------------------------------------------------------
@@ -293,9 +309,10 @@ function quartersOf(t: RoadTile): Quarter[] {
   return QUARTERS.map(([sx, sz, sa, sb, db]) => {
     const h = !!(t.m8 & (1 << sa)), v = !!(t.m8 & (1 << sb)), d = !!(t.m8 & (1 << db));
     // a mid-block zebra drops the kerbs along the street's axis: b for a north-south street, a for an east-west one
-    const mid = (s: number) => t.zebra && (s === 0 || s === 2 ? t.arms === 5 : t.arms === 10);
+    // (a signal crossing's the same, with the red tactile paving of a controlled crossing)
+    const mid = (s: number) => (t.zebra || t.pelican) && (s === 0 || s === 2 ? t.arms === 5 : t.arms === 10);
     const drop = (s: number): Drop => (t.junction && t.cross[s] ? 1 : t.nCross[s] ? 2 : mid(s) ? 3 : 0);
-    const tac = (s: number) => (t.junction && t.cross[s] ? (t.cross[s] === MouthCrossing.Signal ? TACTILE_RED : TACTILE_BUFF) : mid(s) ? TACTILE_BUFF : null);
+    const tac = (s: number) => (t.junction && t.cross[s] ? (t.cross[s] === MouthCrossing.Signal ? TACTILE_RED : TACTILE_BUFF) : mid(s) ? (t.pelican ? TACTILE_RED : TACTILE_BUFF) : null);
     return {
       sx, sz, h, v, d, dropA: drop(sa), dropB: drop(sb), tacA: tac(sa), tacB: tac(sb),
       vergeA: !h && !!(t.leafy & (1 << sa)), vergeB: !v && !!(t.leafy & (1 << sb)),
@@ -507,8 +524,10 @@ function paint(t: RoadTile, g: Geo) {
   }
 
   // ---- lines
-  if (t.junction) junctionPaint(t, g, decal, white);
+  if (t.mini) { junctionPaint(t, g, decal, white); miniPaint(t, g, decal, white); }
+  else if (t.junction) { junctionPaint(t, g, decal, white); if (t.pelican) pelicanPaint(t, decal, white); }
   else if (t.rail) railPaint(t, g, decal, white);
+  else if (t.pelican && straight) pelicanPaint(t, decal, white);
   else if (straight) {
     // the centre line: short dashes, or the long dashes of a warning line on the approach to a junction
     const toJ = [0, 1, 2, 3].filter((s) => t.nArms[s]);
@@ -647,6 +666,77 @@ function junctionPaint(t: RoadTile, _g: Geo, decal: Decal, white: Color) {
   }
 }
 
+/** a quad strip along a polyline, `w` wide (thin painted lines: zigzags, curved arrows) */
+function strip(decal: Decal, pts: P[], w: number, color: Color, y?: number) {
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i], b = pts[i + 1], ex = b[0] - a[0], ez = b[1] - a[1], L = Math.hypot(ex, ez) || 1, nx = (-ez / L) * w / 2, nz = (ex / L) * w / 2;
+    decal([[a[0] - nx, a[1] - nz], [b[0] - nx, b[1] - nz], [b[0] + nx, b[1] + nz], [a[0] + nx, a[1] + nz]], color, y);
+  }
+}
+
+/**
+ * A mini-roundabout (R4, MINI_AUX): a white disc, a little domed, in the middle of the junction (a hair off centre and
+ * its own size on each), and three or four curved arrows round it, anticlockwise seen from above (traffic drives on the
+ * right). The give-way lines and triangles are on the arms (approachPaint, every arm giving way).
+ */
+function miniPaint(t: RoadTile, g: Geo, decal: Decal, white: Color) {
+  const r = (n: number) => hk(t, 70 + n);
+  const cx = t.x + 0.5 + (r(0) - 0.5) * 0.025, cz = t.z + 0.5 + (r(1) - 0.5) * 0.025;
+  const R = 0.1 + 0.03 * r(2), dome = 0.003 + 0.004 * r(3), seg = 18;
+  const disc = WHITE.clone().multiplyScalar(0.86 + 0.12 * r(4) - 0.04 * t.wear);
+  const ring = arc(cx, cz, R, 0, Math.PI * 2, seg);
+  for (let i = 0; i < seg; i++) g.tri([cx, cz], ring[i], ring[i + 1], Y_PAINT + dome, Y_PAINT, Y_PAINT, disc);
+  // a darker band of worn paint where tyres clip the disc's edge
+  if (t.wear >= 2 || r(5) < 0.3) {
+    const inner = arc(cx, cz, R * 0.82, 0, Math.PI * 2, seg), worn = disc.clone().multiplyScalar(0.8);
+    for (let i = 0; i < seg; i += 2) decal([inner[i], ring[i], ring[i + 1], inner[i + 1]], worn, Y_PAINT + dome * 0.2);
+  }
+  // arrows round it: p(θ) = (cx + ρ cos θ, cz - ρ sin θ) goes anticlockwise from above as θ grows
+  const n = r(6) < 0.35 ? 4 : 3, Ra = R + 0.07 + 0.02 * r(7), ph = r(8) * Math.PI * 2, span = ((Math.PI * 2) / n) * (0.42 + 0.12 * r(9));
+  const P = (rho: number, th: number): P => [cx + rho * Math.cos(th), cz - rho * Math.sin(th)];
+  const arrowC = white.clone().multiplyScalar(0.92);
+  for (let k = 0; k < n; k++) {
+    const t0 = ph + (k * Math.PI * 2) / n, t1 = t0 + span, m = 6, pts: P[] = [];
+    for (let i = 0; i <= m; i++) pts.push(P(Ra, t0 + ((t1 - t0) * i) / m));
+    strip(decal, pts, 0.02, arrowC);
+    const tip = P(Ra, t1), tx = -Math.sin(t1), tz = -Math.cos(t1);
+    decal([[tip[0] + tx * 0.055, tip[1] + tz * 0.055], P(Ra + 0.032, t1), P(Ra - 0.032, t1)], arrowC);
+  }
+}
+
+/**
+ * A signal crossing (pelican, R4) across the middle of a straight: two lines of studs either side of the walkers' band,
+ * a stop line across each approach lane, and zigzags along both kerbs and the centre out to the tile's ends. Each
+ * crossing's zigzags start at their own phase and run a little differently.
+ */
+function pelicanPaint(t: RoadTile, decal: Decal, white: Color) {
+  const ox = t.x + 0.5, oz = t.z + 0.5, c = t.prof.carriage, ns = t.pelican === 'ns';
+  const ax: P = ns ? [0, 1] : [1, 0];
+  const r = (n: number) => hk(t, 80 + n);
+  for (const sg of [-1, 1]) {
+    // f the way the traffic of this half goes, its right-hand side r; it stops at -0.2 before the crossing
+    const f: P = [ax[0] * sg, ax[1] * sg], rr: P = [-f[1], f[0]];
+    const P2 = (a: number, b: number): P => [ox + f[0] * a + rr[0] * b, oz + f[1] * a + rr[1] * b];
+    // studs: a line of small squares along the near edge of the band
+    const a0 = -MID - 0.012;
+    for (let b = -c + 0.03 + r(sg) * 0.01; b < c - 0.02; b += 0.044) decal([P2(a0 - 0.008, b), P2(a0 + 0.008, b), P2(a0 + 0.008, b + 0.02), P2(a0 - 0.008, b + 0.02)], white);
+    decal([P2(-0.215, 0.01), P2(-0.19, 0.01), P2(-0.19, c - 0.012), P2(-0.215, c - 0.012)], white);
+    // zigzags: along each kerb and down the middle, from the stop line out to the tile's end
+    const amp = 0.012 + 0.004 * r(3 + sg), per = 0.058 + 0.008 * r(5), phase = r(7 + sg) < 0.5 ? 0 : 1;
+    for (const b of [-(c - 0.04), 0, c - 0.04]) {
+      if (b === 0 && sg > 0) continue; // the middle line is one, shared by both approaches
+      const pts: P[] = [];
+      const from = b === 0 ? -0.5 : -0.5, to = b === 0 ? 0.5 : -0.24;
+      let i = 0;
+      for (let a = from; a <= to + 1e-6; a += per / 2, i++) {
+        if (b === 0 && Math.abs(a) < 0.24) { if (pts.length > 1) strip(decal, pts, 0.009, white); pts.length = 0; continue; }
+        pts.push(P2(a, b + ((i + phase) % 2 ? amp : -amp)));
+      }
+      if (pts.length > 1) strip(decal, pts, 0.009, white);
+    }
+  }
+}
+
 /** A level crossing: the track's concrete panels across road and pavements, its rails, stop lines and keep-clear hatching. */
 function railPaint(t: RoadTile, g: Geo, decal: Decal, white: Color) {
   const ox = t.x + 0.5, oz = t.z + 0.5, c = t.prof.carriage, K = t.prof.kerb;
@@ -779,6 +869,127 @@ export function ringSurfaceY(x: number, z: number, pos: number, arm: boolean, pr
   const O = RING_OUTER, c = prof.carriage;
   if (!(pos & 1)) return a + 0.5 > O && !(arm && Math.abs(b) < c) ? prof.kerb : 0;
   return Math.hypot(a + 0.5, b - 0.5) > O ? prof.kerb : 0;
+}
+
+// ---- R4: the 5×5 two-lane roundabout's ring ------------------------------------------------------------------------
+
+/** A ring tile of a 5×5 roundabout (road class 6, shared/src/junctions.ts BIG_RING), as roads.ts describes it. */
+export interface BigRingTile {
+  /** quarter turns anticlockwise from the canonical frame: the east side (island to the west, traffic going north), or the north-east corner */
+  turn: number;
+  corner: boolean;
+  /** a road from outside the 5×5 joins (side tiles only): 1 cars come on here, 2 they leave, 3 both (a street) */
+  arm: number;
+  /** half the arm's carriageway */
+  armC: number;
+}
+/** across a ring tile from the island's edge: the overrun apron of setts, the carriageway's outer kerb (two lanes between) */
+export const BIG_APRON = 0.1, BIG_OUTER = 0.875;
+
+/**
+ * A tile of a 5×5 roundabout's ring (R4): two lanes round, anticlockwise, between a strip of setts against the planted
+ * island (render/junctions.ts) and a pavement round the outside that opens where a road joins. A dashed line between
+ * the lanes, an edge line by the apron, now and then arrows round (both lanes, at each tile's own place), curved
+ * arrows on the corners. Built in the frame of the east side or the north-east corner and turned into place, as the
+ * 3×3 ring's tiles (buildRing). The give-way lines are on the arms (approachPaint).
+ */
+export function buildBigRing(x: number, z: number, b: BigRingTile, g: Geo, wear: number) {
+  g.tx = x; g.tz = z;
+  const K = STREET.kerb, A = BIG_APRON, O = BIG_OUTER;
+  const ox = x + 0.5, oz = z + 0.5;
+  const W = (p: P): P => { let [a, c] = p; for (let i = 0; i < b.turn; i++) [a, c] = [c, -a]; return [ox + a, oz + c]; };
+  const r = (n: number) => hash2(x * 23 + n * 5, z * 19 - n * 7);
+  const tone = 0.92 + 0.12 * hash2(Math.floor(x / 5) * 3 + 1, Math.floor(z / 5) * 7 + 2); // the ring was surfaced as one
+  const asphalt = new Color().setScalar(tone * (0.97 + 0.05 * r(1)) * (1 - 0.03 * wear)), pave = new Color().setScalar(0.92 + 0.12 * r(2));
+  const kerb = KERB.clone().multiplyScalar(0.9 + 0.15 * r(3)), sett = new Color(1.05, 1.0, 0.92).multiplyScalar(0.92 + 0.12 * r(4));
+  const white = WHITE.clone().multiplyScalar((1 - 0.07 * wear) * (0.92 + 0.08 * r(5)));
+  const flat = (poly: P[], y: number, color: Color, cell: number) => {
+    g.setCell(cell);
+    for (const tri of triangulate(poly)) { const w = tri.map(W); g.tri(w[0], w[1], w[2], y, y, y, color); }
+  };
+  const wallC = kerb.clone().multiplyScalar(0.82);
+  const wall = (line: P[], ya: number, yb: number, toward: P) => {
+    g.setCell(Cell.Paint);
+    for (let i = 0; i + 1 < line.length; i++) {
+      const a = line[i], c = line[i + 1], ex = c[0] - a[0], ez = c[1] - a[1], L = Math.hypot(ex, ez) || 1;
+      let nx = -ez / L, nz = ex / L;
+      const mx = (a[0] + c[0]) / 2, mz = (a[1] + c[1]) / 2;
+      if (nx * (toward[0] - mx) + nz * (toward[1] - mz) < 0) { nx = -nx; nz = -nz; }
+      const wa = W(a), wn = W([a[0] + nx, a[1] + nz]);
+      g.wall(wa, W(c), ya, yb, ya, yb, wn[0] - wa[0], wn[1] - wa[1], wallC);
+    }
+  };
+  const paint = (poly: P[], color = white) => { g.setCell(Cell.Paint); g.fan(poly.map(W), () => Y_PAINT, color); };
+  const APRON_Y = 0.006;
+  if (!b.corner) {
+    // the east side: island edge at lx = -0.5, u = lx + 0.5 out from it; traffic goes north (-z)
+    const L = (u: number) => u - 0.5;
+    flat([[L(0), -0.5], [L(A), -0.5], [L(A), 0.5], [L(0), 0.5]], APRON_Y, sett, Cell.Setts);
+    flat([[L(A), -0.5], [L(O), -0.5], [L(O), 0.5], [L(A), 0.5]], 0, asphalt, Cell.Asphalt);
+    wall([[L(A), -0.5], [L(A), 0.5]], 0, APRON_Y, [L(O), 0]);
+    if (b.arm) {
+      const c = b.armC, rr = 0.05;
+      flat([[L(O), -c], [0.5, -c], [0.5, c], [L(O), c]], 0, asphalt, Cell.Asphalt);
+      for (const sd of [-1, 1]) {
+        const corner = arc(L(O) + rr, sd * (c + rr), rr, sd < 0 ? Math.PI / 2 : -Math.PI / 2, sd < 0 ? Math.PI : -Math.PI, 4);
+        flat([[0.5, sd * c], [0.5, sd * 0.5], [L(O), sd * 0.5], ...corner.slice().reverse()], K, pave, Cell.Pavement);
+        flat([[L(O), sd * c], ...corner], 0, asphalt, Cell.Asphalt);
+        wall([[L(O), sd * 0.5], ...corner.slice().reverse(), [0.5, sd * c]], 0, K, [L(A), 0]);
+        wall([[0.5, sd * c], [0.5, sd * 0.5]], 0, K, [1, 0]);
+      }
+    } else {
+      flat([[L(O), -0.5], [0.5, -0.5], [0.5, 0.5], [L(O), 0.5]], K, pave, Cell.Pavement);
+      wall([[L(O), -0.5], [L(O), 0.5]], 0, K, [L(A), 0]);
+      wall([[0.5, -0.5], [0.5, 0.5]], 0, K, [1, 0]);
+    }
+    // the edge line by the apron, the dashed line between the lanes (its own phase on each tile)
+    paint([[L(A + 0.02), -0.5], [L(A + 0.036), -0.5], [L(A + 0.036), 0.5], [L(A + 0.02), 0.5]]);
+    const ph = (r(6) - 0.5) * 0.12;
+    for (const d0 of [-0.42, 0.08]) paint([[L(0.5) - 0.01, d0 + ph], [L(0.5) + 0.01, d0 + ph], [L(0.5) + 0.01, d0 + ph + 0.22], [L(0.5) - 0.01, d0 + ph + 0.22]]);
+    // arrows round, on about one side tile in three (never across an arm's mouth): straight on, up the lane (-z)
+    if (!b.arm && r(7) < 0.4) {
+      const P2 = (along: number, across: number): P => W([across, -along]);
+      const decalW: Decal = (poly, color, y = Y_PAINT) => { g.setCell(Cell.Paint); g.fan(poly, () => y, color); };
+      const sh = (r(8) - 0.5) * 0.2;
+      for (const u of [0.31, 0.69]) laneArrow(decalW, P2, L(u), true, false, false, white, -0.2 + sh, 0.18 + sh);
+    }
+  } else {
+    // the north-east corner: everything an arc round the island's corner at the tile's south-west
+    const kx = -0.5, kz = 0.5;
+    const ring = (rad: number, n = 10) => arc(kx, kz, rad, -Math.PI / 2, 0, n);
+    flat([[kx, kz], ...ring(A, 6)], APRON_Y, sett, Cell.Setts);
+    flat([...ring(O, 14), ...ring(A, 6).reverse()], 0, asphalt, Cell.Asphalt);
+    const outer = ring(O, 14);
+    flat([[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], ...outer.slice().reverse()], K, pave, Cell.Pavement);
+    wall(ring(A, 6), 0, APRON_Y, [0.5, -0.5]);
+    wall(outer, 0, K, [kx, kz]);
+    wall([[-0.5, -0.5], [0.5, -0.5]], 0, K, [0, -1]);
+    wall([[0.5, -0.5], [0.5, 0.5]], 0, K, [1, 0]);
+    const band = (r0: number, r1: number, a0: number, a1: number, n: number) => {
+      const e0 = arc(kx, kz, r0, a0, a1, n), e1 = arc(kx, kz, r1, a0, a1, n);
+      for (let i = 0; i < n; i++) paint([e0[i], e0[i + 1], e1[i + 1], e1[i]]);
+    };
+    band(A + 0.02, A + 0.036, -Math.PI / 2, 0, 8);
+    // the lane line: two dashes round the bend
+    const ph = (r(6) - 0.5) * 0.15;
+    for (const [f0, f1] of [[0.08, 0.38], [0.58, 0.88]]) band(0.49, 0.51, -Math.PI / 2 * (f0 + ph * 0.3), -Math.PI / 2 * (f1 + ph * 0.3), 4);
+    // a curved arrow in each lane, anticlockwise: in from the south edge (angle 0), out by the west (-π/2)
+    const arrowC = white.clone().multiplyScalar(0.9);
+    for (const R of [0.31, 0.69]) {
+      const a0 = -0.3 - 0.15 * r(9), a1 = a0 - 0.75;
+      band(R - 0.011, R + 0.011, a0, a1, 5);
+      const hx = kx + R * Math.cos(a1), hz = kz + R * Math.sin(a1), tx = Math.sin(a1), tz = -Math.cos(a1);
+      paint([[hx + tx * 0.06, hz + tz * 0.06], [hx + Math.cos(a1) * 0.035, hz + Math.sin(a1) * 0.035], [hx - Math.cos(a1) * 0.035, hz - Math.sin(a1) * 0.035]], arrowC);
+    }
+  }
+}
+
+/** Height a walker stands at on a big ring tile (the frame as buildBigRing's). */
+export function bigRingSurfaceY(x: number, z: number, b: BigRingTile, wx: number, wz: number): number {
+  let a = wx - x - 0.5, c = wz - z - 0.5;
+  for (let i = 0; i < b.turn; i++) [a, c] = [-c, a];
+  if (!b.corner) return a + 0.5 > BIG_OUTER && !(b.arm && Math.abs(c) < b.armC) ? STREET.kerb : 0;
+  return Math.hypot(a + 0.5, c - 0.5) > BIG_OUTER ? STREET.kerb : 0;
 }
 
 // ---- R3: the other road classes ------------------------------------------------------------------------------------
@@ -1004,7 +1215,7 @@ function oneWayApproach(t: RoadTile, s: number, decal: Decal, white: Color, lo: 
       decal(thick(A, B), white); decal(thick(B, C), white); decal(thick(C, A), white);
     }
   }
-  if (ctrl !== MouthControl.GiveWay && t.nArms[s]) {
+  if (ctrl !== MouthControl.GiveWay && t.nArms[s] && !t.cl?.hold) {
     const arms = t.nArms[s];
     const has = (dx: number, dz: number) => { const i = SIDE.findIndex(([x, z]) => x === dx && z === dz); return i >= 0 && !!(arms & (1 << i)); };
     const straight = has(f[0], f[1]), right = has(r[0], r[1]), left = has(-r[0], -r[1]);
@@ -1091,11 +1302,13 @@ function classPaint(t: RoadTile, g: Geo, grass: Color, ped: PedStyle | null) {
 
   // ---- lines
   if (cl.jbox >= 0) divBox(t, decal);
+  else if (cl.mbox) medianBox(t, decal);
   if (t.junction) { if (t.prof.edge === 'kerb') junctionPaint(t, g, decal, white); return; }
   if (!straight) return;
   const toJ = [0, 1, 2, 3].filter((s) => t.nArms[s]);
   if (cls === C_LANE) {
     lanePaint(t, g, grass, decal);
+    if (t.pelican) pelicanPaint(t, decal, white);
     for (const s of toJ) if (t.nCtrl[s]) approachPaint(t, s, decal, white);
     return;
   }
@@ -1106,9 +1319,10 @@ function classPaint(t: RoadTile, g: Geo, grass: Color, ped: PedStyle | null) {
   const quad = (a0: number, a1: number, c0: number, c1: number): P[] => [P2(a0, c0), P2(a1, c0), P2(a1, c1), P2(a0, c1)];
   // across the flow: the reservation on the left of a divided road, the kerb (or the verge) on the right
   const left = cl.twin >= 0 ? 0.5 - M : c;
-  // the lane line between the two lanes: a motorway's dashes longer
-  for (const [a0, a1] of cls === C_MOTORWAY ? [[-0.39, -0.11], [0.11, 0.39]] : [[-0.35, -0.15], [0.15, 0.35]]) decal(quad(a0, a1, -0.011, 0.011), white);
-  if (cl.arrow) for (const mid of [-0.19, 0.19]) laneArrow(decal, P2, mid, true, false, false, white, -0.2, 0.22);
+  // the lane line between the two lanes: a motorway's dashes longer; solid over a turn lane's held tiles (R4)
+  if (cl.hold) heldLanes(t, decal, P2, quad, white);
+  else for (const [a0, a1] of cls === C_MOTORWAY ? [[-0.39, -0.11], [0.11, 0.39]] : [[-0.35, -0.15], [0.15, 0.35]]) decal(quad(a0, a1, -0.011, 0.011), white);
+  if (cl.arrow && !cl.hold) for (const mid of [-0.19, 0.19]) laneArrow(decal, P2, mid, true, false, false, white, -0.2, 0.22);
   if (cls === C_MOTORWAY) {
     const slipped = !!(cl.slip & (1 << ((f + 1) & 3)));
     // the hard shoulder's line, broken where a slip road joins; the edge line by the reservation
@@ -1154,6 +1368,51 @@ function divBox(t: RoadTile, decal: Decal) {
     let poly: P[] = [[cx - nz * L - nx * lw / 2, cz + nx * L - nz * lw / 2], [cx + nz * L - nx * lw / 2, cz - nx * L - nz * lw / 2], [cx + nz * L + nx * lw / 2, cz - nx * L + nz * lw / 2], [cx - nz * L + nx * lw / 2, cz + nx * L + nz * lw / 2]];
     poly = clip(clip(clip(clip(poly, 1, 0, ix1), -1, 0, -ix0), 0, 1, iz1), 0, -1, -iz0);
     if (poly.length >= 3) decal(poly.map(([x, z]) => [ox + x, oz + z] as P), yel);
+  }
+}
+
+/**
+ * The last two tiles of a one-way approach that hold the lanes (R4 turn lanes, cl.hold): a solid line between the lanes,
+ * a hatched taper where the hold starts (the upstream end of the second tile back, the solid line growing out of its
+ * point), and in each lane the arrows for the moves it keeps (cl.holdL, holdR: the left lane's left turns, the right
+ * lane's straight on and right), set a little differently on each tile.
+ */
+function heldLanes(t: RoadTile, decal: Decal, P2: (along: number, across: number) => P, quad: (a0: number, a1: number, c0: number, c1: number) => P[], white: Color) {
+  const cl = t.cl!, r = (n: number) => hk(t, 130 + n);
+  const start = cl.hold === 2 ? -0.5 + 0.28 + 0.06 * r(0) : -0.5;
+  decal(quad(start, 0.5, -0.011, 0.011), white);
+  if (cl.hold === 2) {
+    // the taper: hatching in a long thin wedge, its point upstream, its tail where the solid line starts
+    const w = 0.03 + 0.01 * r(1), a0 = -0.5, a1 = start;
+    strip(decal, [P2(a0, 0), P2(a1, -w)], 0.01, white); strip(decal, [P2(a0, 0), P2(a1, w)], 0.01, white);
+    for (let a = a0 + 0.05; a < a1 - 0.01; a += 0.045) {
+      const k = (a - a0) / (a1 - a0), hw = w * k;
+      strip(decal, [P2(a, -hw), P2(a + 0.02, hw)], 0.008, white);
+    }
+  }
+  const sh = (r(2) - 0.5) * 0.06, base = cl.hold === 1 ? 0.0 + sh : -0.05 + sh, top = base + 0.26;
+  const L = cl.holdL ?? 3, R = cl.holdR ?? 5;
+  laneArrow(decal, P2, -0.19, !!(L & 1), !!(L & 2), !!(L & 4), white, base, top);
+  laneArrow(decal, P2, 0.19, !!(R & 1), !!(R & 2), !!(R & 4), white, base, top);
+}
+
+/**
+ * The median box (R4): where a car crossing an avenue waits on the reservation, centred on the edge between the two
+ * carriageways' junction tiles; this tile's half of it, faint yellow hatching in a thin border (cl.mbox: the sides
+ * where its edge is), each crossing's a slightly different tone and spacing.
+ */
+function medianBox(t: RoadTile, decal: Decal) {
+  const ox = t.x + 0.5, oz = t.z + 0.5, mask = t.cl!.mbox!;
+  const h = hash2(Math.floor(t.x / 2) * 7 + 3, Math.floor(t.z / 2) * 11 + 5);
+  const yel = YELLOW.clone().multiplyScalar(0.62 + 0.12 * h), lw = 0.012, half = 0.2 + 0.03 * h, depth = 0.085;
+  for (let s = 0; s < 4; s++) {
+    if (!(mask & (1 << s))) continue;
+    const [nx, nz] = SIDE[s], ux = -nz, uz = nx;
+    const P2 = (u: number, v: number): P => [ox + ux * u + nx * v, oz + uz * u + nz * v];
+    const v0 = 0.5 - depth;
+    decal([P2(-half, v0), P2(half, v0), P2(half, v0 + lw), P2(-half, v0 + lw)], yel);
+    for (const e of [-half, half - lw]) decal([P2(e, v0), P2(e + lw, v0), P2(e + lw, 0.5), P2(e, 0.5)], yel);
+    for (let u = -half + 0.05 + 0.02 * h; u < half - 0.02; u += 0.06) strip(decal, [P2(u - 0.035, 0.5), P2(u, v0 + lw)], 0.008, yel);
   }
 }
 
