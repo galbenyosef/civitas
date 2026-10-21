@@ -1480,10 +1480,13 @@ export class Traffic {
     const dir = dirBetween(m.path[(m.pi - 1) * 2], m.path[(m.pi - 1) * 2 + 1], bx, by), outD = this.nextDirOf(m);
     const turning = (outD !== dir && m.prog > 0.3) || (m.inDir !== dir && m.prog < 0.3);
     if (m.wait < 2) return turning && (m.v ?? 0) < DRIVE_SPEED * 0.4 ? 5 : -1;
-    const st = this.standing(m);
-    if (st === 'queue') return 0;
-    if (st === 'dest') return 4;
-    if (st === 'other') return turning ? 5 : 0;
+    // short of the stop line: the car ahead in its own lane (this tile's, or the next tile's tail), else a turn or a bus stop
+    const q = this.laneAt(m.lane);
+    if (q && leaderIn(q, q.indexOf(m), isBike(m), m.s1 ?? 0)) return 0;
+    if (m.committed || m.prog < this.stopLine(m) - 0.05) {
+      if (m.pi + 1 < n) { const nq = this.laneQ(bx, by, outD), t = nq && nq.length ? leaderIn(nq, nq.length, isBike(m), m.s2 ?? 0) : null; if (t && 1 - m.prog + t.prog < 0.6) return 0; }
+      return turning ? 5 : m.dwell ? -1 : 0;
+    }
     if (m.pi + 1 >= n) return 4;
     if (this.degreeOf(bx, by) >= 3 && this.lightHolds(m, m.pi, dir)) return 1;
     if ((this.w.anyRoadClass || this.w.roadRules.size > 0) && this.pelicanAt(bx, by)) { const l = this.pelicanLamp(bx, by); if (l === 'amber' || l === 'red') return 1; }

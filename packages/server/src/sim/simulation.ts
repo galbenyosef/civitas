@@ -3048,6 +3048,8 @@ export class Simulation {
   }
   private headBack(v: Vehicle) {
     const w = this.w;
+    // the lorry curfew (R5): a lorry that delivered late stays where it is until the morning
+    if (v.vkind === VehicleKind.Freight && this.curfewOwners() > 0) { const h = this.control.curfewHold(v.id, v.owner, v.to); if (h !== undefined) { v.until = h; return; } }
     const at: [number, number] = v.parkedAt ? parseKey(v.parkedAt) : [Math.floor(v.x), Math.floor(v.y)];
     this.releaseParking(v);
     v.phase = 'back';
@@ -3061,6 +3063,12 @@ export class Simulation {
     resetTrail(v, at[0], at[1]);
     v.legs = [{ path: route.path, drive: true, arrive: 'none' }];
     this.startLeg(v);
+  }
+  /** How many players have the lorry curfew on (0 skips its checks), recounted when the players change. */
+  private curfewOwners(): number {
+    let n = 0;
+    for (const p of this.w.players.values()) if (p.policies?.includes('curfew')) n++;
+    return n;
   }
   private despawn(v: Vehicle) {
     this.traffic.leave(v);

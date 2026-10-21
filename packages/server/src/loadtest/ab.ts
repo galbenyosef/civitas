@@ -22,7 +22,7 @@
  * measured window only: a tick-cost comparison on the same traffic), --label L, --json FILE, --quiet.
  */
 import { writeFileSync } from 'node:fs';
-import { DRIVE_SPEED, TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, SKILLS, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, roadDragPath, RoadCls, type TrafficTuning, type StopRef } from '@msimcity/shared';
+import { DRIVE_SPEED, TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, VehicleKind, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, SKILLS, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, roadDragPath, RoadCls, StreetRule, streetRuleTiles, type TrafficTuning, type StopRef } from '@msimcity/shared';
 import { World, tkey, type Citizen, type Mover } from '../world';
 import { Simulation } from '../sim/simulation';
 import { seedCity } from './cities';
@@ -102,6 +102,13 @@ export interface AbResult {
    */
   smooth: { stopsAt: Record<string, number>; tiles: number; stops: number; stopsPer10: number; deadStops: number; jerk: number; harshPct: number; standPct: number; standStreamPct: number; carTicks: number };
   mobile: { onRoadMean: number; bikesCarOverlaps: number; bikePedContacts: number; fleetPedContacts: number; fleetPedWhere: Record<string, number>; taxi: Record<string, number>; food: Record<string, number>; bins: Record<string, number>; parcels: Record<string, number>; foodMinutes: number[] };
+  /**
+   * R5 (docs/traffic-tuning.md "Traffic control"): freight and visitor trips (ticks from setting off to arriving, completed
+   * in the window), bus laps (ticks from one call at a line's first stop to the next, per bus), car-pedestrian near misses
+   * per tick (a walker on the carriageway within NEAR_R of a car moving at over NEAR_V tiles a tick), lorries on the road
+   * per tick overnight (22:00-06:00, when the window covers it) and those the curfew held.
+   */
+  control: { freightTrips: number; freightTripMean: number; visitorTrips: number; visitorTripMean: number; busLaps: number; busLapMean: number; busSections: number; busSectionMean: number; nearMissPerTick: number; lorriesNight: number; curfewHeld: number; freightDone: number };
 }
 
 /**
@@ -122,7 +129,7 @@ export const OLD_RULES: Partial<TrafficTuning> = {
 export const UNSMOOTH: Partial<TrafficTuning> = { follow: 0, platoon: 0, startGap: 0, lookAhead: 0, mainRoad: 0, greenWave: 0 };
 
 /** Keys that change the test city rather than TRAFFIC_TUNING: car ownership, no parking lots, no signals technology. */
-const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile', 'edu', 'districts', 'avenues', 'oneway'];
+const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile', 'edu', 'districts', 'avenues', 'oneway', 'hgv', 'zone20', 'yellows', 'busAv', 'busLane', 'curfew'];
 
 /**
  * A bus network on the Commons (local coordinates of the 22×22 district): a depot whose door faces the y=5 street;
@@ -131,15 +138,19 @@ const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFar
  * south-west corner, six stops, within a short walk of line 1 at three places for changes. Every stop faces a plain
  * stretch of road. Returns the stop tiles of each line (world coordinates).
  */
-export function layBusNetwork(w: World, x0: number, y0: number): { depot: [number, number]; lines: StopRef[][] } {
-  const at = (lx: number, ly: number): [number, number] => [x0 + lx, y0 + ly];
+/** The Commons' bus depot (layBusNetwork, layAvenueLine): footprint x 11..13, y 3..4 local, door (12, 4) facing the street at y = 5. */
+function layDepot(w: World, x0: number, y0: number): [number, number] {
   const clear = (x: number, y: number) => w.setTile(x, y, packTile(terrainOf(w.getTile(x, y)), false, 0, 0));
-  // depot: footprint x 11..13, y 3..4 (door 12,4 facing the street at y=5)
-  const [dx, dy] = at(12, 4);
+  const dx = x0 + 12, dy = y0 + 4;
   for (let y = dy - 1; y <= dy; y++) for (let x = dx - 1; x <= dx + 1; x++) clear(x, y);
   const v = planStructure(BUS_DEPOT_KIND, dx, dy, { tile: (x, y) => w.peekTile(x, y), aux: (x, y) => w.auxAt(x, y), sub: (x, y) => w.subAt(x, y), land: () => null });
   if (!v.ok) throw new Error(`bus depot: ${v.reason}`);
   w.placeStructure(v.placed, { work: 0, priority: 0, built: true });
+  return [dx, dy];
+}
+export function layBusNetwork(w: World, x0: number, y0: number): { depot: [number, number]; lines: StopRef[][] } {
+  const at = (lx: number, ly: number): [number, number] => [x0 + lx, y0 + ly];
+  const [dx, dy] = layDepot(w, x0, y0);
   const stop = (lx: number, ly: number): StopRef => {
     const [x, y] = at(lx, ly);
     w.setTile(x, y, packTile(terrainOf(w.getTile(x, y)), false, familyOf(BUS_STOP_KIND), 1), subFor(BUS_STOP_KIND));
@@ -148,6 +159,41 @@ export function layBusNetwork(w: World, x0: number, y0: number): { depot: [numbe
   const ring = [stop(7, 4), stop(14, 6), stop(16, 12), stop(12, 16), stop(4, 12), stop(6, 7)];
   const cross = [stop(4, 2), stop(9, 2), stop(12, 9), stop(11, 13), stop(9, 17), stop(4, 17)];
   return { depot: [dx, dy], lines: [ring, cross] };
+}
+
+/** A near miss (R5): a walker on the carriageway within NEAR_R tiles of a car's centre moving at over NEAR_V tiles a tick. */
+const NEAR_R = 0.5, NEAR_V = 0.2;
+
+/** R5's street rule variants on the test city (runAb: hgv, zone20, yellows, busLane), in each district's local coordinates. */
+export function applyStreetRules(w: World, layout: { districts: { x: number; y: number }[] }, set: Record<string, number>) {
+  const road = (x: number, y: number) => { const t = w.peekTile(x, y); return t !== undefined && isRoad(t); };
+  const env = { road, aux: (x: number, y: number) => w.auxAt(x, y) };
+  const zoneAt = (x: number, y: number) => { const t = w.peekTile(x, y); return t === undefined || isRoad(t) ? -1 : w.buildings.get(`${x},${y}`)?.zone ?? -1; };
+  const sides = (x: number, y: number) => [zoneAt(x + 1, y), zoneAt(x - 1, y), zoneAt(x, y + 1), zoneAt(x, y - 1)];
+  const junction = (x: number, y: number) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => road(x + dx, y + dy)).length >= 3;
+  for (const d of layout.districts) {
+    if (set.hgv) for (const ly of [20, 21]) w.setStreetRules(streetRuleTiles(env, d.x + 2, d.y + ly, false, 'hgv'), StreetRule.Hgv, true);
+    const tiles: [number, number][] = [];
+    for (let ly = 0; ly < 22; ly++) for (let lx = 0; lx < 22; lx++) if (road(d.x + lx, d.y + ly)) tiles.push([d.x + lx, d.y + ly]);
+    if (set.zone20) w.setStreetRules(tiles.filter(([x, y]) => { if (junction(x, y)) return false; const z = sides(x, y); return z.includes(Zone.Residential) && !z.some((q) => q === Zone.Commercial || q === Zone.Industrial || q === Zone.Office); }), StreetRule.Zone20, true);
+    if (set.yellows) w.setStreetRules(tiles.filter(([x, y]) => sides(x, y).some((q) => q === Zone.Commercial || q === Zone.Office)), StreetRule.NoParking, true);
+    if (set.busLane) w.setStreetRules(tiles, StreetRule.BusLane, true); // only where it may go: avenue carriageways and one-way streets, short of junctions
+  }
+}
+/**
+ * A bus line round district A1's avenue corner (busAv=N buses, with avenues=2): south down the avenue's x = 20
+ * carriageway, west along its y = 20 one, north up the x = 0 street and east along y = 0; six stops on the kerb side.
+ * (The line is laid two game hours before the window: runAb.)
+ */
+export function layAvenueLine(w: World, x0: number, y0: number): { stops: StopRef[] } {
+  layDepot(w, x0, y0);
+  const stop = (lx: number, ly: number): StopRef => {
+    const x = x0 + lx, y = y0 + ly;
+    w.setTile(x, y, packTile(terrainOf(w.getTile(x, y)), false, familyOf(BUS_STOP_KIND), 1), subFor(BUS_STOP_KIND));
+    return { x, y };
+  };
+  // mid-block lots whose only road side is the avenue (or the street), so the router keeps to it between them
+  return { stops: [stop(19, 7), stop(19, 13), stop(13, 19), stop(7, 19), stop(1, 13), stop(7, 1)] };
 }
 
 export function parseSet(spec: string | undefined): Record<string, number> {
@@ -204,7 +250,14 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
       L(i % 2 ? [v, 21] : [v, 0], i % 2 ? [v, 0] : [v, 21], RoadCls.OneWay);
     }
   }
+  // R5 street rules (docs/traffic-tuning.md "Traffic control"): hgv=1 an HGV ban on the Commons' two busiest freight
+  // streets (each district's doubled south edge, local rows 20 and 21, measured), zone20=1 a 20 zone on its residential
+  // street tiles (homes beside them and no shop, works or office), yellows=1 double yellows where shops or offices front
+  // the street (where full destinations send drivers to the kerb), busLane=1 bus lanes on every avenue carriageway
+  applyStreetRules(w, layout, opts.set);
+  if (opts.set.curfew) for (const p of w.players.values()) p.policies = [...(p.policies ?? []), 'curfew']; // the lorry curfew (R5)
   const busNet = opts.set.bus || opts.set.busTiles ? layBusNetwork(w, layout.x0, layout.y0) : null;
+
   if (opts.set.busFare !== undefined) TRANSIT.fare = opts.set.busFare;
   for (const id of w.parcels.keys()) w.recountRoads(id);
   const sim = new Simulation(w);
@@ -215,6 +268,14 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
   });
 
   const start = DAY + Math.round(opts.hour * TPH);
+  // busAv: the avenue line's depot and stops go in two hours before the window, so the depot (a coach station, a
+  // gateway newcomers trickle in by) does not slow the fill the way busTiles does
+  if (opts.set.busAv) {
+    while (w.tick < start - 2 * TPH) sim.tick();
+    const av = layAvenueLine(w, layout.x0, layout.y0);
+    const r = sim.transit.saveLine('sys', { number: 9, colour: 0xd94f4f, stops: av.stops, loop: true, vehicles: opts.set.busAv });
+    if (typeof r === 'string') throw new Error(`avenue bus line: ${r}`);
+  }
   while (w.tick < start) sim.tick();
   // --then: tunables changed only for the measured window (the same city and traffic, for a fair tick cost)
   for (const [k, v] of Object.entries(opts.then ?? {})) if (k in TRAFFIC_TUNING) (TRAFFIC_TUNING as Record<string, number>)[k] = v;
@@ -262,11 +323,36 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     curPos.set(m.id, { x: m.x, y: m.y, v, armed });
   };
 
+  // R5: freight and visitor trips, bus laps, near misses, lorries overnight
+  const vOut = new Map<number, number>(), fTrips: number[] = [], vTrips: number[] = [], laps: number[] = [], lastCall0 = new Map<number, number>(), prevCall = new Map<number, number>(), sections: number[] = [];
+  let nearMiss = 0, lorriesNight = 0;
+  const curfew0 = sim.control.curfew.held;
+  const busesOf = () => (sim.buses as unknown as { buses: Map<number, { v: Mover; call: number; atCall: boolean; arrivedAt: number; phase: string }> }).buses;
   let simMs = 0;
   for (let i = 0; i < opts.ticks; i++) {
     const ts = performance.now();
     sim.tick();
     simMs += performance.now() - ts;
+    for (const veh of w.vehicles.values()) {
+      if (veh.vkind !== VehicleKind.Freight && veh.vkind !== VehicleKind.Visitor) continue;
+      if (veh.phase === 'out' && veh.lane >= 0 && !vOut.has(veh.id)) vOut.set(veh.id, w.tick);
+      else if (veh.phase === 'dwell' && vOut.has(veh.id)) { (veh.vkind === VehicleKind.Freight ? fTrips : vTrips).push(w.tick - vOut.get(veh.id)!); vOut.delete(veh.id); }
+    }
+    for (const id of vOut.keys()) if (!w.vehicles.has(id)) vOut.delete(id); // gave up or was withdrawn: not a trip
+    { const h = (w.tick % DAY) / TPH; if (h >= 22 || h < 6) for (const veh of w.vehicles.values()) if (veh.vkind === VehicleKind.Freight && veh.lane >= 0) lorriesNight++; }
+    // a lap: from one time a bus moves on from the line's first call (served or passed) to the next
+    for (const b of busesOf().values()) {
+      const was = prevCall.get(b.v.id);
+      prevCall.set(b.v.id, b.call);
+      if (b.phase !== 'service' || was === undefined || was === b.call) continue;
+      if (was === 0 && b.call === 1) {
+        const last = lastCall0.get(b.v.id);
+        if (last !== undefined) laps.push(w.tick - last);
+        lastCall0.set(b.v.id, w.tick);
+      }
+      // the avenue line's avenue section (busAv): from moving on from its first call to moving on from its fourth
+      if (was === 3 && b.call === 4) { const l0 = lastCall0.get(b.v.id); if (l0 !== undefined && w.tick - l0 < 2000) sections.push(w.tick - l0); }
+    }
     const v = tr.lastVehicles, q = tr.lastQueued, sp = tr.lastSpeedPct * v;
     vehSum += v; qSum += q; spSum += sp;
     if (v > peakCars) { peakCars = v; peakQ = v ? q / v : 0; }
@@ -343,9 +429,12 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     }
     for (const p of peds) {
       const px = Math.floor(p.x), py = Math.floor(p.y);
+      // R5: a near miss: on the carriageway (crossing), a car moving fast close by
+      const crossingNow = !!(p.cross && p.pp < p.cross.length && p.cross[p.pp]);
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const l = grid.get(tkey(px + dx, py + dy));
         if (!l) continue;
+        if (crossingNow) for (const a of l) if ((a.m.v ?? 0) > NEAR_V && Math.hypot(a.x - p.x, a.y - p.y) < NEAR_R) nearMiss++;
         for (const a of l) {
           if (Math.hypot(a.x - p.x, a.y - p.y) > a.len / 2 + 0.2 || !pointInObb(p.x, p.y, a)) continue;
           tcp++;
@@ -418,6 +507,11 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
       jerk: smJerkN ? smJerk / smJerkN : 0, harshPct: smJerkN ? (100 * smHarsh) / smJerkN : 0,
       standPct: smN ? (100 * smStand) / smN : 0, standStreamPct: smN ? (100 * smStream) / smN : 0, carTicks: smN,
     },
+    control: {
+      freightTrips: fTrips.length, freightTripMean: avg(fTrips), visitorTrips: vTrips.length, visitorTripMean: avg(vTrips),
+      busLaps: laps.length, busLapMean: avg(laps), busSections: sections.length, busSectionMean: avg(sections), nearMissPerTick: nearMiss / opts.ticks, lorriesNight: lorriesNight / opts.ticks,
+      curfewHeld: sim.control.curfew.held - curfew0, freightDone: fTrips.length,
+    },
     mobile: {
       onRoadMean: fleetSum / opts.ticks, bikesCarOverlaps: bikeCar, bikePedContacts: bikePed, fleetPedContacts: fleetPed, fleetPedWhere,
       taxi: delta(sim.taxis.stats, mob0.taxi), food: delta(sim.delivery.stats, mob0.food), bins: delta(sim.refuse.stats, mob0.bins), parcels: delta(sim.couriers.stats, mob0.parcels),
@@ -444,6 +538,7 @@ export function summary(r: AbResult): string {
     `  cars on the road ${f1(r.carsMean)} mean, ${r.carsPeak} peak; buses ${f1(r.busesMean)}; bus-car overlaps ${f3(r.busCarPerTick)}/tick; transit ${JSON.stringify(r.transit)}`,
     `  mobile jobs: ${f1(r.mobile.onRoadMean)} fleet vehicles on the road; taxi ${JSON.stringify(r.mobile.taxi)}; food ${JSON.stringify(r.mobile.food)}; bins ${JSON.stringify(r.mobile.bins)}; parcels ${JSON.stringify(r.mobile.parcels)}; bike-car overlaps ${r.mobile.bikesCarOverlaps}, bike-ped contacts ${r.mobile.bikePedContacts}, fleet-ped contacts ${r.mobile.fleetPedContacts} ${JSON.stringify(r.mobile.fleetPedWhere)}`,
     `  smooth: ${f1(r.smooth.tiles)} tiles, ${r.smooth.stops} stops (${f3(r.smooth.stopsPer10)} per 10 tiles, ${r.smooth.deadStops} dead), jerk ${f3(r.smooth.jerk)} tiles/tick (harsh ${f1(r.smooth.harshPct)}%), standing ${f1(r.smooth.standPct)}% (in the stream ${f1(r.smooth.standStreamPct)}%); stops at ${JSON.stringify(r.smooth.stopsAt)}`,
+    `  control: freight trips ${r.control.freightTrips} (mean ${f1(r.control.freightTripMean)} ticks), visitor trips ${r.control.visitorTrips} (mean ${f1(r.control.visitorTripMean)}), bus laps ${r.control.busLaps} (mean ${f1(r.control.busLapMean)}; sections ${r.control.busSections}, mean ${f1(r.control.busSectionMean)}), near misses ${f3(r.control.nearMissPerTick)}/tick, lorries on the road overnight ${f3(r.control.lorriesNight)}/tick, curfew held ${r.control.curfewHeld}`,
     `  sim ${r.simMsPerTick.toFixed(3)} ms/tick over the window; wall ${f1(r.wallSec)} s`,
   ].join('\n');
 }

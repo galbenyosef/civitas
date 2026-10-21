@@ -738,7 +738,9 @@ export class World {
   gatewayLimits = 0;
   /** May a bus lane go on road tile (x, y)? Two lanes one way (busLaneOk), and not a junction (it stops short of one). */
   busLaneTile(x: number, y: number): boolean {
-    if (!busLaneOk(this.auxAt(x, y))) return false;
+    const a = this.auxAt(x, y);
+    if (!busLaneOk(a)) return false;
+    if (isDividedAux(a)) return true; // an avenue's carriageway: busLaneOk already refused its junction tiles (no direction there)
     let n = 0;
     for (const [dx, dy] of DIRS) { const t = this.peekTile(x + dx, y + dy); if (t !== undefined && isRoad(t)) n++; }
     return n <= 2;
