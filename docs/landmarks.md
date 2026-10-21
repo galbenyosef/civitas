@@ -12,7 +12,7 @@ A landmark is an ordinary **placed civic kind**: a player places it, builders bu
 
 | Role | Family code | What it does | Copy from |
 | --- | --- | --- | --- |
-| Offices (a town hall, a headquarters, a tower) | `Zone.Office` (4), family `office` | Office jobs, nine to five, the office car-ownership rate | `asOffice` in `landmark-drafts.ts`; the Gherkin in `landmarks-london.ts` |
+| Offices (a town hall, a headquarters, a tower) | `Zone.Office` (4), family `office` | Office jobs, nine to five, the office car-ownership rate | `asOffice` (`landmark-roles.ts`, also exported by `landmark-drafts.ts`); the Gherkin in `landmarks-london.ts` |
 | Daytime attraction (a cathedral, castle, museum, monument) | `library.code` (14), family `leisure` | Visitors pay a ticket, stay one to three hours; retirees and children love it | `asAttraction`; the Tower of London in `landmarks-london-2.ts` |
 | Venue with event nights (an opera house, theatre) | theatre family (12), family `leisure` | Evening shows on event nights | the Royal Opera House in `landmarks-london.ts` |
 | Leisure venue (a wheel, a stadium) | sports family (13) | Day and evening rides or matches | the London Eye |
@@ -30,7 +30,15 @@ A landmark is **one building, not a type**: it has one level and **one design**.
 | `footprint` | `{ w, h, door: [dx, h - 1] }`, up to 4×4 for a landmark (section 3) |
 | `levels` | One level with its numbers: `capacity` (jobs), `wage` (per eight-hour shift), `cost`, `upkeep` (per day), `work` (builder work units), `parking`, and one design |
 
-Numbers to start from (London): a small office landmark `capacity` 20-30, `cost` 3000-5000, `work` 800-1200; a tower `capacity` 240-420, `cost` 16000-30000, `work` 2600-5200; attractions `capacity` 40, `cost` 12000, `work` 3000. A draft needs `cost`, `upkeep`, `work`, `wage`, `parking` and an `occupation` like any civic kind; the presets in `landmark-drafts.ts` supply the occupation.
+**`capacity` and `visitorCapacity`, once.** `capacity` is **jobs: the staff who work there**, on every landmark. `visitorCapacity` (in `attrs`) is **how many visitors it holds at once** and exists only for the attraction and venue roles (an office landmark has none). A draft also needs `wage` (per eight-hour shift), `upkeep` (per day), `cost`, `work` (builder work units that grow with the size) and `parking`, like any civic kind; the presets in `landmark-roles.ts` supply the `occupation`. Suggested numbers, scaled from London:
+
+| Size | Role | `capacity` | `visitorCapacity` | `wage` | `upkeep` | `cost` | `work` | `parking` (surface, underground) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Monument, 1×1 | attraction | 2 | 12 | 16 | 8 | 800 | 300 | 0, 0 |
+| Small building, 2×1 or 2×2 | office | 20-24 | none | 20-22 | 30-40 | 3000-4000 | 800-1000 | 2, 6 |
+| Small building, 2×1 or 2×2 | attraction | 10-20 | 40 | 16-18 | 20-30 | 3000-5000 | 800-1200 | 2, 6 |
+| Large, 3×3 or 4×4 | office | 240-420 | none | 30-46 | 90-150 | 16000-30000 | 2600-5200 | 0, 40-80 |
+| Large, 3×3 or 4×4 | attraction | 40 | 180 | 17 | 70 | 12000 | 3000 | 0, 20 |
 
 ## 2. Scale
 
@@ -64,7 +72,9 @@ The model is authored **in tiles for the whole footprint**, centred on the footp
 | 4×3 | -2 to 2 | -1.5 to 1.5 |
 | w×h | -w/2 to w/2 | -h/2 to h/2 |
 
-Ground is y = 0. **+z is the front, the side towards the road.** The renderer places the model unscaled at the footprint's centre and turns it to face the road, so every part must stay inside the rectangle: `landmarks:check` and `buildings:check` fail a part that reaches outside. Keep walls 0.02 inside the edge. A paved plot is `slab(w, h, PAVING)` (section 11), 0.04 smaller than the footprint.
+Ground is y = 0. **+z is the front, the side towards the road.** The renderer places the model unscaled at the footprint's centre and turns it to face the road, so every part must stay inside the rectangle: `landmarks:check` and `buildings:check` fail a part that reaches outside. Keep walls 0.02 inside the edge. A paved plot is `slab(w, h, PAVING)` (section 11): 0.04 smaller than the footprint and 0.02 tall, so **the first building box sits at y = 0.02**; every later part is stacked from that, and `height` counts from the ground.
+
+**Plans that are not rectangles.** A `cyl` or `lathe` is round and a `box` is square-cornered; there is no oval. An octagon is a `lathe` with `seg: 8` (a dome or a bandstand roof); an oval or a long curved front is a round part whose diameter fits within the **shorter** side of the footprint, or two overlapping cylinders side by side along the longer one. A round part's extent is its radius in every direction, so on a 2×1 footprint a drum can be at most 0.5 in radius.
 
 ## 4. The door, marks and rotation
 
@@ -76,7 +86,7 @@ Until the player presses Z or C the footprint turns to face the road beside it; 
 
 ## 5. Parts
 
-A design is a list of ops. Each op is a tuple of its name and arguments. Colours are a palette name or a `0xRRGGBB` number. Positions and sizes are tiles. **Every part rests on the ground or on the part below it: its `y` is exactly the top (`y + h`) of what it stands on.** Nothing floats, nothing is buried (`landmarks:check` reports a floating part).
+A design is a list of ops. Each op is a tuple of its name and arguments. Colours are a palette name or a `0xRRGGBB` number. Positions and sizes are tiles. **Every part rests on the ground or on the part below it: its `y` is exactly the top (`y + h`) of what it stands on.** Nothing floats, nothing is buried. The check accepts a part as supported when **another part is under it or beside it**: some other part whose height range contains this part's base `y` (within 0.01) and whose plan comes within 0.02 of this part's plan. So a finial on a roof ridge, a flag on a hedge and a tower standing against a hall all pass, and a part hanging in the air does not (`landmarks:check` names it).
 
 | Op | Arguments | Notes |
 | --- | --- | --- |
@@ -103,7 +113,7 @@ A design is a list of ops. Each op is a tuple of its name and arguments. Colours
 ['lathe', 0, 1.2, 0.65, 0xf3eee0, [0, 0, 0.2, 0, 0.2, 0.006], { seg: 24, axis: 'z' }],
 ```
 
-**Helpers and repetition.** The data files are TypeScript: `repeat(n, (i) => [...])` or `.flatMap` build rows of identical parts (a colonnade, a row of pinnacles), and the compile step flattens them. `landmark-drafts.ts` imports `slab`, `tree`, `fence`, `lampPost` and `PAVING` from `tierkit.ts`; the same file also has `pine`, `treeLine`, `mast`, `signBoard`, `flags`, `block`, `helipad`. Each returns plain ops.
+**Helpers and repetition.** The data files are TypeScript. `repeat(n, (i) => op)` builds a row: **the callback returns ONE op** (a single tuple), and the result is an array of ops that **you must spread with `...`** into `ops`. Use `.flatMap` when each step makes several ops. Forgetting the spread nests an array inside `ops` and fails with `op 7: an op must be an array starting with its name` and `does not compile: unknown op box,0.1,0.1,...`. `landmark-drafts.ts` imports `slab`, `tree`, `fence`, `lampPost` and `PAVING` from `tierkit.ts`; the same file also has `pine`, `treeLine`, `mast`, `signBoard`, `flags`, `block`, `helipad`. Each returns plain ops.
 
 **Budget.** The London landmarks run 12 to 283 compiled ops (the median is 104). `landmarks:check` warns over 400 and fails over 800. Use `taper` and `lathe` for curved and faceted forms and `repeat` for rows instead of hundreds of boxes.
 
@@ -181,8 +191,8 @@ So build the **silhouette from big solid parts**: the Gherkin is one lathe, the 
 Everything is in `packages/shared/src/buildings/landmark-drafts.ts`, which exports `LANDMARK_DRAFTS: KindDef[]`.
 
 1. Run `npm install` and `npm run dev` (the viewer is at `http://localhost:5173/viewer.html`).
-2. Copy the `TEMPLATE` constant, paste it below the last kind, and rename: `id` (lower-case words and dashes), `name` (lower case, as used in sentences), `kindId` (next free in 230-249), `tags` (`['draft', '<city or era>']`).
-3. Choose the role by spreading a preset: `...asOffice` (the template's default) or `...asAttraction`; override `family`, `code`, `flags` and `attrs` for another role (copy a London kind from the table in section 1). To change one attribute of a preset write the whole object: `attrs: { ...asAttraction.attrs, ticket: 0, visitorCapacity: 12 }` (a bare `attrs` key replaces the preset's). The attraction's `capacity` is its staff, `visitorCapacity` how many it holds.
+2. Copy the `TEMPLATE` constant (it is the first thing in the file after the imports: from `export const TEMPLATE` to its closing `};`, about 25 lines, every essential field in it, including `levels`), paste it below the last kind, and rename: `id` (lower-case words and dashes), `name` (lower case, as used in sentences), `kindId` (the next free one in 230-249: **`npm run landmarks:check` prints every landmark's id, drafts included**, and validation refuses a duplicate), `tags` (`['draft', '<city or era>']`).
+3. Choose the role by spreading a preset: `...asOffice` (the template's default) or `...asAttraction`; override `family`, `code`, `flags` and `attrs` for another role (copy a London kind from the table in section 1). To change one attribute of a preset write the whole object: `attrs: { ...asAttraction.attrs, ticket: 0, visitorCapacity: 12 }` (a bare `attrs` key replaces the preset's). `capacity` is staff and `visitorCapacity` how many visitors it holds (section 1).
 4. Set `footprint` (section 4), `blurb` and `howTo`, and the level numbers. Replace the ops. Keep `draft: true` and an `author` on the design.
 5. Add the kind to the `LANDMARK_DRAFTS` array at the bottom of the file.
 6. Save: the Vite plugin recompiles, the viewer reloads. Without the dev server run `npm run buildings:compile` (and commit the regenerated `compiled.ts` and `recipes.ts`; never edit them by hand).
@@ -214,7 +224,34 @@ const TEMPLATE: KindDef = {
 };
 ```
 
-**Checking a scratch file** before it joins the tree: put `export const MINE: KindDef[] = [...]` in any `.ts` file and run `npx tsx packages/shared/scripts/check-landmarks.ts <file>` (or `check-drafts.ts <file>`, which hands a kind file to the same check).
+**Checking a scratch file** before it joins the tree. Save it beside the other recipes as `packages/shared/src/buildings/scratch-landmark.ts` (delete it before you commit; elsewhere, write the full path in the imports) with this header and shape, then run `npx tsx packages/shared/scripts/check-landmarks.ts packages/shared/src/buildings/scratch-landmark.ts` (or `check-drafts.ts <file>`, which hands a kind file to the same check). The file must export one array of kinds; a kind whose id is already in the catalogue replaces it, so use your own id.
+
+```ts
+import type { KindDef, Op } from './schema';
+import { repeat } from './helpers';
+import { slab, PAVING } from './tierkit';
+import { TEMPLATE, asOffice, asAttraction } from './landmark-drafts';
+
+export const MINE: KindDef[] = [{
+  ...TEMPLATE,                  // the draft flags, the office role, a 2×2 footprint and the template's level
+  ...asAttraction,              // optional: a different role replaces code, family, flags, windows, occupation, lot and attrs
+  id: 'my-landmark', name: 'my landmark', kindId: 233,   // the next free id in 230-249
+  tags: ['draft', 'my-era'],
+  blurb: 'What it is and what it is known for, in a sentence or two.',  // the game's voice, 20 characters or more
+  howTo: 'How to place it: the plot and the street it faces.',
+  levels: [{
+    capacity: 20, wage: 20, cost: 3000, upkeep: 30, work: 800, parking: { surface: 2, underground: 6 },
+    designs: [{ name: 'what it looks like', height: 0.72, draft: true, author: 'me', ops: [
+      slab(2, 2, PAVING),
+      ['box', 1.2, 0.6, 0.8, 0, 0.02, 0, 'cream', true, { name: 'main', facade: { storeys: 2, bays: 4 } }],
+      ['door', 'main', 'front', 1],
+      ...repeat(3, (i): Op => ['box', 0.1, 0.1, 0.1, -0.3 + i * 0.3, 0.62, 0, 'stone']),   // one op each, spread with ...
+    ] }],
+  }],
+}];
+```
+
+To move it into the tree, delete the header's unused imports, paste the object into `landmark-drafts.ts` (which already has them) and add it to `LANDMARK_DRAFTS`.
 
 ## 12. The viewer
 

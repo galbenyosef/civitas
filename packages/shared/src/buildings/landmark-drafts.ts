@@ -1,54 +1,26 @@
-import type { Attributes, KindDef, Op } from './schema';
-import { Zone } from './codes';
+import type { KindDef, Op } from './schema';
 import { repeat } from './helpers';
 import { office } from './office';
-import { library } from './leisure';
 import { slab, tree, fence, lampPost, PAVING } from './tierkit';
+import { DRAFT, asOffice, asAttraction } from './landmark-roles';
+export { DRAFT, asOffice, asAttraction };
 
 /**
- * Draft landmarks: the path for a first contribution (docs/landmarks.md, CONTRIBUTING.md "Add a landmark in about an hour").
- *
- * A draft landmark is a whole kind with `draft: true`. It is compiled into the catalogue so /viewer.html shows it
- * (/viewer.html?tag=draft, or the Tag row), and it never reaches the city: its designs are drafts, it has no tool, and
- * `buildings:check` fails if one leaks into the city batch. Until it is accepted it needs NO tool, collection rung or
- * tech node. Validation (validate.ts landmarkErrors) asks of a draft only what the model needs to be shown:
- *   - `landmark: true`, `draft: true`, the civic flag and tags that include 'draft';
- *   - a kind id from the reserved range 230-249 (codes.ts LANDMARK_DRAFT_IDS), unique;
- *   - no tool (a draft is never placed);
- *   - the same recipe, footprint and numbers rules as any kind.
- * When a landmark is accepted, a maintainer drops `draft`, gives it a permanent kind id outside this range, a tool, a
- * rung of a `collection` group and a `locked` tech node, and moves it into its city's landmarks file.
- *
- * Add yours at the bottom of LANDMARK_DRAFTS: copy TEMPLATE, rename it, give it the next free id, and fill the
- * placeholders. Check it with `npm run landmarks:check`. Free ids: 230 template, 231 town hall clock tower, 232 and up.
+ * Draft landmarks (docs/landmarks.md, CONTRIBUTING.md "Add a landmark in about an hour"): whole kinds with `draft: true`.
+ * Compiled so /viewer.html?tag=draft shows them; never in the city (no tool, draft designs, ids 230-249 reserved in
+ * codes.ts). Validation (validate.ts landmarkErrors) needs no tool, collection rung or tech node for a draft.
+ * To add one: copy TEMPLATE below (read it to its closing `};`, about 40 lines), take a free id (`npm run landmarks:check`
+ * prints every landmark's id; in use: 230 template, 231 clock tower, 232 war memorial), fill the <placeholders>, append
+ * it to LANDMARK_DRAFTS at the bottom. Roles are in landmark-roles.ts (`asOffice`, `asAttraction`).
  */
-
-/** What every draft landmark shares. Spread it first and the kind is a draft landmark. */
-const DRAFT = { landmark: true, draft: true, tags: ['draft'] };
-
-/**
- * Role presets: what the simulation treats your landmark as (docs/landmarks.md section 1). Spread one and override.
- * `asOffice`: a workplace for office staff, nine to five (a town hall, a headquarters, a tower).
- * `asAttraction`: a daytime visitor attraction of the library family with a ticket (a cathedral, a castle, a museum, a monument).
- */
-export const asOffice = {
-  code: Zone.Office, family: 'office' as const, flags: { civic: true, workplace: true }, windows: 'office' as const,
-  occupation: office.occupation, lot: { wage: 14 },
-};
-export const asAttraction = {
-  code: library.code, family: 'leisure' as const, flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic' as const,
-  occupation: library.occupation, lot: { wage: 16 },
-  attrs: { ...library.attrs, visitorCapacity: 40, ticket: 4, openHours: [9, 18], stay: [0.5, 1.5], leisureValue: 4, radius: 16, dayAppeal: 1.2, eveningAppeal: 0.1, retireeAppeal: 1.8, childAppeal: 1.2 } as Attributes,
-};
 
 // ================================================================= TEMPLATE (kind id 230)
 
 /**
- * The template. Every field of a landmark kind is here with a one-line comment; placeholders are in <angle brackets>.
- * It is a real draft, so it compiles and shows in the viewer as "landmark template": a paved 2×2 plot with a windowed
- * block, a door on the front, a roof and a finial. That is the minimum a landmark needs; replace the ops with yours.
+ * Every field of a landmark kind with a one-line comment; <placeholders> in angle brackets. A real draft: a paved 2×2 plot,
+ * a windowed block, a door on the front, a roof and a finial. Exported so a scratch file can spread it (docs/landmarks.md section 11).
  */
-const TEMPLATE: KindDef = {
+export const TEMPLATE: KindDef = {
   ...DRAFT,                                             // landmark, draft, tags ['draft']; add your own tags after it: tags: ['draft', '<city>']
   ...asOffice,                                          // the role: code, family, flags, windows class, occupation, lot (or asAttraction)
   id: 'landmark-template',                              // <your-landmark-id>: lower-case words and dashes, unique
