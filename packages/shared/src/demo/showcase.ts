@@ -1837,6 +1837,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
     for (const r of s.runways ?? []) dup(r.id);
     for (const t of s.tracks ?? []) dup(t.id);
     for (const j of s.junctions ?? []) dup(j.id);
+    for (const r of s.streetRules ?? []) dup(r.id);
     for (const b of s.bridges ?? []) dup(b.id);
     for (const u of s.utilLinks ?? []) dup(u.id);
     for (const l of s.lines ?? []) dup(l.id);
@@ -1866,6 +1867,7 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
   for (const tool of Object.keys(SURFACE_TOOLS) as SurfaceTool[]) {
     const n = tool === 'runway' ? all((s) => s.runways).length : tool === 'rail' ? all((s) => s.tracks).length
       : tool === 'pylons' || tool === 'cable' ? all((s) => s.utilLinks?.filter((l) => l.mode === (tool === 'pylons' ? 'overhead' : 'buried'))).length
+        : tool === 'streetrule' ? all((s) => s.streetRules).length // R5: the Street rules tool's rules
         : all((s) => s.junctions?.filter((j) => j.tool === tool)).length;
     if (!n) out.push(`no ${tool} is painted in the showcase`);
   }
