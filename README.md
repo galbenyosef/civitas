@@ -209,7 +209,12 @@ changing behaviour in game time.
   re-routing after a long wait with hysteresis), that the heat overlay shows,
   and that road tooltips report. Behind all of these rules a body guard is the
   last resort: no car moves its body onto another car or a pedestrian, and no
-  pedestrian steps into a car. A driver who has not reached a new tile for 60
+  pedestrian steps into a car. Each car keeps a speed and brakes in time for
+  the car ahead, a bus halt and a turn into lights rather than stopping dead;
+  at lights a car close behind one going the same way follows it into the box;
+  and the client draws cars along a curve between the server's five positions a
+  second so their speed changes smoothly (`client/src/render/glide.ts`). A
+  driver who has not reached a new tile for 60
   ticks gives up, so a jam can always clear. The rules and their values live in
   `TRAFFIC_TUNING` (`shared/src/tuning.ts`); `docs/traffic-tuning.md` has the
   measurements they were chosen from. With Junction design (Transport tier 3) a

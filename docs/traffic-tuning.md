@@ -568,3 +568,186 @@ bus line 1 on the deck and line 2 under it): `probe-obb-junction.mjs` (probe-obb
 counts near each junction) over 90 s with about 11 cars around each junction per frame: car-car 0 everywhere, car-ped 0
 near the flyover and 0-2 near the roundabout. A scan of the server sim (3,400 ticks of the showcase) found no car going
 the wrong way round the ring and none turning on the flyover.
+
+## Smooth flow (2026-10-21)
+
+Rich, watching the UAT: "a lot of stop start traffic". Three things made it:
+
+1. **No speed.** A car moved min(full speed, gap to the car ahead) each tick, so it went from full speed (half a tile a
+   tick) to a dead stop in one tick and back the next.
+2. **One decision at the line.** It decided whether to go into the next tile only at the stop line, so it drove flat
+   out at a red light or a full lane and stopped dead on the line.
+3. **The drawing.** The client drew each car in a straight line at a constant speed from where it was drawn to the
+   newest of the server's five positions a second. The drawn speed jumped at every position, and whenever the next
+   position came a little late (the server's timer, the network) the car stood parked on the last one for a frame or
+   more.
+
+**Outcome.** The drawing was most of it. Offline (below), with positions arriving ±10 ms either side of their time,
+drawn stops fall from 30 to 5.5 per 1,000 moving car-frames and frame-to-frame speed jumps from 2.9% of frames to
+0.3%; the drawing alone takes them to 6.3 and 0.5, so about 97% of what reads as stop-start on screen was rendering. In
+the simulation, on the Commons at the peaks over 24 seeds, dead stops fall by a third and all stops by 8%, with speed,
+give-ups and overlaps unchanged within the noise. Halving stops per 10 tiles, the target, was not reached: the
+Commons is saturated all day (two-thirds of car-ticks are queued), and most stops are a queue moving up one car
+length when its front moves, which no driving style removes.
+
+### What is measured
+
+`ab.ts` now also reports smoothness, from each road vehicle's position tick to tick (the speed a player sees, in tiles
+a tick; full speed is 0.5):
+
+- **Stops per 10 tiles**: the speed falls under 0.01 after being over 0.05 since the last stop, per 10 tiles driven.
+- **Dead stops per 10 tiles**: the stops from at least half of full speed in one tick, the ones that read as a jolt.
+- **Jerk**: mean |Δv| per car-tick.
+- **Standing in the stream**: share of car-ticks standing anywhere but first at a junction's or a level crossing's
+  stop line.
+- **Where the stops are** (`smooth.stopsAt` in the JSON, `Traffic.standing`): first at a junction's stop line (40%),
+  at a plain-road stop line waiting for room in the next lane (23%), behind a car (25%), elsewhere (11%).
+
+```sh
+npx tsx packages/server/src/loadtest/ab-matrix.ts --hours 8,17 --seeds 1,2,3,4,5,6,7,8,9,10,11,12 --table smooth --row "off=smooth=0" --row "new="
+npx tsx packages/server/src/loadtest/smooth-trace.ts --hour 8 --cars 5      # a few drivers' speed, tick by tick
+npx tsx packages/server/src/loadtest/ab.ts --set districts=2,smooth=0 --then follow=1,platoon=2 --ticks 400   # same-traffic tick cost
+npx tsx packages/client/scripts/render-smooth.ts --hour 8 --ticks 300 --jitter 10   # the drawing, offline
+```
+
+`--set smooth=0` turns every new rule off; `--then` changes tunables only for the measured window, after the fill, so
+two runs measure the same traffic; `districts=2` builds the 2×2 city. Two harness fixes came first: passengers riding
+in a shared car (sim/carpool.ts) were counted as pedestrians inside a car, eight "contacts" a tick, and a delivery bike
+filtering past a car counted as two cars touching (now bike–car, on its own). With those out the Commons has 0 car–car
+overlaps and 0.05 car–pedestrian contacts a tick as drawn.
+
+The differences below are paired by seed (mean ± standard error). Give-ups move by ±15 between seeds at 08:00, so a
+difference has to be about twice its standard error to count.
+
+### The techniques, one at a time
+
+All behind `TRAFFIC_TUNING` knobs. "Lights" is the Commons as seeded (the Commons player has the signals technology,
+so every junction of three arms or more has lights); "no lights" is the same city with `noSignals=1`, every junction
+give-way, which is what every town has until its owner researches signals.
+
+| technique (setting) | seeds | lights 08:00: stops, dead stops, speed points, give-ups | lights 17:00 | no lights 08:00 | no lights 17:00 |
+| --- | --- | --- | --- | --- | --- |
+| car following, acceleration 0.15 (`follow=1, accel=0.15`) | 12 | 0.0, −0.97, **−3.1**, −13 ± 17 | −0.1, −0.80, **−2.8**, −16 ± 12 | | |
+| car following, acceleration 1, braking for turns (`follow=1`) | 24 | 0.0, −0.38, −0.4 ± 0.3, 0 ± 13 | 0.0, −0.32, −0.4 ± 0.3, +3 ± 8 | +0.05, −0.27, **−1.5 ± 0.6**, +24 ± 16 | +0.07, −0.23, **−1.9 ± 0.7**, +12 ± 10 |
+| car following, no braking for turns (`followTurn=0`) | 24 | 0.0, −0.38, −0.7 ± 0.3, **+31 ± 10** | −0.06, −0.32, −0.2 ± 0.4, +11 ± 6 | −0.06, −0.30, −0.3 ± 0.4, +8 ± 11 | 0.0, −0.24, −0.4 ± 0.6, +3 ± 10 |
+| + platoons at lights (`platoon=2`), on the line above | 24 | −0.23, −0.20, +0.5 ± 0.3, −12 ± 9 | −0.18, −0.17, +0.1 ± 0.3, 0 ± 6 | (no lights: no change) | |
+| platoons everywhere, give-way junctions too (`platoon=1`, no following) | 12 | −0.15, −0.06, 0.0 ± 0.4, +14 ± 16 | −0.13, −0.03, −0.2 ± 0.3, +6 ± 10 | −0.07, −0.01, −1.2 ± 0.7, **+47 ± 17** | −0.08, −0.03, −0.7 ± 1.0, +20 ± 14 |
+| start gap 0.9 tiles in queues (`startGap=0.9`, added to following + platoons) | 12 | −0.29, 0.00, +0.7 ± 0.3, −24 ± 11 | −0.21, −0.02, +0.5 ± 0.3, −4 ± 11 | see below | |
+| look-ahead 1, the full entry rules on arrival (`lookAhead=1`, added) | 24 | −0.08, −0.31, −0.3 ± 0.3, +14 ± 13 | −0.02, −0.25, −0.4 ± 0.3, +13 ± 7 | | |
+| look-ahead 2, only what will still be there (`lookAhead=2`) | 12 | 0.0, −0.09, −0.3 ± 0.5, +15 ± 18 | 0.0, −0.09, −0.2 ± 0.7, +3 ± 18 | | |
+| look-ahead 3, the lights only (`lookAhead=3`) | 12 | 0.0, −0.04, **−0.8 ± 0.3**, **+32 ± 15** | 0.0, −0.04, −0.5 ± 0.5, +14 ± 14 | | |
+| green waves timed for 0.3 tiles a tick (`greenWave=1`) | 12 | +0.10, 0.0, **−1.2 ± 0.3**, **+33 ± 10** | +0.09, 0.0, **−1.1 ± 0.5**, +11 ± 12 | | |
+| actuated lights (`signalActuated=1`) | 12 | +0.07, 0.0, **−1.1 ± 0.5**, **+49 ± 20** | +0.03, 0.0, **−1.1 ± 0.5**, +24 ± 15 | | |
+| main road at T-junctions (`mainRoad=1`) | 12 | | | −0.07, −0.02, +0.5 ± 0.6, −30 ± 17 | −0.03, −0.01, −0.5 ± 1.0, +4 ± 13 |
+| main road at T-junctions and crossroads (`mainRoad=2`) | 12 | | | −0.05, −0.03, +0.5 ± 0.7, −33 ± 19 | +0.03, 0.00, −0.3 ± 0.9, −4 ± 13 |
+
+Stops and dead stops are per 10 tiles (the baseline is 3.86 and 1.78 at 08:00 with lights). Reading it:
+
+- **Car following** ([`safeSpeed`](../packages/server/src/sim/traffic.ts)): each mover keeps the distance it moved
+  last tick (`Mover.v`, 0 when it pulls out or a save loads, so saves are unchanged) and goes no faster than lets it
+  stop, braking at `brake` (0.2 tiles a tick a tick), behind the car ahead (allowing for that car braking too, with a
+  `headway` of half a tick), before a bus halt, and before a turn. The gap, MIN_GAP, the stop lines, the conflict table
+  and the body guard stay hard limits, so it can only ever make a car slower. It cuts dead stops by a fifth to a third.
+  **Bounded acceleration costs throughput**: at 0.15 tiles a tick a tick (full speed in four ticks) speed falls 3
+  points, because a junction box is held longer by every car moving off. A tick is 36 game seconds, so a car really
+  can be at full speed a tick after it moves off; `accel` is 1 (trucks and buses take two ticks), and the drawing eases
+  the start instead. Each driver's acceleration is their own (±25%, from a hash of their id).
+- **Braking for turns** helps with lights and hurts without: at a give-way junction a turning car that slows early gets
+  to the box later and loses its gap to the cross traffic (1.5 to 1.9 speed points). `followTurn=2` brakes only for a
+  turn into a junction with lights.
+- **Platoons**: a car close behind one that went into a junction by the same approach and exit (moving, within
+  `platoonGap` 0.6 tiles) may follow it in before it has left the box; every other entry rule still applies. At lights
+  it is the one technique that cuts stops without a cost. At give-way junctions a platoon holds the box against the
+  cross traffic, and give-ups rise by a sixth, so `platoon=2` allows it only at lights.
+- **Start gap** (a car standing behind a standing car moves up only once 0.9 tiles are free) cuts the queue
+  shuffling, the biggest share of stops, but it doubles car–pedestrian contacts as drawn (0.054 to 0.104 a tick),
+  together with the rest costs 2.7 speed points and 21% more give-ups without lights, and doubles give-ups in the
+  saturated bridge bench (`bridges.ts`). It is off. A version that let a car move up once it had stood a third of the
+  stuck limit was worse.
+- **Look-ahead** (brake for the line when the next tile will not take the car on arrival, the light read at the tick
+  the car will decide): the full entry rules cut dead stops by a quarter more, but braking early also costs a little
+  speed and some give-ups (+13 a peak), and reading only the lights is the worst variant. It is off. (A first version
+  read the light a tick later than the tick the car decides at, and cost about twice as many give-ups.)
+- **Green waves and actuated lights** both lose: a 15-tick phase on blocks five tiles long already gives most cars a
+  green within a few ticks, a common period throws away the ±20% that keeps neighbouring lights from switching
+  together, and an actuated green holds the whole box for one approach.
+- **Main-road priority** without lights is within the noise (−30 ± 17 give-ups at 08:00, +4 ± 13 at 17:00). It is
+  off; `Traffic.roadRank` is the hook for R3's road classes to rank the arms before straightness does.
+
+### Chosen values and the result
+
+`follow: 1`, `accel: 1`, `accelVar: 0.25`, `heavyAccel: 0.6`, `brake: 0.2`, `headway: 0.5`, `followTurn: 2`,
+`platoon: 2`, `platoonGap: 0.6`, `platoonV: 0.1`; off: `startGap`, `lookAhead`, `mainRoad`, `greenWave`. One fix is in
+both rows and is not switchable: a car arriving at a building follows a car pulling out of it the same way (the
+pulling-out car starts at the middle of the tile, where the arriving one ends; it was the only car–car overlap left in
+these runs, once in about twenty runs, old rules included).
+
+24 seeds (1–24), 1,500 ticks:
+
+| | stops / 10 tiles | dead stops / 10 tiles | jerk (tiles/tick²) | standing in the stream % | speed % | queued % | give-ups | car–car / tick (path / drawn) | car–ped / tick (drawn) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| lights 08:00, before | 3.86 | 1.78 | 0.055 | 41.6 | 25.8 | 67.8 | 428 | 0 / 0 | 0.054 |
+| lights 08:00, after | 3.57 | 1.17 | 0.052 | 41.3 | 25.9 | 67.1 | 432 | 0 / 0 | 0.061 |
+| lights 17:00, before | 3.32 | 1.57 | 0.058 | 38.4 | 29.5 | 64.5 | 248 | 0 / 0 | 0.024 |
+| lights 17:00, after | 3.06 | 1.06 | 0.055 | 37.9 | 29.7 | 63.6 | 251 | 0 / 0 | 0.026 |
+| no lights 08:00, before | 3.12 | 1.51 | 0.063 | 39.3 | 32.7 | 59.7 | 382 | 0 / 0 | 0.052 |
+| no lights 08:00, after | 2.98 | 1.06 | 0.060 | 39.7 | 32.1 | 60.0 | 393 | 0 / 0 | 0.057 |
+| no lights 17:00, before | 2.54 | 1.25 | 0.062 | 37.1 | 36.5 | 56.4 | 228 | 0 / 0 | 0.018 |
+| no lights 17:00, after | 2.43 | 0.88 | 0.059 | 37.2 | 35.9 | 56.8 | 238 | 0 / 0 | 0.021 |
+
+Paired, after − before: with lights, stops −0.29 ± 0.03 (08:00) and −0.26 ± 0.03 (17:00), dead stops −34% and −32%,
+speed +0.0 ± 0.4 and +0.2 ± 0.4, give-ups +4 ± 15 and +3 ± 7. Without lights, stops −0.14 and −0.11, dead stops −30%,
+speed −0.6 ± 0.4 and −0.6 ± 0.6, give-ups +11 ± 12 and +10 ± 10. The two halves of the seeds agree: with lights,
+seeds 1–12 give stops −0.28 / −0.23 and give-ups +7 / +5, and seeds 13–24 −0.30 / −0.29 and +2 / 0. Car–car overlaps
+are 0 in every run.
+
+**Cost.** The 2×2 city, the same traffic switched for the measured 400 ticks (`--then`), nine pairs: 2.69 ms a tick
+before, 2.78 after, +3.2 ± 2.1%.
+
+### The drawing (client)
+
+`render/glide.ts`: each new server position starts a stretch from where the car is drawn now, leaving at the speed it
+is drawn moving and arriving at the speed of the server's last step (a cubic Hermite curve), so the drawn speed changes
+smoothly across positions instead of jumping at each. Both speeds are capped at twice the stretch and dropped when
+they point back along it, so a car never overshoots or rolls backwards, and one that stops arrives still. A stretch is
+planned to take 1.3 times the gap between positions (`STRETCH`), so a position that comes a little late finds the car
+still moving: drivers are drawn about a fifth of a tick further behind the server than before (1.20 ticks against
+0.98). Walkers are drawn as before. `?glide=0` draws drivers the old way.
+
+`render-smooth.ts`, the Commons at 08:00, 300 ticks, positions sent as net.ts sends them and delivered with jitter (a
+local server under load measured 202.7 ± 9.7 ms between messages, 95th percentile 210, worst 282), per 1,000 moving
+car-frames at 60 frames a second:
+
+| | jolts (drawn speed changes over 0.5 tiles/s in a frame), % of frames | hitches (standing a frame between moving ones) | drawn stops |
+| --- | --- | --- | --- |
+| before (old rules, old drawing), ±10 ms | 2.9 | 13.5 | 30.4 |
+| new rules, old drawing | 2.6 | 12.1 | 29.4 |
+| old rules, new drawing | 0.5 | 0.1 | 6.3 |
+| after (new rules, new drawing) | 0.3 | 0.0 | 5.5 |
+| before, ±25 ms | 3.6 | 21.3 | 43.3 |
+| after, ±25 ms | 0.6 | 1.4 | 6.9 |
+| before, no jitter | 1.8 | 0.7 | 10.0 |
+| old rules, new drawing, no jitter | 0.5 | 0.0 | 6.4 |
+
+17:00 is the same within a few tenths. Live, in headless Chrome against a 1×1 test city with both drawings side by side
+on the same traffic for 40 s (`drawn.mjs`, in the session's scratch): jolts 3.5% → 1.4%, hitches 9.8 → 2.2, drawn stops
+31.4 → 12.8 per 1,000 moving car-frames; headless Chrome on a loaded machine drew at 27–44 frames a second and handled
+the messages in bursts, which is harsher on both than a player's browser.
+
+### Specials
+
+`junctions.ts --rates 15,25,35 --mix turns` (yield, lights, roundabout and flyover, 60/100/140 cars an hour over the
+four approaches): throughput within one car an hour of before everywhere (the roundabout 81 → 80 and 76 → 75 at the two
+higher rates), give-ups the same or fewer (give-way at 140: 22 → 11), overlaps 0. `bridges.ts` at 120/240/360 cars an
+hour: throughput 55/37/20 → 54/36/20, give-ups 8/9/6 → 4/7/9, overlaps 0. `crossings.ts` (car–train overlaps 0, nobody in a crossing box beside a train), `busroutes.ts` (every
+lap and three-point turn as estimated), and the fires, death, media, motivation, utilities and ranks probes pass.
+Emergency vehicles keep ignoring lights (`m.priority`); a bus brakes for its halt instead of stopping dead at it;
+kerb parking, car sharing and level crossings use the same hard limits as before.
+
+**Known gaps.**
+- The stop count is set by saturation. What would halve it is less queueing: capacity (R3's avenues and classes),
+  junction design, or less demand at the peaks.
+- A car still stops dead when it is refused at the line without warning (no look-ahead): about a third fewer than
+  before, and the drawing cannot soften those, since it does not know the stop is coming.
+- The test city is a grid of short blocks; long roads between junctions, where a car reaches and holds full speed,
+  are where following and look-ahead would show more.
