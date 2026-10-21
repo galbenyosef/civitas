@@ -106,7 +106,7 @@ still selects.
 | People and cars | hover anyone for who they are and what they are doing; click to select them in a side panel with a **follow** camera |
 | Trains and planes | hover a train or plane to highlight it; click to select it: a panel with its line or flight, what it is doing, speed, its crew and everyone on board (a train's riders are clickable citizens; plane passengers are visitors), and **follow**. `client/src/vehicles.ts`, docs/rail.md and docs/airport.md |
 | First person | with someone selected, **FPV** in the panel or I opens a 16:9 inset (bottom right) from their eyes, **full** or O fills the window (Esc leaves); the view follows their heading and leans into corners, walkers bob, drivers sway, and it ends when they go indoors or arrive. With a train selected it rides in the driver's cab, with a plane in the cockpit. `render/fpv.ts` |
-| Money | click the treasury chip for the ledger (yesterday and today by category, overdraft interest included). While the treasury is below zero, in administration or with a service mothballed, a chip beside it opens the money panel: the balance, the $5,000 overdraft limit, the interest a day, midnights below zero or days in administration, and the recovery plan as buttons (raise tax, sell land back, mothball services, each with what it would raise or save; in local mode also "Start again from the last autosave"). It opens by itself when administration begins. A police, fire or health building or a builders' yard of yours has **Mothball** / **Reopen** in its panel. `client/src/finance.ts` |
+| Money | click the treasury chip for the ledger (yesterday and today by category, grouped into running costs and one-off spending with a total each, and the daily running balance that leaves building and buying out; overdraft interest included). While the treasury is below zero, in administration or with a service mothballed, a chip beside it opens the money panel: the balance, the $5,000 overdraft limit, the interest a day, midnights below zero or days in administration, the running balance a day, and the recovery plan as buttons (raise tax, sell land back, mothball services, each with what it would raise or save; in local mode also "Start again from the last autosave"). It opens by itself when administration begins. A police, fire or health building or a builders' yard of yours has **Mothball** / **Reopen** in its panel. `client/src/finance.ts` |
 | Overlays | H cycles the overlays: traffic congestion on the roads (green → red), then service coverage, leisure, happiness and jobs against homes tinted on the ground and the buildings (colour-blind safe ramps: viridis, and blue against orange for jobs/homes), then off; the top-bar **overlay** chip opens a menu to pick one, with its legend. `client/src/overlays.ts`, `server/src/overlays.ts`. T opens the technology tree; M shows the perf readout |
 | Problems | a badge floats over any of your buildings or lots that is stuck: on fire, no road, no builders, unstaffed, parking full, no customers, very unhappy; hover it for what is wrong and what fixes it, click it to open the building. The top-bar **problems N** chip (red while there are any) lists them by kind, each with **show me**. `server/src/sim/issues.ts`, `client/src/render/issues.ts`, `client/src/problems.ts` |
 | Fires | homes and works catch fire now and then (bigger and older ones more often). The nearest staffed fire post or station within 14 tiles sends its engine on blue lights; it drives down the middle of the road past stopped traffic, and the damage is what had burnt when it arrived. With no engine in reach the building burns down. Flames, smoke and a scorch show on the building, an **On fire** badge leads the problems list, a toast names who is coming, and the bill is **Fire damage** in the ledger. Your first fire is a warning the neighbours always put out. docs/incidents.md, `server/src/sim/fires.ts`, `client/src/render/fires.ts` |
@@ -354,9 +354,12 @@ changing behaviour in game time.
   parcel), sales tax (to the venue parcel), road upkeep, civic upkeep and public
   payroll (police, fire, hospital and builders are paid by the parcel that
   hosts them; public services' wages are half grant-funded, `ECONOMY_TUNING.civicPayroll`
-  in `shared/src/tuning.ts`). The treasury chip shows yesterday's net and, on
-  click, the ledger: income and spending by category (taxes, fees, wages, upkeep,
-  builders' fees, construction, land, technology) for yesterday and today, sent
+  in `shared/src/tuning.ts`). The treasury chip shows yesterday's running balance and, on
+  click, the ledger: income and spending by category for yesterday and today in two groups, each with its
+  total: **running** (taxes, fees, wages, upkeep, utility bills and fuel, interest, funeral fees, billboard rent)
+  and **one-off** (construction, builders' fees, land, technology, advert campaigns, fire damage, charter grants
+  and rewards), then the net and the **daily running balance**, which says whether the town pays for itself
+  (`shared/src/protocol.ts` `LEDGER_GROUP`, `client/src/finance.ts`). Sent
   with the players message once a game hour (`PlayerDTO.ledger`). High taxes make workers quit and residents leave; nearby staffed
   services raise what people will put up with.
 - *The first five minutes* (`docs/first-five.md`, `server/src/sim/firstfive.ts`, `shared/src/buildings/camp.ts`,
@@ -376,7 +379,7 @@ changing behaviour in game time.
   Each rank pays a charter grant ($2,500 to $10,000) and, on a frontier, grows the free charter by a ring of land
   (32 → 48 → 64 → 80 → 96 tiles a side; the holder buys beyond it only as a City, nobody else inside it). The rank
   chip beside the treasury shows the next rank's progress; its card (in the goals column, taking the goals card's
-  place once the chain is done) lists the needs, the grant and a milestone feed, and each new milestone comes up in a
+  place once the chain is done) lists the needs, the grant and a milestone feed (opened from the chip, its ×, Esc or a press elsewhere closes it), and each new milestone comes up in a
   ticker under the top bar. A rank-up gets a banner, fireworks over the town (every shell its own) and the camera
   pulling up to show the new land. Saved with the player (`Player.ranks`); older saves derive their rank on load
   without a grant. None in sandboxes; the showcase tour's "Settlement ranks" stop plays the celebration.

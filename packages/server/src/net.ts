@@ -847,7 +847,7 @@ export class Net {
     const touched = new Set<number>();
     for (let i = 0; i < plan.tiles!.length; i += 4) { const q = this.w.parcelIdAt(plan.tiles![i], plan.tiles![i + 1]); if (q) touched.add(q); }
     for (const q of touched) this.w.recountRoads(q);
-    if (plan.cost) this.w.credit(p.id, -plan.cost);
+    if (plan.cost) this.w.credit(p.id, -plan.cost, 'build'); // construction, not upkeep (the credit default for a cost)
     this.toast(c, swap ? 'The other road is on the deck now' : tool === 'roundabout' ? `Roundabout built for $${plan.cost}: traffic goes round anticlockwise and gives way to the ring` : `Flyover built for $${plan.cost}: nobody turns here now`, 'info');
   }
 
@@ -1191,7 +1191,13 @@ export class Net {
     const ut = this.utilities;
     if (ut?.stateChanged) { ut.stateChanged = false; this.broadcast(ut.stateMsg()); }
     if (ut?.linksChanged) { ut.linksChanged = false; this.broadcast(ut.linksMsg()); }
-    if (ut?.notices.length) for (const n of ut.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
+    if (ut?.notices.length) for (const n of ut.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) {
+      // the notice itself is a toast at once (it names the fault and when it will be fixed, which an advisor line queued
+      // behind another could outlive); a fault also raises the advisor's general line, with "show me" for the depot
+      const m = n.hint && this.onboarding ? this.onboarding.hint(c.player, n.hint) : null;
+      if (m) this.send(c, m);
+      this.toast(c, n.msg, 'info');
+    }
     if (this.adverts?.notices.length) for (const n of this.adverts.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise
     // only what changes as the buses run and which line each bus runs, when that changed

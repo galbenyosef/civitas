@@ -8,7 +8,7 @@
  *   npx tsx packages/server/src/finance-check.ts
  */
 import {
-  ECONOMY_TUNING, LAND_PRICE_PER_TILE, KIND_ID, Terrain, packTile, placedFromDoor, isRoad, tileKey,
+  ECONOMY_TUNING, LAND_PRICE_PER_TILE, LEDGER_LABELS, LEDGER_GROUP, runningBalance, type LedgerCat, KIND_ID, Terrain, packTile, placedFromDoor, isRoad, tileKey,
   type ServerMsg, type ClientMsg, type PlayerDTO,
 } from '@msimcity/shared';
 import { World } from './world';
@@ -158,6 +158,31 @@ const dtoOf = (world: World, id: string): PlayerDTO => world.playerDTO(world.pla
   for (let i = 0; i < 4; i++) midnight(world, game);
   ok(!p.admin && !p.adminDays, 'a sandbox player is never put into administration');
   ok(sys.money === -1000, 'the Commons pays no interest');
+}
+
+{
+  // ---- the ledger's two groups (shared LEDGER_GROUP, playtest 6399a522): running and one-off
+  const cats = Object.keys(LEDGER_LABELS) as LedgerCat[];
+  ok(cats.every((k) => LEDGER_GROUP[k] === 'running' || LEDGER_GROUP[k] === 'oneoff') && Object.keys(LEDGER_GROUP).length === cats.length, `every ledger category is running or one-off (${cats.length})`);
+  ok(runningBalance({ tax: 500, wages: -120, upkeep: -80, build: -2000, land: -900, grant: 2500, adrent: -10 }) === 290, 'the running balance counts taxes, wages, upkeep and rent, not building, land or grants');
+  const { world, game, client } = setup(false);
+  const a = client('Bea');
+  const p = world.players.get(a.id)!;
+  p.devUnlimited = false; p.money = 20000;
+  const X = 300, Y = 300;
+  a.send({ t: 'buy', x: X, y: Y, w: 12, h: 12 });
+  a.send({ t: 'build', tool: 'road', tiles: Array.from({ length: 11 }, (_, i) => [X + i, Y + 5] as [number, number]) });
+  a.send({ t: 'build', tool: 'road', tiles: Array.from({ length: 11 }, (_, i) => [X + 5, Y + i] as [number, number]) });
+  const L0 = world.ledgerDTO(p).today;
+  ok((L0.land ?? 0) < 0 && (L0.build ?? 0) < 0 && !L0.upkeep, `buying land and laying roads are one-off (land ${L0.land}, construction ${L0.build}), not upkeep`);
+  const build0 = L0.build ?? 0;
+  a.clear(); a.send({ t: 'build', tool: 'roundabout', tiles: [[X + 5, Y + 5]], dev: true } as ClientMsg);
+  const L1 = world.ledgerDTO(p).today;
+  ok(/Roundabout built/.test(a.toast()), `a roundabout on the crossroads ("${a.toast().slice(0, 40)}")`);
+  ok((L1.build ?? 0) < build0 && !L1.upkeep, `its cost is construction (${(L1.build ?? 0) - build0}), not upkeep (it used to fall to the credit default)`);
+  midnight(world, game);
+  const y = world.ledgerDTO(p).yesterday;
+  ok(runningBalance(y) === 0 && (y.build ?? 0) < 0, 'the day after: yesterday ran at zero (nothing running yet) while the one-offs show apart');
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nall ok');

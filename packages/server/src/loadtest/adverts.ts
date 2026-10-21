@@ -8,7 +8,7 @@
  * 2. campaigns: locked until Advertising; artwork charged under 'ads'; claims only from the table, names from the
  *    player's own land; at most AD.maxCampaigns;
  * 3. rent: renting the nearest free frames charges the first day, a frame on another owner's parcel pays that owner, a
- *    taken frame is refused, and each midnight charges again ('ads' in both ledgers);
+ *    taken frame is refused, and each midnight charges again ('adrent' in both ledgers: rent is a running cost, the artwork a one-off);
  * 4. wear: posters age once a day at their area's rate; a neglected area's rate tags a poster within a few days, a
  *    well-served one keeps it clean; every poster wears its own way (the seeds);
  * 5. endings: a poster whose building is pulled down comes down at midnight, and so do an unpaid renter's;
@@ -59,7 +59,7 @@ p.tech = ['zon1'];
 const sys = w.players.get('sys')!;
 const env: AdEnv = { tile: (x, y) => w.peekTile(x, y), aux: (x, y) => w.auxAt(x, y), sub: (x, y) => w.subAt(x, y) };
 const ads = g.adverts;
-const ledger = (id: string) => w.ledgerDTO(w.players.get(id)!).today.ads ?? 0;
+const ledger = (id: string, cat: 'ads' | 'adrent' = 'ads') => w.ledgerDTO(w.players.get(id)!).today[cat] ?? 0;
 
 console.log('1. slots on the map');
 const bySize: Record<string, number> = {};
@@ -117,8 +117,8 @@ if (own) ads.rent(p, cid, [[own.x, own.y, own.i]], undefined);
 ok(!own || Math.abs(m2 - p.money) < 1e-6, 'a frame on your own frontage costs nothing (the rent comes back)');
 const near = ads.rent(p, cid, undefined, { x: mine.x + 10, y: mine.y + 10, n: 3 });
 ok(typeof near !== 'string' && near.n >= 1, `rented the nearest free frames (${typeof near === 'string' ? near : near.n})`);
-const ledgerSys = ledger('sys');
-ok(ledgerSys > 0, `the Commons' ledger shows rent in under 'ads' ($${ledgerSys})`);
+const ledgerSys = ledger('sys', 'adrent');
+ok(ledgerSys > 0, `the Commons' ledger shows rent in under 'adrent' ($${ledgerSys})`);
 
 console.log('6. the tutorial goal and the milestone');
 const onb = new Onboarding(w, g.sim.traffic);

@@ -1,6 +1,7 @@
 import { Rings, TICKS_PER_HOUR, WORLD_KEYS, PLAYER_KEYS, type RingsDTO } from '@msimcity/shared';
 import type { World } from './world';
 import type { Simulation } from './sim/simulation';
+import type { PowerHour } from './sim/utilities';
 
 /**
  * City history (docs/charts.md): once a game hour the key figures of the city, and of each player's treasury and
@@ -27,6 +28,9 @@ export interface HistoryJSON {
 
 /** WORLD_SERIES slots of the education group (shared/src/history.ts), in order */
 const EDU_AT = WORLD_KEYS.indexOf('eduIndex');
+/** the power series' slots (shared/src/history.ts) */
+const PWR_OUT = WORLD_KEYS.indexOf('pwrOutPct'), PWR_AT = PLAYER_KEYS.indexOf('pwrThermal');
+const pct = (n: number, of: number) => (of > 0 ? Math.round((1000 * n) / of) / 10 : 0);
 
 const zeros = () => new Array<number>(24).fill(0);
 const sum = (a: number[]) => { let s = 0; for (const v of a) s += v; return s; };
@@ -48,6 +52,8 @@ export class History {
   private prev = { migIn: 0, migOut: 0, boarded: -1 };
   /** results since the process started as of the last sample (-1: none yet), and the hourly results of the last 24 hours (not saved: they restart with the process) */
   private prevResults = { pass: -1, drop: -1 };
+  /** each owner's power at the last hourly solve (game.ts sets it to the utilities' `hourly`; absent: the series read 0) */
+  power: (() => ReadonlyMap<string, PowerHour>) | null = null;
   private passH = zeros(); private dropH = zeros();
 
   private playerHist(id: string): PlayerHist {
@@ -86,8 +92,12 @@ export class History {
     this.prev.boarded = boarded;
     v[13] = tickAvg; v[14] = tickP95;
     this.sampleEducation(sim, hour);
+    let homes = 0, out = 0;
+    const power = this.power?.();
+    if (power) for (const h of power.values()) { homes += h.homes; out += h.dark + h.brown; }
+    v[PWR_OUT] = pct(out, homes);
     this.world.push(hour, v);
-    this.samplePlayers(w, hour);
+    this.samplePlayers(w, hour, power);
     return true;
   }
 
@@ -108,7 +118,7 @@ export class History {
     v[k++] = sum(this.passH); v[k++] = sum(this.dropH);
   }
 
-  private samplePlayers(w: World, hour: number) {
+  private samplePlayers(w: World, hour: number, power: ReadonlyMap<string, PowerHour> | undefined) {
     const housed = new Map<string, number>(), jobs = new Map<string, number>(), staffed = new Map<string, number>();
     const edu = new Map<string, number[]>();
     for (const p of w.parcels.values()) {
@@ -141,6 +151,12 @@ export class History {
       v[3] = housed.get(pl.id) ?? 0; v[4] = jobs.get(pl.id) ?? 0; v[5] = staffed.get(pl.id) ?? 0;
       const e = edu.get(pl.id);
       v[6] = e ? e[0] : 0; v[7] = e ? e[1] : 0; v[8] = e ? e[2] : 0;
+      const ph = power?.get(pl.id);
+      let k = PWR_AT;
+      const r1 = (x: number | undefined) => Math.round((x ?? 0) * 10) / 10;
+      v[k++] = r1(ph?.thermal); v[k++] = r1(ph?.wind); v[k++] = r1(ph?.solar); v[k++] = r1(ph?.imported);
+      v[k++] = r1(ph?.demand); v[k++] = r1(ph?.supplied);
+      v[k++] = ph ? pct(ph.dark, ph.homes) : 0; v[k++] = ph ? pct(ph.brown, ph.homes) : 0;
       h.rings.push(hour, v);
     }
   }

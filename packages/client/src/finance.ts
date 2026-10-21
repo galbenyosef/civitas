@@ -1,4 +1,7 @@
-import { ECONOMY_TUNING, type PlayerDTO, type RecoverAction } from '@msimcity/shared';
+import {
+  ECONOMY_TUNING, LEDGER_LABELS, LEDGER_GROUP, runningBalance,
+  type PlayerDTO, type RecoverAction, type LedgerDTO, type LedgerCat, type FinanceDTO,
+} from '@msimcity/shared';
 
 /**
  * Money that can run out (docs/start-from-zero.md B3; the rules are the server's, server/src/sim/finance.ts): a chip in the
@@ -9,6 +12,60 @@ import { ECONOMY_TUNING, type PlayerDTO, type RecoverAction } from '@msimcity/sh
  */
 const money = (n: number) => `${n < 0 ? '−' : ''}$${Math.round(Math.abs(n)).toLocaleString('en-GB')}`;
 const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`;
+
+// ---- the ledger (the treasury chip's drop-down; ui.ts setMoney) -------------------------------------------------
+
+type Day = LedgerDTO['today'];
+const sum = (r: Day, keep: (k: LedgerCat, v: number) => boolean) => (Object.keys(r) as LedgerCat[]).reduce((a, k) => a + (keep(k, r[k] ?? 0) ? r[k] ?? 0 : 0), 0);
+const signed = (n: number) => `${n >= 0 ? '+' : '−'}${money(Math.abs(n)).replace('−', '')}`;
+
+/**
+ * The day's running balance for the treasury chip (shared LEDGER_GROUP): yesterday's, or today's so far before there
+ * is a yesterday. Absent when nothing has moved yet.
+ */
+export function chipBalance(L: LedgerDTO | null): { v: number; today: boolean } | null {
+  if (!L) return null;
+  if (Object.keys(L.yesterday).length) return { v: runningBalance(L.yesterday), today: false };
+  return Object.keys(L.today).length ? { v: runningBalance(L.today), today: true } : null;
+}
+
+/** The treasury chip's tooltip. */
+export function ledgerText(L: LedgerDTO) {
+  const line = (r: Day) => `running ${signed(runningBalance(r))}, one-off ${signed(sum(r, (k) => LEDGER_GROUP[k] === 'oneoff'))}, net ${signed(sum(r, () => true))}`;
+  return `Yesterday: ${line(L.yesterday)}\nToday so far: ${line(L.today)}\nRunning: taxes and fees less wages, upkeep and bills. One-off: building, land, research and the like.`;
+}
+
+/**
+ * The ledger: yesterday and today by category in two groups, running (every day whatever you do) and one-off (what
+ * you chose to build, buy or research, and what happened once), each with its total, then the net and the daily
+ * running balance, which says whether the town pays for itself.
+ */
+export function ledgerHtml(L: LedgerDTO, cash: number, fin: FinanceDTO | undefined) {
+  const cell = (v: number | undefined) => (v ? `<td class="${v < 0 ? 'bad' : ''}">${signed(v)}</td>` : '<td class="z">·</td>');
+  const cats = (Object.keys(LEDGER_LABELS) as LedgerCat[]).filter((k) => L.today[k] || L.yesterday[k]);
+  const group = (g: 'running' | 'oneoff', title: string, total: string) => {
+    const rows = cats.filter((k) => LEDGER_GROUP[k] === g);
+    if (!rows.length) return '';
+    const of = (r: Day) => sum(r, (k) => LEDGER_GROUP[k] === g) || undefined;
+    return `<tr class="grp"><th colspan="3">${title}</th></tr>${rows.map((k) => `<tr><th>${LEDGER_LABELS[k]}</th>${cell(L.yesterday[k])}${cell(L.today[k])}</tr>`).join('')}
+      <tr class="sum"><th>${total}</th>${cell(of(L.yesterday))}${cell(of(L.today))}</tr>`;
+  };
+  const all = (r: Day) => sum(r, () => true) || undefined;
+  const bal = chipBalance(L);
+  const run = bal?.v ?? 0;
+  // the overdraft (server sim/finance.ts) is spendable too: days until its limit at the running rate
+  const limit = ECONOMY_TUNING.overdraftLimit;
+  const left = run < 0 ? Math.max(0, Math.floor((cash + limit) / -run)) : -1;
+  return `<table><tr><th></th><th>yesterday</th><th>today</th></tr>
+      ${group('running', 'Running · every day', 'Running total')}
+      ${group('oneoff', 'One-off · building, land, research', 'One-off total')}
+      <tr class="sum net"><th>Net</th>${cell(all(L.yesterday))}${cell(all(L.today))}</tr></table>
+      ${bal ? `<div class="lbal"><span>Daily running balance${bal.today ? ' (today so far)' : ''}</span><b class="${run < 0 ? 'bad' : ''}">${signed(run)}</b></div>` : ''}
+      <div class="note"><span class="chartlink" data-chart="money">Treasury and income charts ›</span></div>
+      ${cash < 0 ? `<div class="note bad">Overdrawn: ${money(-cash)} of the ${money(limit)} overdraft used, interest ${Math.round(ECONOMY_TUNING.overdraftInterestPerDay * 100)}% a day at midnight. ${fin?.admin !== undefined ? 'In administration until a midnight finds the treasury at zero or above.' : `${ECONOMY_TUNING.adminAfterDays} midnights below zero and the city goes into administration.`}</div>` : ''}
+      <div class="note">${left < 0 ? 'The town pays for itself: taxes and fees cover the running costs. One-off spending comes out of the treasury.'
+        : `<span class="${left < 30 ? 'bad' : ''}">Running costs exceed taxes and fees${left < 30 ? `: about ${left} day${left === 1 ? '' : 's'} to the end of the ${money(limit)} overdraft at this rate` : ''}.</span> Raise the tax rate in a parcel, add homes, or hold off on services.`}</div>`;
+}
 
 export interface FinanceDeps {
   el: HTMLElement;
@@ -23,6 +80,8 @@ export interface FinanceDeps {
 export class FinancePanel {
   private open = false;
   private me: PlayerDTO | undefined;
+  /** the last ledger (it comes once a game hour), for the running balance */
+  private ledger: LedgerDTO | null = null;
   private wasAdmin = false;
   /** the restart button asks once before replacing the city */
   private armed = false;
@@ -57,6 +116,7 @@ export class FinancePanel {
   /** The player changed (money, the players message): the chip, and the panel when it is open. */
   show(me: PlayerDTO | undefined) {
     this.me = me;
+    if (me?.ledger) this.ledger = me.ledger;
     const f = me?.fin;
     const btn = this.d.btn;
     btn.style.display = f ? '' : 'none';
@@ -87,6 +147,7 @@ export class FinancePanel {
       : me.money < 0
         ? `You can keep spending down to ${money(-f.limit)}. At ${plural(f.after, 'midnight')} in a row below zero the city goes into administration: building stops and the regional grant is withdrawn.`
         : 'These services have no staff, cost no upkeep and give no cover until you reopen them.';
+    const bal = chipBalance(this.ledger);
     const stat = (k: string, v: string, cls = '') => `<div class="fst ${cls}"><span>${k}</span><b>${v}</b></div>`;
     const head = `<div class="thead"><h2 class="${admin ? 'bad' : ''}">${title}</h2><span class="sub">${lead}</span><button class="chip" id="adminClose">✕</button></div>`;
     const stats = '<div class="fstats">'
@@ -95,6 +156,7 @@ export class FinancePanel {
       + stat('Interest', f.interest ? `${money(f.interest)}<small> a day</small>` : '<small>none above zero</small>', f.interest ? 'neg' : '')
       + (admin ? stat('In administration', `${plural(days, 'day')}<small> · since day ${f.admin}</small>`, 'neg') : stat('Midnights below zero', `${f.days}<small> of ${f.after}</small>`, f.days ? 'neg' : ''))
       + (me.money < 0 ? stat('Back to zero', money(-me.money)) : '')
+      + (bal ? stat('Running balance', `${signed(bal.v)}<small> a day${bal.today ? ' so far' : ''}, building and buying not counted</small>`, bal.v < 0 ? 'neg' : '') : '')
       + '</div>';
     const card = (id: RecoverAction, name: string, body: string, gain: string, label: string, ok: boolean, extra = '') =>
       `<div class="fact ${ok ? '' : 'none'}"><div class="nhead"><b>${name}</b><span class="gain">${gain}</span></div><div class="blurb">${body}</div>${extra}

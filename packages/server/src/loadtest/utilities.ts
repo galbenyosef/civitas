@@ -24,7 +24,7 @@
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, KIND_ID, Zone, DEFAULT_TAX, UTIL, UtilState, UTIL_STATE_WORDS, UTIL_RADIUS_OF, UTIL_IMPORT_OF,
   UtilityField, utilityReach, solveNetwork, utilKey, packTile, terrainOf, subFor, tileKey, planStructure, workOf, mulberry32, isMultiTile, FleetKind,
-  type UtilEnv, type UtilNode, type SolveNode,
+  type UtilEnv, type UtilNode, type SolveNode, PLAYER_KEYS, WORLD_KEYS,
 } from '@msimcity/shared';
 import { World, emptyStats, type Building } from '../world';
 import { seedCity } from './cities';
@@ -33,6 +33,7 @@ import { createGame, type Game } from '../game';
 import { snapshotOf, worldFromSnapshot } from '../snapshot';
 import type { Conn } from '../transport';
 import { playF } from './botf';
+import { historyOf } from '../history';
 
 const argv = process.argv.slice(2);
 const get = (n: string, d: number) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? Number(argv[i + 1]) : d; };
@@ -68,6 +69,12 @@ function put(w: World, kind: number, x: number, y: number, rot?: number, staff =
 const clearBlock = (w: World, x: number, y: number) => { for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) w.setTile(x + i, y + j, packTile(terrainOf(w.getTile(x + i, y + j)), false, 0, 0)); };
 const steps = (g: Game, n: number) => { for (let i = 0; i < n; i++) g.step(); };
 const stateOf = (g: Game, b: Building) => g.utilities.nodeState.get(utilKey(b.x, b.y))?.state ?? -1;
+/** Every notice the utilities give their owners from now on (net.ts takes them off the list each step). */
+function heard(g: Game) {
+  const out: { msg: string; hint?: string }[] = [], list = g.utilities.notices;
+  list.push = (...a) => { out.push(...a); return Array.prototype.push.apply(list, a); };
+  return out;
+}
 
 // ---------------------------------------------------------------- 1. reach follows the roads
 console.log('1. reach follows the roads');
@@ -168,6 +175,20 @@ let townA: ReturnType<typeof city>;
   ok(!!info?.power?.node && info.power.node[0] === sub.x && info.power.state === UtilState.Ok, `a building's panel names its substation (${JSON.stringify(info?.power)})`);
   const pinfo = g.utilities.info(gas);
   ok(pinfo?.network?.role === 'plant' && (pinfo.network.output ?? 0) > 0 && pinfo.network.nodes === 1, `the plant's panel: its output and its network (${JSON.stringify(pinfo?.network)})`);
+  // the power charts (a7ba07e8): the hourly solve's figures by owner, sampled into the history rings
+  const ph = g.utilities.hourly.get('ada'), hist = historyOf(w);
+  const ps = hist.playerSample('ada'), at = (k: string) => ps[PLAYER_KEYS.indexOf(k)];
+  ok(!!ph && ph.thermal > 0 && ph.wind === 0 && ph.demand > 0 && ph.homes > 0 && Math.abs(ph.supplied - ph.thermal - ph.imported) < 1e-6, `the solve's power by owner: ${JSON.stringify(ph && { thermal: Math.round(ph.thermal), imported: Math.round(ph.imported), demand: Math.round(ph.demand), homes: ph.homes, dark: ph.dark })}`);
+  ok(at('pwrThermal') > 0 && at('pwrDemand') > 0 && at('pwrSupplied') > 0 && at('pwrDarkPct') >= 0 && at('pwrDarkPct') <= 100, `the charts' player series: ${['pwrThermal', 'pwrImport', 'pwrDemand', 'pwrSupplied', 'pwrDarkPct', 'pwrBrownPct'].map((k) => `${k} ${at(k)}`).join(', ')}`);
+  ok(hist.playerRings('ada')!.read(PLAYER_KEYS.indexOf('pwrThermal'), 0)!.v.some((x) => x > 0), 'and the hourly ring holds them');
+  // a fault darkens the substation's homes: the outage shares rise, yours and the world's
+  const fx = g.utilities.openFault('node', utilKey(sub.x, sub.y), 'ada', sub.x, sub.y);
+  steps(g, 2 * TPH);
+  const dark = hist.playerSample('ada')[PLAYER_KEYS.indexOf('pwrDarkPct')], worldOut = hist.lastWorld[WORLD_KEYS.indexOf('pwrOutPct')];
+  const fh = g.utilities.hourly.get('ada');
+  ok(dark > 0 && worldOut > 0 && !!fh && fh.demand > 0 && fh.supplied === 0, `a fault: ${dark}% of your homes without power, ${worldOut}% of the world's homes in a cut or brownout; wanted ${Math.round(fh?.demand ?? 0)}, supplied ${fh?.supplied}`);
+  for (let i = 0; i < 12 * TPH && g.utilities.openFaults.some((q) => q.id === fx.id); i++) g.step(); // the contractor (no depot yet)
+  steps(g, TPH);
 }
 {
   // a frontier: the gate's road runs into the charter, so a substation at the road end takes the grid
@@ -206,22 +227,43 @@ console.log('4. faults, vans and links');
   for (; wait < DAY && onShift(); wait++) g.step();
   for (; wait < 3 * DAY && !onShift(); wait++) g.step();
   ok(onShift(), `a lineworker of the depot is on shift (after ${(wait / TPH).toFixed(1)} game hours)`);
+  const said = heard(g);
   const f = u.openFault('node', utilKey(sub.x, sub.y), 'ada', sub.x, sub.y);
+  // playtest 37299b96: the notice says what happened and who fixes it, the panels too
+  const open1 = said.at(-1);
+  ok(!!open1 && open1.hint === 'fault' && open1.msg.startsWith(`Substation fault at (${sub.x}, ${sub.y}): its streets are dark.`) && /Your power depot sends a repair van \(about 2–3 hours\); if none can come, a contractor fixes it in about 10 hours/.test(open1.msg), `the fault's notice (a toast, and the advisor's fault line): "${open1?.msg}"`);
+  const panel1 = u.info(sub)?.network;
+  ok(!!panel1 && panel1.faults[0] === `Substation fault at (${sub.x}, ${sub.y})` && /contractor fixes it in about 10 hours/.test(panel1.repair?.[0] ?? ''), `the substation's panel: "${panel1?.faults[0]}" / "${panel1?.repair?.[0]}"`);
+  const home1 = [...w.buildings.values()].find((b) => b.level > 0 && b.id !== SUB && b.id !== DEPOT && b.id !== GAS && u.field.serving('ada', b.x, b.y) === u.field.indexOf(utilKey(sub.x, sub.y)));
+  ok(!!home1 && /repair van|contractor/.test(u.info(home1)?.power?.repair ?? ''), `a home on its streets says so too: "${home1 && u.info(home1)?.power?.repair}"`);
   ok(stateOf(g, sub) === UtilState.Fault && !u.supplied([...w.buildings.values()].find((b) => b.level > 0 && u.field.serving('ada', b.x, b.y) === u.field.indexOf(utilKey(sub.x, sub.y)))!), 'a fault: the substation and its streets have no power at once');
   const sent0 = u.stats.vansSent, van0 = u.stats.byVan;
   let tick = 0;
   for (; tick < 14 * TPH && u.openFaults.some((q) => q.id === f.id); tick++) g.step();
   ok(u.stats.vansSent > sent0 && u.stats.byVan > van0, `the depot's van went out and fixed it in ${(tick / TPH).toFixed(1)} game hours (${u.stats.vansSent - sent0} sent)`);
+  const fixed1 = said.find((n) => n.msg.startsWith('Power restored'))?.msg ?? '';
+  ok(new RegExp(`^Power restored at \\(${sub.x}, ${sub.y}\\) after ${Math.max(1, Math.round(tick / TPH))} hours?: your repair van fixed it$`).test(fixed1), `the repair's notice says who and how long: "${fixed1}"`);
   steps(g, TPH + 5);
   ok(stateOf(g, sub) === UtilState.Ok, `the substation is supplied again after the next solve (${UTIL_STATE_WORDS[stateOf(g, sub)]})`);
   // without a depot: the contractor
   const t2 = city({ rnd: seed + 1, days: 0.2 });
   const s2 = put(t2.w, SUB, t2.x0 + 9, t2.y0 + 9)!;
   steps(t2.g, TPH);
+  const said2 = heard(t2.g);
   const f2 = t2.g.utilities.openFault('node', utilKey(s2.x, s2.y), 'ada', s2.x, s2.y);
-  let t = 0;
+  ok(/A contractor fixes it in about 10 hours\. A power depot of your own sends a repair van in 2–3 hours\.$/.test(said2.at(-1)?.msg ?? ''), `with Power stations and no depot the notice says to build one: "${said2.at(-1)?.msg}"`);
+  steps(t2.g, 3 * TPH);
+  ok(/contractor fixes it in about 7 hours/.test(t2.g.utilities.info(s2)?.network?.repair?.[0] ?? ''), `the panel counts the contractor's hours down: "${t2.g.utilities.info(s2)?.network?.repair?.[0]}"`);
+  let t = 3 * TPH;
   for (; t < 12 * TPH && t2.g.utilities.openFaults.some((q) => q.id === f2.id); t++) t2.g.step();
   ok(t2.g.utilities.stats.byContractor === 1 && Math.abs(t / TPH - UTIL.contractorHours) < 0.2, `with no depot a contractor clears it after ${(t / TPH).toFixed(1)} game hours`);
+  ok(/^Power restored at \(-?\d+, -?\d+\) after 10 hours: a contractor fixed it\. A power depot of your own sends a repair van in 2–3 hours\.$/.test(said2.find((n) => n.msg.startsWith('Power restored'))?.msg ?? ''), `and the repair's notice: "${said2.find((n) => n.msg.startsWith('Power restored'))?.msg}"`);
+  // without the technology (a drill, or a fault left over from a save): the notice names what the depot needs
+  const ada2 = t2.w.players.get('ada')!, tech2 = ada2.tech;
+  ada2.tech = tech2.filter((id) => id !== 'ut2');
+  t2.g.utilities.openFault('node', utilKey(s2.x, s2.y), 'ada', s2.x, s2.y);
+  ok(/would send a repair van in 2–3 hours: it needs Power stations \(T\)\.$/.test(said2.at(-1)?.msg ?? ''), `with no Power stations the notice says the depot needs it: "${said2.at(-1)?.msg}"`);
+  ada2.tech = tech2;
   // links: a buried cable from the gas plant to a second substation across the district
   const p = w.players.get('ada')!;
   p.money = 100000;

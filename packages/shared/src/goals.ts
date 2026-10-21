@@ -123,7 +123,7 @@ export interface GoalsDTO {
  * it. The server sends the ones only it can see (builders, the books, the jam, boredom, newcomers), the client raises the
  * rest (night, a refused build on an empty treasury); either way the client shows at most one per HINT_GAP ticks.
  */
-export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night' | 'fire' | 'power' | 'death' | 'burial';
+export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night' | 'fire' | 'power' | 'fault' | 'death' | 'burial';
 /** `panel` 'admin': the overdraft and administration panel (client finance.ts) */
 export interface HintDef { kind: 'tip' | 'alert'; msg: string; tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin' }
 export const HINTS: Record<HintId, HintDef> = {
@@ -146,6 +146,8 @@ export const HINTS: Record<HintId, HintDef> = {
   burial: { kind: 'alert', tool: 'churchyard', msg: 'No burial space: the dead are waiting at the mortuary and their families grieve longer. Build a churchyard, cemetery or crematorium within 80 tiles.' },
   night: { kind: 'tip', msg: "It's night in the city. The light chip at the top right holds the view at mid-afternoon; click it again to follow the clock." },
   // utilities (docs/utilities.md section 3.4): growth to two storeys held back by power
+  // a fault cutting a substation or trunk line (the server's message names it and says who will fix it, and when)
+  fault: { kind: 'alert', tool: 'powerdepot', panel: 'tech', msg: 'A power fault has cut a substation: its streets are dark. A contractor fixes it in about 10 hours; a power depot of your own (Power stations, T) sends a repair van in 2–3 hours.' },
   power: { kind: 'alert', tool: 'substation', panel: 'tech', msg: 'Buildings want power to grow to two storeys. Unlock Electrification (T) and place a substation beside your streets: its supply runs 12 road tiles along them, and the National Grid feeds it (at a price) while it is within 64 road tiles of a motorway connection.' },
 };
 export const isHintId = (id: string): id is HintId => id in HINTS;

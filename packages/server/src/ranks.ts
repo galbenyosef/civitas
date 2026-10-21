@@ -157,7 +157,7 @@ export class Ranks {
       if (this.met(next, have)) {
         s.rank = next; s.at[next] = w.tick;
         const def = RANKS[next];
-        if (def.grant) w.credit(p.id, def.grant, 'other');
+        if (def.grant) w.credit(p.id, def.grant, 'grant');
         const land = this.holder() === p.id ? this.grantRing(p, s, next) : undefined;
         note(`rank:${next}`, 'rank', `${def.name}! ${rankRewardText(next, !!land)}`);
         up = { rank: next, grant: def.grant, ...(land ? { land } : {}), at: t.n ? [Math.round(t.cx / t.n), Math.round(t.cy / t.n)] : this.home(p) };

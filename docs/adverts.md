@@ -411,8 +411,8 @@ goes to the parcel owner, homes carry no ads, claims come from the table, and va
     parcel names or a workplace's sign, and a look (palette × layout × icon).
   - The artwork costs $150, and a player runs at most 8 campaigns.
 - **Rent.**
-  - Renting charges the first day at once, then each midnight. Both sides file it under **Advertising** ('ads') in
-    the ledger.
+  - Renting charges the first day at once, then each midnight. Both sides file it under **Billboard rent** ('adrent')
+    in the ledger, a running cost; the artwork is **Advert campaigns** ('ads'), a one-off (playtest 6399a522).
   - The money goes to the owner of the parcel the slot stands on. Renting your own frontage is free, and on unclaimed
     land the money goes nowhere.
   - A rental ends at midnight if its slot has gone (the building pulled down, the site finished) or if the renter

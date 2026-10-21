@@ -1,5 +1,5 @@
 import {
-  GOALS, HINTS, TECH_BY_ID, Zone, TICKS_PER_DAY, CAMP_KIND, familyOf, isLeisure, isHintId, rewardText, tileKey, isFuneralKind, isRestKind,
+  GOALS, HINTS, TECH_BY_ID, Zone, runningBalance, TICKS_PER_DAY, CAMP_KIND, familyOf, isLeisure, isHintId, rewardText, tileKey, isFuneralKind, isRestKind,
   type GoalDef, type GoalId, type GoalsDTO, type HintId, type LedgerDTO, type ServerMsg,
 } from '@msimcity/shared';
 import type { World, Player } from './world';
@@ -116,10 +116,10 @@ export class Onboarding {
   /** Cash through the ledger ('other'), a free technology (its price when already owned). Returns the words for it. */
   private pay(p: Player, g: GoalDef): string {
     const w = this.w;
-    if (g.reward.cash) w.credit(p.id, g.reward.cash, 'other');
+    if (g.reward.cash) w.credit(p.id, g.reward.cash, 'grant');
     const tech = g.reward.tech ? TECH_BY_ID.get(g.reward.tech) : undefined;
     if (tech) {
-      if (p.tech.includes(tech.id)) w.credit(p.id, tech.cost, 'other');
+      if (p.tech.includes(tech.id)) w.credit(p.id, tech.cost, 'grant');
       else { p.tech.push(tech.id); w.techVersion++; }
     }
     w.playersDirty = true;
@@ -244,4 +244,5 @@ export class Onboarding {
 }
 
 /** Taxes and fees less wages, upkeep and overdraft interest, for one day of a ledger. */
-export const running = (r: LedgerDTO['today']) => (r.tax ?? 0) + (r.fees ?? 0) + (r.wages ?? 0) + (r.upkeep ?? 0) + (r.interest ?? 0) + (r.bills ?? 0) + (r.fuel ?? 0);
+/** A day's running balance, as the ledger shows it (shared LEDGER_GROUP). */
+export const running = (r: LedgerDTO['today']) => runningBalance(r);
