@@ -10,8 +10,11 @@
 import {
   ROAD_COST, PUBLIC_ROAD_COST, BULLDOZE_COST, Zone, Terrain, packTile, isRoad, zoneOf, levelOf, withConstruction, KIND_ID, familyOf, subFor,
   roadDragPath, snapRoadEnd, planRoad, parallelGap, streetBase, streetName, ROAD_UNDO_MS, houseNumber, isJunctionAux,
+  RoadCls, ROAD_CLASS_DEFS, classByte, auxClass, auxDir, auxJunction, oneWayDir, isClassAux, twinRow, carStepOk, edgeLanes, MSG_ROAD_FRONTAGE,
   type RoadEnv, type ServerMsg, type ClientMsg,
 } from '@msimcity/shared';
+import { findRoute } from '../pathfinding';
+import { corridor, bench } from './classbench';
 import { World } from '../world';
 import { seedCommons } from '../seed';
 import { createGame } from '../game';
@@ -84,9 +87,11 @@ function env(map: Map<string, number>, opts: Partial<RoadEnv> & { mine?: (x: num
   ok(w2.bridges.length === 1 && w2.bridges[0].plan.ok && w2.fresh === 4, `with it: a bridge of 2 between the new banks ($${w2.cost})`);
   const w3 = planRoad(roadDragPath([0, 0], [2, 0]), env(wet));
   ok(!w3.bridges[0].plan.ok && w3.tiles[2].state === 'refused', 'released over the water: the bridge is refused (it must reach dry land)');
-  // upgrade in place (R3): a road of another class is upgraded, keeping its junction byte; the same class is kept
-  const up = planRoad(roadDragPath([0, 0], [2, 0]), env(new Map([['1,0', packTile(Terrain.Grass, true, 0, 0)]]), { roadClass: () => 1, aux: (x) => (x === 1 ? 0xf0 : 0) }));
-  ok(up.tiles[1].state === 'upgrade' && up.upgrade === 1 && up.tiles[0].state === 'new', 'a road of another class is upgraded in place, junction and all');
+  // upgrade in place (R3): a road of another class is upgraded; a tile with a ring, bridge or crossing byte keeps it (a street)
+  const up = planRoad(roadDragPath([0, 0], [2, 0]), env(new Map([['1,0', packTile(Terrain.Grass, true, 0, 0)]]), { roadClass: () => 1 }));
+  ok(up.tiles[1].state === 'upgrade' && up.upgrade === 1 && up.tiles[0].state === 'new', 'a road of another class is upgraded in place');
+  const ring = planRoad(roadDragPath([0, 0], [2, 0]), env(new Map([['1,0', packTile(Terrain.Grass, true, 0, 0)]]), { aux: (x) => (x === 1 ? 0xf0 : 0) }), { cls: RoadCls.Avenue });
+  ok(ring.tiles.find((t) => t.x === 1 && t.y === 0)?.state === 'have', 'a roundabout ring tile keeps its byte under a class drag');
 }
 
 // ---- the server ------------------------------------------------------------------------------------------------
@@ -278,6 +283,115 @@ ok(own(11, 0) && own(30, 10), "Ada owns 20×22 east of the Commons");
   a.send({ t: 'build', tool: 'res', tiles: roadDragPath([13, 3], [19, 3]) });
   ok(world.hasRoadAccess(15, 2) && !world.hasRoadAccess(15, 3), 'a lot beside the road has access, the one behind it none');
   ok(/stay empty until a road reaches them, or the building in front, once it is two storeys \(Masonry and power\)/.test(a.toasts().join('|')), `zoning a row behind says why it will wait ("${a.toasts().find((t) => /no road beside/.test(t))}")`);
+}
+
+// ---- road classes (R3, docs/roads.md "Classes", shared/src/roadclass.ts) ------------------------------------------
+{
+  // the byte
+  ok(classByte(RoadCls.Street) === 0 && auxClass(0) === 0 && auxClass(0xf0) === 0 && auxClass(0xd9) === 0, 'a street has no byte; ring, bridge and other bytes read as streets');
+  let all = true;
+  for (const d of ROAD_CLASS_DEFS) for (let dir = 0; dir < 4; dir++) for (const j of [false, true]) {
+    const b = classByte(d.id, dir, j);
+    if (d.id && (!isClassAux(b) || b >= 0x40 || auxClass(b) !== d.id || (d.oneWay && auxDir(b) !== dir) || auxJunction(b) !== (j && d.divided))) all = false;
+  }
+  ok(all, 'every class, direction and junction flag round-trips through its byte, all inside 0x01-0x3f');
+  ok(!carStepOk(classByte(RoadCls.OneWay, 0), 0, 1) && carStepOk(classByte(RoadCls.OneWay, 0), 0, 0) && carStepOk(classByte(RoadCls.OneWay, 0), 0, 2), 'a car never leaves a one-way tile against it; across it is free');
+  ok(!carStepOk(classByte(RoadCls.Avenue, 0), classByte(RoadCls.Avenue, 1), 3) && carStepOk(classByte(RoadCls.Avenue, 0, true), classByte(RoadCls.Avenue, 1), 3), "no crossing an avenue's reservation but at a junction tile");
+  ok(!carStepOk(0, classByte(RoadCls.Pedestrian), 0) && carStepOk(0, classByte(RoadCls.Pedestrian), 0, true), 'a pedestrian street: no cars, but emergencies and deliveries out of hours');
+  ok(edgeLanes(classByte(RoadCls.OneWay, 0), classByte(RoadCls.OneWay, 0), 0) === 2 && edgeLanes(0, classByte(RoadCls.OneWay, 0), 0) === 1, 'two lanes between one-way tiles, one off a street');
+  const tw = twinRow(roadDragPath([0, 0], [4, 0]));
+  ok(tw.length === 5 && tw.every((t) => t.y === -1 && t.dir === 1), "an avenue dragged east: its twin row on the left (north), going west");
+  // the plan: an avenue over a street widens it, a motorway refuses a building beside it
+  const map = new Map<string, number>();
+  for (let x = 0; x <= 6; x++) map.set(`${x},0`, packTile(Terrain.Grass, true, 0, 0));
+  map.set('3,-3', packTile(Terrain.Grass, false, Zone.Residential, 2));
+  const av = planRoad(roadDragPath([0, 0], [6, 0]), env(new Map([...map].filter(([k]) => k !== '3,-3'))), { cls: RoadCls.Avenue });
+  ok(av.upgrade === 7 && av.fresh === 7 && av.cost === 7 * (ROAD_CLASS_DEFS[RoadCls.Avenue].cost - ROAD_COST) + 7 * ROAD_CLASS_DEFS[RoadCls.Avenue].cost,
+    `an avenue dragged along a street: 7 tiles upgraded for the difference, 7 new for the twin ($${av.cost})`);
+  const mw = planRoad(roadDragPath([0, -1], [6, -1]), env(map), { cls: RoadCls.Motorway });
+  ok(mw.tiles.some((t) => t.reason === MSG_ROAD_FRONTAGE), `a motorway beside a house is refused ("${MSG_ROAD_FRONTAGE}")`);
+  const owp = planRoad(roadDragPath([6, 0], [0, 0]), env(map, { aux: () => classByte(RoadCls.OneWay, 0), roadClass: () => RoadCls.OneWay }), { cls: RoadCls.OneWay });
+  ok(owp.upgrade === 7 && owp.cost === 0 && owp.tiles.every((t) => t.byte !== undefined && oneWayDir(t.byte) === 1), 'a one-way street dragged the other way is reversed, for nothing');
+}
+{
+  // on the server: locks, laying, upgrading in place, junction flags, save and load
+  const w = new World(5151);
+  seedCommons(w, 0);
+  const { game: g, client: cl } = setup(w);
+  const c = cl('Cleo');
+  const me = w.players.get(c.id)!;
+  me.money = 100_000;
+  c.send({ t: 'buy', x: 11, y: -11, w: 20, h: 22 });
+  c.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, 0], [28, 0]), cls: RoadCls.Avenue });
+  ok(/Avenues is needed/.test(c.toast()) && !isRoad(w.getTile(15, 0)), `an avenue without the technology: refused, naming it ("${c.toast()}")`);
+  me.tech = [...me.tech, 'tr13', 'tr14', 'tr15', 'cul6', 'tr1', 'tr2', 'tr3', 'cul1', 'zon1'];
+  // a street with a crossroads, then an avenue dragged along it
+  c.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, 0], [28, 0]) });
+  c.send({ t: 'build', tool: 'road', tiles: roadDragPath([20, -6], [20, 6]) });
+  const m0 = me.money;
+  c.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, 0], [28, 0]), cls: RoadCls.Avenue });
+  const avD = ROAD_CLASS_DEFS[RoadCls.Avenue];
+  const crossing = auxJunction(w.auxAt(20, 0)) && auxJunction(w.auxAt(20, -1)) && isRoad(w.getTile(20, 1)) && isRoad(w.getTile(20, -2));
+  const row = [...Array(17).keys()].every((i) => auxClass(w.auxAt(12 + i, 0)) === RoadCls.Avenue && auxDir(w.auxAt(12 + i, 0)) === 0);
+  const twin = [...Array(17).keys()].every((i) => auxClass(w.auxAt(12 + i, -1)) === RoadCls.Avenue && auxDir(w.auxAt(12 + i, -1)) === 1);
+  ok(row && twin, 'an avenue dragged along a street: the street upgraded going east, its twin laid north going west');
+  ok(crossing, 'the crossroads keeps its junction: both carriageways there are junction tiles, the crossing street carrying on either side');
+  ok(m0 - me.money === 18 * (avD.cost - ROAD_COST) + 16 * avD.cost, `charged the difference on the 18 tiles of road upgraded and the full price for the 16 new ($${m0 - me.money})`);
+  ok(auxJunction(w.auxAt(19, 0)) === false && auxJunction(w.auxAt(12, 0)) && auxJunction(w.auxAt(28, -1)), 'junction flags at the avenue\'s ends; none along it');
+  ok(isRoad(w.getTile(20, -1)) && auxClass(w.auxAt(20, -1)) === RoadCls.Avenue, 'the crossing street crosses both carriageways');
+  // routes: never across the reservation mid-block, never against the one-way
+  const cost = (x: number, y: number) => g.sim.traffic.cost(x, y);
+  const r1 = findRoute(w, 15, 0, 15, -1, cost, 0.4, 20000);
+  ok(!!r1 && r1.path.length / 2 > 3, `a U-turn across the reservation goes round by a junction (${r1 ? r1.path.length / 2 : 0} tiles)`);
+  const west = findRoute(w, 25, 0, 14, 0, cost, 0.4, 20000);
+  let against = false;
+  if (west) for (let i = 0; i + 3 < west.path.length; i += 2) if (west.path[i + 1] === 0 && west.path[i + 3] === 0 && west.path[i + 2] < west.path[i] && auxDir(w.auxAt(west.path[i], 0)) === 0) against = true;
+  ok(!!west && !against, 'a route west along the eastbound carriageway does not drive against it');
+  // a pedestrian street: no car route along it; an emergency's goes through
+  c.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, 6], [28, 6]) });
+  c.send({ t: 'build', tool: 'road', tiles: roadDragPath([21, 6], [27, 6]), cls: RoadCls.Pedestrian });
+  w.setTile(24, 7, packTile(Terrain.Grass, false, Zone.Commercial, 1));
+  const car = findRoute(w, 15, 6, 24, 7, cost, 0.4, 20000), fire = findRoute(w, 15, 6, 24, 7, cost, 0.4, 20000, -1, Infinity, true);
+  ok(!car && !!fire, 'a shop on a pedestrian street: no car reaches its door, a fire engine does');
+  ok(w.hasRoadAccess(24, 7), 'but it has its road (it grows; walkers reach it)');
+  // a motorway: no frontage
+  c.send({ t: 'build', tool: 'road', tiles: roadDragPath([13, -8], [27, -8]), cls: RoadCls.Motorway });
+  ok(auxClass(w.auxAt(20, -8)) === RoadCls.Motorway && auxClass(w.auxAt(20, -9)) === RoadCls.Motorway, 'a motorway laid: two carriageways');
+  w.setTile(20, -10, packTile(Terrain.Grass, false, Zone.Residential, 0));
+  ok(!w.hasRoadAccess(20, -10), 'a lot beside only a motorway has no road access (no frontage)');
+  ok(!findRoute(w, 20, -10, 15, 0, cost, 0.4, 20000), 'nor can a car leave it onto the motorway');
+  // upgrade in place keeps the junction and undo puts the class back
+  const before = w.auxAt(20, 6);
+  const m1 = me.money;
+  c.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, 6], [20, 6]), cls: RoadCls.OneWay });
+  const one = auxClass(w.auxAt(16, 6)) === RoadCls.OneWay && oneWayDir(w.auxAt(16, 6)) === 0;
+  ok(one && m1 - me.money === 9 * (ROAD_CLASS_DEFS[RoadCls.OneWay].cost - ROAD_COST) && isRoad(w.getTile(20, 6)), `a street made one-way in place: the difference charged ($${m1 - me.money}), the junction still a road`);
+  c.send({ t: 'undoRoad' });
+  ok(auxClass(w.auxAt(16, 6)) === 0 && w.auxAt(20, 6) === before && me.money === m1, `undo: back to a street, refunded ("${c.toast()}")`);
+  // save and load: every class byte and flag kept
+  const bytes: number[] = [];
+  for (let y = -11; y <= 10; y++) for (let x = 11; x <= 30; x++) bytes.push(w.auxAt(x, y));
+  const w2 = worldFromSnapshot(JSON.parse(JSON.stringify(snapshotOf(w))))!;
+  const after: number[] = [];
+  for (let y = -11; y <= 10; y++) for (let x = 11; x <= 30; x++) after.push(w2.auxAt(x, y));
+  ok(bytes.join() === after.join() && bytes.some((b) => isClassAux(b)), `saved and loaded: every class byte kept (${bytes.filter((b) => isClassAux(b)).length} tiles of classes)`);
+  // the address and the tooltip name the class
+  w.setTile(16, 7, packTile(Terrain.Grass, false, Zone.Residential, 1));
+  c.send({ t: 'inspect', x: 16, y: -1 });
+  const info = c.last('road')?.info;
+  ok(info?.cls === RoadCls.Avenue && info.flow === 1, `the road tooltip says avenue, westbound (cls ${info?.cls}, flow ${info?.flow})`);
+  ok(/Avenue$/.test(info?.streets?.[0]?.name ?? ''), `an avenue names itself an Avenue ("${info?.streets?.[0]?.name}")`);
+  c.send({ t: 'inspect', x: 16, y: 0 });
+  ok(c.last('road')?.info?.streets?.[0]?.name === info?.streets?.[0]?.name, 'both carriageways are one street');
+}
+{
+  // traffic: an avenue carries more than a street, with no car-car overlaps (loadtest/classbench.ts)
+  const st = bench(corridor(RoadCls.Street), 40, 1, 1200), av = bench(corridor(RoadCls.Avenue), 40, 1, 1200), ow = bench(corridor(RoadCls.OneWay), 40, 1, 1200), mw = bench(corridor(RoadCls.Motorway, false), 40, 1, 1200, { cross: false });
+  ok(av.through > st.through, `an avenue corridor carries more than a street through the same crossing (${av.through.toFixed(0)}/h against ${st.through.toFixed(0)}/h)`);
+  ok(st.overlaps === 0 && av.overlaps === 0 && ow.overlaps === 0 && mw.overlaps === 0, `no car-car body overlaps on any class (street ${st.overlaps}, avenue ${av.overlaps}, one-way ${ow.overlaps}, motorway ${mw.overlaps})`);
+  const ped = corridor(RoadCls.Pedestrian);
+  const t = new (await import('../sim/traffic')).Traffic(ped);
+  ok(!findRoute(ped, -12, 0, 12, 0, (x, y) => t.cost(x, y), 0.4, 20000), 'no car route along a pedestrian street');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

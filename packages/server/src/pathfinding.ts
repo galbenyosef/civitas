@@ -264,8 +264,14 @@ export function findRoute(
   cost: (x: number, y: number) => number, turnCost = 0.4, maxNodes = 4000, startDir = -1, maxCost = Infinity, service = false,
 ): { path: number[]; cost: number } | null {
   if (sx === gx && sy === gy) return { path: [sx, sy], cost: 0 };
-  for (const [dx, dy] of DIRS) if (sx + dx === gx && sy + dy === gy) return { path: [sx, sy, gx, gy], cost: 1 };
   const goalRoad = (() => { const t = w.peekTile(gx, gy); return t !== undefined && isRoad(t); })();
+  // next door: the one step, unless a road's class forbids it (a one-way, a reservation, a pedestrian street, a motorway's frontage)
+  for (let d = 0; d < 4; d++) if (sx + DIRS[d][0] === gx && sy + DIRS[d][1] === gy) {
+    const as = w.auxAt(sx, sy), ag = w.auxAt(gx, gy), st = w.peekTile(sx, sy), startRoad = st !== undefined && isRoad(st);
+    if (!(as > 0 && as < 0x40) && !(ag > 0 && ag < 0x40)) return { path: [sx, sy, gx, gy], cost: 1 };
+    const ok = startRoad && goalRoad ? carStepOk(as, ag, d, service) : startRoad ? !isMotorwayAux(as) || w.kindIdAt(gx, gy) === MOTORWAY_KIND : goalRoad ? !isMotorwayAux(ag) || w.kindIdAt(sx, sy) === MOTORWAY_KIND : true;
+    if (ok) return { path: [sx, sy, gx, gy], cost: 1 };
+  }
   if (!goalRoad && !w.hasRoadAccess(gx, gy)) return null; // a building is reached only from a road beside it: without one, skip the search
   const S = slotsOf(w), st = nextStamp();
   // open set: binary heap on f
