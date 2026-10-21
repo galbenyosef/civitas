@@ -1,5 +1,5 @@
 import {
-  TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, pedestrianDeliveryOpen, auxClass, oneWayDir, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
+  TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, pedestrianDeliveryOpen, auxClass, oneWayDir, carStepOk, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
   DRIVE_MIN_TILES, CAR_FETCH_RADIUS, PARK_RADIUS, PARKING_FEE, KERB_CAP, FREIGHT_TRIPS_PER_LEVEL_PER_DAY, VISITORS_PER_100_PEAK_HOUR,
   Zone, CitizenState, VehicleClass, VehicleKind, KIND_COUNT, KIND_ID_COUNT, KIND_NAMES, CIVIC_UPKEEP, CONSTRUCTION_FEE, MAX_BUILDERS_PER_SITE, CAMP_KIND,
   capacityOf, parkingOf, wageOf, upkeepOf, workOf, familyOf, isGrowableId, isCivicId, isServiceId, isParkingId,
@@ -219,6 +219,7 @@ export class Simulation {
   modeLog = { walk: 0, drive: 0, transit: 0, taxi: 0 };
 
   constructor(private w: World) {
+    w.onRoadClass = () => { this.classEpoch++; };
     this.motive = new Motivation(w);
     this.motiveHost = {
       bestJob: (c, except) => this.jobOptions(c, except),
@@ -2365,7 +2366,7 @@ export class Simulation {
       }
       const r = this.traffic.step(c);
       if (c.wait > 1) { if (c.statsDay !== this.today) today(c, this.today); c.trafficTicksToday++; c.trafficTicksLife++; }
-      if (r === 'moving') { this.maybeReroute(c, leg, this.dueForcedReroute(c)); return false; }
+      if (r === 'moving') { if (this.classEpoch) this.recheckClasses(c, leg); this.maybeReroute(c, leg, this.dueForcedReroute(c)); return false; }
       if (r === 'stuck') { this.onStuck(c, leg); return false; }
     } else if (!this.walk(c)) {
       if (!this.repath(c)) { this.abortTrip(c); return false; }
@@ -2561,6 +2562,26 @@ export class Simulation {
    * Only the route after the tile ahead changes, and never once the car is
    * committed into it (its movement through that box is already decided).
    */
+  /** a road's class changed (World.onRoadClass): drivers check the way ahead once against it (recheckClasses) */
+  private classEpoch = 0;
+  private classSeen = new WeakMap<Mover, number>();
+  /**
+   * After a road's class changed under the traffic (a street made one-way or pedestrian, say: shared/src/roadclass.ts),
+   * a driver whose way ahead now breaks a rule finds another; the rest carry on. Until it has a way that keeps them, it
+   * asks again each tick (a car committed into a box cannot turn off this tick).
+   */
+  private recheckClasses(m: Mover, leg: Leg) {
+    if (this.classSeen.get(m) === this.classEpoch) return;
+    const p = m.path, n = p.length / 2, service = m.priority || ('vkind' in m && (m as Vehicle).vkind === VehicleKind.Freight);
+    let broken = false;
+    for (let i = Math.max(1, m.pi); i + 1 < n && !broken; i++) {
+      const ax = p[i * 2], ay = p[i * 2 + 1], bx = p[i * 2 + 2], by = p[i * 2 + 3];
+      if (!isRoad(this.w.peekTile(bx, by) ?? 0)) continue;
+      if (!carStepOk(this.w.auxAt(ax, ay), this.w.auxAt(bx, by), dirBetween(ax, ay, bx, by), service)) broken = true;
+    }
+    if (broken) { const was = m.path; this.maybeReroute(m, leg, true); if (m.path === was) return; }
+    this.classSeen.set(m, this.classEpoch);
+  }
   private maybeReroute(m: Mover, leg: Leg, force = false) {
     const w = this.w;
     let late = false;
@@ -2894,7 +2915,7 @@ export class Simulation {
         if (v.lane < 0) { if (this.traffic.enter(v) === 'blocked') { if (++v.wait > GARAGE_WAIT_MAX) { this.traffic.count('garageGiveUp'); this.despawn(v); } continue; } continue; }
         const r = this.traffic.step(v);
         if (r === 'stuck') { this.onStuck(v, leg); continue; }
-        if (r === 'moving') { this.maybeReroute(v, leg, this.dueForcedReroute(v)); continue; }
+        if (r === 'moving') { if (this.classEpoch) this.recheckClasses(v, leg); this.maybeReroute(v, leg, this.dueForcedReroute(v)); continue; }
         done = true;
       } else {
         // vehicles never walk; a non-drive leg means the route could not be driven

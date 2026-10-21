@@ -408,7 +408,7 @@ export class World {
   setRoadClass(x: number, y: number, byte: number): boolean {
     const t = this.peekTile(x, y), a = this.auxAt(x, y);
     if (t === undefined || !isRoad(t) || (a && !isClassAux(a))) return false;
-    if (a !== byte) { this.setAux(x, y, byte); this.onTileChanged?.(x, y); }
+    if (a !== byte) { this.setAux(x, y, byte); this.onTileChanged?.(x, y); this.onRoadClass?.(x, y); }
     if (byte) { this.minRouteCost = Math.min(this.minRouteCost, classDef(auxClass(byte)).routeCost); this.anyRoadClass = true; }
     this.refreshRoadFlags(x, y);
     return true;
@@ -424,9 +424,11 @@ export class World {
       const t = this.peekTile(tx, ty);
       if (t === undefined || !isRoad(t)) continue;
       const v = (a & ~CLASS_JUNCTION) | (divJunction(tx, ty, this.roadFn, this.auxFn) ? CLASS_JUNCTION : 0);
-      if (v !== a) { this.setAux(tx, ty, v); this.onTileChanged?.(tx, ty); }
+      if (v !== a) { this.setAux(tx, ty, v); this.onTileChanged?.(tx, ty); this.onRoadClass?.(tx, ty); }
     }
   }
+  /** Told when a road tile's class byte or junction flag changes (the simulation has drivers check their way: Simulation.recheckClasses). */
+  onRoadClass: ((x: number, y: number) => void) | null = null;
   private roadFn = (x: number, y: number) => { const t = this.peekTile(x, y); return t !== undefined && isRoad(t); };
   /**
    * The cheapest any road tile is to drive for a router (roadclass.ts routeCost): 1 while every road is a street or
