@@ -853,7 +853,7 @@ function buildClassTile(t: RoadTile, g: Geo) {
   const paveTone = 0.9 + 0.14 * stretch(t, 3);
   const pave = stretch(t, 4) < 0.15 ? new Color(1.0, 0.95, 0.85).multiplyScalar(paveTone) : new Color().setScalar(paveTone * (0.97 + 0.06 * hk(t, 2)));
   const kerb = KERB.clone().multiplyScalar(0.92 + 0.14 * hk(t, 3));
-  const grass = cls === C_LANE ? new Color(0.94, 1.0, 0.8).multiplyScalar(0.8 + 0.22 * stretch(t, 5) + 0.08 * hk(t, 4))
+  const grass = cls === C_LANE ? new Color(0.94, 1.0, 0.8).multiplyScalar(0.84 + 0.2 * stretch(t, 5))
     : cls === C_MOTORWAY ? new Color(0.9, 0.98, 0.82).multiplyScalar(0.84 + 0.16 * stretch(t, 5))
       : new Color(0.85, 0.95, 0.8).multiplyScalar(0.86 + 0.16 * stretch(t, 5));
   const ped = cls === C_PED ? pedStyle(t) : null;
