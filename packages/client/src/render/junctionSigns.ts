@@ -33,6 +33,8 @@ export class JunctionSigns {
   private ghost: Mesh | null = null;
   private ghostKey = '';
   private mat = new MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  /** the ghost's plates stand this much higher than a real sign's */
+  private lift = 0;
   private ghostMat = new MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true, opacity: 0.55, depthWrite: false });
 
   constructor(private world: SignsWorld) { this.group.name = 'junction signs'; }
@@ -68,7 +70,10 @@ export class JunctionSigns {
     if (!g || !key) return;
     const k = new Kit();
     const r: RoadRule = state === 'noEntry' ? { noEntry: 1 << arm } : { ban: 1 << (arm * 3 + (state === 'noLeft' ? Turn.Left : state === 'noRight' ? Turn.Right : Turn.Straight)) };
-    if (!this.arm(k, g, arm, r, 0)) return;
+    this.lift = 0.115; // above whatever sign stands there now, so both read
+    const ok = this.arm(k, g, arm, r, 0);
+    this.lift = 0;
+    if (!ok) return;
     this.ghost = new Mesh(k.build(), this.ghostMat);
     this.ghost.renderOrder = 3;
     this.group.add(this.ghost);
@@ -118,7 +123,7 @@ export class JunctionSigns {
    * on; E: no entry), each sign its own size, height, lean, turn and fading.
    */
   private sign(k: Kit, px: number, pz: number, hx: number, hz: number, plates: string[], seed: (n: number) => number) {
-    const R = 0.042 + 0.008 * seed(1), H = 0.17 + 0.03 * seed(2), fade = 0.86 + 0.16 * seed(3);
+    const R = 0.042 + 0.008 * seed(1), H = 0.17 + 0.03 * seed(2) + this.lift, fade = 0.86 + 0.16 * seed(3);
     const yaw = Math.atan2(-hx, -hz) + (seed(4) - 0.5) * 0.18;
     const lean = new Quaternion().setFromAxisAngle(new Vector3(Math.cos(seed(5) * 6.28), 0, Math.sin(seed(5) * 6.28)), (seed(6) - 0.5) * 0.06);
     const q = lean.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), yaw));
