@@ -64,6 +64,8 @@ export interface RoadTile {
   rail: number;
   /** the road under a flyover's deck */
   under: boolean;
+  /** a zebra across the middle of this straight (roadlook midZebraAt) */
+  zebra: boolean;
   /** 0..3, from the traffic the tile has seen */
   wear: number;
 }
@@ -174,14 +176,22 @@ function cut(line: P[], axis: 0 | 1, d: number): P[] {
 
 // ---- the quarter templates ---------------------------------------------------------------------------------------
 
-/** a drop along one axis of a quarter: 0 none, 1 this junction's crossing band, 2 the ramp up from the junction next door */
-type Drop = 0 | 1 | 2;
-const dropBreaks = (d: Drop, c: number): number[] => (d === 1 ? [c - 0.03 - RAMP_LEN, c - 0.03] : d === 2 ? [0.5 - RAMP_LEN] : []);
+/**
+ * A drop along one axis of a quarter: 0 none, 1 this junction's crossing band (flat out to the edge), 2 the ramp up
+ * from the junction next door, 3 a crossing across the middle of the tile (a mid-block zebra: flat about the centre).
+ */
+type Drop = 0 | 1 | 2 | 3;
+/** half the flat of a mid-block crossing's drop */
+const MID = 0.075;
+const dropBreaks = (d: Drop, c: number): number[] => (d === 1 ? [c - 0.03 - RAMP_LEN, c - 0.03] : d === 2 ? [0.5 - RAMP_LEN] : d === 3 ? [MID, MID + RAMP_LEN] : []);
 function dropF(d: Drop, t: number, c: number): number {
   if (d === 1) { const r1 = c - 0.03, r0 = r1 - RAMP_LEN; return t <= r0 ? 1 : t >= r1 ? LOW : 1 - ((t - r0) / RAMP_LEN) * (1 - LOW); }
   if (d === 2) { const r0 = 0.5 - RAMP_LEN; return t <= r0 ? 1 : LOW + ((0.5 - t) / RAMP_LEN) * (1 - LOW); }
+  if (d === 3) return t <= MID ? LOW : t >= MID + RAMP_LEN ? 1 : LOW + ((t - MID) / RAMP_LEN) * (1 - LOW);
   return 1;
 }
+/** is t in the flat (tactile) part of a drop? */
+const dropFlat = (d: Drop, t: number, c: number) => (d === 1 ? t > c - 0.03 : d === 3 ? t < MID : false);
 
 interface Quarter {
   /** quarter signs: tile-local x = sx * a, z = sz * b */
@@ -235,8 +245,10 @@ const QUARTERS: readonly [number, number, number, number, number][] = [
 function quartersOf(t: RoadTile): Quarter[] {
   return QUARTERS.map(([sx, sz, sa, sb, db]) => {
     const h = !!(t.m8 & (1 << sa)), v = !!(t.m8 & (1 << sb)), d = !!(t.m8 & (1 << db));
-    const drop = (s: number): Drop => (t.junction && t.cross[s] ? 1 : t.nCross[s] ? 2 : 0);
-    const tac = (s: number) => (t.junction && t.cross[s] ? (t.cross[s] === MouthCrossing.Signal ? TACTILE_RED : TACTILE_BUFF) : null);
+    // a mid-block zebra drops the kerbs along the street's axis: b for a north-south street, a for an east-west one
+    const mid = (s: number) => t.zebra && (s === 0 || s === 2 ? t.arms === 5 : t.arms === 10);
+    const drop = (s: number): Drop => (t.junction && t.cross[s] ? 1 : t.nCross[s] ? 2 : mid(s) ? 3 : 0);
+    const tac = (s: number) => (t.junction && t.cross[s] ? (t.cross[s] === MouthCrossing.Signal ? TACTILE_RED : TACTILE_BUFF) : mid(s) ? TACTILE_BUFF : null);
     return {
       sx, sz, h, v, d, dropA: drop(sa), dropB: drop(sb), tacA: tac(sa), tacB: tac(sb),
       vergeA: !h && !!(t.leafy & (1 << sa)), vergeB: !v && !!(t.leafy & (1 << sb)),
@@ -292,11 +304,10 @@ export function buildTile(t: RoadTile, g: Geo) {
     if (q.vergeA) pieces = split(pieces, 0, 0.5 - VERGE_W);
     if (q.vergeB) pieces = split(pieces, 1, 0.5 - VERGE_W);
     const H = (p: P) => quarterH(q, p[0], p[1], c, K);
-    const flatA = c - 0.03, flatB = c - 0.03;
     for (const piece of pieces) {
       const [ca, cb] = centroid(piece);
       const isVerge = (q.vergeA && ca > 0.5 - VERGE_W) || (q.vergeB && cb > 0.5 - VERGE_W);
-      const tac = q.tacB && cb > flatB ? q.tacB : q.tacA && ca > flatA ? q.tacA : null;
+      const tac = q.tacB && dropFlat(q.dropB, cb, c) ? q.tacB : q.tacA && dropFlat(q.dropA, ca, c) ? q.tacA : null;
       g.setCell(isVerge ? Cell.Grass : tac ? Cell.Tactile : Cell.Pavement);
       const w = piece.map(W), hs = piece.map(H);
       for (let i = 1; i + 1 < w.length; i++) g.tri(w[0], w[i], w[i + 1], hs[0], hs[i], hs[i + 1], isVerge ? verge : tac ?? pave);
@@ -429,7 +440,8 @@ function paint(t: RoadTile, g: Geo) {
     const warn = toJ.length > 0;
     const dashes: [number, number][] = warn ? [[-0.4, -0.08], [0.04, 0.36]] : [[-0.34, -0.16], [0.16, 0.34]];
     const sgn = ns ? (toJ.includes(0) ? -1 : 1) : (toJ.includes(3) ? -1 : 1); // keep the gap at the junction's end
-    if (!t.prof.oneWay && t.prof.median === 0) for (const [a0, a1] of dashes) {
+    if (t.zebra) zebraPaint(t, decal, white);
+    else if (!t.prof.oneWay && t.prof.median === 0) for (const [a0, a1] of dashes) {
       const m = ((a0 + a1) / 2) * sgn, L = a1 - a0;
       decal(ns ? rect(ox, oz, 0, m, 0, 1, L, 0.024) : rect(ox, oz, m, 0, 1, 0, L, 0.024), white);
     }
@@ -454,6 +466,20 @@ function paint(t: RoadTile, g: Geo) {
 }
 
 type Decal = (poly: P[], color: Color, y?: number) => void;
+
+/** A zebra across the middle of a straight: stripes along the traffic across the carriageway, a give-way line each side. */
+function zebraPaint(t: RoadTile, decal: Decal, white: Color) {
+  const ox = t.x + 0.5, oz = t.z + 0.5, c = t.prof.carriage, ns = t.arms === 5;
+  // along: the street's axis; across: from kerb to kerb
+  const P2 = (along: number, across: number): P => (ns ? [ox + across, oz + along] : [ox + along, oz + across]);
+  const stripe = 0.056, gap = 0.046, n = Math.floor((2 * c - 0.04 + gap) / (stripe + gap)), span = n * stripe + (n - 1) * gap;
+  for (let i = 0; i < n; i++) { const c0 = -span / 2 + i * (stripe + gap); decal([P2(-MID, c0), P2(MID, c0), P2(MID, c0 + stripe), P2(-MID, c0 + stripe)], white); }
+  // traffic drives on the right: heading +along, a car's right is -across on a north-south street, +across on an east-west one
+  for (const sg of [-1, 1]) for (let k = 0; k < 4; k++) {
+    const a = sg * (MID + 0.06), c0 = 0.02 + k * 0.09, c1 = Math.min(c - 0.01, c0 + 0.055), side = ns ? sg : -sg;
+    decal([P2(a - 0.011, side * c0), P2(a + 0.011, side * c0), P2(a + 0.011, side * c1), P2(a - 0.011, side * c1)], white);
+  }
+}
 
 /** forward (into the junction) and right-hand directions for an approach from side s of the junction's neighbour */
 const frame = (s: number): { f: P; r: P } => { const f: P = [-SIDE[s][0], -SIDE[s][1]]; return { f, r: [-f[1], f[0]] }; };

@@ -66,6 +66,27 @@ export function mouthCrossing(x: number, y: number, bit: number, signalled: bool
 }
 
 /**
+ * A zebra in the middle of a street: on a plain straight (no aux byte) at least two tiles clear of any junction, at
+ * one place in each stretch of nine tiles along the street (its phase hashed by the street) and there in a little under
+ * half of the stretches. Walkers cross anywhere and cars stop for anyone on the carriageway, so it is paint and
+ * beacons only; it gives a town with lights everywhere its zebras.
+ */
+export function midZebraAt(road: RoadFn, aux: number, x: number, y: number): boolean {
+  if (aux) return false;
+  const arms = signalArms(road, x, y);
+  if (arms !== 5 && arms !== 10) return false;
+  const ns = arms === 5;
+  for (const d of [-2, -1, 1, 2]) {
+    const tx = ns ? x : x + d, ty = ns ? y + d : y;
+    if (!road(tx, ty) || armCount(signalArms(road, tx, ty)) >= 3) return false;
+  }
+  const line = ns ? x : y, pos = ns ? y : x, stride = 9;
+  const phase = Math.floor(hash2(line * 5 + 1, ns ? 3 : 4) * stride);
+  if ((((pos + phase) % stride) + stride) % stride !== 0) return false;
+  return hash2(line * 7 + 3, Math.floor((pos + phase) / stride) * 11 + (ns ? 1 : 2)) < 0.45;
+}
+
+/**
  * Does crossroads (x, y) get yellow box hatching? Where it is busy (`busy`: the client's wear from the traffic it has
  * seen; the Showcase's check passes false) and at about two in five signalled crossroads, hashed, so a grid of lights
  * is not boxed all over.

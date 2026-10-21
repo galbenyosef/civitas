@@ -4,7 +4,7 @@ import {
 } from 'three';
 import {
   CHUNK_SIZE, Terrain, hash2, isRoad, terrainOf, signalArms, armCount, signalledArms, isMarkedJunction, mouthControl, mouthCrossing,
-  boxJunction, leafySide, streetTreeAt, MouthCrossing, MouthControl, isRingAux, ringPos, isArmPos, RING_POS, isFlyoverAux, deckEW,
+  boxJunction, leafySide, streetTreeAt, midZebraAt, MouthCrossing, MouthControl, isRingAux, ringPos, isArmPos, RING_POS, isFlyoverAux, deckEW,
   isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, isRailAux, railMask,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
@@ -432,8 +432,9 @@ export class RoadLayer {
     }
     const box = junction && boxJunction(road, x, z, sig0, wear >= 2);
     const rail = isRailAux(a) ? railMask(a) : 0;
-    const t: RoadTile = { x, z, prof: profileOf(tw, a), m8, arms, junction, cross, ctrl, box, nCross, nCtrl, nArms, leafy, rail, under, wear };
-    const sig = `${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0},${wear}`;
+    const zebra = !junction && !under && midZebraAt(road, a, x, z);
+    const t: RoadTile = { x, z, prof: profileOf(tw, a), m8, arms, junction, cross, ctrl, box, nCross, nCtrl, nArms, leafy, rail, under, zebra, wear };
+    const sig = `${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0}${zebra ? 1 : 0},${wear}`;
     return { sig, t, ring: null };
   }
 
@@ -463,6 +464,7 @@ export class RoadLayer {
   private lampOf(x: number, z: number, tw: number, a: number): { px: number; pz: number; lx: number; lz: number; yaw: number; on: number; flags: number; design: number } | null {
     const road = this.roadFn;
     if (terrainOf(tw) === Terrain.Water || isRailAux(a) || isFlyoverAux(a) || isBridgeAux(a) || this.isRamp(x, z, a)) return null;
+    if (midZebraAt(road, a, x, z)) return null; // the zebra's beacons stand there
     const r = (n: number) => hash2(x * 41 + n * 13, z * 37 - n * 7);
     let px = 0, pz = 0, lx = 0, lz = 0, line = 0, st = 0;
     if (isRingAux(a)) {
@@ -560,7 +562,7 @@ export class RoadLayer {
       const off = 0.482, [dx, dz] = SIDE[s];
       const lx = dx * off + (dx === 0 ? tree.along : 0), lz = dz * off + (dz === 0 ? tree.along : 0);
       const k = tree.k, species = k < 0.55 ? 0 : k < 0.75 ? 1 : 2;
-      const size = (species === 2 ? 0.8 : 1.05) + 0.45 * hash2(t.x * 3 + s, t.z * 5 - s);
+      const size = (species === 2 ? 1.35 : 1.75) + 0.7 * hash2(t.x * 3 + s, t.z * 5 - s);
       const leaf = species === 2 ? LEAF[5 + (hash2(t.x + s, t.z) < 0.6 ? 0 : 1)] : LEAF[Math.floor(hash2(t.x * 7 + s, t.z * 3) * 4.99)];
       const c = leaf.clone().multiplyScalar(0.85 + 0.25 * hash2(t.z * 11 + s, t.x * 13));
       const lean = 0.03 + 0.06 * hash2(t.x * 19 + s, t.z * 23), leanDir = Math.atan2(-dz, -dx) + (hash2(t.x, t.z * 3 + s) - 0.5) * 1.2; // towards the open road, for the light
@@ -587,6 +589,14 @@ export class RoadLayer {
           put(F.Beacon, lx, lz, 0, 1, new Color(1, 1, 1));
           put(F.Globe, lx, lz, 0, 1, new Color(1, 1, 1), 0, 0, [r(40 + s), r(44 + s), 0, 0]);
         }
+      }
+    } else if (t.zebra) {
+      // Belisha beacons at the ends of a mid-block zebra
+      const ns = t.arms === 5, c = t.prof.carriage;
+      for (const e of [-1, 1]) {
+        const lx = ns ? e * (c + 0.055) : 0, lz = ns ? 0 : e * (c + 0.055);
+        put(F.Beacon, lx, lz, 0, 1, new Color(1, 1, 1));
+        put(F.Globe, lx, lz, 0, 1, new Color(1, 1, 1), 0, 0, [r(40), r(44), 0, 0]);
       }
     } else if ((t.arms === 5 || t.arms === 10) && r(50) < 0.1) {
       // a litter bin on the pavement, away from the lamp

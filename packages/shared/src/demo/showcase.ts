@@ -27,7 +27,9 @@ import { HARBOUR_OF, type HarbourRole } from '../harbours';
 import type { SeaGate } from '../waterways';
 import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
 import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
-import { zoneOf, levelOf, Zone } from '../tile';
+import { zoneOf, levelOf, Zone, isRoad } from '../tile';
+import { isMarkedJunction, mouthCrossing, MouthCrossing, boxJunction, sandboxSignalled, streetTreeAt, midZebraAt } from '../roadlook';
+import { signalArms } from '../signals';
 import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
 import { FIRE } from '../fires';
 import { DEATH } from '../remembrance';
@@ -197,6 +199,8 @@ const POWER_SUB_A: DemoXY = [-33, 14], POWER_SUB_B: DemoXY = [-33, 8];
 /** the showcase's fire drill home: a level-3 house five tiles from the civic district's fire post (-24, -29), and the stop's frame */
 const FIRE_DRILL: DemoXY = [-29, -31];
 const FIRE_DRILL_RECT: DemoRect = [-31, -33, 9, 6];
+/** the road-look stop (client render/roads.ts): east of downtown, tree-lined streets beside open lots, two box junctions and a mid-block zebra */
+const ROAD_LOOK_RECT: DemoRect = [23, 7, 11, 8];
 /** the news helicopter's orbit over the drill (shared newsHelis.ts NEWS_HELI.radius), framed from above */
 const NEWS_HELI_RECT: DemoRect = [-33, -35, 9, 9];
 /**
@@ -382,6 +386,8 @@ export const SECTIONS: DemoSection[] = [
       // both bus lines cross here, line 1 over the deck and line 2 under it
       { id: 'flyover', tool: 'flyover', at: [-25, -1], deck: 'ew' },
     ],
+    // the streets themselves: kerbs, corners, markings, crossings, lamps and street trees (shared/src/roadlook.ts)
+    spots: [{ id: 'road-look', spot: 'road-look', name: 'Streets', rect: ROAD_LOOK_RECT, inspect: [28, 11] }],
     lines: [
       { id: 'line-bus-1', mode: 'bus', number: 1, colour: 0xe0a92e, loop: false, vehicles: 5, stops: [-33, -28, -23, -18, -9, 6, 15, 20, 25, 30].map((x): DemoXY => [x, -2]) },
       { id: 'line-bus-2', mode: 'bus', number: 2, colour: 0x3a86d4, loop: false, vehicles: 5, stops: LINE_2_STOPS.map((y): DemoXY => [-24, y]) },
@@ -655,7 +661,7 @@ export const TOUR: string[] = [
   'welcome',
   'block-residential', 'focus-groups', 'block-commercial', 'high-street', 'big-screens', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
   'cab-office', 'takeaway', 'waste-depot', 'parcel-depot',
-  'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover',
+  'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover', 'road-look',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
   'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
   'fire-post', 'house-fire', 'fire-spread', 'fire', 'large-fire-station', 'fire-hq',
@@ -770,8 +776,14 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
+export type SpotKind = 'road-look' | 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
+  'road-look': {
+    title: 'Streets',
+    what: 'Close up, every road is drawn as a street: pavements raised behind a kerb, corners rounded where roads meet, dropped kerbs with tactile paving at each crossing, and the paint a driver reads. Centre lines turn to long warning dashes before a junction. Lights get stop lines and turn arrows, junctions without them get give-way lines and triangles, zebras have flashing Belisha beacons, and busy crossroads get a yellow box. Lamp columns line the pavements and each lamp comes on at its own dusk. Trees line the verges beside gardens and open land. Busier streets wear darker and gather patches.',
+    how: 'Nothing to build: lay roads. The markings follow the layout and the lights. At a T-junction the side road gives way, at a crossroads the shorter road gives way, and every approach stops at lights. Trees grow beside homes\' gardens and open grass. Far away a street is drawn flat to the same plan.',
+    facts: [['Lamps', 'every third tile, alternating sides, three designs by street'], ['Zebras', 'mid-block on quiet straights, and at a third of unsignalled junction mouths'], ['Box junctions', 'busy crossroads, and some at lights'], ['Street trees', 'beside houses and open grass, most streets in stretches']],
+  },
   'news-heli': {
     title: 'News helicopter',
     what: 'A media centre keeps a news helicopter on its roof pad, in its channel\'s colours. When its channel covers a story worth the flight (a fire, an explosion, a rank, a big opening, a new line) it takes off a few minutes later, flies to the scene and circles it, or hovers and creeps round, while the story is live and for a while after, then flies home. The newest live story wins, and with none on it flies a traffic watch in the 08:00 and 17:00 rush. Its flights are worked out from the story log everyone already has, so everyone sees the same helicopter. Here it covers the fire drill.',
@@ -1183,6 +1195,35 @@ const newsHeliFlies = (d: SeededDemo) => {
 };
 const days = () => Array.from({ length: FEATURE_DAYS }, (_, d) => d);
 const placedKind = (kind: string) => (ss: readonly DemoSection[]) => ss.some((s) => s.placements?.some((p) => p.kind === kind));
+/**
+ * What the road-look stop's streets show in a seeded demo, worked out with the same rules the client draws by
+ * (shared/src/roadlook.ts), lights as in a sandbox (every owner has the technology).
+ */
+const roadLookSeen = new WeakMap<SeededDemo, { zebra: boolean; signal: boolean; box: boolean; trees: number }>();
+function roadLook(d: SeededDemo) {
+  const had = roadLookSeen.get(d);
+  if (had) return had;
+  const tiles = new Map<string, number>();
+  d.scan((x, y, t) => tiles.set(`${x},${y}`, t));
+  const tile = (x: number, y: number) => tiles.get(`${x},${y}`);
+  const road = (x: number, y: number) => { const t = tile(x, y); return t !== undefined && isRoad(t); };
+  const out = { zebra: false, signal: false, box: false, trees: 0 };
+  const [rx, ry, rw, rh] = ROAD_LOOK_RECT;
+  for (let y = ry; y < ry + rh; y++) for (let x = rx; x < rx + rw; x++) {
+    if (!road(x, y)) continue;
+    const a = d.aux(x, y);
+    if (midZebraAt(road, a, x, y)) out.zebra = true;
+    if (isMarkedJunction(road, a, x, y)) {
+      const sig = sandboxSignalled(road, x, y);
+      if (sig) out.signal = true;
+      if (boxJunction(road, x, y, sig)) out.box = true;
+      for (const bit of [1, 2, 4, 8]) if (signalArms(road, x, y) & bit && mouthCrossing(x, y, bit, sig) === MouthCrossing.Zebra) out.zebra = true;
+    }
+    for (const bit of [1, 2, 4, 8]) if (streetTreeAt(tile, x, y, bit)) out.trees++;
+  }
+  roadLookSeen.set(d, out);
+  return out;
+}
 const anyTile = (d: SeededDemo, f: (x: number, y: number, t: number, a: number, u: number) => boolean) => { let hit = false; d.scan((x, y, t, a, u) => { if (!hit && f(x, y, t, a, u)) hit = true; }); return hit; };
 /** A line of `mode` calls within the change walk (TRANSIT.transferWalk, Manhattan) of a stop of another mode's line. */
 const interchange = (mode: TransitMode) => (lines: readonly { mode: TransitMode; stops: readonly DemoXY[] }[]) => lines.some((m) => m.mode === mode && m.stops.some(([x, y]) =>
@@ -1294,6 +1335,11 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   })),
   { id: 'motorway-gateway', caption: 'a motorway connection, the gateway newcomers, visitors and freight arrive through', tour: 'motorway',
     scenario: placedKind('motorway'), seeded: (d) => (d.kinds.get(MOTORWAY_KIND) ?? 0) > 0 },
+  // ---- the look of the streets (shared/src/roadlook.ts, client render/roads.ts), all seen at the road-look stop
+  { id: 'zebra-crossing', caption: 'a zebra crossing with Belisha beacons', tour: 'road-look', seeded: (d) => roadLook(d).zebra },
+  { id: 'signal-crossing', caption: 'a signal-controlled crossing at a junction with lights', tour: 'road-look', seeded: (d) => roadLook(d).signal },
+  { id: 'box-junction', caption: 'a yellow box junction', tour: 'road-look', seeded: (d) => roadLook(d).box },
+  { id: 'street-trees', caption: 'street trees in the verges', tour: 'road-look', seeded: (d) => roadLook(d).trees >= 4 },
   // ---- aircraft: every plane type is scheduled at a showcase airport within FEATURE_DAYS (the jumbo needs 20 tiles of runway)
   ...(Object.keys(PLANE_CAPTIONS) as PlaneType[]).map((type): ShowcaseFeature => ({
     id: `plane-${type}`, caption: `${PLANE_CAPTIONS[type]} landing${PLANE_TYPES[type].minRunway ? ` (a runway of ${PLANE_TYPES[type].minRunway}+ tiles)` : ''}`, tour: 'runway',
