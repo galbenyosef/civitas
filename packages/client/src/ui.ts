@@ -470,6 +470,7 @@ export class UI {
     const own = named && named.toLowerCase() !== title.toLowerCase() ? named : null;
     const sub = own ? [title, lv].filter(Boolean).join(' · ') : lv;
     let html = `<${h}><span class="sw" style="background:${color}"></span>${own ? esc(own) : title}${sub ? ` <span style="color:var(--muted);font-weight:400">${sub}</span>` : ''}</${h}>`;
+    if (info.address) html += `<div class="addr">${esc(info.address)}</div>`; // the number on the door and the street it faces (server/src/streets.ts)
     html += `<div class="sub">${info.parcel ? `${esc(info.parcel.name)} · ${esc(info.parcel.owner)} · tax ${Math.round(info.parcel.taxRate * 100)}%` : 'unclaimed land'}</div>`;
     if (info.construction) {
       const c = info.construction;
@@ -647,7 +648,11 @@ export class UI {
     const row = (k: string, v: string | number) => `<div class="row"><span>${k}</span><span>${v}</span></div>`;
     const pct = Math.round(info.congestion * 100);
     const grade = pct < 15 ? 'flowing' : pct < 40 ? 'busy' : pct < 70 ? 'congested' : 'jammed';
-    let html = `<h3><span class="sw" style="background:#6b6f7a"></span>${info.bridge ? 'Bridge' : 'Road'} <span style="color:var(--muted);font-weight:400">${info.bridge ? `${info.bridge.style}, ${info.bridge.span} tile${info.bridge.span === 1 ? '' : 's'} over the water` : info.junction === 'none' ? '' : info.junction === 'signal' ? 'signalled junction' : info.junction === 'roundabout' ? 'roundabout' : info.junction === 'flyover' ? 'flyover' : 'junction'}</span></h3>`;
+    // the street's name leads (server/src/streets.ts); a crossroads or a bend names both streets
+    const [st, other] = info.streets ?? [];
+    const what = info.bridge ? 'Bridge' : 'Road';
+    let html = `<h3><span class="sw" style="background:#6b6f7a"></span>${st ? esc(st.name) : what} <span style="color:var(--muted);font-weight:400">${st && info.bridge ? 'bridge, ' : ''}${info.bridge ? `${info.bridge.style}, ${info.bridge.span} tile${info.bridge.span === 1 ? '' : 's'} over the water` : info.junction === 'none' ? '' : info.junction === 'signal' ? 'signalled junction' : info.junction === 'roundabout' ? 'roundabout' : info.junction === 'flyover' ? 'flyover' : 'junction'}</span></h3>`;
+    if (other) html += `<div class="sub">${info.junction === 'none' ? 'corner of' : 'meets'} ${esc(other.name)}</div>`;
     html += `<div class="sub">${info.parcel ? `${esc(info.parcel.name)} · ${esc(info.parcel.owner)}` : 'public road'}</div>`;
     html += `<div class="row"><span>Traffic</span><span class="${pct >= 40 ? 'bad' : ''}">${grade} (${pct}%)</span></div>`;
     html += `<div class="bar heat"><i style="width:${pct}%"></i></div>`;

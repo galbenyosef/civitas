@@ -23,7 +23,7 @@ mode's 4× makes every number a quarter and pause holds any of them.
 | When | What they do | What they see within seconds |
 | --- | --- | --- |
 | 0:00 | The join card; the camera at the road end, the gate on the horizon. | **Goal 2 of 14, Lay a street** (the charter has done "Claim your plot"): "Road (3): drag a street on from the end of the country road into your land." (Claim your plot is gone: the charter is theirs.) |
-| 0:15-0:40 | Drag a street east from the road end, a side street or two. | Road tiles paint; "Nicely done! Lay a street"; the card flips to **Pitch camp**, "show me" lights the camp tool. |
+| 0:15-0:40 | Drag a street east from the road end, a side street or two. | The road shows as a ghost with its cost and is built on release; "Nicely done! Lay a street"; the card flips to **Pitch camp**, "show me" lights the camp tool. |
 | 0:40 | Click a tile beside the street. | The camp stands at once: tents, a caravan, a fire pit, festoon lights. Toast: *"Camp pitched: eight settlers are on their way through the gate and arrive within the hour."* The card flips to **Zone homes**. |
 | 0:50-1:30 | (meanwhile) | Headlights at the gate: the first car with a roof box turns off the motorway and comes the whole length of the country road, then two people with suitcases, then another car. The camera leaves the player's hands for seven seconds to meet the first of them at the camp: **"Your first settlers are here: Ada Walker and 7 more are pitching camp."** |
 | 1:00-1:20 | Paint a dozen lots of Residential along the street. | Each lot opens a site within 8 seconds: fences and cranes. The card flips to **Hire your own builders**: "Handyman's workshop (Builders, the first size, $120)". |
@@ -106,7 +106,7 @@ mode everything below happens four times sooner.
 | --- | --- | --- |
 | 0:00 | The join card; the world appears beside the Commons. | The goals card: **Goal 1 of 14, Claim your plot**, with "show me" looking at the open land beside the Commons' edge road. |
 | 0:10-0:30 | Drag out a plot. | The parcel outline in their colour; "Nicely done! Claim your plot"; the card flips to **Lay a street**. |
-| 0:30-1:00 | Drag a street or two through it, joined to the Commons' road. | Road tiles paint as they drag; the card flips to **Pitch camp**, whose "show me" lights the *Pioneer camp* tool just under Residential. |
+| 0:30-1:00 | Drag a street or two through it, joined to the Commons' road. | The road shows as a ghost with its cost and is built on release; the card flips to **Pitch camp**, whose "show me" lights the *Pioneer camp* tool just under Residential. |
 | 1:00 | Click a tile beside the street. | The camp stands at once: three ridge tents and a caravan round a fire pit, festoon lights on a wire, a washing line. The toast: *"Camp pitched: eight settlers are coming up the road and arrive within the hour."* The card flips to **Zone homes**. |
 | 1:05-1:20 | Paint a row or two of Residential. | Each lot opens a site at the next growth pass (every 8 seconds): fences and cranes. The card flips to **Hire your own builders**. |
 | 1:10-1:25 | (meanwhile) | The first settlers turn into the street: a car with a roof box, then two people with suitcases, then another car. The camera leaves the player's hands for seven seconds, flies down to the camp and turns slowly: **"Your first settlers are here: Priya Shah and 7 more are pitching camp"**. Any click or key hands the camera straight back. The rest trickle in over the next 20 seconds. |

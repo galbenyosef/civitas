@@ -1,6 +1,6 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
-  OVERLAY_TEXT, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
+  OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
   terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
@@ -24,6 +24,7 @@ import { boatTipHtml, boatPanelHtml, boatCab, boatKnots } from './boatPanel';
 import { AirfieldView } from './render/airfield';
 import { TrainsView } from './render/trains';
 import { RailClient, trainHtml, setPlatformCrowd } from './rail';
+import { RoadTool } from './roadtool';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
 import { BridgeView } from './render/bridges';
@@ -201,6 +202,7 @@ citizens.platformAlongX = (x, y) => underMask(world.underAt(x, y)) === 10; // a 
 const junctions = new JunctionView(world); scene.add(junctions.group); // roundabout islands, flyover decks and ramps
 // utilities (utilities.ts, docs/utilities.md): reach from the tiles, the hourly node states, blackouts, the power overlay, pylons
 const power = new PowerClient(world, (k) => views.get(k)); scene.add(power.group);
+const roadTool = new RoadTool(world, DEV_TOOLS); scene.add(roadTool.group); // the road drag's ghost, cost chip, spacing guide and question (roadtool.ts)
 const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks, piers, towers and ramps (render/bridges.ts)
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz); // cars and walkers on a flyover deck or a bridge and their ramps
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
@@ -587,7 +589,16 @@ const input = new Input(canvas, rig, {
   map: mapMode,
   onToolChange: (t) => { ui.setTool(t); rectMesh.visible = false; updateStatus(); toolUnder(t); },
   ladderKey: (t) => ui.ladderKey(t), // 0, 8, 9, Y, P, G, V, B, L open their size picker on the size last used
-  isWater: (x, y) => { const t = world.getTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water; }, // the road tool bridges water (render/bridges.ts)
+  isWater: (x, y) => { const t = world.getTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water; }, // a road drag's end does not snap across water
+  isRoad: (x, y) => { const t = world.getTile(x, y); return t !== undefined && isRoad(t); },
+  onRoad: (tiles, _shape) => {
+    // buildings in the way: ask once, with the cost, and the answer goes for the whole drag (a0902fd7)
+    const v = roadTool.plan(tiles);
+    const send = (demolish: boolean) => net.send({ t: 'build', tool: 'road', tiles, cls: 0, ...(demolish ? { demolish: true } : {}), ...(DEV_TOOLS ? { dev: true } : {}) });
+    if (!v.demolish.n) { send(false); return; }
+    void roadTool.ask(v, mouse.x, mouse.y).then((a) => { if (a !== 'cancel') send(a === 'demolish'); });
+  },
+  onUndoRoad: () => net.send({ t: 'undoRoad' }),
   onBuild: (tool, tiles) => {
     // a click (not a drag) with a link tool takes down the line through that tile (docs/utilities.md 4.2)
     if ((tool === 'pylons' || tool === 'cable') && tiles.length < 2) { if (tiles[0]) net.send({ t: 'utilLink', op: 'remove', x: tiles[0][0], y: tiles[0][1] }); return; }
@@ -988,7 +999,16 @@ function buyVerdict(r: Rect) {
  * placement verdict, worked out on the loaded chunks), the whole structure under the cursor, else the tile.
  */
 let placeMemo: { key: string; kind: number; at: number; v: PlaceVerdict } | null = null;
-function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: number; verdict?: PlaceVerdict; placed?: Placed; existing?: boolean } {
+/** A zoning tool over land with no road on any side (797ee40a): such a lot builds only when the building in front grows back into it. */
+const NO_ROAD_LOT = 'no road beside this lot: it stays empty until the building in front of it grows back into it (two storeys: Masonry and power) or a road reaches it';
+function zoneNoRoad(x: number, y: number): boolean {
+  if (!(input.tool in ZONE_TOOLS)) return false;
+  const t = world.getTile(x, y);
+  if (t === undefined || isRoad(t) || terrainOf(t) === Terrain.Water) return false;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const n = world.getTile(x + dx, y + dy); if (n === undefined || (isRoad(n) && terrainOf(n) !== Terrain.Water)) return false; }
+  return true;
+}
+function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: number; verdict?: PlaceVerdict; placed?: Placed; existing?: boolean; warn?: boolean } {
   const kind = structureTool(input.tool);
   if (kind) {
     const rot = input.rotationOf(input.tool);
@@ -1011,18 +1031,13 @@ function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: n
     return p ? { x: p.ax, y: p.ay, w: p.w, h: p.h, verdict: v, placed: p } : { x: h[0], y: h[1], w: 1, h: 1, verdict: v };
   }
   if (input.tool === 'roundabout' || input.tool === 'flyover') return junctions.hoverArea(input.tool, h);
-  if (input.tool === 'road' && input.crossing) {
-    // a road dragged out over the water: the bridge it would make, bank to bank
-    const c = bridges.crossingPlan(input.crossing, DEV_TOOLS);
-    return { x: c.x, y: c.y, w: c.w, h: c.h, verdict: c.plan.ok ? { ok: true } as PlaceVerdict : { ok: false, reason: c.plan.reason ?? '' } };
-  }
   if (input.tool === 'runway') {
     const v = runwayVerdict(input.runwayLine ?? [h]);
     const r = v.rect;
     return r ? { x: r.x, y: r.y, w: r.w, h: r.h, verdict: v.ok ? { ok: true } as PlaceVerdict : { ok: false, reason: v.reason ?? '' } } : { x: h[0], y: h[1], w: 1, h: 1, verdict: { ok: false, reason: v.reason ?? '' } };
   }
   const s = world.structureAt(h[0], h[1]);
-  return s ? { x: s.ax, y: s.ay, w: s.w, h: s.h, placed: s, existing: true } : { x: h[0], y: h[1], w: 1, h: 1 };
+  return s ? { x: s.ax, y: s.ay, w: s.w, h: s.h, placed: s, existing: true } : { x: h[0], y: h[1], w: 1, h: 1, warn: zoneNoRoad(h[0], h[1]) };
 }
 /** The server's runway rules on the loaded chunks: snap onto a terminal's runway row, check the strip. */
 let runwayMemo: { key: string; at: number; v: RunwayPlan } | null = null;
@@ -1062,9 +1077,9 @@ function updateStatus() {
     if (input.tool === 'rail') s += rail.status(input.railPath);
     if (input.tool === 'pylons' || input.tool === 'cable') s += power.status(input.tool, input.railPath);
     else if (isRoad(t) && (power.overlayOn || structureTool(input.tool))) s += power.roadStatus(x, y);
-    if (input.tool === 'road' && input.crossing) s += bridges.crossingStatus(input.crossing, DEV_TOOLS);
-    else if (input.tool === 'road' && terr === Terrain.Water && !isRoad(t)) s += ' · drag a road straight across from a road on the bank to bridge the water';
+    if (input.tool === 'road') s += input.roadPath ? roadTool.status(input.roadPath, input.roadShape) : terr === Terrain.Water && !isRoad(t) ? ' · drag a road straight across from a road on the bank to bridge the water' : roadTool.status(null, 'line');
     if (input.tool === 'roundabout' || input.tool === 'flyover') s += junctions.status(input.tool, x, y);
+    if (zoneNoRoad(x, y)) s += ` · ${NO_ROAD_LOT}`;
     if (input.tool === 'runway') {
       const rv = runwayVerdict(input.runwayLine ?? [h]);
       s += input.runwayLine
@@ -1215,7 +1230,7 @@ function hoverTile(tile: [number, number] | null) {
   tipRefresh = window.setInterval(() => { if (tipTile) net.send({ t: 'inspect', x: tipTile[0], y: tipTile[1] }); }, 1500);
 }
 // agents move under a still cursor, so re-check the pick a few times a second
-setInterval(() => { if (input.hover && !input.buyRect && !input.painting) hoverAt(input.hover); }, 250);
+setInterval(() => { if (input.hover && !input.buyRect && !input.painting && !input.roadPath) hoverAt(input.hover); }, 250);
 net.on('building', (m) => {
   if (m.info?.people && selectedBuilding && m.x === selectedBuilding[0] && m.y === selectedBuilding[1]) ui.showBuilding(m.info, selectedCitizen);
   else if (!m.info && selectedBuilding && m.x === selectedBuilding[0] && m.y === selectedBuilding[1]) closeBuilding();
@@ -1300,6 +1315,7 @@ function frame(now: number) {
   trains.level = Math.max(underground.level, riding); citizens.underLevel = Math.max(underground.level, riding);
   trains.frame(vehTick);
   rail.frame(input.tool === 'rail' ? input.railPath : null);
+  roadTool.frame(input.tool === 'road' ? input.roadPath : null, rig.camera, canvas.clientWidth, canvas.clientHeight);
   power.frame(now, input.tool, input.railPath);
   airfield.frame();
   parks.frame(clock.day);
@@ -1317,14 +1333,14 @@ function frame(now: number) {
   }
 
   const h = input.hover;
-  hoverMesh.visible = !!h && !input.buyRect;
+  hoverMesh.visible = !!h && !input.buyRect && !input.roadPath; // a road drag shows its own ghost
   if (h) {
     const area = hoverArea(h);
     hoverMesh.scale.set(area.w, 1, area.h);
     hoverMesh.position.set(area.x + area.w / 2, 0.04, area.y + area.h / 2);
     const hm = hoverMesh.material as MeshBasicMaterial;
-    hm.color.setHex(area.verdict ? (area.verdict.ok ? 0x62d2a2 : 0xff3b30) : 0xffffff);
-    hm.opacity = area.verdict ? (area.verdict.ok ? 0.45 : 0.6) : 0.22; // a refusal must read as red over grass
+    hm.color.setHex(area.verdict ? (area.verdict.ok ? 0x62d2a2 : 0xff3b30) : area.warn ? 0xffb020 : 0xffffff);
+    hm.opacity = area.verdict ? (area.verdict.ok ? 0.45 : 0.6) : area.warn ? 0.5 : 0.22; // a refusal must read as red over grass; a lot with no road beside it amber
     // outline, door arrow and marks: full strength for a footprint being placed, faint over a structure that stands
     if (area.placed && !input.buyRect) {
       const p = area.placed, ahead = world.getTile(p.frontX, p.frontY);
@@ -1354,7 +1370,7 @@ function frame(now: number) {
   const cams = fpv.mode === 'off' ? [rig.camera] : [rig.camera, fpv.camera];
   if (feedCam) cams.push(feedCam);
   buildings.updateLod(cams, lighting.sun); // detail tiers and culling (render/buildings.ts)
-  const overheadOnly = [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group];
+  const overheadOnly = [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group, roadTool.group];
   // the feed leaves out what is under a pixel at 160×90 from the helicopter: people, parked cars, signal heads
   tv.render(renderer, scene, [...overheadOnly, citizens.group, parked.group, junctions.group]);
   fpv.render(renderer, scene, rig.camera, overheadOnly);

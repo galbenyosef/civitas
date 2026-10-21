@@ -8,6 +8,7 @@ import type { AdvertsSave } from './sim/adverts';
 import type { NewsSave } from './sim/news';
 import type { DeathSave } from './sim/death';
 import type { UtilitiesSave } from '@msimcity/shared';
+import type { StreetsSave } from './streets';
 
 /**
  * v8: the per-chunk under layer (tunnels and platforms, docs/underground.md), stored only where it is not all zero,
@@ -52,6 +53,8 @@ export interface Snapshot {
   death?: DeathSave;
   /** utilities (sim/utilities.ts, docs/utilities.md): trunk links, open faults, protected nodes, grid import and tariffs; optional, absent in older saves and while there are none */
   utilities?: UtilitiesSave;
+  /** street names by owner (streets.ts, docs/roads.md "Street names"): [line:from:to, name]; optional, absent in older saves (they are named as asked for) */
+  streets?: StreetsSave;
 }
 
 /**
@@ -80,6 +83,7 @@ export function snapshotOf(w: World): Snapshot {
     history: historyOf(w).toJSON(),
     ...(w.seaGates.length ? { seaGates: w.seaGates.map((g) => ({ ...g })) } : {}),
     ...(w.start === 'frontier' ? { start: 'frontier' as const, ...(w.home ? { home: w.home } : {}), ...(w.charter ? { charter: { ...w.charter } } : {}) } : {}),
+    ...(w.streets.size ? { streets: w.streets.toSave() } : {}),
     ...(w.mothballed.size ? { mothballed: [...w.mothballed].map((k) => parseKey(k) as [number, number]) } : {}),
     ...(w.firesSave ? { fires: w.firesSave() } : {}),
     ...(w.adverts ? advertsField(w.adverts.save()) : {}),
@@ -144,6 +148,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
     const ch = snap.charter;
     if (ch && [ch.x, ch.y, ch.w, ch.h].every(Number.isInteger)) w.charter = { x: ch.x, y: ch.y, w: ch.w, h: ch.h };
   }
+  w.streets.load(snap.streets);
   for (const m of snap.mothballed ?? []) if (Array.isArray(m) && w.buildings.has(tileKey(m[0], m[1]))) w.mothballed.add(tileKey(m[0], m[1]));
   if (snap.fires && typeof snap.fires === 'object') w.firesLoaded = snap.fires;
   if (snap.adverts && typeof snap.adverts === 'object') w.advertsLoaded = snap.adverts;

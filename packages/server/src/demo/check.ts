@@ -21,7 +21,7 @@
  *    London without its Underground section, for the tick cost without the metro.
  */
 import {
-  KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, DEMOS, demoSections, showcaseProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
+  KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, isRoad, DEMOS, demoSections, showcaseProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
   isBridgeAux, bridgeStyle, BridgeStyle, basculeSeed, basculeLiftAt, isCrossing, isTunnel, isPlatform, underMask, boatTimetable, boatLifts, HARBOUR_OF,
   SCHOOL_SPECS, Study, LifeStage, STUDY_NAMES, EduLevel, AD_SIZES, AD_STRIDE, adHostAt, adSlotOpen, adWear, adAge, adSeed, type DemoId, type SeededDemo, type AdSize,
 } from '@msimcity/shared';
@@ -93,7 +93,23 @@ function seededOf(w: World, airports: Airports, sim: Simulation, harbours: Harbo
     focusAt: (x, y) => sim.focusAt(x, y),
     ads: adverts ? adsOf(w, adverts) : undefined,
     utilLinks: w.utilitiesLoaded?.links ?? [],
+    streets: streetsOf(w, chunks),
   };
+}
+/** Every street through the seeded chunks' road tiles, once each, with the name the server gives it (server/src/streets.ts). */
+function streetsOf(w: World, chunks: { cx: number; cy: number; tiles: Uint16Array }[]): NonNullable<SeededDemo['streets']> {
+  const seen = new Set<string>(), out: NonNullable<SeededDemo['streets']>[number][] = [];
+  for (const c of chunks) for (let i = 0; i < c.tiles.length; i++) {
+    if (!isRoad(c.tiles[i])) continue;
+    const x = c.cx * CHUNK + (i % CHUNK), y = c.cy * CHUNK + Math.floor(i / CHUNK);
+    for (const r of w.streets.streetsAt(x, y)) {
+      const k = `${r.ns}:${r.line}:${r.from}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ ...r, name: w.streets.nameOf(r) });
+    }
+  }
+  return out;
 }
 /** Open ad frames by size over every door and site, and the wear of every rented poster (docs/adverts.md). */
 function adsOf(w: World, adverts: Adverts): NonNullable<SeededDemo['ads']> {
