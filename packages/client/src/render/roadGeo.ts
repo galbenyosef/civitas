@@ -1163,9 +1163,14 @@ function lanePaint(t: RoadTile, g: Geo, grass: Color, decal: Decal) {
   const L2 = (along: number, across: number): P => (ns ? [ox + across, oz + along] : [ox + along, oz + across]);
   g.setCell(Cell.Grass);
   if (hash2(cl.line * 3 + 17, Math.floor(cl.pos / 9) * 5 + 3) < 0.4) {
-    const w = 0.02 + 0.02 * hash2(cl.line, 7), moss = grass.clone().multiplyScalar(0.82);
-    const ws = [w, w * (0.5 + hk(t, 90)), w * (0.6 + 0.9 * hk(t, 91)), w * (0.4 + hk(t, 92)), w];
-    for (let i = 0; i < 4; i++) { const a0 = -0.5 + i * 0.25, a1 = a0 + 0.25; decal([L2(a0, -ws[i]), L2(a1, -ws[i + 1]), L2(a1, ws[i + 1]), L2(a0, ws[i])], moss, Y_PATCH); }
+    // thin and broken: moss and weeds where no wheel runs, gone where it was scraped
+    const w = 0.008 + 0.01 * hash2(cl.line, 7), moss = grass.clone().multiplyScalar(0.62 + 0.12 * hk(t, 93));
+    const ws = [w, w * (0.3 + 1.2 * hk(t, 90)), w * (0.4 + hk(t, 91)), w * (0.2 + 1.3 * hk(t, 92)), w];
+    for (let i = 0; i < 4; i++) {
+      if (hk(t, 94 + i) < 0.22) continue;
+      const a0 = -0.5 + i * 0.25, a1 = a0 + 0.25;
+      decal([L2(a0, -ws[i]), L2(a1, -ws[i + 1]), L2(a1, ws[i + 1]), L2(a0, ws[i])], moss, Y_PATCH);
+    }
   }
   for (const sd of [-1, 1]) {
     if (t.m8 & (1 << (ns ? (sd > 0 ? 1 : 3) : (sd > 0 ? 2 : 0)))) continue; // a road joins on that side
