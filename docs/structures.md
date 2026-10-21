@@ -95,6 +95,14 @@ References: Skylines turns elevated roads into bridges [S1]; OpenTTD bridges spa
 > - **Flyover = one tile**, not three. The crossing tile holds the deck byte (layer 1 for the road on top); the tiles either side are drawn as ramps but stay ordinary road in the sim, since the world is flat (E7 is not built). Placement asks for plain straight road either side. On the flyover tile `degreeOf` is 2 (no box, no lights), box conflicts and body guards ignore the other level, and routers keep the deck and the road beneath as separate nodes (`tile key + 2^32` for the lower one) and only go straight across. Cars and walkers along the deck are drawn on it and its ramps (render/junctions.ts `roadY`).
 > - **Deferred**: road classes (E3) and their one-way flag; bigger roundabouts (5×5, two lanes); turning slip roads at a flyover (a true interchange); graded ramps with real height.
 
+> **Built (R4, 2026-10-21): junctions** (docs/roads.md "Junctions", `shared/src/junctions.ts`, `signals.ts`, `roadrules.ts`). What shipped against the sketch above:
+>
+> - **5×5 two-lane roundabout** for avenues: the Roundabout tool on an avenue's junction. A 3×3 island (aux 0xfc, planted as one) in a ring of sixteen road-class-6 tiles, one way round, two lanes, the inner for cars going past the second exit. An avenue's carriageways join a side at its second and third tiles. $1,500, Junction design and Avenues.
+> - **Mini-roundabout** (aux 0xfb on the junction tile, which stays road): a painted disc on a street crossroads or T; arrivals give way to the left. $150, Junction design.
+> - **Diamond interchange**, 9 × 6 as planned (not 6 × 10: the slips run a tile out from the carriageways, four tiles either side of the bridge): the street over both carriageways on a deck (road class 7 under it, as a flyover's two levels), an off and an on slip for each carriageway as one-way streets, giving way where they meet the street. One click on the motorway; ghost, cost and refusal reasons as the other junction tools. $2,500, Junction design and Motorways. The 8 × 8 **trumpet** for motorway meeting motorway is not built (motorways meeting are a plain junction, as in R3).
+> - **Junction groups**: an avenue crossing's two or four junction tiles work as one (one controller, two phases, or four with protected lefts where two avenues cross). No bytes: worked out from the tiles.
+> - **Turn bans, no entry and signal crossings** are a per-junction record (`World.roadRules`, snapshot field `roadRules`), not aux bytes: the layer has five free bytes left and they need a few bits per arm. $40 a sign, $250 a crossing, Traffic signals.
+
 ## 5. Landmarks and civic set pieces
 
 | Structure | Footprint | Kit | Visual and hook | Needs |

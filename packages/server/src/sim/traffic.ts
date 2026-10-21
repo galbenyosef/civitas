@@ -1240,6 +1240,9 @@ export class Traffic {
         const ob = cars[nc] ??= { x: 0, y: 0, hx: 0, hy: 0, len: 0 };
         ob.x = o.x; ob.y = o.y; ob.hx = oh[0]; ob.hy = oh[1]; ob.len = o.len;
         if (obbOverlap(now, ob, 0)) continue;
+        // a car waiting in a median box (R4) stands clear of both carriageways' lanes by a twentieth of a tile, less
+        // than the guard's margin on both bodies: it is tested body to body, or it would hold the reservation-side lane
+        this.gMed[nc] = !!o.med;
         nc++;
       }
     }
@@ -1269,7 +1272,7 @@ export class Traffic {
         if (!hit && nc) {
           const me = this.gMe;
           me.x = c[0]; me.y = c[1]; me.hx = ux; me.hy = uy; me.len = m.len;
-          for (let j = 0; j < nc; j++) if (obbOverlap(me, cars[j], GUARD_MARGIN)) { hit = true; break; }
+          for (let j = 0; j < nc; j++) if (obbOverlap(me, cars[j], this.gMed[j] ? 0 : GUARD_MARGIN)) { hit = true; break; }
         }
       }
       if (hit) return (allowed * (k - 1)) / 3;
@@ -1293,6 +1296,8 @@ export class Traffic {
     return false;
   }
   private gCars: Obb[] = [];
+  /** gatherCars: whether each gathered car is waiting in a median box (tested without the margin) */
+  private gMed: boolean[] = [];
   /**
    * A two-wheeler and a car in the same lane, or one in the lane the other drives into next, both going straight: the
    * bike rides past at the kerb edge. While either is turning, their paths cross and the body guard holds them as any two.
@@ -1356,7 +1361,7 @@ export class Traffic {
         // only what is ahead: a car behind me keeps its own distance (and a turning car's rear swings toward it)
         if (now && (o.x - m.x) * now.hx + (o.y - m.y) * now.hy <= 0) continue;
         const ob = { x: o.x, y: o.y, hx: h[0], hy: h[1], len: o.len };
-        if (!obbOverlap(me, ob, GUARD_MARGIN)) continue;
+        if (!obbOverlap(me, ob, o.med ? 0 : GUARD_MARGIN)) continue;
         if (now && obbOverlap(now, ob, 0)) continue; // already touching: moving on is how it ends
         return true;
       }

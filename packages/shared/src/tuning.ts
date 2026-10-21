@@ -91,7 +91,7 @@ export const TRAFFIC_TUNING = {
    * right; 2 the same at four-phase groups only (protected lefts), elsewhere straight-on traffic may use either; 0 R3's
    * choice (the lane for the next turn within six tiles, straight on in either).
    */
-  turnLanes: 1,
+  turnLanes: 2,
   /** A mini-roundabout: an arriving car gives way to a moving car within this many tiles of the box on the arm to its left (0: first come, first served). */
   miniYield: 0.6,
   /**

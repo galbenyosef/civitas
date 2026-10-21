@@ -1,4 +1,5 @@
 import {
+  planMiniRoundabout, planBigRoundabout, planInterchange, junctionArmAt, pelicanProblem, withArmState, isDividedAux,
   DEFAULT_TAX, Terrain, TICKS_PER_DAY, TICKS_PER_HOUR, Zone, KIND_ID, KIND_NAMES, chunkKey, isBuildable, isRoad, packTile, terrainOf,
   zoneOf, levelOf, familyOf, subFor, workOf, isMultiTile, planStructure, planRunway, planRoundabout, planFlyover, trackDragPath, BUS_STOP_KIND,
   DEMO_TOWN, DEMO_OWNER, DEMO_BY_ID, demoSections, placedFromDoor, type DemoId, type DemoXY, type DemoRect, type DemoSection, type PlaceEnv,
@@ -74,6 +75,9 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
   owner.name = demo.name;
   owner.money = DEV_FUNDS; owner.devUnlimited = true; // a sandbox: the town never runs out of money
   const env = placeEnv(w);
+  // the R4 road-rule tools read roads and aux bytes; the roundabout tool builds the 5×5 on an avenue's junction (as net.ts)
+  const ruleEnv = { road: (x: number, y: number) => isRoad(w.getTile(x, y)), aux: (x: number, y: number) => w.auxAt(x, y) };
+  const avenueAt = (x: number, y: number) => { const g = w.groupAt(x, y); if (!g) return false; for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) if (isDividedAux(w.auxAt(tx, ty))) return true; return false; };
   /** a deep plot or other merged lot of the districts (sim/blocks.ts settleInteriors) under a cleared or rezoned tile breaks up first */
   const unmerge = (x: number, y: number) => { const m = w.auxAt(x, y) ? w.structureAt(x, y) : null; if (m && (isMergedKind(m.kind) || m.kind === GARDEN_KIND)) w.removeStructure(m); };
   for (const s of sections) {
@@ -179,9 +183,23 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
         w.setAux(x, y, tl[i + 2]);
       }
     }
-    for (const j of s.junctions ?? []) { // roundabouts and flyovers, as the tools build them (shared/src/junctions.ts)
+    for (const j of s.junctions ?? []) { // roundabouts, flyovers and the R4 junction tools, as the tools build them (shared/src/junctions.ts)
       const [x, y] = j.at;
-      const plan = j.tool === 'roundabout' ? planRoundabout(x, y, env) : planFlyover(x, y, env, j.deck ? j.deck === 'ew' : undefined);
+      if (j.tool === 'turnrule') { // a sign on the arm tile at: the next state of the cycle the tool clicks through, set at once
+        const r = junctionArmAt(ruleEnv, x, y);
+        if (typeof r === 'string') { problems.push(`${s.id}: ${j.id} at ${at(j.at)}: ${r}`); continue; }
+        w.setRoadRule(r.g.x, r.g.y, withArmState(w.roadRuleAt(r.g.x, r.g.y), r.arm, j.rule ?? 'noLeft'));
+        continue;
+      }
+      if (j.tool === 'pelican') {
+        const why = pelicanProblem(ruleEnv, x, y);
+        if (why) { problems.push(`${s.id}: ${j.id} at ${at(j.at)}: ${why}`); continue; }
+        w.setRoadRule(x, y, { ...(w.roadRuleAt(x, y) ?? {}), pelican: 1 });
+        continue;
+      }
+      const big = j.tool === 'roundabout' && avenueAt(x, y);
+      const plan = j.tool === 'miniroundabout' ? planMiniRoundabout(x, y, env) : j.tool === 'interchange' ? planInterchange(x, y, env) : big ? planBigRoundabout(x, y, env)
+        : j.tool === 'roundabout' ? planRoundabout(x, y, env) : planFlyover(x, y, env, j.deck ? j.deck === 'ew' : undefined);
       if (!plan.ok) { problems.push(`${s.id}: ${j.id} at ${at(j.at)}: ${plan.reason}`); continue; }
       w.placeJunction(plan.tiles!);
     }
