@@ -1,6 +1,6 @@
 import { InstancedMesh, Group, Matrix4, Quaternion, Vector3, Color, SphereGeometry, MeshBasicMaterial, MeshLambertMaterial, DynamicDrawUsage, AdditiveBlending, Shape, ShapeGeometry, type BufferGeometry } from 'three';
 import {
-  CHUNK_SIZE, isRoad, isJunctionAux, hash2, signalTiming, groupPhaseOf, signalArms, signalledArms, groupArms, junctionGroup, inGroup, linkedDegree,
+  CHUNK_SIZE, isRoad, isJunctionAux, hash2, signalTiming, groupTiming, groupPhaseOf, signalArms, signalledArms, groupArms, junctionGroup, inGroup, linkedDegree,
   isClassAux, isDividedAux, isMotorwayAux, isRingClassAux, isDeckClassAux, isPedestrianAux, isFlyoverAux, oneWayDir, carStepOk, slipJunction,
   implicitPelican, pelicanPhase, TRAFFIC_TUNING, ARM_STEPS, type SignalTiming, type SignalPhase, type JunctionGroup, type RoadRule, type PelicanLamp,
 } from '@msimcity/shared';
@@ -275,7 +275,7 @@ export class TrafficLights {
         // a junction group (R4): heads on every approach into it from outside, all on the anchor's timing
         const j = junctionLights(road, aux, x, z);
         if (!j || !j.lit) continue;
-        const g = j.g, timing = signalTiming(g.x, g.y), phases = j.phases;
+        const g = j.g, timing = groupTiming(g.x, g.y), phases = j.phases;
         for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) for (let d = 0; d < 4; d++) {
           const [hx, hz] = CD[d], nx = tx - hx, nz = ty - hz;
           if (inGroup(g, nx, nz) || !car(nx, nz) || !carStepOk(ca(nx, nz), ca(tx, ty), d)) continue;

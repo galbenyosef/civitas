@@ -283,9 +283,10 @@ export const TRAFFIC_TUNING = {
   /**
    * 1: green waves. Every light has the same period (signalPeriod, no ±20%) and an offset of −(x + y) / waveSpeed
    * ticks, so a car going east or south at waveSpeed meets each light in the same phase as the last (shared with the
-   * client, which draws the same lamps). Off: 1.2 speed points worse on the Commons's short blocks.
+   * client, which draws the same lamps). Everywhere (1): 1.2 speed points worse on the Commons's short blocks. 2 (R4, the default): green waves
+   * at junction groups only (the avenues' crossings, shared/src/signals.ts groupTiming), every other light its own.
    */
-  greenWave: 0,
+  greenWave: 2,
   /** the speed a green wave is timed for, tiles per tick */
   waveSpeed: 0.3,
 };

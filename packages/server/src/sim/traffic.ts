@@ -5,7 +5,7 @@ import {
   CHUNK_SIZE, chunkOf, localIndex, hash2,
   isClassAux, edgeLanes, classDef, carStepOk, isMotorwayAux, isPedestrianAux, oneWayDir, auxDir, isDividedAux,
   groupPhaseOf, groupArms, inGroup, isRingClassAux, isDeckClassAux, deckAxisStep, isMiniAux, CDIRS, pelicanPhase, pelicanReady, implicitPelican,
-  slipJunction, type JunctionGroup,
+  slipJunction, groupTiming, type JunctionGroup,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
@@ -842,7 +842,7 @@ export class Traffic {
       j = j ?? { signal, ver: 0, deg, pid, ...signalTiming(x, y) };
       j.signal = signal; j.ver = this.w.techVersion; j.deg = deg; j.pid = pid; j.main = undefined;
       j.g = g ?? undefined; j.phases = g && TT.groupSignals ? (TT.groupSignals === 2 ? 2 : g.phases) : 2; j.ctl = undefined;
-      if (g && TT.groupSignals) { const t = signalTiming(g.x, g.y); j.offset = t.offset; j.period = t.period; j.act = undefined; }
+      if (g && TT.groupSignals) { const t = groupTiming(g.x, g.y); j.offset = t.offset; j.period = t.period; j.act = undefined; }
       else if (was) { const t = signalTiming(x, y); j.offset = t.offset; j.period = t.period; j.act = undefined; }
       rc.junc[i] = j;
     }

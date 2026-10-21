@@ -12,10 +12,20 @@ import { isDividedAux, isDeckClassAux, isPedestrianAux, carStepOk, isClassAux } 
 export interface SignalTiming { offset: number; period: number }
 export function signalTiming(x: number, y: number): SignalTiming {
   const P = TRAFFIC_TUNING.signalPeriod;
-  // green waves (TRAFFIC_TUNING.greenWave): one period, offsets along the diagonal timed for waveSpeed
-  if (TRAFFIC_TUNING.greenWave) { const o = Math.round(-(x + y) / TRAFFIC_TUNING.waveSpeed); return { offset: ((o % (2 * P)) + 2 * P) % (2 * P), period: P }; }
+  // green waves (TRAFFIC_TUNING.greenWave 1): one period, offsets along the diagonal timed for waveSpeed
+  if (TRAFFIC_TUNING.greenWave === 1) return waveTiming(x, y);
   return { offset: Math.floor(hash2(x, y) * 2 * P), period: Math.round(P * (0.8 + 0.4 * hash2(y, x))) };
 }
+/** A green wave's timing at (x, y): every light the same period, offset by -(x + y) / waveSpeed ticks. */
+function waveTiming(x: number, y: number): SignalTiming {
+  const P = TRAFFIC_TUNING.signalPeriod, o = Math.round(-(x + y) / TRAFFIC_TUNING.waveSpeed);
+  return { offset: ((o % (2 * P)) + 2 * P) % (2 * P), period: P };
+}
+/**
+ * The timing of a junction group (R4, junctionGroup) at anchor (gx, gy): its anchor's, as signalTiming; with greenWave 2
+ * a green wave at the groups only (the avenues' junctions), every single junction keeping its own.
+ */
+export const groupTiming = (gx: number, gy: number): SignalTiming => (TRAFFIC_TUNING.greenWave === 2 ? waveTiming(gx, gy) : signalTiming(gx, gy));
 export interface SignalPhase {
   /** the axis that has right of way this phase */
   green: 'ns' | 'ew';

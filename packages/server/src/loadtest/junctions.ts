@@ -21,7 +21,7 @@
  */
 import {
   TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_WIDTH, DRIVE_SPEED, Terrain, packTile, planRoundabout, planFlyover, isFlyoverAux,
-  planMiniRoundabout, planBigRoundabout, planInterchange, RoadCls, roadDragPath, junctionGroup, groupPhaseOf, signalTiming, isRoad, isClassAux,
+  planMiniRoundabout, planBigRoundabout, planInterchange, RoadCls, roadDragPath, junctionGroup, groupPhaseOf, groupTiming, isRoad, isClassAux,
   isRingClassAux, isDeckClassAux, carStepOk, inGroup, withArmState, turnAllowed, pelicanPhase, isMiniAux, implicitPelican, ruleLines,
   type JunctionGroup, type ServerMsg, type ClientMsg,
 } from '@msimcity/shared';
@@ -282,7 +282,7 @@ if (!argv.includes('--bench')) {
     for (let tick = 0; tick < 400; tick++) {
       w.tick = tick;
       for (const g of [g4, g2]) {
-        const want = groupPhaseOf(signalTiming(g.x, g.y), g.phases, tick);
+        const want = groupPhaseOf(groupTiming(g.x, g.y), g.phases, tick);
         for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) {
           const ph = t.signalPhase(tx, ty);
           total++;
