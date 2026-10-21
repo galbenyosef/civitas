@@ -10,12 +10,14 @@ export interface PerfSources {
   /** agents currently drawn (citizens.count) */
   agentsDrawn: () => number;
   chunksLoaded: () => number;
+  /** the audio engine's cost, for one line of the readout (client/src/audio) */
+  audio?: () => { tickMs: number; maxMs: number; voices: number; started: boolean; muted: boolean };
 }
 
 /**
  * Performance readout: how the server's 5 Hz tick is coping against its budget, what this client receives
  * (agents streamed, bytes) and what it draws (FPS, frame time, agents, chunks, draw calls).
- * A plain DOM panel; toggled by the "perf" chip in the top bar or the M key, and forced on in test cities.
+ * A plain DOM panel; toggled by the "perf" chip in the top bar or Shift+M (M alone is the sound mute), and forced on in test cities.
  * Server figures come from the optional tickAvg / tickP95 / tickMax fields of the stats message (last minute of
  * ticks, simulation plus network flush); everything else is measured here once a second.
  */
@@ -48,7 +50,7 @@ export class PerfHud {
     });
     chip?.addEventListener('click', () => this.set(!this.on));
     window.addEventListener('keydown', (e) => {
-      if (e.code !== 'KeyM' || e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement)?.tagName === 'INPUT') return;
+      if (e.code !== 'KeyM' || !e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || (e.target as HTMLElement)?.tagName === 'INPUT') return;
       this.set(!this.on);
     });
     this.set(opts.forceOn ?? false);
@@ -88,7 +90,7 @@ export class PerfHud {
   private render(r: { fps: number; ms: number; worst: number; bps: number; aps: number; mps: number }) {
     const cls = (v: number) => (v > BUDGET_MS ? 'bad' : v > AMBER_MS ? 'warn' : '');
     const num = (v: number) => (v >= 100 ? v.toFixed(0) : v.toFixed(1));
-    const t = this.tick;
+    const t = this.tick, a = this.src.audio?.();
     const server = t
       ? `<span class="${cls(t.avg)}">avg <b>${num(t.avg)}</b></span> · <span class="${cls(t.p95)}">p95 <b>${num(t.p95)}</b></span> · <span class="${cls(t.max)}">max <b>${num(t.max)}</b></span> ms <i>of ${BUDGET_MS}</i>`
       : `<i>${this.serverSeen ? '' : 'waiting for the server…'}</i>`;
@@ -98,6 +100,7 @@ export class PerfHud {
       `<div class="prow"><span>server tick, last minute</span><span>${server}</span></div>` +
       `<div class="prow"><span>stream</span><span><b>${Math.round(r.aps).toLocaleString()}</b> agents/s · <b>${kb >= 100 ? kb.toFixed(0) : kb.toFixed(1)}</b> KB/s · ${Math.round(r.mps)} msg/s</span></div>` +
       `<div class="prow"><span>client</span><span class="${fpsCls}"><b>${r.fps.toFixed(0)}</b> fps · <b>${r.ms.toFixed(1)}</b> ms/frame <i>(worst ${r.worst.toFixed(0)})</i></span></div>` +
-      `<div class="prow"><span>drawn</span><span><b>${this.src.agentsDrawn().toLocaleString()}</b> agents · <b>${this.src.chunksLoaded()}</b> chunks · <b>${this.calls.toLocaleString()}</b> draw calls · ${(this.triangles / 1000).toFixed(0)}k tris</span></div>`;
+      `<div class="prow"><span>drawn</span><span><b>${this.src.agentsDrawn().toLocaleString()}</b> agents · <b>${this.src.chunksLoaded()}</b> chunks · <b>${this.calls.toLocaleString()}</b> draw calls · ${(this.triangles / 1000).toFixed(0)}k tris</span></div>` +
+      (a ? `<div class="prow"><span>sound</span><span>${a.started ? (a.muted ? 'muted' : `<b>${a.tickMs.toFixed(2)}</b> ms/tick <i>(worst ${a.maxMs.toFixed(1)})</i> · <b>${a.voices}</b> voices`) : 'waiting for a click'}</span></div>` : '');
   }
 }

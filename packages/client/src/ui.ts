@@ -388,7 +388,10 @@ export class UI {
   }
   setConn(ok: boolean) { const c = $('conn'); c.textContent = ok ? 'connected' : 'reconnecting…'; c.className = 'stat ' + (ok ? 'ok' : 'bad'); }
   setStatus(text: string) { $('status').textContent = text; }
+  /** an interface sound to make (client/src/audio): the refusal that goes with an error toast */
+  onSound?: (id: 'click' | 'place' | 'refuse' | 'undo') => void;
   toast(kind: 'info' | 'error', msg: string) {
+    if (kind === 'error') this.onSound?.('refuse');
     const el = document.createElement('div');
     el.className = `toast ${kind}`; el.textContent = msg;
     $('toasts').appendChild(el);
