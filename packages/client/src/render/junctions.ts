@@ -1,8 +1,5 @@
 import { DoubleSide, Group, Mesh, MeshLambertMaterial, BufferGeometry, Float32BufferAttribute, Shape, ExtrudeGeometry, IcosahedronGeometry, ConeGeometry, CylinderGeometry, BoxGeometry, Color } from 'three';
-import {
-  CHUNK_SIZE, hash2, isRoad, hasFeature, isIslandAux, isFlyoverAux, deckEW, RING_POS, FLYOVER_DECK_H, FLYOVER_EW, FLYOVER_NS,
-  planRoundabout, planFlyover, type JunctionEnv, type PlaceVerdict,
-} from '@msimcity/shared';
+import { CHUNK_SIZE, hash2, isRoad, isIslandAux, isFlyoverAux, deckEW, RING_POS, FLYOVER_DECK_H } from '@msimcity/shared';
 import type { ClientChunk, ClientWorld } from '../world';
 import { Kit } from './kit';
 import { RING_ISLAND } from './atlas';
@@ -140,32 +137,6 @@ export class JunctionView {
     if (s === 0) return H;
     const u = ew ? x - tx : z - tz; // across the ramp tile, 0..1 along +x / +z
     return H * ease(s < 0 ? u : 1 - u);
-  }
-
-  /** The planner's verdict for the junction tools at a hovered tile, worked out on the loaded chunks. */
-  verdict(tool: 'roundabout' | 'flyover', x: number, y: number) {
-    const me = this.world.myPlayer, pub = !!me && hasFeature(me.tech, 'publicRoads');
-    const env: JunctionEnv = {
-      tile: (tx, ty) => this.world.getTile(tx, ty),
-      aux: (tx, ty) => this.world.auxAt(tx, ty),
-      land: (tx, ty) => { const p = this.world.parcelAt(tx, ty); return p ? (this.world.mayEdit(p.owner) ? null : 'Not your land') : pub ? null : 'Buy this land first (or research Public works)'; },
-    };
-    return tool === 'roundabout' ? planRoundabout(x, y, env) : planFlyover(x, y, env);
-  }
-  /** Status-line text for a junction tool over (x, y). */
-  status(tool: 'roundabout' | 'flyover', x: number, y: number): string {
-    const v = this.verdict(tool, x, y);
-    if (!v.ok) return ` · ${v.reason}`;
-    if (tool === 'flyover' && v.cost === 0) return ' · click to put the other road on the deck';
-    return ` · click to build a ${tool}, $${v.cost}`;
-  }
-  /** The hover outline for a junction tool: the 3×3 of a roundabout, a flyover's deck and ramps. */
-  hoverArea(tool: 'roundabout' | 'flyover', h: [number, number]): { x: number; y: number; w: number; h: number; verdict: PlaceVerdict } {
-    const v = this.verdict(tool, h[0], h[1]);
-    const verdict = (v.ok ? { ok: true } : { ok: false, reason: v.reason ?? '' }) as PlaceVerdict;
-    if (tool === 'roundabout') return { x: h[0] - 1, y: h[1] - 1, w: 3, h: 3, verdict };
-    const ew = v.tiles ? v.tiles[2] === FLYOVER_EW : this.world.auxAt(h[0], h[1]) !== FLYOVER_NS;
-    return ew ? { x: h[0] - 1, y: h[1], w: 3, h: 1, verdict } : { x: h[0], y: h[1] - 1, w: 1, h: 3, verdict };
   }
 
   // ---- models ----------------------------------------------------------------------------------------

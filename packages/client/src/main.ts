@@ -1,3 +1,4 @@
+import { JunctionTools, isJunctionTool } from './junctiontools';
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
@@ -202,6 +203,7 @@ scene.add(citizens.under);
 setPlatformCrowd((x0, y0, x1, y1) => citizens.platformCrowd(x0, y0, x1, y1));
 citizens.platformAlongX = (x, y) => underMask(world.underAt(x, y)) === 10; // a platform tile's axis (docs/underground.md section 1)
 const junctions = new JunctionView(world); scene.add(junctions.group); // roundabout islands, flyover decks and ramps
+const junctionTools = new JunctionTools(world); // the junction tools' ghost, cost and reasons (R4)
 // utilities (utilities.ts, docs/utilities.md): reach from the tiles, the hourly node states, blackouts, the power overlay, pylons
 const power = new PowerClient(world, (k) => views.get(k)); scene.add(power.group);
 const roadTool = new RoadTool(world, DEV_TOOLS); scene.add(roadTool.group); // the road drag's ghost, cost chip, spacing guide and question (roadtool.ts)
@@ -1068,7 +1070,7 @@ function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: n
     }
     return p ? { x: p.ax, y: p.ay, w: p.w, h: p.h, verdict: v, placed: p } : { x: h[0], y: h[1], w: 1, h: 1, verdict: v };
   }
-  if (input.tool === 'roundabout' || input.tool === 'flyover') return junctions.hoverArea(input.tool, h);
+  if (isJunctionTool(input.tool)) return junctionTools.hoverArea(input.tool, h);
   if (input.tool === 'runway') {
     const v = runwayVerdict(input.runwayLine ?? [h]);
     const r = v.rect;
@@ -1116,7 +1118,7 @@ function updateStatus() {
     if (input.tool === 'pylons' || input.tool === 'cable') s += power.status(input.tool, input.railPath);
     else if (isRoad(t) && (power.overlayOn || structureTool(input.tool))) s += power.roadStatus(x, y);
     if (input.tool === 'road') s += input.roadPath ? roadTool.status(input.roadPath, input.roadShape) : terr === Terrain.Water && !isRoad(t) ? ' · drag a road straight across from a road on the bank to bridge the water' : roadTool.status(null, 'line');
-    if (input.tool === 'roundabout' || input.tool === 'flyover') s += junctions.status(input.tool, x, y);
+    if (isJunctionTool(input.tool)) s += junctionTools.status(input.tool, x, y);
     if (zoneNoRoad(x, y)) s += ` · ${NO_ROAD_LOT}`;
     if (input.tool === 'runway') {
       const rv = runwayVerdict(input.runwayLine ?? [h]);

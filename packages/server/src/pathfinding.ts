@@ -1,4 +1,4 @@
-import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, STEP_RULE_AUX, isBridgeAux, bridgeNS, CHUNK_SIZE, isMotorwayAux, isPedestrianAux, carStepOk, MOTORWAY_KIND } from '@msimcity/shared';
+import { isRoad, chunkOf, localIndex, junctionStepOk, routeLayer, stepRuleAux, isBridgeAux, bridgeNS, CHUNK_SIZE, isMotorwayAux, isPedestrianAux, carStepOk, MOTORWAY_KIND, isDeckClassAux, deckAxisStep, turnAllowed } from '@msimcity/shared';
 import { DIRS, tkey, type Chunk, type World } from './world';
 
 /** `a`: the tile's aux byte (roundabouts and flyovers restrict the steps out of it, shared/src/junctions.ts) */
@@ -17,12 +17,14 @@ function peek(w: World, x: number, y: number): number | undefined {
 }
 /** May a search go on from node n to its neighbour (nx, ny): round a ring only forwards, over a flyover only straight, off a bridge deck only along it. */
 function stepOk(w: World, n: Node, nx: number, ny: number): boolean {
-  if (n.a < STEP_RULE_AUX) return true;
+  if (!stepRuleAux(n.a)) return true;
   return junctionStepOk((x, y) => w.auxAt(x, y), n.x, n.y, nx, ny, n.parent ? n.x - n.parent.x : 0, n.parent ? n.y - n.parent.y : 0);
 }
 
 /** Would the step (dx, ·) onto a tile with aux byte a come onto a bridge deck from the side? Decks are entered only at their ends. */
 const sideways = (a: number, dx: number) => isBridgeAux(a) && bridgeNS(a) === (dx !== 0);
+/** A motorway nobody walks along (step dx onto aux a): any motorway tile but along an interchange's street deck (R4). */
+const walkBarred = (a: number, dx: number) => isMotorwayAux(a) && !(isDeckClassAux(a) && deckAxisStep(a, dx));
 
 export interface PathResult { path: number[]; gx: number; gy: number }
 
@@ -57,7 +59,7 @@ export function findPath(
       const s = S.slot(w, chunkOf(nx), chunkOf(ny));
       if (s < 0) continue;
       const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
-      if (isRoad(t) && !sideways(a, dx) && !isMotorwayAux(a)) {
+      if (isRoad(t) && !sideways(a, dx) && !walkBarred(a, dx)) {
         visited[s * NODES + routeLayer(a, dx) * CELLS + li] = st;
         queue.push({ x: nx, y: ny, parent: root, depth: 1, a });
       }
@@ -80,7 +82,7 @@ export function findPath(
       const key = s * NODES + routeLayer(a, dx) * CELLS + li;
       if (visited[key] === st || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
       if (isGoal(nx, ny)) return { path: unwind({ x: nx, y: ny, parent: n, depth: n.depth + 1, a }), gx: nx, gy: ny };
-      if (!isRoad(t) || isMotorwayAux(a)) continue; // nobody walks along a motorway
+      if (!isRoad(t) || walkBarred(a, dx)) continue; // nobody walks along a motorway
       visited[key] = st;
       queue.push({ x: nx, y: ny, parent: n, depth: n.depth + 1, a });
     }
@@ -121,7 +123,7 @@ export function findPaths(
       const s = S.slot(w, chunkOf(nx), chunkOf(ny));
       if (s < 0) continue;
       const li = localIndex(nx, ny), t = S.chunks[s].tiles[li], a = S.chunks[s].aux[li];
-      if (isRoad(t) && !sideways(a, dx) && !isMotorwayAux(a)) {
+      if (isRoad(t) && !sideways(a, dx) && !walkBarred(a, dx)) {
         visited[s * NODES + routeLayer(a, dx) * CELLS + li] = st;
         queue.push({ x: nx, y: ny, parent: root, depth: 1, a });
       }
@@ -149,7 +151,7 @@ export function findPaths(
       const key = s * NODES + routeLayer(a, dx) * CELLS + li;
       if (visited[key] === st || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
       if (isGoal(nx, ny)) { found(nx, ny, n, a); continue; }
-      if (!isRoad(t) || isMotorwayAux(a)) continue;
+      if (!isRoad(t) || walkBarred(a, dx)) continue;
       visited[key] = st;
       queue.push({ x: nx, y: ny, parent: n, depth: n.depth + 1, a });
     }
@@ -193,7 +195,7 @@ export function findBest(
   else for (const [dx, dy] of DIRS) {
     const nx = sx + dx, ny = sy + dy;
     const t = peek(w, nx, ny);
-    if (t !== undefined && isRoad(t) && !sideways(peekedAux, dx) && !isMotorwayAux(peekedAux)) { visited.add(tkey(nx, ny) + routeLayer(peekedAux, dx) * LAYER); queue.push({ x: nx, y: ny, parent: root, depth: 1, a: peekedAux }); }
+    if (t !== undefined && isRoad(t) && !sideways(peekedAux, dx) && !walkBarred(peekedAux, dx)) { visited.add(tkey(nx, ny) + routeLayer(peekedAux, dx) * LAYER); queue.push({ x: nx, y: ny, parent: root, depth: 1, a: peekedAux }); }
   }
   const early = maxScore !== Infinity || maxTotal !== Infinity;
   let expanded = 0;
@@ -208,7 +210,7 @@ export function findBest(
       const key = tkey(nx, ny) + routeLayer(a, dx) * LAYER;
       if (visited.has(key) || !stepOk(w, n, nx, ny) || sideways(a, dx)) continue;
       if (t === undefined || !isRoad(t)) { if (!goals.has(key)) { goals.add(key); consider(nx, ny, n); } continue; }
-      if (isMotorwayAux(a)) continue;
+      if (walkBarred(a, dx)) continue;
       visited.add(key);
       queue.push({ x: nx, y: ny, parent: n, depth: n.depth + 1, a });
     }
@@ -261,7 +263,7 @@ export function pathStillValid(w: World, path: number[]): boolean {
  */
 export function findRoute(
   w: World, sx: number, sy: number, gx: number, gy: number,
-  cost: (x: number, y: number) => number, turnCost = 0.4, maxNodes = 4000, startDir = -1, maxCost = Infinity, service = false,
+  cost: (x: number, y: number) => number, turnCost = 0.4, maxNodes = 4000, startDir = -1, maxCost = Infinity, service = false, emergency = false,
 ): { path: number[]; cost: number } | null {
   if (sx === gx && sy === gy) return { path: [sx, sy], cost: 0 };
   const goalRoad = (() => { const t = w.peekTile(gx, gy); return t !== undefined && isRoad(t); })();
@@ -322,6 +324,9 @@ export function findRoute(
     seen[k] = st; gScore[k] = c; parent[k] = start; dirIn[k] = d; push(k, c + h(nx, ny));
   }
   const auxFn = (x: number, y: number) => w.auxAt(x, y);
+  // turn bans and no entry (R4, World.ruleTiles): checked where a route leaves a ruled junction, from the way it came in
+  const RT = w.ruleTiles.size ? w.ruleTiles : null;
+  const tileOf = (node: number) => { const c = S.chunks[(node / NODES) | 0], i = node & (CELLS - 1); return tkey(c.cx * CHUNK_SIZE + (i % CHUNK_SIZE), c.cy * CHUNK_SIZE + ((i / CHUNK_SIZE) | 0)); };
   let expanded = 0;
   while (hn && expanded < maxNodes) {
     // f never falls from one node taken to the next, and a route found from a node costs at least its f
@@ -335,9 +340,18 @@ export function findRoute(
     const here = ch.aux[li];
     // the neighbours' chunk: this one, or the last one looked up
     let ls = s, lcx = ch.cx, lcy = ch.cy;
+    const rk = RT ? RT.get(tkey(x, y)) : undefined;
+    let entry = -1;
+    if (rk !== undefined) {
+      // the heading it came into the junction by: back along its parents while they are the junction's tiles
+      let cur = k;
+      for (let p = parent[cur]; p >= 0 && RT!.get(tileOf(p)) === rk; p = parent[cur]) cur = p;
+      entry = dirIn[cur];
+    }
     for (let d = 0; d < 4; d++) {
       const nx = x + DIRS[d][0], ny = y + DIRS[d][1];
-      if (here >= STEP_RULE_AUX && !junctionStepOk(auxFn, x, y, nx, ny, din >= 0 ? DIRS[din][0] : 0, din >= 0 ? DIRS[din][1] : 0)) continue;
+      if (stepRuleAux(here) && !junctionStepOk(auxFn, x, y, nx, ny, din >= 0 ? DIRS[din][0] : 0, din >= 0 ? DIRS[din][1] : 0)) continue;
+      if (rk !== undefined && entry >= 0 && RT!.get(tkey(nx, ny)) !== rk && !turnAllowed(w.roadRules.get(rk), entry, d, emergency)) continue;
       const ncx = chunkOf(nx), ncy = chunkOf(ny);
       if (ncx !== lcx || ncy !== lcy) { ls = S.slot(w, ncx, ncy); lcx = ncx; lcy = ncy; }
       if (nx === gx && ny === gy) {
@@ -351,7 +365,9 @@ export function findRoute(
       }
       if (ls < 0) continue; // not loaded: no road
       const li2 = localIndex(nx, ny), nch = S.chunks[ls], t = nch.tiles[li2], a = nch.aux[li2];
-      const nk = ls * NODES + routeLayer(a, DIRS[d][0]) * CELLS + li2;
+      // a ruled junction's tiles (R4) are two nodes, reached along x and along y, so a ban on one arm's turn does not
+      // shut the tile to a route that comes in by another
+      const nk = ls * NODES + (routeLayer(a, DIRS[d][0]) || (RT && DIRS[d][0] === 0 && RT.has(tkey(nx, ny)) ? 1 : 0)) * CELLS + li2;
       if (closed[nk] === st) continue;
       if (!isRoad(t) || sideways(a, DIRS[d][0])) continue;
       if (((here > 0 && here < 0x40) || (a > 0 && a < 0x40)) && !carStepOk(here, a, d, service)) continue;

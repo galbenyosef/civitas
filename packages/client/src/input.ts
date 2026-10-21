@@ -1,3 +1,4 @@
+import { isJunctionTool } from './junctiontools';
 import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, KIND_ID, isMultiTile, trackDragPath, roadDragPath, snapRoadEnd, type KindToolId, type RoadShape } from '@msimcity/shared';
 import type { CameraRig } from './camera';
 import { Vector3 } from 'three';
@@ -8,7 +9,7 @@ const CLICK_SLOP = 5;
 /** Safari's trackpad pinch/rotate (GestureEvent is not in lib.dom) */
 interface GestureLike extends UIEvent { scale: number; rotation: number; clientX: number; clientY: number }
 
-export type ToolId = 'select' | 'buy' | 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'pylons' | 'cable' | KindToolId;
+export type ToolId = 'select' | 'buy' | 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'pylons' | 'cable' | KindToolId;
 /** `?dev` in the URL shows draft kinds (catalogue `draft: true`) in the tool bar and on their keys. */
 export const DEV_TOOLS = typeof location !== 'undefined' && new URLSearchParams(location.search).has('dev');
 /** Kinds whose tool shows: every catalogue kind with a tool, drafts only with ?dev. */
@@ -271,7 +272,7 @@ export class Input {
       this.cb.onHover(tile);
     }
     if (!tile) return;
-    if (this.painting && !structureTool(this.tool) && this.tool !== 'roundabout' && this.tool !== 'flyover') this.paint(tile); // junction tools: one click, one junction
+    if (this.painting && !structureTool(this.tool) && !isJunctionTool(this.tool)) this.paint(tile); // junction tools: one click, one junction (or one sign)
     if (this.buyStart) {
       const [sx, sy] = this.buyStart;
       let x0 = Math.min(sx, tile[0]), y0 = Math.min(sy, tile[1]);

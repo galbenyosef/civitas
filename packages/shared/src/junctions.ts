@@ -2,7 +2,7 @@ import { isRoad, zoneOf, levelOf, underConstruction, terrainOf, Terrain } from '
 import { Zone } from './buildings/codes';
 import { isBridgeAux, bridgeStepOk, BRIDGE_AUX } from './bridges';
 import { isClassAux, auxClass, auxDir, auxJunction, isDividedAux, isMotorwayAux, isPedestrianAux, isDeckClassAux, deckAxisStep, isRingClassAux, RoadCls, classByte, CDIRS, oneWayDir } from './roadclass';
-import { junctionGroup, linkedDegree } from './signals';
+import { junctionGroup, linkedDegree, roadsLinked, implicitPelican, type JunctionGroup } from './signals';
 
 /**
  * Junction types beyond the give-way box and traffic lights (docs/structures.md capability E6, docs/traffic-tuning.md
@@ -384,4 +384,42 @@ export function planInterchange(x: number, y: number, env: JunctionEnv): Junctio
   const xs = all.filter((_, i) => i % 2 === 0), ys = all.filter((_, i) => i % 2 === 1);
   const bx = Math.min(...xs), by = Math.min(...ys);
   return { ok: true, tiles, cost: INTERCHANGE_COST, layout: { tiles, deck, ramps, x: bx, y: by, w: Math.max(...xs) - bx + 1, h: Math.max(...ys) - by + 1 } };
+}
+
+// ---- turn rules and signal crossings: where the tools may go (R4, shared/src/roadrules.ts) ----------------------
+
+/** What the R4 road-rule tools read: road tiles and aux bytes. */
+export interface RuleEnv { road(x: number, y: number): boolean; aux(x: number, y: number): number }
+const clsOf = (env: RuleEnv) => (x: number, y: number) => { const a = env.aux(x, y); return isClassAux(a) ? a : 0; };
+/**
+ * The junction and arm a click on (x, y) with the Turn rules tool means: (x, y) is the road just before a junction,
+ * beside it, and the arm is the side of the junction (group) it is on (DIRS index: the way out of the junction along
+ * it). A reason instead when it is not one.
+ */
+export function junctionArmAt(env: RuleEnv, x: number, y: number): { g: JunctionGroup; arm: number } | string {
+  if (!env.road(x, y)) return 'Click the road just before a junction, on the arm you want the sign on';
+  const ca = clsOf(env);
+  if (linkedDegree(env.road, ca, x, y) >= 3) return 'Click the road just before the junction (an arm), not the junction itself';
+  for (let d = 0; d < 4; d++) {
+    const [dx, dy] = CDIRS[d], nx = x + dx, ny = y + dy;
+    if (!env.road(nx, ny) || !roadsLinked(ca, x, y, d) || linkedDegree(env.road, ca, nx, ny) < 3) continue;
+    const a = env.aux(nx, ny);
+    if (isJunctionAux(a) && !isMiniAux(a)) return 'Roundabouts and flyovers take no turn signs';
+    if (isRingClassAux(a)) return 'Roundabouts take no turn signs';
+    const g = junctionGroup(env.road, ca, nx, ny);
+    if (g) return { g, arm: [1, 0, 3, 2][d] };
+  }
+  return 'Click the road just before a junction, on the arm you want the sign on';
+}
+/** Why a signal crossing cannot go on (x, y), or null: a straight two-way street or lane tile, a tile or more from a junction. */
+export function pelicanProblem(env: RuleEnv, x: number, y: number): string | null {
+  if (!env.road(x, y)) return 'Click a street: a signal crossing goes on a straight stretch of road';
+  const a = env.aux(x, y), ca = clsOf(env), road = env.road;
+  if (implicitPelican(road, ca, x, y)) return 'There is a signal crossing here already: a pedestrian street crosses';
+  if (a && !(isClassAux(a) && auxClass(a) === RoadCls.Lane)) return isClassAux(a) ? 'A signal crossing goes on a two-way street or lane' : 'Not on a junction, bridge or level crossing';
+  if (linkedDegree(road, ca, x, y) !== 2) return 'A signal crossing goes on a straight stretch, away from junctions';
+  const ns = road(x, y - 1) && road(x, y + 1) && !road(x - 1, y) && !road(x + 1, y), ew = road(x - 1, y) && road(x + 1, y) && !road(x, y - 1) && !road(x, y + 1);
+  if (!ns && !ew) return 'A signal crossing goes on a straight stretch, not a bend';
+  for (const [dx, dy] of STEPS) if (road(x + dx, y + dy) && linkedDegree(road, ca, x + dx, y + dy) >= 3) return 'Too close to a junction: a signal crossing goes a tile or more away from one';
+  return null;
 }
