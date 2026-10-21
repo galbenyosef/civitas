@@ -324,10 +324,10 @@ A section (`DemoSection`) lists:
 | `placements` | `{ kind, door, rot }`: the catalogue kind's string id, the tile a player would click, and the FRONT rotation (0 the door faces south, 1 east, 2 north, 3 west). `id` defaults to the kind and must be unique. Bus stops are placements too |
 | `water` | rectangles painted as open water: a scenario's river (no tool makes water) |
 | `roads` | straight road drags, laid as the road tool lays them on the owner's dry land. Track drawn later straight across one makes a level crossing |
-| `classRoads` | `{ cls, from, to }`: road drags of a class (docs/roads.md "Classes"), planned and laid as the road tool does (`planRoad`: an avenue's or motorway's twin row on the drag's left, a drag across a one-way or divided road keeping it), in order after `roads`. The Road classes section lays one of each |
+| `classRoads` | `{ cls, from, to }`: road drags of a class (docs/roads.md "Classes"), planned and laid as the road tool does (`planRoad`: an avenue's or motorway's twin row on the drag's left, a drag across a one-way or divided road keeping it), in order after `roads`. The Road classes and junctions section lays one of each |
 | `runways` | `{ from, to }`: a runway drag |
 | `tracks` | drags as a player makes them; each runs along its longer axis first and turns once |
-| `junctions` | a roundabout or flyover clicked on a junction (`deck` picks the road on top) |
+| `junctions` | a junction tool clicked at `at`, as the tools build them (R4, docs/roads.md "Junctions"): a roundabout (the 5×5 two-lane ring on an avenue's junction) or flyover on a junction (`deck` picks the road on top), a mini-roundabout, an interchange on a motorway, a turn rule on an arm tile (`rule`: noLeft, noRight, noStraight, noEntry), a signal crossing on a street tile |
 | `bridges` | a road bridge over water from `from` to `to`, laid through `planBridge`, with a forced `style` (the road tool's choice otherwise); `landmark` draws a bascule span as that landmark |
 | `lines` | bus, rail or metro lines: stops in calling order (bus stop tiles or station doors), loop or there and back, vehicles. `freight: true` for a line between yards; `name` for a line known by name (the Central) |
 | `blocks` | grown land the tour stops at: zones nobody places, and block middles (deep plots, a communal garden) |

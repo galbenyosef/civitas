@@ -164,9 +164,10 @@ streets.
 
 **Showcase.** The "Road classes" section (west of district A1, `ROAD_CLASSES_LAND`): Cheapside, a pedestrian street of
 shops that Market Street ends at; North and South Parade, a one-way pair round a block of homes; Kingsway, an avenue
-through offices and homes crossed by Market Street; a motorway from a motorway connection of its own with Market Street
-joining it by a slip road; Hedge Lane, a country lane out to the edge. A tour stop each, and five registered features
-(`road-class-*`) that demo:check enforces.
+through offices and homes crossed by Market Street (y -26 and -25 since R4, with its 5×5 roundabout at Crown Street);
+a motorway from a motorway connection of its own that Market Street crosses at a diamond interchange (R4; it was a slip
+road); Hedge Lane, a country lane out to the edge (since R4 from Queen's Avenue, on the junctions' land south of the
+section). A tour stop each, and five registered features (`road-class-*`) that demo:check enforces.
 
 ## Junctions
 
