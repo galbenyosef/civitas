@@ -215,7 +215,8 @@ export const TRAFFIC_TUNING = {
   /**
    * With follow, a driver standing behind a car that is standing too waits until there is this much room (tiles, beyond
    * MIN_GAP) before moving up, or until that car moves off: a queue closes up in fewer, longer moves rather than
-   * shuffling forward one car length every time the front moves (0: always move up at once).
+   * shuffling forward one car length every time the front moves (0: always move up at once). Off: 0.9 cut stops by 8%
+   * but doubled car–pedestrian contacts as drawn and cost give-ups without lights.
    */
   startGap: 0,
   /**
@@ -223,13 +224,15 @@ export const TRAFFIC_TUNING = {
    * let in on arrival (the light as it will be then: phases are a pure function of the tick) and brakes for the line
    * only if not, so it glides to a red and rolls on into a green that comes before it gets there. 2: only for what
    * will still be there then (a red or amber light on arrival, barriers, people on the crossing, an exit lane of
-   * standing cars), not a car passing through the box now. 3: only the lights and level-crossing barriers.
+   * standing cars), not a car passing through the box now. 3: only the lights and level-crossing barriers. Off: 1 cut
+   * dead stops by a quarter more for about 13 more give-ups a peak; 2 and 3 were worse.
    */
   lookAhead: 0,
   /**
    * 1: platoons through junctions. A car following one that went in by the same approach and the same exit, moving and
    * within platoonGap tiles, may go in behind it before it has left the box (the following gap keeps them apart);
-   * every other entry rule still applies (the light, crossings, conflicting movements). 2: only at lights.
+   * every other entry rule still applies (the light, crossings, conflicting movements). 2: only at lights (at a give-way
+   * junction a platoon holds the box against the cross traffic: a sixth more give-ups in a town without signals).
    */
   platoon: 2,
   platoonGap: 0.6,
@@ -238,7 +241,8 @@ export const TRAFFIC_TUNING = {
   /**
    * Main-road priority at junctions without lights: 1 at T-junctions the side road gives way to cars on the through
    * road (moving, within mainGap tiles of the junction, whose path crosses its own); 2 also at crossroads, where the
-   * straighter road (the longer straight run either side) is the main one. Never at lights or roundabouts.
+   * straighter road (the longer straight run either side) is the main one. Never at lights or roundabouts. Off: within
+   * the noise on the Commons (Traffic.roadRank is the hook for road classes).
    */
   mainRoad: 0,
   mainGap: 1.0,
@@ -247,7 +251,7 @@ export const TRAFFIC_TUNING = {
   /**
    * 1: green waves. Every light has the same period (signalPeriod, no ±20%) and an offset of −(x + y) / waveSpeed
    * ticks, so a car going east or south at waveSpeed meets each light in the same phase as the last (shared with the
-   * client, which draws the same lamps).
+   * client, which draws the same lamps). Off: 1.2 speed points worse on the Commons's short blocks.
    */
   greenWave: 0,
   /** the speed a green wave is timed for, tiles per tick */
