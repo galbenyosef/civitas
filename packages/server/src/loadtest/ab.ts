@@ -108,7 +108,7 @@ export interface AbResult {
    * per tick (a walker on the carriageway within NEAR_R of a car moving at over NEAR_V tiles a tick), lorries on the road
    * per tick overnight (22:00-06:00, when the window covers it) and those the curfew held.
    */
-  control: { freightTrips: number; freightTripMean: number; visitorTrips: number; visitorTripMean: number; busLaps: number; busLapMean: number; busSections: number; busSectionMean: number; nearMissPerTick: number; lorriesNight: number; curfewHeld: number; freightDone: number };
+  control: { freightTrips: number; freightTripMean: number; visitorTrips: number; visitorTripMean: number; busLaps: number; busLapMean: number; busSections: number; busSectionMean: number; nearMissPerTick: number; nearFastPerTick: number; lorriesNight: number; curfewHeld: number; freightDone: number };
 }
 
 /**
@@ -163,6 +163,8 @@ export function layBusNetwork(w: World, x0: number, y0: number): { depot: [numbe
 
 /** A near miss (R5): a walker on the carriageway within NEAR_R tiles of a car's centre moving at over NEAR_V tiles a tick. */
 const NEAR_R = 0.5, NEAR_V = 0.2;
+/** a fast near miss: the car going faster than a 20 zone lets it (ZONE20_SPEED of a car's full DRIVE_SPEED) */
+const NEAR_FAST = 0.6 * DRIVE_SPEED;
 
 /** R5's street rule variants on the test city (runAb: hgv, zone20, yellows, busLane), in each district's local coordinates. */
 export function applyStreetRules(w: World, layout: { districts: { x: number; y: number }[] }, set: Record<string, number>) {
@@ -325,7 +327,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
 
   // R5: freight and visitor trips, bus laps, near misses, lorries overnight
   const vOut = new Map<number, number>(), fTrips: number[] = [], vTrips: number[] = [], laps: number[] = [], lastCall0 = new Map<number, number>(), prevCall = new Map<number, number>(), sections: number[] = [];
-  let nearMiss = 0, lorriesNight = 0;
+  let nearMiss = 0, nearFast = 0, lorriesNight = 0;
   const curfew0 = sim.control.curfew.held;
   const busesOf = () => (sim.buses as unknown as { buses: Map<number, { v: Mover; call: number; atCall: boolean; arrivedAt: number; phase: string }> }).buses;
   let simMs = 0;
@@ -434,7 +436,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const l = grid.get(tkey(px + dx, py + dy));
         if (!l) continue;
-        if (crossingNow) for (const a of l) if ((a.m.v ?? 0) > NEAR_V && Math.hypot(a.x - p.x, a.y - p.y) < NEAR_R) nearMiss++;
+        if (crossingNow) for (const a of l) if ((a.m.v ?? 0) > NEAR_V && Math.hypot(a.x - p.x, a.y - p.y) < NEAR_R) { nearMiss++; if ((a.m.v ?? 0) > NEAR_FAST) nearFast++; }
         for (const a of l) {
           if (Math.hypot(a.x - p.x, a.y - p.y) > a.len / 2 + 0.2 || !pointInObb(p.x, p.y, a)) continue;
           tcp++;
@@ -509,7 +511,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     },
     control: {
       freightTrips: fTrips.length, freightTripMean: avg(fTrips), visitorTrips: vTrips.length, visitorTripMean: avg(vTrips),
-      busLaps: laps.length, busLapMean: avg(laps), busSections: sections.length, busSectionMean: avg(sections), nearMissPerTick: nearMiss / opts.ticks, lorriesNight: lorriesNight / opts.ticks,
+      busLaps: laps.length, busLapMean: avg(laps), busSections: sections.length, busSectionMean: avg(sections), nearMissPerTick: nearMiss / opts.ticks, nearFastPerTick: nearFast / opts.ticks, lorriesNight: lorriesNight / opts.ticks,
       curfewHeld: sim.control.curfew.held - curfew0, freightDone: fTrips.length,
     },
     mobile: {
@@ -538,7 +540,7 @@ export function summary(r: AbResult): string {
     `  cars on the road ${f1(r.carsMean)} mean, ${r.carsPeak} peak; buses ${f1(r.busesMean)}; bus-car overlaps ${f3(r.busCarPerTick)}/tick; transit ${JSON.stringify(r.transit)}`,
     `  mobile jobs: ${f1(r.mobile.onRoadMean)} fleet vehicles on the road; taxi ${JSON.stringify(r.mobile.taxi)}; food ${JSON.stringify(r.mobile.food)}; bins ${JSON.stringify(r.mobile.bins)}; parcels ${JSON.stringify(r.mobile.parcels)}; bike-car overlaps ${r.mobile.bikesCarOverlaps}, bike-ped contacts ${r.mobile.bikePedContacts}, fleet-ped contacts ${r.mobile.fleetPedContacts} ${JSON.stringify(r.mobile.fleetPedWhere)}`,
     `  smooth: ${f1(r.smooth.tiles)} tiles, ${r.smooth.stops} stops (${f3(r.smooth.stopsPer10)} per 10 tiles, ${r.smooth.deadStops} dead), jerk ${f3(r.smooth.jerk)} tiles/tick (harsh ${f1(r.smooth.harshPct)}%), standing ${f1(r.smooth.standPct)}% (in the stream ${f1(r.smooth.standStreamPct)}%); stops at ${JSON.stringify(r.smooth.stopsAt)}`,
-    `  control: freight trips ${r.control.freightTrips} (mean ${f1(r.control.freightTripMean)} ticks), visitor trips ${r.control.visitorTrips} (mean ${f1(r.control.visitorTripMean)}), bus laps ${r.control.busLaps} (mean ${f1(r.control.busLapMean)}; sections ${r.control.busSections}, mean ${f1(r.control.busSectionMean)}), near misses ${f3(r.control.nearMissPerTick)}/tick, lorries on the road overnight ${f3(r.control.lorriesNight)}/tick, curfew held ${r.control.curfewHeld}`,
+    `  control: freight trips ${r.control.freightTrips} (mean ${f1(r.control.freightTripMean)} ticks), visitor trips ${r.control.visitorTrips} (mean ${f1(r.control.visitorTripMean)}), bus laps ${r.control.busLaps} (mean ${f1(r.control.busLapMean)}; sections ${r.control.busSections}, mean ${f1(r.control.busSectionMean)}), near misses ${f3(r.control.nearMissPerTick)}/tick (fast ${f3(r.control.nearFastPerTick)}), lorries on the road overnight ${f3(r.control.lorriesNight)}/tick, curfew held ${r.control.curfewHeld}`,
     `  sim ${r.simMsPerTick.toFixed(3)} ms/tick over the window; wall ${f1(r.wallSec)} s`,
   ].join('\n');
 }

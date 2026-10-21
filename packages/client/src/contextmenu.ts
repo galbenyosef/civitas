@@ -1,6 +1,6 @@
 import {
   BULLDOZE_COST, LAND_PRICE_PER_TILE, KIND_NAMES, PRIORITY_NAMES, Terrain, isRoad, isRailAux, isAirfieldAux, kindIdOf, levelOf, priorityOf, stopModeOf,
-  terrainOf, underConstruction, zoneOf, STREET_NAME_MAX, type CitizenInfo, type ServerMsg, type PurchaseCheck, type RoadInfo,
+  terrainOf, underConstruction, zoneOf, STREET_NAME_MAX, STREET_RULE_DEFS, StreetRule, streetRuleTiles, streetRuleCost, busLaneOk, hasFeature, techFor, type CitizenInfo, type ServerMsg, type PurchaseCheck, type RoadInfo,
 } from '@msimcity/shared';
 import type { NetClient } from './net';
 import type { ClientWorld } from './world';
@@ -60,7 +60,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const money = (n: number) => `$${n.toLocaleString('en-US')}`;
 const MARGIN = 8;
 /** entries that change the world: left out in a read-only showcase (world.spectate) */
-const CHANGES = new Set(['demolish', 'raise', 'lower', 'pause', 'buy', 'rename-h', 'rename-v']);
+const CHANGES = new Set(['demolish', 'raise', 'lower', 'pause', 'buy', 'rename-h', 'rename-v', 'rule-hgv', 'rule-bus', 'rule-yellow', 'rule-zone20']);
 
 /** The right-click menu: a small list of the actions that exist for whatever was clicked, each greyed out with its reason when it cannot be done. */
 export class ContextMenu {
@@ -326,7 +326,23 @@ export class ContextMenu {
           if (name !== null && name.trim() !== st.name) d.net.send({ t: 'renameStreet', x, y, ns: st.ns, name: name.trim() });
         },
       }));
-      return { title: streets[0]?.name ?? 'Road', sub: streets[1] ? `${streets[0].name} at ${streets[1].name} · ${sub}` : sub, swatch, groups: [rename, [demolish('Demolish this road tile', levelOf(t) > 0 ? BULLDOZE_COST : 0)], [...parcelItem(), view]] };
+      // R5 street rules (shared/src/roadrules.ts): each on or off along the street through this tile, as the Street rules tool clicks
+      const env = { road: (tx: number, ty: number) => { const tt = w.getTile(tx, ty); return tt !== undefined && isRoad(tt); }, aux: (tx: number, ty: number) => w.auxAt(tx, ty), bits: (tx: number, ty: number) => w.ruleAt(tx, ty)?.st ?? 0 };
+      const ns = !(env.road(x - 1, y) || env.road(x + 1, y));
+      const me = w.myPlayer;
+      const rules: MenuItem[] = STREET_RULE_DEFS.map((def) => {
+        const tiles = streetRuleTiles(env, x, y, ns, def.id), c = streetRuleCost(env, tiles, def.bit);
+        const lock = me && !hasFeature(me.tech, def.feature) && !me.devUnlimited ? techFor(def.feature)?.name ?? 'a technology' : null;
+        const noLane = def.bit === StreetRule.BusLane && !tiles.some(([tx, ty]) => busLaneOk(w.auxAt(tx, ty)));
+        const why = parcel && !mine ? `Not your street: ${ownerName} owns it` : noLane ? 'One lane each way: a bus lane needs a one-way street or an avenue' : c.on && lock ? `Needs ${lock}` : c.on && c.cost > cash ? `Needs ${money(c.cost)}` : undefined;
+        return {
+          key: `rule-${def.id}`, label: c.on ? `${def.title} along this street` : `Take the ${def.title.toLowerCase()} off`, on: !c.on,
+          hint: why ? (noLane ? 'one lane each way' : lock && c.on ? 'locked' : 'not yours') : c.on ? `${money(c.cost)}, ${money(Math.round(c.upkeep * 100) / 100)}/day` : 'free',
+          disabled: why,
+          run: () => d.net.send({ t: 'streetRule', rule: def.id, tiles, on: c.on }),
+        };
+      });
+      return { title: streets[0]?.name ?? 'Road', sub: streets[1] ? `${streets[0].name} at ${streets[1].name} · ${sub}` : sub, swatch, groups: [rename, rules, [demolish('Demolish this road tile', levelOf(t) > 0 ? BULLDOZE_COST : 0)], [...parcelItem(), view]] };
     }
     if (zoneOf(t) !== 0) {
       const kind = kindIdOf(zoneOf(t), w.subAt(dx, dy));

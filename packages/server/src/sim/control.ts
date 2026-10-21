@@ -45,6 +45,8 @@ export class TrafficControl {
   private visitTicks: number[] = []; private freightTicks: number[] = [];
   /** lorries held by the curfew since the start (the harness reads it), and released */
   curfew = { held: 0, released: 0 };
+  /** lorries waiting out the curfew at their depot: vehicle id to the tick they set off (Simulation.moveVehicles) */
+  holds = new Map<number, number>();
 
   constructor(private w: World, private traffic: Traffic, private gateways: Gateways) {}
 

@@ -153,8 +153,6 @@ export interface Vehicle extends Mover {
   legs: Leg[]; leg: Leg | null;
   /** what the buyer pays on delivery when it is not FREIGHT_FEE (harbour freight: fish by the box, sim/harbours.ts) */
   fee?: number;
-  /** a lorry held at its depot by the lorry curfew (R5, sim/control.ts) until this tick: it sets off then */
-  hold?: number;
   /** a fire engine on a call (Mover.call) held up in stopped traffic, driving on down the middle of the road out of the lanes (Simulation.weave) */
   weave?: boolean;
 }

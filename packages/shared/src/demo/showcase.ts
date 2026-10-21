@@ -421,10 +421,10 @@ export const SECTIONS: DemoSection[] = [
     // on Market Street's approach to Cheapside, a 20 zone on Church Lane through the homes, and the motorway connection's
     // visitor limit
     streetRules: [
-      { id: 'street-hgv', rule: 'hgv', name: 'HGV ban: South Parade', at: [-44, -30], rect: [-58, -32, 24, 5], inspect: [-44, -30] },
-      { id: 'street-bus', rule: 'bus', name: 'Bus lane: North Parade', at: [-44, -34], rect: [-58, -36, 24, 5], inspect: [-44, -34] },
+      { id: 'street-hgv', rule: 'hgv', name: 'HGV ban: South Parade', at: [-57, -30], to: [-36, -30], rect: [-58, -32, 24, 5], inspect: [-44, -30] },
+      { id: 'street-bus', rule: 'bus', name: 'Bus lane: North Parade', at: [-57, -34], to: [-36, -34], rect: [-58, -36, 24, 5], inspect: [-44, -34] },
       { id: 'street-yellow', rule: 'yellow', name: 'Double yellows: Market Street', at: [-48, -36], to: [-48, -31], rect: [-51, -38, 7, 9], inspect: [-48, -33] },
-      { id: 'street-zone20', rule: 'zone20', name: '20 zone: Church Lane', at: [-55, -2], ns: true, rect: [-58, -5, 7, 11], inspect: [-55, -2] },
+      { id: 'street-zone20', rule: 'zone20', name: '20 zone: Church Lane', at: [-55, -4], to: [-55, 4], rect: [-58, -5, 7, 11], inspect: [-55, -2] },
     ],
     visitorLimits: [[-58, -20]],
     streets: [

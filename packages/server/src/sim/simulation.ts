@@ -2957,9 +2957,12 @@ export class Simulation {
     if (vkind === VehicleKind.Freight) v.gapMul *= 1.4;
     resetTrail(v, from[0], from[1]);
     w.vehicles.set(id, v);
-    if (lorry) { this.control.noteFreight(); v.hold = this.control.curfewHold(id, owner, to); }
+    // a lorry the curfew holds sets off in the morning (moveVehicles); kept off the Vehicle, so every vehicle has one shape
+    const hold = lorry ? this.control.curfewHold(id, owner, to) : undefined;
+    if (lorry) this.control.noteFreight();
     else if (vkind === VehicleKind.Visitor) this.control.noteVisitor(from[0], from[1]);
-    if (v.hold === undefined) this.startLeg(v); // a lorry the curfew holds sets off in the morning (moveVehicles)
+    if (hold !== undefined) this.control.holds.set(id, hold);
+    else this.startLeg(v);
     return v;
   }
 
@@ -2971,7 +2974,10 @@ export class Simulation {
         if (w.tick >= v.until) this.headBack(v);
         continue;
       }
-      if (v.hold !== undefined) { if (w.tick < v.hold) continue; v.hold = undefined; this.control.curfew.released++; if (!this.startLeg(v)) { w.vehicles.delete(v.id); continue; } } // the lorry curfew is over (R5)
+      if (this.control.holds.size) { // a lorry the curfew held (R5): it sets off once its time comes
+        const h = this.control.holds.get(v.id);
+        if (h !== undefined) { if (w.tick < h) continue; this.control.holds.delete(v.id); this.control.curfew.released++; if (!this.startLeg(v)) { w.vehicles.delete(v.id); continue; } }
+      }
       if (!v.leg) { w.vehicles.delete(v.id); continue; }
       const leg = v.leg;
       let done = false;

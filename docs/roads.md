@@ -308,7 +308,8 @@ one clicked); a straight drag sets it on those tiles only; a click on a street t
 free. The ghost covers the tiles a release would change in the rule's colour (dim where it is already, red where it
 cannot go), with a chip of the cost, the day's upkeep and, for an HGV ban, how much further a lorry going past must go
 round (the server's router, `ruleProbe`). Ctrl/Cmd+Z takes the last change back, refunded, within `ROAD_UNDO_MS`. The
-upkeep is charged with the parcel's roads each midnight (`World.recountRoads`). The road tooltip lists a tile's rules.
+upkeep is charged with the parcel's roads each midnight (`World.recountRoads`). The road tooltip lists a tile's rules, and
+a road's right-click menu has the four, each on or off along the street through it with its cost (`client/src/contextmenu.ts`).
 
 | Rule | Who it stops | Cost a tile | Upkeep a day | Technology |
 | --- | --- | --- | --- | --- |

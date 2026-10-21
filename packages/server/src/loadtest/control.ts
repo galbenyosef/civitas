@@ -249,13 +249,13 @@ const mover = (w: World, id: number, path: number[], cls: number = VehicleClass.
   const sim = new Simulation(w), p = w.players.get('bench')!;
   w.tick = TICKS_PER_DAY + 23 * TICKS_PER_HOUR; // 23:00
   const id0 = sim.spawnFreightTruck([-10, 1], [10, 1], 'bench')!;
-  ok(id0 !== null && w.vehicles.get(id0)!.hold === undefined, 'no curfew: a lorry sets off at 23:00');
+  ok(id0 !== null && !sim.control.holds.has(id0), 'no curfew: a lorry sets off at 23:00');
   p.policies = ['curfew'];
   const id = sim.spawnFreightTruck([-10, 1], [10, 1], 'bench')!;
-  const v = w.vehicles.get(id)!;
-  ok(v.hold !== undefined && v.hold >= 2 * TICKS_PER_DAY + 6 * TICKS_PER_HOUR && v.hold < 2 * TICKS_PER_DAY + 7 * TICKS_PER_HOUR && v.lane < 0, `with the curfew it waits at the works until ${((v.hold! % TICKS_PER_DAY) / TICKS_PER_HOUR).toFixed(2)}`);
+  const v = w.vehicles.get(id)!, hold = sim.control.holds.get(id);
+  ok(hold !== undefined && hold >= 2 * TICKS_PER_DAY + 6 * TICKS_PER_HOUR && hold < 2 * TICKS_PER_DAY + 7 * TICKS_PER_HOUR && v.lane < 0, `with the curfew it waits at the works until ${(((hold ?? 0) % TICKS_PER_DAY) / TICKS_PER_HOUR).toFixed(2)}`);
   let gone = false;
-  while (w.tick < v.hold! + 30) { sim.tick(); if (v.lane >= 0 || v.pi > 0) gone = true; }
+  while (w.tick < (hold ?? 0) + 30) { sim.tick(); if (v.lane >= 0 || v.pi > 0) gone = true; }
   ok(gone && sim.control.curfew.held >= 1 && sim.control.curfew.released >= 1, 'and sets off once it is over');
   const m0 = p.money; sim.control.chargeCurfew();
   ok(m0 - p.money === 10, 'the curfew costs $10 a day');
