@@ -83,7 +83,7 @@ export class FpvSound {
       this.lastDoors = doors;
       // rail joints: a clack-clack a bogie apart, more often the faster it goes (a tube train's are duller and softer)
       this.joint += dt * 8 * s;
-      if (this.joint >= 1) { this.joint -= 1; fire(eng, 'fx-joint', { seed: seed(), gain: (0.5 + 0.5 * s) * (r.kind === 'metro' ? 0.5 : 1), delay: hash2(this.n++, this.salt) * 0.03 }); }
+      if (this.joint >= 1) { this.joint %= 1; fire(eng, 'fx-joint', { seed: seed(), gain: (0.5 + 0.5 * s) * (r.kind === 'metro' ? 0.5 : 1), delay: hash2(this.n++, this.salt) * 0.03 }); }
     }
   }
 

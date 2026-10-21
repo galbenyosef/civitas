@@ -1458,7 +1458,6 @@ const rideNow = (): RideNow | null => {
   if (!a || !a.car) return null; // on foot: the city's own sound
   return { key: `c${selectedCitizen}`, kind: a.cls === VehicleClass.Bus ? 'bus' : a.cls === VehicleClass.Truck ? 'truck' : 'car', x: a.rx, z: a.rz };
 };
-let statusTimer = 0;
 const audio = new Audio({
   ambience: {
     hour: liveHour,
@@ -1469,8 +1468,7 @@ const audio = new Audio({
     pelican: (x, z, r) => lights.redPelicanNear(x, z, r, liveTick()),
   },
   fpv: { riding: rideNow },
-  status: (t) => { clearTimeout(statusTimer); ui.setStatus(t); },
-  restoreStatus: () => { clearTimeout(statusTimer); statusTimer = window.setTimeout(updateStatus, 0); },
+  notice: (t) => ui.notice(t),
 });
 ui.onSound = (id) => audio.ui(id);
 Object.assign((window as any).msc, { perf, lines, audio });

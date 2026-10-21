@@ -101,6 +101,6 @@ export class PerfHud {
       `<div class="prow"><span>stream</span><span><b>${Math.round(r.aps).toLocaleString()}</b> agents/s · <b>${kb >= 100 ? kb.toFixed(0) : kb.toFixed(1)}</b> KB/s · ${Math.round(r.mps)} msg/s</span></div>` +
       `<div class="prow"><span>client</span><span class="${fpsCls}"><b>${r.fps.toFixed(0)}</b> fps · <b>${r.ms.toFixed(1)}</b> ms/frame <i>(worst ${r.worst.toFixed(0)})</i></span></div>` +
       `<div class="prow"><span>drawn</span><span><b>${this.src.agentsDrawn().toLocaleString()}</b> agents · <b>${this.src.chunksLoaded()}</b> chunks · <b>${this.calls.toLocaleString()}</b> draw calls · ${(this.triangles / 1000).toFixed(0)}k tris</span></div>` +
-      (a ? `<div class="prow"><span>sound</span><span>${a.started ? (a.muted ? 'muted' : `<b>${a.tickMs.toFixed(2)}</b> ms/tick <i>(worst ${a.maxMs.toFixed(1)})</i> · <b>${a.voices}</b> voices`) : 'waiting for a click'}</span></div>` : '');
+      (a ? `<div class="prow"><span>sound</span><span>${a.started ? (a.muted ? 'muted' : `<b>${a.tickMs.toFixed(2)}</b> ms/tick <i>(p95 ${a.maxMs.toFixed(2)})</i> · <b>${a.voices}</b> voices`) : 'waiting for a click'}</span></div>` : '');
   }
 }

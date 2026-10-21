@@ -9,6 +9,8 @@ import { VOICES, type BusId } from './manifest';
 export const AUDIO_KEY = 'msimcity.audio';
 /** one-shots, beds and the ridden vehicle together */
 export const MAX_VOICES = 24;
+/** voices kept back from one-shots for the beds and the ridden vehicle */
+export const HELD_RESERVE = 4;
 export const DEFAULT_VOLUME = 0.6;
 
 export interface AudioPrefs { volume: number; muted: boolean; /** the "sound on" chip has been shown and dismissed or timed out */ chipSeen: boolean }
@@ -137,9 +139,12 @@ export class AudioEngine {
   private emit() { for (const f of this.listeners) f(); }
 
   // ---- the voice budget ----------------------------------------------------------------------------------------
-  /** Reserve a voice for `seconds` (0: held until `give`). False when the budget is spent: the caller skips the sound. */
+  /**
+   * Reserve a voice for `seconds`, or (0) hold it until `give` as a bed or the ridden vehicle does. False when the budget is
+   * spent and the caller skips the sound. One-shots leave the last few voices free, so a bed or an engine can always start.
+   */
   take(seconds = 0): boolean {
-    if (this.active >= MAX_VOICES) return false;
+    if (this.active >= (seconds > 0 ? MAX_VOICES - HELD_RESERVE : MAX_VOICES)) return false;
     this.active++;
     if (seconds > 0) setTimeout(() => this.give(), seconds * 1000 + 50);
     return true;

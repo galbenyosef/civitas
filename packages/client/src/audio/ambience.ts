@@ -118,8 +118,16 @@ export function owlRate(s: Scan, hour: number, dist: number): number {
 }
 
 export class Ambience {
-  /** the cost of the 250 ms tick, ms: last, running average and worst */
-  stats = { last: 0, avg: 0, max: 0, ticks: 0 };
+  /** the cost of the 250 ms tick, ms: the last, the worst steady one, the number run, and the first (which builds the beds and the noise) */
+  stats = { last: 0, max: 0, ticks: 0, setup: 0 };
+  private recent = new Float32Array(64);
+  /** the median and 95th percentile of the last 64 steady ticks, ms (read once a second by the perf readout, never per frame) */
+  get cost() {
+    const n = Math.min(this.stats.ticks - 1, 64);
+    if (n < 1) return { median: 0, p95: 0 };
+    const a = Array.from(this.recent.subarray(0, n)).sort((x, y) => x - y);
+    return { median: a[Math.floor(n / 2)], p95: a[Math.min(n - 1, Math.floor(n * 0.95))] };
+  }
   readonly scan = newScan();
   readonly mix = newMix();
   private beds: Partial<Record<keyof Mix, Bed>> = {};
@@ -145,7 +153,10 @@ export class Ambience {
     const t0 = performance.now();
     this.tick(dt, now);
     const ms = performance.now() - t0, s = this.stats;
-    s.last = ms; s.avg = s.ticks ? s.avg * 0.95 + ms * 0.05 : ms; if (ms > s.max) s.max = ms; s.ticks++;
+    s.last = ms;
+    if (s.ticks === 0) s.setup = ms; // the first tick makes the beds and the noise buffers: counted apart
+    else { this.recent[(s.ticks - 1) & 63] = ms; if (ms > s.max) s.max = ms; }
+    s.ticks++;
   }
 
   private tick(dt: number, now: number) {

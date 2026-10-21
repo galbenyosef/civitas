@@ -226,7 +226,7 @@ How it works (dev servers only, never with `NODE_ENV=production`):
 - **Client.** Joining a city reloads the page with `?ws=<host>:<8100+n>&city=n`, which is the existing `?ws=` override, and
   shows a banner "Test city 4×4 — not the live world" with a link back. `?city=n` alone starts the city and joins it.
   If the city's process disappears (idle stop, Ctrl-C of the dev stack), the client asks the main server to start it again.
-- **Perf readout.** The top-bar **perf** chip or **M** (always on in a test city): server tick average, p95 and max over the
+- **Perf readout.** The top-bar **perf** chip or **Shift+M** (always on in a test city): server tick average, p95 and max over the
   last minute (300 ticks, simulation plus flush, from the optional `tickAvg`, `tickP95` and `tickMax` fields of the `stats`
   message) against the 200 ms budget, amber past 50 ms and red past 200 ms; agents and KB per second received by this client;
   FPS and frame time; agents drawn, chunks loaded and draw calls. The same server figures are in `/healthz`.

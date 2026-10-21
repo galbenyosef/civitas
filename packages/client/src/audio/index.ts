@@ -13,10 +13,8 @@ export type UiSound = 'click' | 'place' | 'refuse' | 'undo';
 export interface AudioHooks {
   ambience: AmbSources;
   fpv: FpvSources;
-  /** the status line (main.ts): "Sound off" for a moment */
-  status(text: string): void;
-  /** put the status line back */
-  restoreStatus(): void;
+  /** a short notice in the status line: "Sound off" */
+  notice(text: string): void;
 }
 
 /** Everything audio, wired for the client (main.ts makes one). Nothing here runs a sound before the first gesture. */
@@ -32,12 +30,7 @@ export class Audio {
     this.ambience = new Ambience(this.engine, hooks.ambience);
     this.fpv = new FpvSound(this.engine, hooks.fpv);
     this.engine.arm(window, document);
-    let timer = 0;
-    bindMuteKey(window, this.engine, (muted) => {
-      hooks.status(muted ? 'Sound off' : 'Sound on');
-      clearTimeout(timer);
-      timer = window.setTimeout(() => hooks.restoreStatus(), 1500);
-    });
+    bindMuteKey(window, this.engine, (muted) => hooks.notice(muted ? 'Sound off' : 'Sound on'));
     bindControls(this.engine, {
       toggle: document.getElementById('soundOn') as HTMLInputElement | null,
       slider: document.getElementById('soundVol') as HTMLInputElement | null,
@@ -62,5 +55,5 @@ export class Audio {
   }
 
   /** for the perf readout */
-  get stats() { return { tickMs: this.ambience.stats.avg, maxMs: this.ambience.stats.max, voices: this.engine.active, started: this.engine.started, muted: this.engine.muted }; }
+  get stats() { const c = this.ambience.cost; return { tickMs: c.median, maxMs: c.p95, voices: this.engine.active, started: this.engine.started, muted: this.engine.muted }; }
 }
