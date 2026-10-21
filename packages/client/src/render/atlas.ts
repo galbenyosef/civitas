@@ -11,7 +11,7 @@ import { mulberry32 } from '@msimcity/shared';
  * the *End cells), canvas y runs across it, away from the runway centre on shoulders and towards the terminal on
  * taxiway rows. chunkView turns and mirrors the UVs per tile.
  */
-export const CELL = 128, COLS = 8, ROWS = 8;
+export const CELL = 128, COLS = 8, ROWS = 12;
 export const Cell = {
   Grass: 0, Water: 1, Sand: 2, Pavement: 3, Lot: 4, Dirt: 5, Road: 8,
   /** the road geometry's surfaces (render/roadGeo.ts): plain asphalt, flat white for paint and stone (tinted by vertex colour), tactile paving, setts */
@@ -27,6 +27,14 @@ export const Cell = {
   RingArm: 24, RingSide: 25, RingCorner: 26, Island: 27,
   /** a level crossing (shared/src/rail.ts): the east-west road with the track north-south over it; chunkView turns it */
   Crossing: 28,
+  /** pedestrian streets' paving near the camera (render/roadGeo.ts), light neutral to be tinted: brick basketweave, flagstones */
+  Brick: 31, Flags: 43,
+  /**
+   * road classes from far off (shared/src/roadclass.ts): a country lane per connection mask (LaneRoad + mask); a one-way
+   * street, an avenue's and a motorway's carriageway drawn flowing north (the twin to the west), chunkView turns them;
+   * a pedestrian street's straight (north-south) and its other tiles
+   */
+  LaneRoad: 64, OneWay: 80, OneWayArrow: 81, Avenue: 82, Motorway: 83, PedStraight: 84, Ped: 85,
 } as const;
 /** Roundabout geometry in tiles out from the island tile's edge (render/junctions.ts draws the island to RING_ISLAND). */
 export const RING_ISLAND = 0.3, RING_APRON = 0.44, RING_OUTER = 0.92;
@@ -356,6 +364,8 @@ export function buildAtlas() {
     at(Cell.Island, (g) => { g.fillStyle = APRON; g.fillRect(0, 0, CELL, CELL); setts(g); g.fillStyle = '#5f9a4b'; g.fillRect(I / 2, I / 2, CELL - I, CELL - I); });
   }
 
+  drawClassCells(at);
+
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;
   texture.minFilter = LinearMipmapLinearFilter;
@@ -372,4 +382,135 @@ export function cellUV(i: number): [number, number, number, number] {
   const u0 = cx / COLS + inset, u1 = (cx + 1) / COLS - inset;
   const v1 = 1 - cy / ROWS - insetV, v0 = 1 - (cy + 1) / ROWS + insetV;
   return [u0, v0, u1, v1];
+}
+
+/**
+ * The road classes' cells (R3), drawn last with their own random stream so every earlier cell is as it was. Far off a
+ * class reads by its cross-section, to the plan the geometry near the camera uses (render/roadGeo.ts CLASS_PROFILES):
+ * a lane's asphalt between verges, a one-way's lane line and arrows, an avenue's planted strip on its twin's side, a
+ * motorway's shoulder line, barrier and verges, a pedestrian street's paving.
+ */
+function drawClassCells(at: (i: number, draw: (g: CanvasRenderingContext2D) => void) => void) {
+  const rand = mulberry32(4321);
+  const speckle = (g: CanvasRenderingContext2D, colors: string[], n: number, r = 2) => {
+    for (let i = 0; i < n; i++) { g.fillStyle = colors[Math.floor(rand() * colors.length)]; const s = r * (0.6 + rand()); g.fillRect(rand() * CELL, rand() * CELL, s, s); }
+  };
+  const grass = (g: CanvasRenderingContext2D) => { g.fillStyle = '#5f9a4b'; g.fillRect(0, 0, CELL, CELL); speckle(g, ['#558f43', '#6aa655', '#4f8a3e', '#73ad5c'], 260, 3); };
+  const tarmac = (g: CanvasRenderingContext2D, c = '#3d3f45') => { g.fillStyle = c; g.fillRect(0, 0, CELL, CELL); speckle(g, ['#404248', '#393b41', '#45464a'], 80, 3); };
+  const PAVE = '#a3a7ae', KERBLINE = '#b9bcc1', PAINT = 'rgba(242,242,238,0.95)';
+
+  // ---- near-camera paving, light and neutral (vertex colours tint it per precinct)
+  at(Cell.Brick, (g) => {
+    g.fillStyle = '#c4beb6'; g.fillRect(0, 0, CELL, CELL);
+    // basketweave: 16 px blocks of two bricks, alternately lengthwise and across, each brick its own tone
+    for (let by = 0; by < CELL; by += 16) for (let bx = 0; bx < CELL; bx += 16) {
+      const across = ((bx + by) / 16) % 2 === 1;
+      for (let k = 0; k < 2; k++) {
+        const v = Math.floor(170 + rand() * 50);
+        g.fillStyle = `rgb(${v},${v - 6},${v - 12})`;
+        if (across) g.fillRect(bx + k * 8 + 1, by + 1, 6, 14); else g.fillRect(bx + 1, by + k * 8 + 1, 14, 6);
+      }
+    }
+  });
+  at(Cell.Flags, (g) => {
+    g.fillStyle = '#9a968f'; g.fillRect(0, 0, CELL, CELL);
+    // flagstones in courses of random length, offset row by row
+    for (let y = 0; y < CELL; y += 22) {
+      let x = -Math.floor(rand() * 30);
+      while (x < CELL) {
+        const w = 22 + Math.floor(rand() * 26), v = Math.floor(190 + rand() * 40);
+        g.fillStyle = `rgb(${v},${v - 3},${v - 9})`; g.fillRect(x + 1, y + 1, w - 2, 20);
+        x += w;
+      }
+    }
+  });
+
+  // ---- the country lane: verge right up to a narrower, warmer asphalt, no kerbs or lines (quarters as the road cells)
+  const LC = Math.round(0.28 * CELL), LSW = CELL / 2 - LC;
+  for (let mask = 0; mask < 16; mask++) at(Cell.LaneRoad + mask, (g) => {
+    tarmac(g, '#45433f');
+    speckle(g, ['#4c4944', '#3e3c38'], 60, 4);
+    const open = (b: number) => (mask & b) !== 0, half = CELL / 2;
+    // the verge: everything outside the carriageway, with grass of its own
+    g.save(); g.beginPath();
+    for (const [sx, sy, hb, vb] of [[1, -1, 2, 1], [1, 1, 2, 4], [-1, 1, 8, 4], [-1, -1, 8, 1]]) {
+      const h = open(hb), v = open(vb), X = (a: number) => half + sx * a, Y = (b: number) => half + sy * b;
+      if (h && v) { g.moveTo(X(half), Y(half)); g.arc(X(half), Y(half), LSW, 0, Math.PI * 2); continue; }
+      if (v) { g.rect(Math.min(X(LC), X(half)), Math.min(Y(0), Y(half)), LSW, half); continue; }
+      if (h) { g.rect(Math.min(X(0), X(half)), Math.min(Y(LC), Y(half)), half, LSW); continue; }
+      // the outer corner: the quarter outside a circle of radius LC about the centre
+      const x0 = Math.min(X(0), X(half)), y0 = Math.min(Y(0), Y(half));
+      g.moveTo(x0, y0); g.rect(x0, y0, half, half);
+    }
+    g.clip('nonzero');
+    grass(g);
+    g.restore();
+    // round the dead-end and bend corners back to asphalt where the quarter is open on neither side
+    for (const [sx, sy, hb, vb] of [[1, -1, 2, 1], [1, 1, 2, 4], [-1, 1, 8, 4], [-1, -1, 8, 1]]) {
+      if (open(hb) || open(vb)) continue;
+      g.save(); g.beginPath(); g.rect(Math.min(half, half + sx * half), Math.min(half, half + sy * half), half, half); g.clip();
+      g.fillStyle = '#45433f'; g.beginPath(); g.arc(half, half, LC, 0, Math.PI * 2); g.fill(); g.restore();
+    }
+    // ragged edges: grass creeping onto the asphalt here and there
+    if (mask === 5 || mask === 10) {
+      g.fillStyle = '#5a9447';
+      for (let i = 0; i < 14; i++) {
+        const a = rand() * CELL, e = rand() < 0.5 ? half - LC : half + LC, r = 1.5 + rand() * 3;
+        g.beginPath(); g.arc(mask === 5 ? e : a, mask === 5 ? a : e, r, 0, Math.PI * 2); g.fill();
+      }
+    }
+  });
+
+  // ---- one-way, avenue and motorway carriageways, flowing north (up), the twin to the west (left)
+  const lineDashes = (g: CanvasRenderingContext2D, x: number, len: number) => { g.fillStyle = PAINT; for (const y of [32, 96]) g.fillRect(x - 1, y - len / 2, 2, len); };
+  const kerbSide = (g: CanvasRenderingContext2D, x0: number, x1: number, kx: number) => {
+    g.fillStyle = PAVE; g.fillRect(x0, 0, x1 - x0, CELL);
+    g.fillStyle = KERBLINE; g.fillRect(kx - 1, 0, 2.5, CELL);
+  };
+  const upArrow = (g: CanvasRenderingContext2D, x: number) => {
+    g.fillStyle = PAINT; g.fillRect(x - 1.5, 52, 3, 28);
+    g.beginPath(); g.moveTo(x, 40); g.lineTo(x - 6, 54); g.lineTo(x + 6, 54); g.closePath(); g.fill();
+  };
+  const SW = 16, LANE = Math.round(0.19 * CELL);
+  const oneWay = (g: CanvasRenderingContext2D, arrow: boolean) => {
+    tarmac(g); kerbSide(g, 0, SW, SW); kerbSide(g, CELL - SW, CELL, CELL - SW);
+    lineDashes(g, CELL / 2, 26);
+    if (arrow) for (const x of [CELL / 2 - LANE, CELL / 2 + LANE]) upArrow(g, x);
+  };
+  at(Cell.OneWay, (g) => oneWay(g, false));
+  at(Cell.OneWayArrow, (g) => oneWay(g, true));
+  at(Cell.Avenue, (g) => {
+    tarmac(g);
+    const M = Math.round(0.09 * CELL);
+    g.fillStyle = '#5f9a4b'; g.fillRect(0, 0, M, CELL); speckle(g, ['#558f43', '#4f8a3e'], 20, 3);
+    g.fillStyle = '#4f8a3e'; for (let y = 6; y < CELL; y += 32) { g.beginPath(); g.arc(1 + rand() * 3, y + rand() * 10, 5 + rand() * 3, 0, Math.PI * 2); g.fill(); } // tree crowns on the strip
+    g.fillStyle = KERBLINE; g.fillRect(M - 1, 0, 2.5, CELL);
+    kerbSide(g, CELL - SW, CELL, CELL - SW);
+    lineDashes(g, CELL / 2, 26);
+  });
+  at(Cell.Motorway, (g) => {
+    grass(g);
+    const M = Math.round(0.06 * CELL), C = Math.round(0.4 * CELL);
+    g.fillStyle = '#34363b'; g.fillRect(M, 0, CELL / 2 + C - M, CELL);
+    speckle(g, ['#383a3f', '#303237'], 40, 3);
+    g.fillStyle = '#9aa1a8'; g.fillRect(0, 0, 2, CELL); // the barrier on the shared edge
+    g.fillStyle = PAINT; g.fillRect(M + 3, 0, 2, CELL); g.fillRect(CELL / 2 + Math.round(0.3 * CELL), 0, 3, CELL);
+    lineDashes(g, CELL / 2, 36);
+  });
+
+  // ---- pedestrian streets: slabs to the building line, warm paving between the old kerb lines, a channel down the middle
+  const pedBase = (g: CanvasRenderingContext2D) => {
+    g.fillStyle = '#b9b2a6'; g.fillRect(0, 0, CELL, CELL);
+    g.fillStyle = 'rgba(0,0,0,0.08)';
+    for (let y = 0; y < CELL; y += 5) for (let x = (y / 5) % 2 ? 2 : 0; x < CELL; x += 5) g.fillRect(x + rand(), y + rand(), 1, 4);
+  };
+  at(Cell.PedStraight, (g) => {
+    pedBase(g);
+    g.fillStyle = '#c3c1bc'; g.fillRect(0, 0, SW, CELL); g.fillRect(CELL - SW, 0, SW, CELL);
+    g.strokeStyle = 'rgba(0,0,0,0.1)'; g.lineWidth = 1;
+    for (let y = 0; y <= CELL; y += 16) { g.beginPath(); g.moveTo(0, y); g.lineTo(SW, y); g.moveTo(CELL - SW, y); g.lineTo(CELL, y); g.stroke(); }
+    g.fillStyle = '#8f8a82'; for (const x of [SW, CELL - SW - 3]) g.fillRect(x, 0, 3, CELL);
+    g.fillStyle = '#9d968a'; g.fillRect(CELL / 2 - 3, 0, 6, CELL);
+  });
+  at(Cell.Ped, pedBase);
 }

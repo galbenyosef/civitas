@@ -6,9 +6,10 @@ import {
   CHUNK_SIZE, Terrain, hash2, isRoad, terrainOf, signalArms, armCount, signalledArms, isMarkedJunction, mouthControl, mouthCrossing,
   boxJunction, leafySide, streetTreeAt, midZebraAt, MouthCrossing, MouthControl, isRingAux, ringPos, isArmPos, RING_POS, isFlyoverAux, deckEW,
   isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, isRailAux, railMask, streetRun, streetLine, MOTORWAY_KIND,
+  auxClass, oneWayDir, isDividedAux, isMotorwayAux, auxJunction, RoadCls,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
-import { Geo, buildTile, buildRing, surfaceY, ringSurfaceY, STREET, SIDE, type RoadTile, type RoadProfile } from './roadGeo';
+import { Geo, buildTile, buildRing, surfaceY, ringSurfaceY, STREET, SIDE, CLASS_PROFILES, type RoadTile, type RoadProfile, type ClassInfo } from './roadGeo';
 import { lampTexture, OVL_SIZE, groundMaterial, lanternMaterial, sceneUniforms } from './materials';
 import { Kit } from './kit';
 
@@ -46,15 +47,17 @@ export interface RoadCtx {
   signalled: (x: number, y: number) => boolean;
 }
 
-/** a profile drawn on every street instead, from the console (RoadLayer.preview), for trying out R3's classes */
+/** a profile drawn on every street instead, from the console (RoadLayer.preview), for trying out cross-sections */
 let previewProfile: RoadProfile | null = null;
-/** The class of a road tile. One today; R3 reads the aux class byte here. */
-export const profileOf = (_tile: number, _aux: number): RoadProfile => previewProfile ?? STREET;
+/** The cross-section of a road tile: its class's (shared/src/roadclass.ts, the aux byte), a street's otherwise. */
+export const profileOf = (_tile: number, aux: number): RoadProfile => { const cls = auxClass(aux); return cls ? CLASS_PROFILES[cls] : previewProfile ?? STREET; };
+/** DIRS order (E, W, S, N) to a side (N 0, E 1, S 2, W 3) */
+const DIR_SIDE = [1, 3, 2, 0];
 
 // ---- furniture ------------------------------------------------------------------------------------------------------
 
-const F = { Post0: 0, Post1: 1, Post2: 2, Lens0: 3, Lens1: 4, Lens2: 5, Trunk: 6, Crown: 7, Column: 8, Bollard: 9, Bin: 10, Sign: 11, Beacon: 12, Globe: 13 } as const;
-const F_COUNT = 14;
+const F = { Post0: 0, Post1: 1, Post2: 2, Lens0: 3, Lens1: 4, Lens2: 5, Trunk: 6, Crown: 7, Column: 8, Bollard: 9, Bin: 10, Sign: 11, Beacon: 12, Globe: 13, Bench: 14 } as const;
+const F_COUNT = 15;
 interface Furn { f: number; m: Matrix4; c: Color; lamp?: [number, number, number, number]; street?: string }
 
 /** A name plate's post (R2 draws the street's name on it): the plate's centre, its yaw (it faces along +z turned by yaw) and the street tile it names. */
@@ -116,7 +119,10 @@ function smallGeometries() {
   const beacon = new Kit();
   for (let i = 0; i < 6; i++) beacon.cyl(0.0055, 0.0055, 0.03, 0, i * 0.03, 0, i % 2 ? 0xf2f2ee : 0x1b1d20, 6);
   const globe = new Kit().part(new SphereGeometry(0.017, 10, 8).translate(0, 0.195, 0), 0xffffff).build();
-  return { bollard, bin: bin, sign: sign.build(), beacon: beacon.build(), globe };
+  // a bench (pedestrian streets): seat and back in the instance colour, facing +z, on two dark legs
+  const bench = new Kit().box(0.086, 0.005, 0.028, 0, 0.019, 0.002, 0xffffff).box(0.086, 0.022, 0.005, 0, 0.024, -0.013, 0xffffff)
+    .box(0.005, 0.019, 0.026, -0.036, 0, 0, 0x4a4d52).box(0.005, 0.019, 0.026, 0.036, 0, 0, 0x4a4d52).build();
+  return { bollard, bin: bin, sign: sign.build(), beacon: beacon.build(), globe, bench };
 }
 
 /** Belisha globes: amber, flashing about once a second, each crossing at its own rate and phase (aLamp.x). */
@@ -195,14 +201,14 @@ export class RoadLayer {
     const lens = lanternMaterial(), beacon = beaconMaterial();
     const tree = treeGeometries(), small = smallGeometries();
     const geos = [postGeometry(0), postGeometry(1), postGeometry(2), lensGeometry(0), lensGeometry(1), lensGeometry(2),
-      tree.trunk, tree.crown, tree.column, small.bollard, small.bin, small.sign, small.beacon, small.globe];
-    const caps = [6000, 6000, 6000, 6000, 6000, 6000, 12000, 12000, 12000, 6000, 3000, 3000, 2000, 2000];
+      tree.trunk, tree.crown, tree.column, small.bollard, small.bin, small.sign, small.beacon, small.globe, small.bench];
+    const caps = [6000, 6000, 6000, 6000, 6000, 6000, 12000, 12000, 12000, 6000, 3000, 3000, 2000, 2000, 2000];
     this.meshes = geos.map((g, i) => {
       const lamp = i >= F.Lens0 && i <= F.Lens2, glob = i === F.Globe;
       if (lamp || glob) g.setAttribute('aLamp', new InstancedBufferAttribute(new Float32Array(caps[i] * 4), 4).setUsage(DynamicDrawUsage));
       const m = new InstancedMesh(g, lamp ? lens : glob ? beacon : furnMat, caps[i]);
       m.count = 0; m.frustumCulled = false;
-      m.castShadow = i <= F.Post2 || i === F.Trunk || i === F.Crown || i === F.Column || i === F.Beacon;
+      m.castShadow = i <= F.Post2 || i === F.Trunk || i === F.Crown || i === F.Column || i === F.Beacon || i === F.Bench;
       m.receiveShadow = i === F.Crown || i === F.Column;
       m.instanceMatrix.setUsage(DynamicDrawUsage);
       this.furniture.add(m);
@@ -464,13 +470,92 @@ export class RoadLayer {
       }
       if (!(m8 & bit) && leafySide(ctx.tile(nx, nz))) leafy |= bit;
     }
-    const box = junction && boxJunction(road, x, z, sig0, wear >= 2);
+    const cls = auxClass(a);
+    // no marked crossings on a lane, a motorway or a pedestrian street (its walkers have it all)
+    if (cls === RoadCls.Lane || cls === RoadCls.Motorway || cls === RoadCls.Pedestrian) cross.fill(0);
+    const box = junction && cls !== RoadCls.Lane && cls !== RoadCls.Pedestrian && cls !== RoadCls.Motorway && boxJunction(road, x, z, sig0, wear >= 2);
     const rail = isRailAux(a) ? railMask(a) : 0;
     const zebra = !junction && !under && midZebraAt(road, a, x, z);
     const prof = profileOf(tw, a);
     const t: RoadTile = { x, z, prof, m8, arms, junction, cross, ctrl, box, nCross, nCtrl, nArms, leafy, rail, under, zebra, wear };
-    const sig = `${prof.carriage},${prof.lanes},${prof.median},${prof.oneWay ? 1 : 0}|${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0}${zebra ? 1 : 0},${wear}`;
+    if (cls) t.cl = this.classInfo(x, z, a, cls, arms, junction, nArms, m8);
+    const cl = t.cl;
+    const clSig = cl ? `|C${cl.cls},${cl.flow},${cl.twin},${cl.divJ ? 1 : 0},${cl.eC.join(',')},${cl.eK.join(',')},${cl.nose},${cl.slip},${cl.gore},${cl.mouth},${cl.arrow ? 1 : 0},${cl.jbox},${cl.jAhead ? 1 : 0}` : '';
+    const sig = `${prof.carriage},${prof.lanes},${prof.median},${prof.oneWay ? 1 : 0}|${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0}${zebra ? 1 : 0},${wear}${clSig}`;
     return { sig, t, ring: null };
+  }
+
+  /**
+   * What a class tile's look depends on (roadGeo ClassInfo): its flow and twin, the widths and kerbs it meets at each
+   * edge, where its reservation ends, a motorway's slips and gores, a pedestrian street's mouths, the one-way arrows.
+   */
+  private classInfo(x: number, z: number, a: number, cls: number, arms: number, junction: boolean, nArms: number[], m8: number): ClassInfo {
+    const ctx = this.ctx!, P = CLASS_PROFILES[cls];
+    const ow = oneWayDir(a), flow = ow >= 0 ? DIR_SIDE[ow] : -1;
+    const roadAt = (s: number) => { const t = ctx.tile(x + SIDE[s][0], z + SIDE[s][1]); return t !== undefined && isRoad(t); };
+    const auxS = (s: number) => ctx.aux(x + SIDE[s][0], z + SIDE[s][1]);
+    let twin = -1;
+    if (flow >= 0 && isDividedAux(a)) {
+      const s = (flow + 3) & 3, b = auxS(s), bo = oneWayDir(b);
+      if (roadAt(s) && isDividedAux(b) && (b & 7) === cls && bo >= 0 && DIR_SIDE[bo] === ((flow + 2) & 3)) twin = s;
+    }
+    const eC = [0, 0, 0, 0], eK = [0, 0, 0, 0];
+    let mouth = 0, slip = 0;
+    for (let s = 0; s < 4; s++) {
+      eC[s] = P.carriage;
+      if (!roadAt(s)) continue;
+      const nb = auxClass(auxS(s)), nP = CLASS_PROFILES[nb];
+      // the two roads meet at the street's width, or else the wider of them
+      eC[s] = nb === 0 ? nP.carriage : Math.max(P.carriage, nP.carriage);
+      eK[s] = nP.kerb;
+      if (cls === RoadCls.Pedestrian && nb !== RoadCls.Pedestrian) mouth |= 1 << s;
+      if (cls === RoadCls.Motorway && flow >= 0 && s === ((flow + 1) & 3) && nb !== RoadCls.Motorway) slip |= 1 << s;
+    }
+    let nose = 0, gore = 0;
+    if (twin >= 0) for (const e of [flow, (flow + 2) & 3]) {
+      const b = auxS(e);
+      if (!(roadAt(e) && isDividedAux(b) && (b & 7) === cls && oneWayDir(b) === ow)) nose |= 1 << e;
+    }
+    if (cls === RoadCls.Motorway && flow >= 0 && !slip) {
+      const o = (flow + 1) & 3;
+      for (const e of [flow, (flow + 2) & 3]) {
+        const ex = x + SIDE[e][0], ez = z + SIDE[e][1], b = ctx.aux(ex, ez);
+        if (!isMotorwayAux(b) || oneWayDir(b) !== ow) continue;
+        const tx = ex + SIDE[o][0], tz = ez + SIDE[o][1], tt = ctx.tile(tx, tz);
+        if (tt !== undefined && isRoad(tt) && !isMotorwayAux(ctx.aux(tx, tz))) gore |= 1 << e;
+      }
+    }
+    const nsAxis = flow >= 0 ? flow === 0 || flow === 2 : (arms & 5) !== 0 && (arms & 10) === 0;
+    const line = nsAxis ? x : z, pos = nsAxis ? z : x;
+    let arrow = false;
+    if (flow >= 0 && (arms === 5 || arms === 10) && !junction && !nArms.some(Boolean) && (cls === RoadCls.OneWay || cls === RoadCls.Avenue)) {
+      // every few tiles, the phase hashed by the street (a one-way's matches its far cells, chunkView classCell)
+      const per = cls === RoadCls.OneWay ? 4 + Math.floor(hash2(line * 3 + 1, 9) * 3) : 7, ph = Math.floor(hash2(line * 5 + 2, 11) * per);
+      arrow = (((pos + ph) % per) + per) % per === 0 && (cls === RoadCls.OneWay || hash2(line * 7 + 5, pos) < 0.5);
+    }
+    // an avenue's crossing: its junction tiles (one each side of the reservation, two pairs where avenues cross) boxed
+    // as one when every one of them is a crossing (road on all four sides), at about seven crossings in ten
+    let jbox = -1;
+    if (cls === RoadCls.Avenue && auxJunction(a) && (m8 & 15) === 15) {
+      const isJ = (px: number, pz: number) => { const t = ctx.tile(px, pz); return t !== undefined && isRoad(t) && auxJunction(ctx.aux(px, pz)); };
+      const four = (px: number, pz: number) => SIDE.every(([dx, dz]) => { const t = ctx.tile(px + dx, pz + dz); return t !== undefined && isRoad(t); });
+      const sides = [0, 1, 2, 3].filter((s) => isJ(x + SIDE[s][0], z + SIDE[s][1]));
+      const members: [number, number][] = [[x, z], ...sides.map((s): [number, number] => [x + SIDE[s][0], z + SIDE[s][1]])];
+      if (sides.length === 2 && (sides[0] + sides[1]) % 2 === 1) {
+        const dx = SIDE[sides[0]][0] + SIDE[sides[1]][0], dz = SIDE[sides[0]][1] + SIDE[sides[1]][1];
+        if (isJ(x + dx, z + dz)) members.push([x + dx, z + dz]);
+      }
+      const kx = Math.min(...members.map((m) => m[0])), kz = Math.min(...members.map((m) => m[1]));
+      if (members.every(([px, pz]) => four(px, pz)) && hash2(kx * 17 + 5, kz * 13 + 7) < 0.7) {
+        jbox = 0;
+        for (let s = 0; s < 4; s++) if (!sides.includes(s)) jbox |= 1 << s;
+      }
+    }
+    const ahead = flow >= 0 ? auxS(flow) : 0;
+    const fx = flow >= 0 ? x + SIDE[flow][0] : 0, fz = flow >= 0 ? z + SIDE[flow][1] : 0;
+    const jAhead = flow >= 0 && isDividedAux(a) && roadAt(flow) && isDividedAux(ahead) && auxJunction(ahead)
+      && SIDE.every(([dx, dz]) => { const t = ctx.tile(fx + dx, fz + dz); return t !== undefined && isRoad(t); }); // a crossing, not a bend or an end
+    return { cls, flow, twin, divJ: auxJunction(a), eC, eK, nose, slip, gore, mouth, arrow, line, pos, jbox, jAhead };
   }
 
   /** A road tile under a flyover's ramp or a bridge's landing ramp (those draw it; render/junctions.ts, bridges.ts). */
@@ -501,6 +586,8 @@ export class RoadLayer {
     if (terrainOf(tw) === Terrain.Water || isRailAux(a) || isFlyoverAux(a) || isBridgeAux(a) || this.isRamp(x, z, a)) return null;
     if (midZebraAt(road, a, x, z)) return null; // the zebra's beacons stand there
     const r = (n: number) => hash2(x * 41 + n * 13, z * 37 - n * 7);
+    const cls = auxClass(a);
+    if (cls === RoadCls.Motorway) return this.motorwayLamp(x, z, a, r);
     let px = 0, pz = 0, lx = 0, lz = 0, line = 0, st = 0;
     if (isRingAux(a)) {
       const p = ringPos(a);
@@ -514,19 +601,23 @@ export class RoadLayer {
         // along a straight: every third tile, the side alternating, the spacing set by the street's own phase
         const ns = arms === 5, along = ns ? z : x;
         line = ns ? x : z;
+        // (a pedestrian street's heritage lamps every other tile)
+        const per = cls === RoadCls.Pedestrian ? 2 : 3;
         const k = along + Math.floor(hash2(line * 7 + 3, ns ? 41 : 43) * 3);
-        if (((k % 3) + 3) % 3 !== 0) return null;
-        let side = Math.floor(k / 3) & 1 ? 1 : -1;
+        if (((k % per) + per) % per !== 0) return null;
+        let side = Math.floor(k / per) & 1 ? 1 : -1;
         const sideRoad = (sd: number) => (ns ? road(x + sd, z) : road(x, z + sd));
         if (sideRoad(side)) side = -side;
         if (sideRoad(side)) return null;
+        if (cls === RoadCls.Lane && r(12) > 0.18) return null; // a lane's lamps are few and far between
         const j = (r(2) - 0.5) * 0.3;
         // the lantern reaches out over the road from the back of the pavement
         if (ns) { px = side * 0.47; pz = j; lx = side * 0.34; lz = j; } else { px = j; pz = side * 0.47; lx = j; lz = side * 0.34; }
         st = Math.floor(along / 8);
       } else if (n === 2) {
         // a bend: on the outside corner, leaning in over the turn
-        if (r(3) > 0.6) return null;
+        // (not on a divided road's junction tiles: their outside corner is the crossing or the turn)
+        if (r(3) > 0.6 || (cls === RoadCls.Lane && r(12) > 0.25) || auxJunction(a)) return null;
         const sx = arms & 2 ? -1 : 1, sz = arms & 4 ? -1 : 1;
         px = sx * 0.43; pz = sz * 0.43; lx = sx * 0.34; lz = sz * 0.34; line = x + z; st = 0;
       } else return null;
@@ -534,13 +625,37 @@ export class RoadLayer {
     if (r(4) < 0.04) return null; // a column taken down and not replaced
     // the street's lamps: one design and colour per stretch, now and then a replacement that does not match
     const ds = hash2(line * 11 + 5, st * 3 + 1), odd = r(5) < 0.08;
-    const design = odd ? Math.floor(r(6) * 3) : ds < 0.45 ? 0 : ds < 0.8 ? 1 : 2;
+    let design = odd ? Math.floor(r(6) * 3) : ds < 0.45 ? 0 : ds < 0.8 ? 1 : 2;
+    if (cls === RoadCls.Pedestrian) design = r(6) < 0.06 ? 1 : 2; // heritage lanterns, now and then an old column
+    else if (cls === RoadCls.Lane) design = ds < 0.65 ? 1 : 0;
     const led = design === 0 ? r(7) > 0.1 : design === 2 ? r(7) < 0.5 : r(7) < 0.15;
     if (design === 2) { lx = px; lz = pz; }
     const dead = r(8) < 0.04, sput = !dead && r(9) < 0.05;
     const bright = Math.floor(r(10) * 31);
     const flags = (dead ? 1 : 0) | (sput ? 2 : 0) | (led ? 4 : 0) | (bright << 3);
     return { px, pz, lx, lz, yaw: Math.atan2(-(lz - pz), lx - px), on: 0.1 + 0.55 * r(11), flags, design };
+  }
+
+  /**
+   * A motorway's lamps: on the reservation, every third tile of a lit stretch, the pair of carriageways' columns on the
+   * same spot (one column with an arm each way), each lantern lighting its own carriageway.
+   */
+  private motorwayLamp(x: number, z: number, a: number, r: (n: number) => number) {
+    const ow = oneWayDir(a);
+    if (ow < 0) return null;
+    const f = DIR_SIDE[ow], tw = (f + 3) & 3, [tx, tz] = SIDE[tw];
+    const b = this.ctx!.aux(x + tx, z + tz);
+    if (!isMotorwayAux(b) || oneWayDir(b) < 0) return null;
+    const ns = f === 0 || f === 2, along = ns ? z : x;
+    const edge = ns ? x + Math.max(0, tx) : z + Math.max(0, tz); // the shared edge, the same for both of the pair
+    if (hash2(edge * 7 + 1, Math.floor(along / 12) * 5 + (ns ? 1 : 2)) > 0.6) return null; // an unlit stretch
+    const k = along + Math.floor(hash2(edge * 11 + 5, ns ? 7 : 9) * 3);
+    if (((k % 3) + 3) % 3 !== 0) return null;
+    const j = (hash2(edge * 13 + 3, along * 7 + 1) - 0.5) * 0.2;
+    const px = ns ? tx * 0.5 : j, pz = ns ? j : tz * 0.5, lx = ns ? tx * 0.3 : j, lz = ns ? j : tz * 0.3;
+    const dead = r(8) < 0.03, sput = !dead && r(9) < 0.03, led = hash2(edge * 3 + 1, Math.floor(along / 12)) > 0.25;
+    const flags = (dead ? 1 : 0) | (sput ? 2 : 0) | (led ? 4 : 0) | (Math.floor(r(10) * 31) << 3);
+    return { px, pz, lx, lz, yaw: Math.atan2(-(lz - pz), lx - px), on: 0.1 + 0.55 * r(11), flags, design: 0 };
   }
 
   private placeLamps(e: Entry) {
@@ -574,15 +689,20 @@ export class RoadLayer {
     const ox = t.x + 0.5, oz = t.z + 0.5;
     const r = (n: number) => hash2(t.x * 53 + n * 11, t.z * 47 - n * 5);
     const at = (lx: number, lz: number) => surfaceY(t, ox + lx, oz + lz);
-    const put = (f: number, lx: number, lz: number, yaw: number, s: number, c: Color, lean = 0, leanDir = 0, lamp?: [number, number, number, number]) => {
+    const put = (f: number, lx: number, lz: number, yaw: number, s: number, c: Color, lean = 0, leanDir = 0, lamp?: [number, number, number, number], y?: number) => {
       const q = new Quaternion().setFromAxisAngle(UP, yaw);
       if (lean) q.premultiply(new Quaternion().setFromAxisAngle(new Vector3(Math.cos(leanDir), 0, -Math.sin(leanDir)), lean));
-      out.push({ f, m: new Matrix4().compose(new Vector3(ox + lx, at(lx, lz), oz + lz), q, new Vector3(s, s, s)), c, lamp });
+      out.push({ f, m: new Matrix4().compose(new Vector3(ox + lx, y ?? at(lx, lz), oz + lz), q, new Vector3(s, s, s)), c, lamp });
     };
+    const cls = t.cl?.cls ?? 0;
     const tw = ctx.tile(t.x, t.z)!;
     const l = this.lampOf(t.x, t.z, tw, ctx.aux(t.x, t.z));
     let lampSide = -1, lampAlong = 0;
-    if (l) {
+    if (l && cls === RoadCls.Motorway) {
+      // the pair's columns stand on one spot, so they are alike: one column with an arm each way
+      put(F.Post0, l.px, l.pz, l.yaw, 1, new Color().setScalar(0.95));
+      put(F.Lens0, l.px, l.pz, l.yaw, 1, new Color(1, 1, 1), 0, 0, [l.on, l.flags, t.x, t.z]);
+    } else if (l) {
       const s = 0.95 + 0.1 * r(1);
       const tone = new Color().setScalar(0.85 + 0.25 * r(2));
       put(F.Post0 + l.design, l.px, l.pz, l.yaw, s, tone, (r(3) - 0.5) * 0.04, r(4) * 6.28);
@@ -590,8 +710,8 @@ export class RoadLayer {
       lampSide = Math.abs(l.px) > Math.abs(l.pz) ? (l.px > 0 ? 1 : 3) : (l.pz > 0 ? 2 : 0);
       lampAlong = Math.abs(l.px) > Math.abs(l.pz) ? l.pz : l.px;
     }
-    // street trees in the verge
-    for (let s = 0; s < 4; s++) {
+    // street trees in the verge (a motorway's verge is kept clear)
+    for (let s = 0; s < 4 && cls !== RoadCls.Motorway; s++) {
       const tree = streetTreeAt(ctx.tile, t.x, t.z, 1 << s);
       if (!tree || (s === lampSide && Math.abs(tree.along - lampAlong) < 0.2)) continue;
       const off = 0.482, [dx, dz] = SIDE[s];
@@ -605,7 +725,9 @@ export class RoadLayer {
       put(F.Trunk, lx, lz, yaw, size, new Color().setScalar(0.85 + 0.3 * hash2(t.x + 9, t.z + s)), lean, leanDir);
       put(species === 1 ? F.Column : F.Crown, lx, lz, yaw, size * (species === 1 ? 1 : 1 + 0.15 * hash2(t.x, t.z + s * 7)), c, lean, leanDir);
     }
-    if (t.junction) {
+    if (cls === RoadCls.Avenue && t.cl!.twin >= 0) this.reservationTrees(t, put);
+    if (cls === RoadCls.Pedestrian) this.pedFurniture(t, put);
+    if (t.junction && cls !== RoadCls.Lane && cls !== RoadCls.Motorway && cls !== RoadCls.Pedestrian) {
       const c = t.prof.carriage;
       // bollards round some corners, clear of the walkers' corner (the sidewalk line meets at 45°)
       for (const [sx, sz, sa, sb] of [[1, -1, 1, 0], [1, 1, 1, 2], [-1, 1, 3, 2], [-1, -1, 3, 0]]) {
@@ -633,7 +755,7 @@ export class RoadLayer {
         put(F.Beacon, lx, lz, 0, 1, new Color(1, 1, 1));
         put(F.Globe, lx, lz, 0, 1, new Color(1, 1, 1), 0, 0, [r(40), r(44), 0, 0]);
       }
-    } else if ((t.arms === 5 || t.arms === 10) && r(50) < 0.1) {
+    } else if ((t.arms === 5 || t.arms === 10) && r(50) < 0.1 && cls !== RoadCls.Lane && cls !== RoadCls.Motorway) {
       // a litter bin on the pavement, away from the lamp
       const ns = t.arms === 5, sides = ns ? [1, 3] : [0, 2];
       const s = sides[r(51) < 0.5 ? 0 : 1];
@@ -646,6 +768,7 @@ export class RoadLayer {
     // a name plate post on a corner where the street meets a junction: always on a road that gives way, on about half
     // of the others (R2 names the street on it)
     for (let s = 0; s < 4; s++) {
+      if (cls === RoadCls.Motorway) break;
       if (!t.nArms[s] || (t.nCtrl[s] !== MouthControl.GiveWay && r(70 + s) > 0.5)) continue;
       const [dx, dz] = SIDE[s], rx = -dz, rz = dx;
       const e = r(60 + s) < 0.5 ? -1 : 1;
@@ -656,6 +779,78 @@ export class RoadLayer {
       out[out.length - 1].street = streetLine(streetRun(t.x, t.z, s === 0 || s === 2, this.roadFn));
     }
     return out;
+  }
+
+  /**
+   * Trees on an avenue's reservation, stood on the shared edge by one of the pair (the tile with its twin to the north
+   * or west): by stretch a tree on every tile, on every other with shrubs between, or shrubs only; one species to a
+   * stretch with the odd replacement, each tree its own size, lean and place, a gap where one was lost.
+   */
+  private reservationTrees(t: RoadTile, put: (f: number, lx: number, lz: number, yaw: number, s: number, c: Color, lean?: number, leanDir?: number, lamp?: [number, number, number, number], y?: number) => void) {
+    const cl = t.cl!, tw = cl.twin;
+    if (tw !== 0 && tw !== 3) return;
+    const [nx, nz] = SIDE[tw], ux = -nz, uz = nx;
+    const ns = ux === 0, along = ns ? t.z : t.x, edge = ns ? t.x + Math.max(0, nx) : t.z + Math.max(0, nz);
+    const h = (n: number) => hash2(edge * 31 + n * 7, along * 17 - n * 3);
+    const sideOf = (dx: number, dz: number) => SIDE.findIndex(([x, z]) => x === dx && z === dz);
+    const umax = cl.nose & (1 << sideOf(ux, uz)) ? 0.22 : 0.42, umin = cl.nose & (1 << sideOf(-ux, -uz)) ? -0.22 : -0.42;
+    const stretchK = Math.floor(along / 8), style = hash2(edge * 5 + 2, stretchK * 3 + 1), K = t.prof.kerb;
+    const sp = hash2(edge * 3 + 9, stretchK * 7 + 2), odd = h(1) < 0.12;
+    const kind = odd ? h(8) : sp; // species: plane/lime greens, a column of poplars, cherries in blossom
+    const at = (u: number): [number, number] => [nx * 0.5 + ux * u, nz * 0.5 + uz * u];
+    if (style < 0.85 && (style < 0.6 || (along & 1) === 0) && h(2) > 0.1) {
+      const u = Math.max(umin, Math.min(umax, (h(3) - 0.5) * 0.35)), [lx, lz] = at(u);
+      const column = kind > 0.62 && kind < 0.8, blossom = kind >= 0.8;
+      const size = (blossom ? 1.4 : 1.65) + 0.65 * h(4), lean = 0.02 + 0.05 * h(5), leanDir = h(6) * 6.28, yaw = h(7) * 6.28;
+      const leaf = blossom ? LEAF[5 + (h(9) < 0.6 ? 0 : 1)] : LEAF[Math.floor(kind * 6.4) % 5];
+      put(F.Trunk, lx, lz, yaw, size, new Color().setScalar(0.85 + 0.3 * h(10)), lean, leanDir, undefined, K);
+      put(column ? F.Column : F.Crown, lx, lz, yaw, size * (column ? 1 : 1 + 0.15 * h(11)), leaf.clone().multiplyScalar(0.85 + 0.25 * h(12)), lean, leanDir, undefined, K);
+    }
+    if (style >= 0.6) {
+      // shrubs: low, rounded, a darker green
+      const n = 2 + (h(13) < 0.5 ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const u = Math.max(umin, Math.min(umax, -0.42 + 0.84 * ((i + 0.3 + 0.4 * h(14 + i)) / n))), [lx, lz] = at(u), s = 0.6 + 0.3 * h(16 + i);
+        put(F.Crown, lx, lz, h(18 + i) * 6.28, s, LEAF[1].clone().multiplyScalar(0.7 + 0.25 * h(20 + i)), 0, 0, undefined, K - 0.11 * s);
+      }
+    }
+  }
+
+  /**
+   * A pedestrian street's furniture: bollards across each mouth where a road cars use meets it (three or four, one now
+   * and then missing), and now and then a bench or a planter with a shrub, clear of the walkers' lines (0.42 out).
+   */
+  private pedFurniture(t: RoadTile, put: (f: number, lx: number, lz: number, yaw: number, s: number, c: Color, lean?: number, leanDir?: number, lamp?: [number, number, number, number], y?: number) => void) {
+    const cl = t.cl!;
+    const r = (n: number) => hash2(t.x * 59 + n * 17, t.z * 43 - n * 11);
+    const prec = hash2(Math.floor(t.x / 7) * 5 + 3, Math.floor(t.z / 7) * 9 + 1); // the precinct's style
+    const bollardC = prec < 0.4 ? new Color(1, 1, 1) : prec < 0.7 ? new Color(0.75, 0.95, 0.8) : new Color(1.6, 1.6, 1.65);
+    for (let s = 0; s < 4; s++) {
+      if (!(cl.mouth & (1 << s))) continue;
+      const [dx, dz] = SIDE[s], rx = -dz, rz = dx;
+      const n = 3 + (r(1 + s) < 0.5 ? 1 : 0), span = 0.26;
+      for (let i = 0; i < n; i++) {
+        if (r(10 + s * 5 + i) < 0.08) continue; // one taken out (for the deliveries) and not put back
+        const across = -span + (2 * span * i) / (n - 1) + (r(30 + s * 5 + i) - 0.5) * 0.02;
+        put(F.Bollard, dx * 0.44 + rx * across, dz * 0.44 + rz * across, 0, 0.95 + 0.15 * r(50 + i), bollardC.clone().multiplyScalar(0.9 + 0.2 * r(55 + i)));
+      }
+    }
+    if ((t.arms !== 5 && t.arms !== 10) || t.junction || r(80) > 0.38) return;
+    const ns = t.arms === 5, side = r(81) < 0.5 ? -1 : 1, along = (r(82) - 0.5) * 0.6, across = side * (0.24 + 0.04 * r(83));
+    const lx = ns ? across : along, lz = ns ? along : across;
+    if (r(84) < 0.55) {
+      // a bench facing the middle of the street: timber, green-painted iron or black
+      const dx = ns ? -side : 0, dz = ns ? 0 : -side, k = r(85);
+      const c = k < 0.5 ? new Color(0.62, 0.42, 0.26) : k < 0.8 ? new Color(0.2, 0.36, 0.26) : new Color(0.14, 0.15, 0.16);
+      put(F.Bench, lx, lz, Math.atan2(dx, dz), 1, c.multiplyScalar(0.9 + 0.2 * r(86)));
+    } else {
+      // a planter (terracotta, stone or charcoal) with a shrub or a flowering bush in it
+      const k = r(87), ps = 2.2 + 0.9 * r(88);
+      const c = k < 0.4 ? new Color(0.72, 0.42, 0.3) : k < 0.75 ? new Color(0.78, 0.76, 0.72) : new Color(0.24, 0.25, 0.27);
+      put(F.Bin, lx, lz, r(89) * 6.28, ps, c);
+      const sh = 0.36 + 0.16 * r(90), leaf = LEAF[Math.floor(r(91) * 6.99)];
+      put(F.Crown, lx, lz, r(92) * 6.28, sh, leaf.clone().multiplyScalar(0.85 + 0.25 * r(93)), 0, 0, undefined, 0.042 * ps - 0.105 * sh);
+    }
   }
 
   private furnishRing(x: number, z: number): Furn[] {
