@@ -203,8 +203,13 @@ export const TRAFFIC_TUNING = {
   heavyAccel: 0.6,
   /** Comfortable braking, tiles per tick per tick: what a driver plans with (harder only when the gap closes unexpectedly). */
   brake: 0.2,
-  /** With follow, 1: slow down before a turn, to be at the turn's speed (0.6 of full at a plain junction) as it begins. */
-  followTurn: 1,
+  /**
+   * With follow, slow down before a turn, to be at the turn's speed (0.6 of full at a plain junction) as it begins: 1
+   * everywhere; 2 only into junctions with lights (at a give-way junction a turning car that slows early gets to the
+   * box later and loses its gap to the cross traffic: 1.5 speed points and 6% more give-ups in a town without
+   * signals, docs/traffic-tuning.md); 0 never (the turn's speed is taken at once inside the box).
+   */
+  followTurn: 2,
   /** Time headway, ticks: a driver keeps headway × its speed on top of MIN_GAP to a car ahead that is braking at `brake` too. */
   headway: 0.5,
   /**
@@ -212,7 +217,7 @@ export const TRAFFIC_TUNING = {
    * MIN_GAP) before moving up, or until that car moves off: a queue closes up in fewer, longer moves rather than
    * shuffling forward one car length every time the front moves (0: always move up at once).
    */
-  startGap: 0.9,
+  startGap: 0,
   /**
    * 1: look ahead to the stop line. Within braking distance of it, a driver asks the entry rules whether it would be
    * let in on arrival (the light as it will be then: phases are a pure function of the tick) and brakes for the line
@@ -224,9 +229,9 @@ export const TRAFFIC_TUNING = {
   /**
    * 1: platoons through junctions. A car following one that went in by the same approach and the same exit, moving and
    * within platoonGap tiles, may go in behind it before it has left the box (the following gap keeps them apart);
-   * every other entry rule still applies (the light, crossings, conflicting movements).
+   * every other entry rule still applies (the light, crossings, conflicting movements). 2: only at lights.
    */
-  platoon: 1,
+  platoon: 2,
   platoonGap: 0.6,
   /** the leader of a platoon must be moving at least this fast (tiles per tick) */
   platoonV: 0.1,

@@ -103,3 +103,5 @@ console.log('| drawing | mean drawn |Δv| per frame (tiles/s) | jolts (|Δv| > 0
 console.log('| --- | --- | --- | --- | --- | --- |');
 for (const k of ['old', 'glide'] as const) { const s = S[k]; console.log(`| ${k} | ${f2(s.dvSum / s.frames)} | ${f1((100 * s.jolts) / s.frames)} | ${f1((1000 * s.hitches) / s.moving)} | ${f1((1000 * s.stops) / s.moving)} | ${f2(s.lag / s.lagN)} |`); }
 if (traceId) for (const k of ['old', 'glide'] as const) console.log(k, trace[k].slice(0, 240).join(' '));
+const tj = get('trace-json');
+if (traceId && tj) (await import('node:fs')).writeFileSync(tj, JSON.stringify({ id: traceId, fps, jitter, set: get('set') ?? '', old: trace.old.map(Number), glide: trace.glide.map(Number), server: msgs.map((m, i) => { const a = m.all.get(traceId), b = msgs[i - 1]?.all.get(traceId); return a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) / (TICK_MS / 1000) : null; }) }));

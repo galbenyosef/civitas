@@ -1269,7 +1269,7 @@ export class Traffic {
       // at a junction the car ahead in the exit lane must be out of the box before we go in behind it;
       // on plain road the following gap in step() is all that is needed, so cars can close up inside a tile
       const tail = leaderIn(nq, nq.length, isBike(m));
-      if (tail && tail.prog < this.clearAt(tail) + MIN_GAP && !(TT.platoon && this.platoonBehind(m, tail, inD))) return false;
+      if (tail && tail.prog < this.clearAt(tail) + MIN_GAP && !(TT.platoon && (TT.platoon === 1 || this.junction(bx, by).signal) && this.platoonBehind(m, tail, inD))) return false;
     }
     if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
     const signal = deg >= 3 && this.junction(bx, by).signal && !trapped;
@@ -1587,7 +1587,7 @@ export class Traffic {
       }
       if (haltLim < Infinity) want = Math.min(want, safeSpeed(haltLim, 0, dec));
       // a turn through the next tile begins at progress 0.3: be down to its speed by then
-      if (TT.followTurn && !last && nextDir !== dir && m.prog < 0.3) {
+      if (TT.followTurn && !last && nextDir !== dir && m.prog < 0.3 && (TT.followTurn === 1 || this.junction(bx, by).signal)) {
         const vt = free * this.turnSlow(bx, by) * (nextDir === OPP[dir] ? UTURN_SLOW : 1);
         want = Math.min(want, safeSpeed(0.3 - m.prog, vt, dec));
       }
