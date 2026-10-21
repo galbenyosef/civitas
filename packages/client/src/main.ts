@@ -1,5 +1,5 @@
 import { JunctionTools, isJunctionTool } from './junctiontools';
-import { junctionArmAt, nextArmState, armState } from '@msimcity/shared';
+import { junctionArmAt, nextArmState, armState, JAM_WHY_STRIDE } from '@msimcity/shared';
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
@@ -28,6 +28,8 @@ import { TrainsView } from './render/trains';
 import { RailClient, trainHtml, setPlatformCrowd } from './rail';
 import { RoadTool } from './roadtool';
 import { RoadClassPicker } from './roadpicker';
+import { StreetRuleTool, StreetRulePicker } from './streetrules';
+import { TrafficPanel } from './trafficpanel';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
 import { BridgeView } from './render/bridges';
@@ -208,13 +210,20 @@ const junctionTools = new JunctionTools(world); // the junction tools' ghost, co
 // utilities (utilities.ts, docs/utilities.md): reach from the tiles, the hourly node states, blackouts, the power overlay, pylons
 const power = new PowerClient(world, (k) => views.get(k)); scene.add(power.group);
 const roadTool = new RoadTool(world, DEV_TOOLS); scene.add(roadTool.group); // the road drag's ghost, cost chip, spacing guide and question (roadtool.ts)
+// the Street rules tool's ghost over the street, its chip and the HGV ban's probe (streetrules.ts, R5)
+const streetRules = new StreetRuleTool(world, DEV_TOOLS, {
+  send: (rule, tiles, on) => net.send({ t: 'streetRule', rule, tiles, on, ...(DEV_TOOLS ? { dev: true } : {}) }),
+  probe: (rule, tiles, seq) => net.send({ t: 'ruleProbe', rule, tiles, seq }),
+  undo: () => net.send({ t: 'undoStreetRule' }),
+});
+scene.add(streetRules.group);
 const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks, piers, towers and ramps (render/bridges.ts)
 // roads near the camera as geometry, their furniture and the street lamps' map (render/roads.ts)
 const roads = new RoadLayer(atlas); scene.add(roads.group, roads.furniture);
 ChunkView.onTint = (cx, cy, heat) => roads.setHeat(cx, cy, heat, !roadsOverlay && !power.overlayOn); // the overlays' bytes wear nothing
 roads.kindAt = (x, y) => world.kindIdAt(x, y);
 roads.rules = world; lights.world = world; // signal crossings and their walk phases (R4)
-citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz) || roads.walkY(x, z); // cars and walkers on a flyover deck or a bridge and their ramps, walkers on a kerbed pavement
+citizens.roadY = (x, z, hx, hz) => (junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz) || roads.walkY(x, z)) + roads.humpY(x, z); // cars and walkers on a flyover deck or a bridge and their ramps, walkers on a kerbed pavement
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
 landmarks.auxAt = (x, y) => world.auxAt(x, y); // a Tower Bridge span running on into the next chunk
 landmarks.bargeHidden = (seed, day) => boats.liftBooked(seed, day); // real boats booked into a span's lifts replace its decorative barge
@@ -264,6 +273,16 @@ ui.roadPicker = new RoadClassPicker({
   pick: (cls) => { roadTool.pick(cls); ui.roadClassChanged(); updateStatus(); },
   locked: (msg) => ui.toast('error', msg),
 });
+// the Street rules tool's picker (streetrules.ts), hung off its button
+ui.rulePicker = new StreetRulePicker({
+  picked: () => streetRules.rule,
+  lockOf: (r) => streetRules.lockOf(r),
+  pick: (r) => { streetRules.pick(r); ui.ruleChanged(); updateStatus(); },
+  locked: (msg) => ui.toast('error', msg),
+});
+ui.ruleName = () => streetRules.def.title;
+ui.ruleChanged();
+net.on('ruleProbe', (m) => streetRules.probed(m));
 ui.roadClassName = () => (roadTool.roadClass ? classDef(roadTool.roadClass).title : '');
 ui.roadClassCost = () => classDef(roadTool.roadClass).cost;
 ui.roadClassChanged();
@@ -338,6 +357,7 @@ ui.mineByName = (name) => world.myPlayer?.name === name;
 net.on('utilState', (m) => power.setState(m));
 net.on('utilLinks', (m) => power.setLinks(m));
 ui.onMothball = (x, y, on) => net.send({ t: 'recover', action: on ? 'mothball' : 'unmothball', keys: [`${x},${y}`] });
+ui.onGatewayLimit = (x, y, on) => { net.send({ t: 'gatewayLimit', x, y, on }); setTimeout(() => { if (selectedBuilding) net.send({ t: 'inspect', x: selectedBuilding[0], y: selectedBuilding[1], full: true }); }, 300); };
 charts.me = () => world.myPlayer;
 lines.onLivery = (pairs, colours) => citizens.setLivery(pairs, colours);
 lines.onEdit = () => input.setTool('select');
@@ -382,7 +402,32 @@ function roadClassHeat(key: string): Uint8Array | undefined {
   return out;
 }
 function paintRoadClasses() { for (const [key, v] of views) { v.heat = roadClassHeat(key); v.tintRoads(); } }
+// the Traffic panel (trafficpanel.ts, R5): asked for only while it is open
+const trafficPanel = new TrafficPanel({
+  ask: () => net.send({ t: 'trafficPanel' }),
+  jump: (x, y) => { following = false; rig.target.set(x + 0.5, 0, y + 0.5); rig.dist = Math.min(rig.dist, 30); },
+  limit: (x, y, on) => net.send({ t: 'gatewayLimit', x, y, on }),
+});
+net.on('trafficPanel', (m) => trafficPanel.show(m.info));
+// the congestion overlay's explanation (R5): why each held-up road is slow, per chunk, asked for only while hovering with it on
+const jamWhy = new Map<string, { at: number; u: number[] }>();
+let jamAsked = '';
+net.on('jamWhy', (m) => {
+  jamWhy.set(`${m.cx},${m.cy}`, { at: performance.now(), u: m.u });
+  jamAsked = '';
+  if (tipTile && !tipAgent && Math.floor(tipTile[0] / CHUNK_SIZE) === m.cx && Math.floor(tipTile[1] / CHUNK_SIZE) === m.cy) net.send({ t: 'inspect', x: tipTile[0], y: tipTile[1] });
+});
+/** The overlay's why for road tile (x, y): the held cars by cause, and how many are lorries or visitors; asks again when stale. */
+function whyAt(x: number, y: number): number[] | null {
+  if (overlayMenu.mode !== 'traffic') return null;
+  const cx = Math.floor(x / CHUNK_SIZE), cy = Math.floor(y / CHUNK_SIZE), k = `${cx},${cy}`, e = jamWhy.get(k), now = performance.now();
+  if ((!e || now - e.at > 2000) && jamAsked !== k) { jamAsked = k; net.send({ t: 'jamWhy', cx, cy }); }
+  if (!e) return null;
+  for (let i = 0; i + JAM_WHY_STRIDE <= e.u.length; i += JAM_WHY_STRIDE) if (e.u[i] === x && e.u[i + 1] === y) return e.u.slice(i + 2, i + JAM_WHY_STRIDE);
+  return [];
+}
 const overlayMenu = new OverlayMenu({
+  trafficPanel: () => trafficPanel.toggle(),
   setTraffic: (on) => setHeat(on),
   setRoads: (on) => {
     const was = roadsOverlay;
@@ -641,6 +686,9 @@ const input = new Input(canvas, rig, {
     void roadTool.ask(v, mouse.x, mouse.y).then((a) => { if (a !== 'cancel') send(a === 'demolish'); });
   },
   onUndoRoad: () => net.send({ t: 'undoRoad' }),
+  // the Street rules tool (R5): a click sets the whole street, a drag part of one
+  onStreetRule: (tiles, street, ns) => { const why = streetRules.release(street ? streetRules.tilesFor(tiles[0], null, ns) : tiles); if (why) ui.toast('error', why); },
+  onUndoStreetRule: () => net.send({ t: 'undoStreetRule' }),
   onBuild: (tool, tiles) => {
     // a click (not a drag) with a link tool takes down the line through that tile (docs/utilities.md 4.2)
     if ((tool === 'pylons' || tool === 'cable') && tiles.length < 2) { if (tiles[0]) net.send({ t: 'utilLink', op: 'remove', x: tiles[0][0], y: tiles[0][1] }); return; }
@@ -1075,6 +1123,7 @@ function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: n
     return p ? { x: p.ax, y: p.ay, w: p.w, h: p.h, verdict: v, placed: p } : { x: h[0], y: h[1], w: 1, h: 1, verdict: v };
   }
   if (isJunctionTool(input.tool)) return junctionTools.hoverArea(input.tool, h);
+  if (input.tool === 'streetrule') return { x: h[0], y: h[1], w: 1, h: 1, verdict: { ok: true } as PlaceVerdict }; // the street's ghost is streetrules.ts's
   if (input.tool === 'runway') {
     const v = runwayVerdict(input.runwayLine ?? [h]);
     const r = v.rect;
@@ -1127,6 +1176,7 @@ function updateStatus() {
     else if (isRoad(t) && (power.overlayOn || structureTool(input.tool))) s += power.roadStatus(x, y);
     if (input.tool === 'road') s += input.roadPath ? roadTool.status(input.roadPath, input.roadShape) : terr === Terrain.Water && !isRoad(t) ? ' · drag a road straight across from a road on the bank to bridge the water' : roadTool.status(null, 'line');
     if (isJunctionTool(input.tool)) s += junctionTools.status(input.tool, x, y);
+    if (input.tool === 'streetrule') s += streetRules.status(h, input.streetPath, input.streetNs);
     if (zoneNoRoad(x, y)) s += ` · ${NO_ROAD_LOT}`;
     if (input.tool === 'runway') {
       const rv = runwayVerdict(input.runwayLine ?? [h]);
@@ -1292,7 +1342,7 @@ net.on('building', (m) => {
 net.on('road', (m) => {
   if (tipAgent || !tipTile || m.x !== tipTile[0] || m.y !== tipTile[1]) return;
   if (!m.info) { ui.hideTip(); return; }
-  ui.showRoadTip(m.info);
+  ui.showRoadTip(m.info, world.ruleAt(m.x, m.y)?.st ?? 0, whyAt(m.x, m.y));
   ui.moveTip(mouse.x, mouse.y);
 });
 
@@ -1365,6 +1415,7 @@ function frame(now: number) {
   trains.frame(vehTick);
   rail.frame(input.tool === 'rail' ? input.railPath : null);
   roadTool.frame(input.tool === 'road' ? input.roadPath : null, rig.camera, canvas.clientWidth, canvas.clientHeight);
+  streetRules.frame(input.tool === 'streetrule', input.hover, input.streetPath, input.streetNs, rig.camera, canvas.clientWidth, canvas.clientHeight);
   power.frame(now, input.tool, input.railPath);
   airfield.frame();
   parks.frame(clock.day);
@@ -1420,7 +1471,7 @@ function frame(now: number) {
   if (feedCam) cams.push(feedCam);
   buildings.updateLod(cams, lighting.sun); // detail tiers and culling (render/buildings.ts)
   roads.frame(cams, signalled); // road geometry near the cameras, its furniture, the lamp map (render/roads.ts)
-  const overheadOnly = [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group, roadTool.group];
+  const overheadOnly = [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group, roadTool.group, streetRules.group];
   // the feed leaves out what is under a pixel at 160×90 from the helicopter: people, parked cars, signal heads
   tv.render(renderer, scene, [...overheadOnly, citizens.group, parked.group, junctions.group]);
   fpv.render(renderer, scene, rig.camera, overheadOnly);
@@ -1461,6 +1512,7 @@ if (demoParam) {
     chipMount: document.getElementById('techBtn')!, onFly: () => { following = false; }, setUnder: (on) => setUnder(on), setMap: (on) => mapMode.set(on, false),
     celebrate: (x, y) => ranks.preview(x, y),
     watchTv: (r) => watchTv(r),
+    setTrafficView: (on) => { overlayMenu.set(on ? 'traffic' : 'off'); trafficPanel.toggle(on); },
     // a stop shown at an hour of its own (the Piccadilly Lights at night): the light is pinned there, and given back after
     setHour: (h) => {
       if (h === null) {

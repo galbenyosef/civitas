@@ -8,7 +8,7 @@ import {
   isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, isRailAux, railMask, streetRun, streetLine, MOTORWAY_KIND,
   auxClass, oneWayDir, isDividedAux, isMotorwayAux, auxJunction, RoadCls,
   isMiniAux, isRingClassAux, isDeckClassAux, isClassAux, isPedestrianAux, bigRingAt, implicitPelican, junctionGroup, slipJunction, linkedDegree, roadsLinked,
-  carStepOk, inGroup, turnAllowed, TRAFFIC_TUNING, type RoadRule, type JunctionGroup,
+  carStepOk, inGroup, turnAllowed, TRAFFIC_TUNING, StreetRule, humpAt, type RoadRule, type JunctionGroup,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Geo, buildTile, buildRing, buildBigRing, surfaceY, ringSurfaceY, bigRingSurfaceY, STREET, SIDE, CLASS_PROFILES, type RoadTile, type RoadProfile, type ClassInfo, type BigRingTile } from './roadGeo';
@@ -307,6 +307,20 @@ export class RoadLayer {
   }
 
   /** Height of the surface a walker stands on at (x, z): a pavement's near the camera, else the ground's (0). */
+  /** R5: speed humps of 20 zones on the near streets (tile key: the street runs north-south), kept as tiles are described */
+  private humps = new Map<string, boolean>();
+  /**
+   * How far a car (or anyone) at (x, z) is lifted by a speed hump under it (R5): a low rounded bump across the
+   * carriageway where roadGeo paints it, so cars dip over each hump as they cross. 0 off a hump.
+   */
+  humpY(x: number, z: number): number {
+    if (!this.humps.size) return 0;
+    const tx = Math.floor(x), tz = Math.floor(z), ns = this.humps.get(`${tx},${tz}`);
+    if (ns === undefined) return 0;
+    const at = (hash2(tx * 31 + 151 * 7, tz * 17 - 151 * 13) - 0.5) * 0.12; // roadGeo humpPaint's band, hk(t, 151)
+    const d = (ns ? z - tz : x - tx) - 0.5 - at, u = d / 0.085;
+    return Math.abs(u) < 1 ? 0.012 * (1 - u * u) : 0;
+  }
   walkY(x: number, z: number): number {
     const tx = Math.floor(x), tz = Math.floor(z);
     const e = this.entries.get(ckey(Math.floor(tx / CHUNK_SIZE), Math.floor(tz / CHUNK_SIZE)));
@@ -541,8 +555,25 @@ export class RoadLayer {
     if (nTurns) t.nTurns = nTurns.map((m, i) => (m < 0 ? nArms[i] : m));
     if (cls) t.cl = this.classInfo(x, z, a, cls, arms, junction, nArms, m8);
     const cl = t.cl;
+    // R5 street rules on this tile (shared/src/roadrules.ts): double yellows on its kerbs, a bus lane, a 20 zone's hump and entry
+    const st = this.rules?.ruleAt(x, z)?.st ?? 0;
+    if (this.humps.size) this.humps.delete(`${x},${z}`);
+    let stSig = '';
+    if (st && !junction && !under && (arms === 5 || arms === 10)) {
+      if (st & StreetRule.NoParking) t.yellow = ~m8 & 15;
+      if (st & StreetRule.BusLane && cl && cl.flow >= 0) { t.bus = true; if ((((arms === 5 ? z : x) % 3) + 3) % 3 === 1) t.busText = true; }
+      if (st & StreetRule.Zone20) {
+        const zone = (tx: number, tz: number) => ((this.rules?.ruleAt(tx, tz)?.st ?? 0) & StreetRule.Zone20) !== 0;
+        const jn = (tx: number, tz: number) => armCount(signalArms(road, tx, tz)) >= 3;
+        if (humpAt(x, z, arms === 5, zone, jn)) { t.hump = true; this.humps.set(`${x},${z}`, arms === 5); }
+        let zin = 0;
+        for (let s = 0; s < 4; s++) if (arms & (1 << s) && !zone(x + SIDE[s][0], z + SIDE[s][1])) zin |= 1 << s;
+        if (zin) t.zoneIn = zin;
+      }
+      stSig = `|S${t.yellow ?? 0},${t.bus ? 1 : 0}${t.busText ? 1 : 0},${t.hump ? 1 : 0},${t.zoneIn ?? 0}`;
+    }
     const clSig = cl ? `|C${cl.cls},${cl.flow},${cl.twin},${cl.divJ ? 1 : 0},${cl.eC.join(',')},${cl.eK.join(',')},${cl.nose},${cl.slip},${cl.gore},${cl.mouth},${cl.arrow ? 1 : 0},${cl.jbox},${cl.jAhead ? 1 : 0},${cl.hold ?? 0}${cl.holdL ?? 0}${cl.holdR ?? 0},${cl.mbox ?? 0}` : '';
-    const sig = `${prof.carriage},${prof.lanes},${prof.median},${prof.oneWay ? 1 : 0}|${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0}${zebra ? 1 : 0},${wear}${mini ? 'M' : ''}${pelican ?? ''}${zig || ''}${t.nTurns ? `T${t.nTurns.join('.')}` : ''}${clSig}`;
+    const sig = `${prof.carriage},${prof.lanes},${prof.median},${prof.oneWay ? 1 : 0}|${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0}${zebra ? 1 : 0},${wear}${mini ? 'M' : ''}${pelican ?? ''}${zig || ''}${t.nTurns ? `T${t.nTurns.join('.')}` : ''}${clSig}${stSig}`;
     return { sig, t, ring: null };
   }
 

@@ -286,6 +286,102 @@ four-phase group), Mill Road's mini-roundabout at Church Lane, its no left turn 
 between the homes and shops; a tour stop each, and six features (`miniroundabout`, `interchange`, `turnrule`,
 `pelican`, `big-roundabout`, `junction-group`) that demo:check enforces.
 
+## Traffic control
+
+R5 (card 0ce0a9c9). The jam tools that work, so a jam is the player's own doing and they can see why: per-street rules,
+a visitor and freight load they can see and shape, and a lorry curfew. The code: `shared/src/roadrules.ts` (the rules,
+their costs, the tiles a click sets, humps), `server/src/world.ts` (the store: `setStreetRules`, `streetAt`),
+`server/src/sim/traffic.ts` (bus lane strands, 20-zone speed and cost, kerbless tiles, `whyHeld`),
+`server/src/pathfinding.ts` (`findRoute`'s lorry and `lorryAccess`), `server/src/sim/control.ts` (freight routing, the
+visitor limit, the curfew, the Traffic panel, the overlay's explanation, the HGV ghost's probe), `server/src/net.ts` (the
+intents), `client/src/streetrules.ts` (the tool, its picker and ghost), `client/src/trafficpanel.ts`,
+`client/src/render/roadGeo.ts` and `roads.ts` (markings, humps), `render/junctionSigns.ts` (signs).
+
+**Street rules, per tile, set per street.** Four bits of `RoadRule.st` on each road tile (StreetRule: 1 HGV ban, 2 bus
+lane, 4 double yellows, 8 20 zone), in the road rule records R4 made (`World.roadRules`, the optional snapshot field
+`roadRules`, sent whole as `{ t: 'roadRules' }`). A tile's bits go with it when it stops being a road (bulldozed out of a
+street: the tiles either side keep theirs) and survive a rename, which only touches the street book. The Street rules tool
+(on the tool bar after the signal crossing; no key) opens a picker of the four, each with its cost a tile and upkeep a
+day and the technology it needs. A click on a road sets the rule along the whole street through it (`streetRuleTiles`:
+the straight run, the axis the cursor is towards at a crossroads; on an avenue both carriageways, but a bus lane only the
+one clicked); a straight drag sets it on those tiles only; a click on a street that has the rule everywhere takes it off,
+free. The ghost covers the tiles a release would change in the rule's colour (dim where it is already, red where it
+cannot go), with a chip of the cost, the day's upkeep and, for an HGV ban, how much further a lorry going past must go
+round (the server's router, `ruleProbe`). Ctrl/Cmd+Z takes the last change back, refunded, within `ROAD_UNDO_MS`. The
+upkeep is charged with the parcel's roads each midnight (`World.recountRoads`). The road tooltip lists a tile's rules.
+
+| Rule | Who it stops | Cost a tile | Upkeep a day | Technology |
+| --- | --- | --- | --- | --- |
+| HGV ban | lorries (freight), but to deliver on it | $3 | $0.05 | Traffic signals |
+| Bus lane | cars and lorries from the kerb lane, but to turn off at the last tile | $8 | $0.20 | Public transport |
+| Double yellows | kerb parking | $1 | $0.02 | Traffic signals |
+| 20 zone | nobody: every vehicle at 60%, routes avoid it | $6 | $0.10 | Traffic signals |
+
+- **HGV ban.** A lorry is a freight vehicle (`VehicleKind.Freight`); vans, buses, the fleet and emergencies are not.
+  `findRoute(…, lorry)` treats banned tiles as walls except "for access": the banned tiles 4-connected to the road the
+  trip starts or ends on, or the roads beside its building (`lorryAccess`), so a delivery to a home on a banned street
+  comes in from the nearest end. The bus router does not read bans. A lorry whose way a new ban breaks finds another
+  (`Simulation.recheckClasses`, `TrafficControl.breaksBan`); its re-routes and its trip back obey the ban. Signs: a red
+  ring with a lorry on both kerbs wherever a road comes into a banned stretch (its ends and the junctions on it). The
+  rule is not in `carStepOk`: it is not in the aux byte, so the routers test `World.streetAt` beside it.
+- **Bus lane.** The kerb lane (strand 0, the right-hand lane) of a one-way tile with two lanes: a one-way street or an
+  avenue's carriageway, not a motorway, a 5×5 ring or a junction tile (it stops short of each junction). Buses, bikes,
+  taxis, private hire and emergencies on a call take it (unless they turn left within six tiles); every other vehicle
+  takes the other lane on an edge into or out of a bus lane tile, but for a right turn out of the next tile, which is
+  turning off at the last tile (`Traffic.strandFor`). The lane model is R3's: a car follows the car ahead in its own
+  lane, so a bus in the bus lane passes the queue. A street with one lane each way refuses one: "One lane each way: a
+  bus lane needs a one-way street or an avenue". Drawn red, the lane line solid, BUS LANE every third tile. No kerb
+  parking on it.
+- **Double yellows.** No kerb parking (`Traffic.kerbless`): a driver whose destination is full and who finds no lot
+  parks at the kerb of the last tile back along the route that allows it (the next street) and walks; a driver giving
+  up in a jam does not pull over there. Drawn as two yellow lines along each kerb of a straight.
+- **20 zone.** Every vehicle at `ZONE20_SPEED` (60%) on its tiles; a route tile costs `ZONE20_COST` (1.4, against a
+  street's 1 and a lane's 1.2), and a lorry's `ZONE20_FREIGHT` (1.5) times that again. Humps four to six tiles apart along
+  each run of zone tiles, never on a junction (`humpAt`, by hash: each run its own), drawn as a raised band with white
+  triangles; cars dip over them (the client's `RoadLayer.humpY`). The roundel stands on both kerbs at each way in and is
+  painted on the road in the lane coming in; a repeater on one kerb at each hump. Quieter and safer: the car–pedestrian
+  contacts in the harness go down (docs/traffic-tuning.md "Traffic control"). Noise: nothing in the game reads traffic
+  noise yet; the hook is `World.streetAt(x, y) & StreetRule.Zone20` (and, for the curfew, `inCurfew`), for when a
+  building's noise or a home's appeal does.
+
+**The visitor and freight load.** Two-thirds of give-ups are visitors and lorries the player did not create
+(docs/traffic-tuning.md "What the player can do about jams"). Three things make that load the player's:
+
+- **The Traffic panel** (the overlays menu's Traffic panel…, `client/src/trafficpanel.ts`): cars on the road now by who
+  drives them (residents, visitors, lorries, buses, services and the fleet), visitors and lorries set off in the last
+  hour, today's give-ups by kind, each gateway's arrivals an hour, moves today and (a motorway connection) visitors today
+  and yesterday, the five junctions where most drivers gave up since yesterday began (`TrafficControl.noteGiveUp`: the
+  junction tile within four tiles ahead of the car) and the three streets with the most cars queued now. A junction or a
+  street is a link. The client asks (`trafficPanel`) every three seconds while it is open, never otherwise.
+- **The visitor limit.** A motorway connection's panel has Limit visitors: `RoadRule.gw` on its door, and
+  `VISITOR_LIMIT_SHARE` (half) of the visitors who would come in by it do (`Simulation.dispatch`, `TrafficControl.dropVisitor`).
+  The panel says about what it costs a day: the visitors it turns away (yesterday's count, or today's so far) times the
+  $5 a visitor spends at the mean tax rate. Rail, coach and air gateways bring newcomers on foot, not visitors by road,
+  so the limit lives on motorway connections. `TRAFFIC_TUNING.visitorLimit` 1 turns it on at every entry (ab.ts: the
+  Commons has no gateway of its own).
+- **Freight routing.** Lorries cost a route as cars do, but a 20 zone costs them half as much again and a ban is a wall,
+  so industry's lorries keep to the roads that are theirs.
+
+**Why it is slow.** With the congestion overlay on, hovering a road's tooltip adds "Why it is slow": the cars held on the
+tile by cause, from the same tests the entry rules make (`Traffic.whyHeld`: following the car ahead in its lane, held at
+a red light, waiting for a gap, the box ahead blocked, getting into the destination or looking for parking, slowed for a
+turn), and how many of them are visitors and lorries. The server answers `{ t: 'jamWhy', cx, cy }` for one chunk at a
+time (flat [x, y, cars, six causes, freight and visitors] per tile with a car held), asked at most every two seconds while
+the tooltip is up with the overlay on: no stream, no steady cost.
+
+**The lorry curfew.** A policy (`shared/src/policies.ts`, the Policies panel's Transport section; Traffic signals opens
+it, $150, $10 a day): from 22:00 to 06:00 no lorry sets off from or for the land of a player with it on. One that would
+waits at its depot (`Vehicle.hold`) and sets off at its own minute in the first hour of the morning; one that delivers
+late waits where it delivered. Industry sends lorries only from 06:00 to 20:00 already, so it holds the late ones, rail
+freight's last mile and the harbours' early fish; deliveries are not lost, they come in the morning.
+
+**Showcase.** In "Road classes and junctions": an HGV ban on South Parade, a bus lane on North Parade with bus line 4
+along it, double yellows on Market Street's approach to Cheapside, a 20 zone on Church Lane (the homes south of Regent
+Avenue: the homes behind Kingsway face the avenue and have no street of their own), the motorway connection's visitor
+limit on, and a stop that opens the Traffic panel with the congestion overlay; a tour stop each and seven features
+(`street-hgv`, `street-bus`, `street-yellow`, `street-zone20`, `bus-lane-line`, `visitor-limit`, `traffic-panel`) that
+demo:check enforces.
+
 ## Street names
 
 **What a street is.** The longest straight run of road tiles along one axis. A crossroads belongs to both streets

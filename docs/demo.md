@@ -328,6 +328,8 @@ A section (`DemoSection`) lists:
 | `runways` | `{ from, to }`: a runway drag |
 | `tracks` | drags as a player makes them; each runs along its longer axis first and turns once |
 | `junctions` | a junction tool clicked at `at`, as the tools build them (R4, docs/roads.md "Junctions"): a roundabout (the 5×5 two-lane ring on an avenue's junction) or flyover on a junction (`deck` picks the road on top), a mini-roundabout, an interchange on a motorway, a turn rule on an arm tile (`rule`: noLeft, noRight, noStraight, noEntry), a signal crossing on a street tile |
+| `streetRules` | `{ id, rule, name, at, ns?, to?, rect, inspect }`: a street rule as the Street rules tool sets it (R5, docs/roads.md "Traffic control"): `rule` hgv, bus, yellow or zone20, on the whole street through `at` (east-west unless `ns`), or with `to` on the drag from `at` to `to`; laid after the junctions; each is a tour stop (its `rect` framed, `inspect` asked about) |
+| `visitorLimits` | gateway doors with the visitor limit on (R5: a motorway connection's, `RoadRule.gw`) |
 | `bridges` | a road bridge over water from `from` to `to`, laid through `planBridge`, with a forced `style` (the road tool's choice otherwise); `landmark` draws a bascule span as that landmark |
 | `lines` | bus, rail or metro lines: stops in calling order (bus stop tiles or station doors), loop or there and back, vehicles. `freight: true` for a line between yards; `name` for a line known by name (the Central) |
 | `blocks` | grown land the tour stops at: zones nobody places, and block middles (deep plots, a communal garden) |

@@ -340,7 +340,8 @@ Optional: add edu4 to `civ6` Medical school's `requires`. That changes an existi
 
 **Policies** (new `shared/src/policies.ts`): a short list, each opened by a tech feature id and toggled per player.
 They are stored in `Player.policies: string[]` (saved with players, no bump) and sent in `PlayerDTO.policies`. A
-`setPolicy` intent goes to `net.ts`, and a Policies panel opens beside the tech tree.
+`setPolicy` intent goes to `net.ts`, and a Policies panel opens beside the tech tree. Since R5 the panel also has a
+Transport section with the Lorry curfew (`PolicyDef.group`; docs/roads.md "Traffic control").
 
 | Policy | Daily cost | Effect |
 | --- | --- | --- |

@@ -94,6 +94,7 @@ function seededOf(w: World, airports: Airports, sim: Simulation, harbours: Harbo
     ads: adverts ? adsOf(w, adverts) : undefined,
     utilLinks: w.utilitiesLoaded?.links ?? [],
     streets: streetsOf(w, chunks),
+    roadRules: w.roadRulesList(), // R4 signs and crossings, R5 street rules and the visitor limit
   };
 }
 /** Every street through the seeded chunks' road tiles, once each, with the name the server gives it (server/src/streets.ts). */

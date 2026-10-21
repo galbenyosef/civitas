@@ -9,7 +9,7 @@ const CLICK_SLOP = 5;
 /** Safari's trackpad pinch/rotate (GestureEvent is not in lib.dom) */
 interface GestureLike extends UIEvent { scale: number; rotation: number; clientX: number; clientY: number }
 
-export type ToolId = 'select' | 'buy' | 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'pylons' | 'cable' | KindToolId;
+export type ToolId = 'select' | 'buy' | 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'streetrule' | 'pylons' | 'cable' | KindToolId;
 /** `?dev` in the URL shows draft kinds (catalogue `draft: true`) in the tool bar and on their keys. */
 export const DEV_TOOLS = typeof location !== 'undefined' && new URLSearchParams(location.search).has('dev');
 /** Kinds whose tool shows: every catalogue kind with a tool, drafts only with ?dev. */
@@ -48,6 +48,13 @@ export interface InputCallbacks {
   onRoad?(tiles: [number, number][], shape: RoadShape): void;
   /** Ctrl/Cmd+Z with the road tool: take back the last road drag */
   onUndoRoad?(): void;
+  /**
+   * the Street rules tool (R5) let go: a click (`street` true: the handler takes the whole street through the tile, along
+   * `ns`, the axis nearer the cursor's way across the tile) or a straight drag of tiles (part of a street)
+   */
+  onStreetRule?(tiles: [number, number][], street: boolean, ns: boolean): void;
+  /** Ctrl/Cmd+Z with the Street rules tool: take back the last street rule */
+  onUndoStreetRule?(): void;
   /** whether a tile is road, for snapping a road drag's end (unloaded tiles are not) */
   isRoad?(x: number, y: number): boolean;
   /** a shortcut key of a size ladder (client/src/picker.ts): the size to select instead (the last one used), or undefined */
@@ -95,6 +102,11 @@ export class Input {
    */
   roadPath: [number, number][] | null = null;
   roadShape: RoadShape = 'line';
+  /** the Street rules tool's drag (R5): a straight line from where it started, along its longer axis; one tile is a click */
+  streetPath: [number, number][] | null = null;
+  private streetStart: [number, number] | null = null;
+  /** which half of the tile the press was in, for a click's axis (ns: nearer the tile's east or west edge than its north or south) */
+  streetNs = false;
   private roadStart: [number, number] | null = null;
   private roadEnd: [number, number] | null = null;
   /** the axis the road drag first left its start along (undefined until it moves, and again when it comes back) */
@@ -155,9 +167,20 @@ export class Input {
     this.runwayStart = null; this.runwayLine = null;
     this.railStart = null; this.railPath = null;
     this.roadStart = null; this.roadPath = null;
+    this.streetStart = null; this.streetPath = null;
     this.cb.onToolChange(t);
   }
 
+  /**
+   * Is the point (canvas pixels) over tile `t` nearer its north or south edge than its east or west one? At a crossroads
+   * that picks the north-south street (the arm the cursor is towards); a tile on one street only ignores it.
+   */
+  private nsAt(px: number, py: number, t: [number, number]): boolean {
+    const hit = this.rig.groundAt(px, py, this.canvas.clientWidth, this.canvas.clientHeight, this.tmp);
+    if (!hit) return false;
+    const fx = hit.x - t[0] - 0.5, fy = hit.z - t[1] - 0.5;
+    return Math.abs(fy) > Math.abs(fx);
+  }
   tileAt(px: number, py: number): [number, number] | null {
     const hit = this.rig.groundAt(px, py, this.canvas.clientWidth, this.canvas.clientHeight, this.tmp);
     return hit ? [Math.floor(hit.x), Math.floor(hit.z)] : null;
@@ -234,7 +257,8 @@ export class Input {
     if (this.tool === 'runway') { this.runwayStart = tile; this.runwayLine = [tile]; return; }
     // track and trunk links (docs/utilities.md 4.2) drag the same way: along the longer axis, then one corner
     if (this.tool === 'rail' || this.tool === 'pylons' || this.tool === 'cable') { this.railStart = tile; this.railPath = [tile]; return; }
-    if (this.tool === 'road') { this.roadStart = tile; this.roadEnd = tile; this.roadFirstX = undefined; this.roadShape = 'line'; this.roadPath = [tile]; return; } // Shift at the press pans, as with any tool; held during the drag it makes a loop
+    if (this.tool === 'road') { this.roadStart = tile; this.roadEnd = tile; this.roadFirstX = undefined; this.roadShape = 'line'; this.roadPath = [tile]; return; }
+    if (this.tool === 'streetrule') { this.streetStart = tile; this.streetPath = [tile]; this.streetNs = this.nsAt(e.offsetX, e.offsetY, tile); return; } // Shift at the press pans, as with any tool; held during the drag it makes a loop
     this.painting = true; this.painted.clear(); this.lastPaint = null;
     this.paint(tile);
   };
@@ -266,6 +290,12 @@ export class Input {
       this.runwayLine = Array.from({ length: n + 1 }, (_, i): [number, number] => (alongX ? [sx + d * i, sy] : [sx, sy + d * i]));
     }
     if (tile && this.railStart) this.railPath = trackDragPath(this.railStart, tile);
+    if (tile && this.streetStart) {
+      const [sx, sy] = this.streetStart, alongX = Math.abs(tile[0] - sx) >= Math.abs(tile[1] - sy);
+      const n = Math.min(160, Math.abs(alongX ? tile[0] - sx : tile[1] - sy)), d = Math.sign(alongX ? tile[0] - sx : tile[1] - sy);
+      this.streetPath = Array.from({ length: n + 1 }, (_, i): [number, number] => (alongX ? [sx + d * i, sy] : [sx, sy + d * i]));
+    }
+    if (tile && !this.streetStart && this.tool === 'streetrule') this.streetNs = this.nsAt(e.offsetX, e.offsetY, tile);
     if (tile && this.roadStart) { this.roadEnd = tile; this.roadShape = e.shiftKey ? 'loop' : 'line'; this.layRoad(); }
     if (!tile !== !this.hover || (tile && this.hover && (tile[0] !== this.hover[0] || tile[1] !== this.hover[1]))) {
       this.hover = tile;
@@ -297,6 +327,13 @@ export class Input {
     if (this.runwayStart && this.runwayLine) this.cb.onBuild('runway', this.runwayLine);
     if (this.railStart && this.railPath) this.cb.onBuild(this.tool === 'pylons' || this.tool === 'cable' ? this.tool : 'rail', this.railPath);
     this.railStart = null; this.railPath = null;
+    if (this.streetStart && this.streetPath && e.type === 'pointerup') {
+      const p = this.streetPath, ns = p.length > 1 ? p[0][0] === p[1][0] : this.streetNs;
+      this.cb.onStreetRule?.(p, p.length === 1, ns);
+    }
+    const hadStreet = !!this.streetStart;
+    this.streetStart = null; this.streetPath = null;
+    if (hadStreet) this.cb.onHover(this.hover);
     const road = this.roadStart && this.roadPath && e.type === 'pointerup' ? this.roadPath : null;
     const hadRoad = !!this.roadStart;
     this.roadStart = null; this.roadPath = null; this.roadEnd = null;
@@ -369,10 +406,11 @@ export class Input {
     const el = e.target as HTMLElement | null;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return; // typing
     this.keys.add(e.code);
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z' && this.tool === 'road' && !this.onMap) {
-      // Ctrl+Z (Cmd+Z on a Mac) with the road tool: take back the last road drag (the browser's own undo has nothing here)
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z' && (this.tool === 'road' || this.tool === 'streetrule') && !this.onMap) {
+      // Ctrl+Z (Cmd+Z on a Mac) with the road tool: take back the last road drag (the browser's own undo has nothing
+      // here); with the Street rules tool, the last street rule
       e.preventDefault();
-      if (!e.repeat) this.cb.onUndoRoad?.();
+      if (!e.repeat) { if (this.tool === 'road') this.cb.onUndoRoad?.(); else this.cb.onUndoStreetRule?.(); }
       return;
     }
     if (e.key === 'Shift' && this.roadStart) { this.roadShape = 'loop'; this.layRoad(); this.cb.onHover(this.hover); }
@@ -383,6 +421,12 @@ export class Input {
     if ((key === 'z' || key === 'c') && structureTool(this.tool)) {
       // turn the footprint a quarter: Z anticlockwise, C clockwise (1×1 tools ignore both)
       if (!e.repeat) this.cb.onRotate(this.tool, key === 'z' ? 1 : -1);
+      return;
+    }
+    if (e.code === 'Escape' && this.streetStart) {
+      // Esc mid-drag lets go of the street rule drag and keeps the tool
+      this.streetStart = null; this.streetPath = null;
+      this.cb.onHover(this.hover);
       return;
     }
     if (e.code === 'Escape' && this.roadStart) {

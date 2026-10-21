@@ -72,5 +72,7 @@ Turn bans, no-entry arms and signal crossings (R4, docs/roads.md "Junctions") ha
 typed record per junction anchor (`shared/src/roadrules.ts` RoadRule), kept by `World.roadRules`, saved as the optional
 snapshot field `roadRules` (absent in older saves) and sent whole as `{ t: 'roadRules' }` on hello and on every change;
 a signal crossing's walk grants go as `{ t: 'walks', u: [x, y, walkAt, ...] }`. R5's traffic control adds its own
-fields to the same record. Junction groups (two or four tiles of an avenue crossing working as one) have no bytes either:
+fields to the same record, keyed by tile: `st`, the street rule bits of a road tile (1 HGV ban, 2 bus lane, 4 double
+yellows, 8 20 zone: `shared/src/roadrules.ts` StreetRule), and `gw: 1` on a gateway's door, its visitor limit
+(docs/roads.md "Traffic control"); a save from before R5 has neither and loads as it did. Junction groups (two or four tiles of an avenue crossing working as one) have no bytes either:
 `shared/src/signals.ts` junctionGroup works them out from the tiles.
