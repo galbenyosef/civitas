@@ -10,7 +10,7 @@
 import {
   ROAD_COST, PUBLIC_ROAD_COST, BULLDOZE_COST, Zone, Terrain, packTile, isRoad, zoneOf, levelOf, withConstruction, KIND_ID, familyOf, subFor,
   roadDragPath, snapRoadEnd, planRoad, parallelGap, streetBase, streetName, ROAD_UNDO_MS, houseNumber, isJunctionAux,
-  RoadCls, ROAD_CLASS_DEFS, signalSite, signalArms, signalledArms, classByte, auxClass, auxDir, auxJunction, oneWayDir, isClassAux, twinRow, carStepOk, edgeLanes, MSG_ROAD_FRONTAGE,
+  RoadCls, ROAD_CLASS_DEFS, junctionGroup, groupArms, signalledArms, classByte, auxClass, auxDir, auxJunction, oneWayDir, isClassAux, twinRow, carStepOk, edgeLanes, MSG_ROAD_FRONTAGE,
   type RoadEnv, type ServerMsg, type ClientMsg,
 } from '@msimcity/shared';
 import { findRoute } from '../pathfinding';
@@ -341,8 +341,9 @@ ok(own(11, 0) && own(30, 10), "Ada owns 20×22 east of the Commons");
   ok(isRoad(w.getTile(20, -1)) && auxClass(w.auxAt(20, -1)) === RoadCls.Avenue, 'the crossing street crosses both carriageways');
   // one crossing, not two: the street over both carriageways is one junction, one controller, one timing
   const env2 = (x: number, y: number) => isRoad(w.getTile(x, y));
-  const site0 = signalSite(20, 0, env2, (x, y) => w.auxAt(x, y), (x, y) => signalArms(env2, x, y), signalledArms), site1 = signalSite(20, -1, env2, (x, y) => w.auxAt(x, y), (x, y) => signalArms(env2, x, y), signalledArms);
-  ok(site0.group && site0.signalled && site0.tx === site1.tx && site0.ty === site1.ty, `a street crossing an avenue: one junction of two tiles, lit as a crossroads, one timing (from ${site0.tx},${site0.ty})`);
+  const cls2 = (x: number, y: number) => { const a = w.auxAt(x, y); return isClassAux(a) ? a : 0; };
+  const site0 = junctionGroup(env2, cls2, 20, 0), site1 = junctionGroup(env2, cls2, 20, -1); // R4: junction groups (shared/src/signals.ts)
+  ok(!!site0 && !!site1 && site0.w * site0.h === 2 && signalledArms(groupArms(env2, site0)) && site0.x === site1.x && site0.y === site1.y, `a street crossing an avenue: one junction of two tiles, lit as a crossroads, one timing (from ${site0?.x},${site0?.y})`);
   const tj = (x: number, y: number) => (g.sim.traffic as unknown as { junction(x: number, y: number): { signal: boolean; offset: number; period: number } }).junction(x, y);
   ok(tj(20, 0).signal && tj(20, -1).signal && tj(20, 0).offset === tj(20, -1).offset && tj(20, 0).period === tj(20, -1).period, 'the traffic model lights both tiles on the same phase');
   // a street ending at the avenue from one side: both carriageways' tiles are the junction

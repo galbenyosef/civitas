@@ -1,5 +1,5 @@
 import {
-  TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, pedestrianDeliveryOpen, auxClass, oneWayDir, carStepOk, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
+  ruleLines, turnAllowed, TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, pedestrianDeliveryOpen, auxClass, oneWayDir, carStepOk, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
   DRIVE_MIN_TILES, CAR_FETCH_RADIUS, PARK_RADIUS, PARKING_FEE, KERB_CAP, FREIGHT_TRIPS_PER_LEVEL_PER_DAY, VISITORS_PER_100_PEAK_HOUR,
   Zone, CitizenState, VehicleClass, VehicleKind, KIND_COUNT, KIND_ID_COUNT, KIND_NAMES, CIVIC_UPKEEP, CONSTRUCTION_FEE, MAX_BUILDERS_PER_SITE, CAMP_KIND,
   capacityOf, parkingOf, wageOf, upkeepOf, workOf, familyOf, isGrowableId, isCivicId, isServiceId, isParkingId,
@@ -220,6 +220,7 @@ export class Simulation {
 
   constructor(private w: World) {
     w.onRoadClass = () => { this.classEpoch++; };
+    w.onRoadRule = () => { this.classEpoch++; }; // a new turn ban or no entry (R4): drivers check their way as for a class change
     this.motive = new Motivation(w);
     this.motiveHost = {
       bestJob: (c, except) => this.jobOptions(c, except),
@@ -439,7 +440,13 @@ export class Simulation {
     for (const m of this.moversOn(x, y)) if (m.wait > 1) queued++;
     info.queuedNow = queued;
     info.speedPct = info.vehiclesNow ? Math.max(0, 1 - queued / info.vehiclesNow) : 1;
-    if (info.junction === 'signal') { const ph = t.signalPhase(x, y); info.green = ph.green; info.amber = ph.amber; }
+    if (info.junction === 'signal') { const ph = t.signalPhase(x, y); info.green = ph.green; info.amber = ph.amber; if (ph.left) info.leftPhase = true; }
+    // R4: the junction group, its turn rules, a signal crossing's lamps
+    const g = t.groupOf(x, y);
+    if (g) info.group = { x: g.x, y: g.y, w: g.w, h: g.h, phases: t.phasesAt(x, y) };
+    const anchor = g ?? (t.degreeOf(x, y) >= 3 ? { x, y } : null);
+    if (anchor) { const lines = ruleLines(this.w.roadRuleAt(anchor.x, anchor.y)); if (lines.length) info.rules = lines; }
+    if (info.junction === 'pelican') info.pelican = t.pelicanLamp(x, y);
     const parcel = this.w.parcelAt(x, y);
     if (parcel) info.parcel = { name: parcel.name, owner: this.w.players.get(parcel.owner)?.name ?? parcel.owner };
     const span = bridgeSpanAt(x, y, (bx, by) => this.w.auxAt(bx, by));
@@ -2465,6 +2472,11 @@ export class Simulation {
             if (TT.pedSignalPatient) { c.wait++; return true; } // past the cap on a red: still never into a busy box
             this.traffic.count('pedForced');
           }
+        } else if (xd >= 0 && this.traffic.junctionKind(bx, by) === 'pelican') {
+          // a signal crossing (R4): press, and cross on the red (cars still on it go first); never against it but for the cap
+          const swm = signalWaitMax();
+          if (this.traffic.pelicanLamp(bx, by) !== 'red' && c.wait < 2 * swm) { this.traffic.pressPelican(bx, by); c.wait++; return true; }
+          if (this.traffic.boxBusy(bx, by, crossMask(xd)) && c.wait < 3 * swm) { this.traffic.noteCrossing(crossing, crossMask(xd)); c.wait++; return true; }
         } else if (TT.pedYieldAfter > 0 && this.traffic.carWaitingInto(bx, by, TT.pedYieldAfter) && (TT.crossingWaitMax <= 0 || c.wait < 3 * TT.crossingWaitMax)) {
           c.wait++; return true; // a car has waited a while for people crossing here: let it go first
         } else if (this.traffic.boxBusy(bx, by)) {
@@ -2580,10 +2592,33 @@ export class Simulation {
       if (!isRoad(this.w.peekTile(bx, by) ?? 0)) continue;
       if (!carStepOk(this.w.auxAt(ax, ay), this.w.auxAt(bx, by), dirBetween(ax, ay, bx, by), service)) broken = true;
     }
-    if (broken) { const was = m.path; this.maybeReroute(m, leg, true); if (m.path === was) return; }
+    if (!broken && this.w.ruleTiles.size) broken = this.breaksRules(m, Math.max(1, m.pi));
+    // a way broken by a class change or a road rule: any other way at all, from the tile ahead (not avoiding the one
+    // after it, as the stuck rule does: that tile holds nobody up)
+    if (broken) { const was = m.path; this.maybeReroute(m, leg, true, true); if (m.path === was) return; }
     this.classSeen.set(m, this.classEpoch);
   }
-  private maybeReroute(m: Mover, leg: Leg, force = false) {
+  /**
+   * Does m's way from path node `from` on make a movement a junction's road rule bans (R4, World.ruleTiles: a turn ban or
+   * a no entry, from the heading it comes into the junction by to the one it leaves by)? Emergencies on a call ignore
+   * turn bans, never a no-entry.
+   */
+  breaksRules(m: Mover, from: number): boolean {
+    const p = m.path, n = p.length / 2, RT = this.w.ruleTiles;
+    for (let i = Math.max(1, from); i + 1 < n; i++) {
+      const rk = RT.get(tkey(p[i * 2], p[i * 2 + 1]));
+      if (rk === undefined || RT.get(tkey(p[i * 2 - 2], p[i * 2 - 1])) === rk) continue; // not coming into a ruled junction here
+      const inH = dirBetween(p[i * 2 - 2], p[i * 2 - 1], p[i * 2], p[i * 2 + 1]);
+      let j = i;
+      while (j + 1 < n && RT.get(tkey(p[j * 2 + 2], p[j * 2 + 3])) === rk) j++;
+      if (j + 1 >= n) break;
+      const outH = dirBetween(p[j * 2], p[j * 2 + 1], p[j * 2 + 2], p[j * 2 + 3]);
+      if (!turnAllowed(this.w.roadRules.get(rk), inH, outH, m.priority)) return true;
+      i = j;
+    }
+    return false;
+  }
+  private maybeReroute(m: Mover, leg: Leg, force = false, broken = false) {
     const w = this.w;
     let late = false;
     if (force) { if (w.tick - m.rerouted < 10) return; }
@@ -2604,7 +2639,7 @@ export class Simulation {
     const gx = m.path[(n - 1) * 2], gy = m.path[(n - 1) * 2 + 1];
     // never back through the tile behind: lanes have no U-turns (one would be drawn driving straight through the box)
     const AVOID = 1e4;
-    const cost = force
+    const cost = force && !broken
       ? (x: number, y: number) => ((x === cx && y === cy && m.pi + 1 < n - 1) || (x === ax && y === ay) ? AVOID : this.traffic.cost(x, y))
       : (x: number, y: number) => (x === ax && y === ay ? AVOID : this.traffic.cost(x, y));
     // a new way is taken only when it costs less than `worse`, so the search stops once it cannot find one that does
@@ -2612,7 +2647,7 @@ export class Simulation {
     // from ever stopping one short of a way that would be taken)
     const worse = force ? AVOID : Math.min(AVOID, this.traffic.pathCost(m.path, m.pi + 1) * (late ? TT.delayGain : 0.85));
     // a driver running late searches wider: the way round a jam is often a long way round
-    const alt = findRoute(w, bx, by, gx, gy, cost, 0.4, late ? TT.delayNodes : TT.rerouteNodes, dirBetween(ax, ay, bx, by), worse * (1 + 1e-9)); // heading into B already (no turning on a flyover)
+    const alt = findRoute(w, bx, by, gx, gy, cost, 0.4, late ? TT.delayNodes : TT.rerouteNodes, dirBetween(ax, ay, bx, by), worse * (1 + 1e-9), false, m.priority); // heading into B already (no turning on a flyover)
     if (!alt || alt.path.length < 2 || alt.cost >= worse) return;
     m.path = [ax, ay, ...alt.path]; m.pi = 1;
     leg.path = m.path;
@@ -2879,7 +2914,8 @@ export class Simulation {
     const w = this.w;
     // a pedestrian street lets in emergencies, and deliveries out of shop hours (shared/src/roadclass.ts)
     const service = priority || (vkind === VehicleKind.Freight && pedestrianDeliveryOpen((w.tick % TICKS_PER_DAY) / TICKS_PER_HOUR));
-    const route = findRoute(w, from[0], from[1], to[0], to[1], (x, y) => this.traffic.cost(x, y), undefined, undefined, undefined, undefined, service);
+    // an emergency on a call ignores turn bans, never a no-entry (shared/src/roadrules.ts)
+    const route = findRoute(w, from[0], from[1], to[0], to[1], (x, y) => this.traffic.cost(x, y), undefined, undefined, undefined, undefined, service, priority);
     if (!route || route.path.length < 4) return null;
     const id = this.nextVehicleId++;
     const v: Vehicle = {

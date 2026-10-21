@@ -1,3 +1,5 @@
+import { JunctionTools, isJunctionTool } from './junctiontools';
+import { junctionArmAt, nextArmState, armState } from '@msimcity/shared';
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
@@ -202,6 +204,7 @@ scene.add(citizens.under);
 setPlatformCrowd((x0, y0, x1, y1) => citizens.platformCrowd(x0, y0, x1, y1));
 citizens.platformAlongX = (x, y) => underMask(world.underAt(x, y)) === 10; // a platform tile's axis (docs/underground.md section 1)
 const junctions = new JunctionView(world); scene.add(junctions.group); // roundabout islands, flyover decks and ramps
+const junctionTools = new JunctionTools(world); // the junction tools' ghost, cost and reasons (R4)
 // utilities (utilities.ts, docs/utilities.md): reach from the tiles, the hourly node states, blackouts, the power overlay, pylons
 const power = new PowerClient(world, (k) => views.get(k)); scene.add(power.group);
 const roadTool = new RoadTool(world, DEV_TOOLS); scene.add(roadTool.group); // the road drag's ghost, cost chip, spacing guide and question (roadtool.ts)
@@ -210,6 +213,7 @@ const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks
 const roads = new RoadLayer(atlas); scene.add(roads.group, roads.furniture);
 ChunkView.onTint = (cx, cy, heat) => roads.setHeat(cx, cy, heat, !roadsOverlay && !power.overlayOn); // the overlays' bytes wear nothing
 roads.kindAt = (x, y) => world.kindIdAt(x, y);
+roads.rules = world; lights.world = world; // signal crossings and their walk phases (R4)
 citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz) || roads.walkY(x, z); // cars and walkers on a flyover deck or a bridge and their ramps, walkers on a kerbed pavement
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
 landmarks.auxAt = (x, y) => world.auxAt(x, y); // a Tower Bridge span running on into the next chunk
@@ -302,6 +306,8 @@ net.on('chunk', (m) => {
   }
 });
 net.on('aux', (m) => world.applyAux(m.u));
+net.on('roadRules', (m) => { world.applyRoadRules(m.r); roads.invalidate(); lights.invalidate(); junctions.rulesChanged(); updateStatus(); });
+net.on('walks', (m) => world.applyWalks(m.u));
 net.on('sub', (m) => world.applySub(m.u));
 net.on('under', (m) => world.applyUnder(m.u));
 net.on('tiles', (m) => world.applyTiles(m.u));
@@ -1035,6 +1041,8 @@ function buyVerdict(r: Rect) {
  * placement verdict, worked out on the loaded chunks), the whole structure under the cursor, else the tile.
  */
 let placeMemo: { key: string; kind: number; at: number; v: PlaceVerdict } | null = null;
+/** the tiles as the road rule tools read them (shared/src/junctions.ts junctionArmAt) */
+const ruleEnv = { road: (x: number, y: number) => { const t = world.getTile(x, y); return t !== undefined && isRoad(t); }, aux: (x: number, y: number) => world.auxAt(x, y) };
 /** A zoning tool over land with no road on any side (797ee40a): such a lot builds only when the building in front grows back into it. */
 const NO_ROAD_LOT = 'no road beside this lot: it stays empty until the building in front of it grows back into it (two storeys: Masonry and power) or a road reaches it';
 function zoneNoRoad(x: number, y: number): boolean {
@@ -1066,7 +1074,7 @@ function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: n
     }
     return p ? { x: p.ax, y: p.ay, w: p.w, h: p.h, verdict: v, placed: p } : { x: h[0], y: h[1], w: 1, h: 1, verdict: v };
   }
-  if (input.tool === 'roundabout' || input.tool === 'flyover') return junctions.hoverArea(input.tool, h);
+  if (isJunctionTool(input.tool)) return junctionTools.hoverArea(input.tool, h);
   if (input.tool === 'runway') {
     const v = runwayVerdict(input.runwayLine ?? [h]);
     const r = v.rect;
@@ -1092,6 +1100,10 @@ function runwayVerdict(line: [number, number][]): RunwayPlan {
 
 function updateStatus() {
   const h = input.hover;
+  // the Turn rules tool's ghost: the sign the next click would put up on the hovered arm (render/junctionSigns.ts)
+  const arm = input.tool === 'turnrule' && h ? junctionArmAt(ruleEnv, h[0], h[1]) : null;
+  if (arm && typeof arm !== 'string') junctions.signs.preview(arm.g, arm.arm, nextArmState(armState(world.ruleAt(arm.g.x, arm.g.y), arm.arm)));
+  else junctions.signs.preview(null, 0, null);
   if (!h) { ui.setStatus(''); return; }
   const [x, y] = h;
   const t = world.getTile(x, y);
@@ -1114,7 +1126,7 @@ function updateStatus() {
     if (input.tool === 'pylons' || input.tool === 'cable') s += power.status(input.tool, input.railPath);
     else if (isRoad(t) && (power.overlayOn || structureTool(input.tool))) s += power.roadStatus(x, y);
     if (input.tool === 'road') s += input.roadPath ? roadTool.status(input.roadPath, input.roadShape) : terr === Terrain.Water && !isRoad(t) ? ' · drag a road straight across from a road on the bank to bridge the water' : roadTool.status(null, 'line');
-    if (input.tool === 'roundabout' || input.tool === 'flyover') s += junctions.status(input.tool, x, y);
+    if (isJunctionTool(input.tool)) s += junctionTools.status(input.tool, x, y);
     if (zoneNoRoad(x, y)) s += ` · ${NO_ROAD_LOT}`;
     if (input.tool === 'runway') {
       const rv = runwayVerdict(input.runwayLine ?? [h]);

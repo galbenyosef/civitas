@@ -10,7 +10,7 @@
  * street's ends going over or turning (a quarter of `rate` each). Reported: throughput, mean delay, give-ups and true
  * car-car body overlaps per tick, as junctions.ts reports them.
  */
-import { TICKS_PER_HOUR, VEHICLE_WIDTH, DRIVE_SPEED, Terrain, packTile, planRoad, roadDragPath, RoadCls, ROAD_CLASS_DEFS, isRoad, terrainOf, type RoadEnv } from '@msimcity/shared';
+import { TICKS_PER_HOUR, VEHICLE_WIDTH, DRIVE_SPEED, Terrain, packTile, planRoad, roadDragPath, RoadCls, ROAD_CLASS_DEFS, isRoad, terrainOf, planMiniRoundabout, planBigRoundabout, TRAFFIC_TUNING, type RoadEnv } from '@msimcity/shared';
 import { World, emptyStats, type Mover } from '../world';
 import { Traffic } from '../sim/traffic';
 import { findRoute } from '../pathfinding';
@@ -41,16 +41,25 @@ export function layClass(w: World, path: [number, number][], cls: number) {
 export const ARM = 12;
 export interface BenchRes { through: number; delay: number; giveUps: number; backlog: number; overlaps: number; served: number; tick: number }
 
-/** The world for a corridor of class `cls` crossed by a street at x = 0. */
-export function corridor(cls: number, cross = true): World {
+/**
+ * The world for a corridor of class `cls` crossed by a street at x = 0. `junction` (R4) makes the crossing a signalled one
+ * (the owner has Traffic signals), a mini-roundabout (a street corridor) or a 5×5 roundabout (an avenue); give-way else.
+ */
+export function corridor(cls: number, cross = true, junction: 'yield' | 'signal' | 'mini' | 'big' = 'yield'): World {
   const w = new World(1);
   const p = w.getOrCreatePlayer('bench', 'Bench', 1e9);
-  p.tech = ['tr1'];
+  p.tech = junction === 'signal' ? ['tr1', 'tr2'] : ['tr1'];
   const parcel = { id: w.nextId++, owner: p.id, name: 'bench', x: -ARM - 3, y: -ARM - 3, w: 2 * ARM + 7, h: 2 * ARM + 7, taxRate: 0, stats: emptyStats() };
   w.parcels.set(parcel.id, parcel);
   for (let y = -ARM - 3; y <= ARM + 3; y++) for (let x = -ARM - 3; x <= ARM + 3; x++) { w.setParcelId(x, y, parcel.id); w.setTile(x, y, packTile(Terrain.Grass, false, 0, 0)); }
   if (cross) layClass(w, roadDragPath([0, -ARM], [0, ARM]), RoadCls.Street);
   layClass(w, roadDragPath([-ARM, 0], [ARM, 0]), cls);
+  if (junction === 'mini' || junction === 'big') {
+    const env = { tile: (x: number, y: number) => w.getTile(x, y), aux: (x: number, y: number) => w.auxAt(x, y), land: () => null };
+    const plan = junction === 'mini' ? planMiniRoundabout(0, 0, env) : planBigRoundabout(0, 0, env);
+    if (!plan.ok) throw new Error(`${junction}: ${plan.reason}`);
+    w.placeJunction(plan.tiles!);
+  }
   return w;
 }
 
@@ -61,7 +70,8 @@ export function corridor(cls: number, cross = true): World {
 export function bench(w: World, rate: number, seed: number, ticks: number, opts: { cross?: boolean; warm?: number } = {}): BenchRes {
   const rnd = mulberry32(seed * 7919 + rate * 31);
   const t = new Traffic(w);
-  const divided = ROAD_CLASS_DEFS[w.auxAt(0, 0) & 7]?.divided && w.auxAt(0, 0) < 0x40 && w.auxAt(0, 0) > 0;
+  // the corridor's class read away from the crossing (a roundabout there has no class byte at (0, 0))
+  const divided = ROAD_CLASS_DEFS[w.auxAt(-ARM + 2, 0) & 7]?.divided && w.auxAt(-ARM + 2, 0) < 0x40 && w.auxAt(-ARM + 2, 0) > 0;
   const twinY = isRoad(w.getTile(-ARM + 1, -1)) ? -1 : null;
   // ends: corridor west and east (east only when two-way or divided), street north and south
   const ends: { at: [number, number]; to: [number, number][]; rate: number }[] = [];
@@ -144,13 +154,16 @@ if (process.argv[1]?.endsWith('classbench.ts')) {
   const TICKS = Number(arg('ticks', '2000')), RATES = arg('rates', '60,120,240').split(',').map(Number), SEEDS = arg('seeds', '1,2').split(',').map(Number);
   const CLASSES = arg('classes', 'street,oneway,avenue,motorway').split(',');
   const cross = arg('cross', '1') === '1';
+  const JUNCTIONS = arg('junctions', 'yield').split(',') as ('yield' | 'signal' | 'mini' | 'big')[];
+  for (const kv of arg('set', '').split(',').filter(Boolean)) { const [k, v] = kv.split('='); (TRAFFIC_TUNING as Record<string, number>)[k] = Number(v); }
   const ids: Record<string, number> = { street: RoadCls.Street, lane: RoadCls.Lane, oneway: RoadCls.OneWay, avenue: RoadCls.Avenue, motorway: RoadCls.Motorway };
   console.log(`class bench: ${TICKS} ticks, seeds ${SEEDS.join(',')}, crossing street ${cross}`);
-  console.log('| corridor | demand / h along | throughput / h | mean delay (min) | give-ups | backlog | car-car overlaps / tick |');
-  console.log('| --- | --- | --- | --- | --- | --- | --- |');
-  for (const rate of RATES) for (const c of CLASSES) {
-    const rs = SEEDS.map((s) => bench(corridor(ids[c], cross), rate, s, TICKS, { cross }));
+  console.log('| corridor | crossing | demand / h along | throughput / h | mean delay (min) | give-ups | backlog | car-car overlaps / tick |');
+  console.log('| --- | --- | --- | --- | --- | --- | --- | --- |');
+  for (const rate of RATES) for (const c of CLASSES) for (const j of JUNCTIONS) {
+    if ((j === 'mini' && c !== 'street' && c !== 'lane') || (j === 'big' && c !== 'avenue')) continue;
+    const rs = SEEDS.map((s) => bench(corridor(ids[c], cross, j), rate, s, TICKS, { cross }));
     const mean = (f: (r: BenchRes) => number) => rs.reduce((n, r) => n + f(r), 0) / rs.length;
-    console.log(`| ${c} | ${rate} | ${mean((r) => r.through).toFixed(0)} | ${mean((r) => r.delay).toFixed(1)} | ${mean((r) => r.giveUps).toFixed(1)} | ${mean((r) => r.backlog).toFixed(0)} | ${mean((r) => r.overlaps).toFixed(3)} |`);
+    console.log(`| ${c} | ${j} | ${rate} | ${mean((r) => r.through).toFixed(0)} | ${mean((r) => r.delay).toFixed(1)} | ${mean((r) => r.giveUps).toFixed(1)} | ${mean((r) => r.backlog).toFixed(0)} | ${mean((r) => r.overlaps).toFixed(3)} |`);
   }
 }

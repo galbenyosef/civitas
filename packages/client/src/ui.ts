@@ -1,6 +1,6 @@
 import { ROAD_COST, ZONE_COST, LAND_PRICE_PER_TILE, MAX_TAX, CIVIC_COST, Zone, KIND_NAMES, PRIORITY_NAMES, DAYS_PER_WEEK, isCivicId, familyOf, hasFeature, techFor, TECH, TECH_BY_ID, TRACK_NAMES, describeCondition, type ParcelDTO, type PlayerDTO, type BuildingInfo, type PersonRow, type PersonRef, type RoadInfo, type CitizenInfo, type SiteDTO, type FocusInfo, VALUE_NAMES } from '@msimcity/shared';
 import { TOOL_KINDS, DEV_TOOLS, type ToolId } from './input';
-import { ROUNDABOUT_COST, FLYOVER_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo, type HarbourInfo } from '@msimcity/shared';
+import { ROUNDABOUT_COST, FLYOVER_COST, MINI_ROUNDABOUT_COST, INTERCHANGE_COST, TURN_RULE_COST, PELICAN_COST, RUNWAY_COST, RAIL_COST, TICKS_PER_DAY, TICKS_PER_HOUR, type AirportLink, type AirportInfo, type GatewayInfo, type HarbourInfo } from '@msimcity/shared';
 import { railStationHtml, metroStationHtml } from './rail';
 import { stopHtml, busHtml } from './lines';
 import { MANIFEST, spendableMoney, type KindToolId, type LedgerDTO, type FinanceDTO } from '@msimcity/shared';
@@ -41,8 +41,13 @@ export const TOOLS: { id: ToolId; label: string; key: string; cost?: string; col
 // roundabouts and flyovers rebuild a junction (shared/src/junctions.ts): right after the road tool
 {
   const i = TOOLS.findIndex((t) => t.id === 'road');
-  TOOLS.splice(i + 1, 0, { id: 'roundabout', label: 'Roundabout (click a junction)', key: '', cost: `$${ROUNDABOUT_COST}`, color: '#7fa24d' },
-    { id: 'flyover', label: 'Flyover (click a crossroads)', key: '', cost: `$${FLYOVER_COST}`, color: '#a9a59c' });
+  TOOLS.splice(i + 1, 0, { id: 'roundabout', label: 'Roundabout (click a junction; on an avenue, the big two-lane one)', key: '', cost: `$${ROUNDABOUT_COST}`, color: '#7fa24d' },
+    { id: 'miniroundabout', label: 'Mini-roundabout (click a street junction)', key: '', cost: `$${MINI_ROUNDABOUT_COST}`, color: '#e8e8e0' },
+    { id: 'flyover', label: 'Flyover (click a crossroads)', key: '', cost: `$${FLYOVER_COST}`, color: '#a9a59c' },
+    { id: 'interchange', label: 'Interchange (click where a street meets a motorway)', key: '', cost: `$${INTERCHANGE_COST}`, color: '#5f9be8' },
+    // R4 road rules (shared/src/roadrules.ts): signs on a junction's arms, and signal crossings for walkers
+    { id: 'turnrule', label: 'Turn rules (click the road just before a junction: no left, no right, no straight on, no entry)', key: '', cost: `$${TURN_RULE_COST}`, color: '#d8423a' },
+    { id: 'pelican', label: 'Signal crossing (click a straight street)', key: '', cost: `$${PELICAN_COST}`, color: '#f2c14e' });
 }
 // the pioneer camp (docs/first-five.md, shared buildings/camp.ts) sits right after Residential; every letter is taken, so no key
 {
@@ -704,7 +709,8 @@ export class UI {
     const cn = info.cls && st && !namesClass(st.name, info.cls) ? classDef(info.cls).name : '';
     const cls = [cn, info.flow !== undefined ? FLOW_WORDS[info.flow] : ''].filter(Boolean).map((w) => `, ${w}`).join('');
     const swatch = `#${(info.cls ? classDef(info.cls).colour : 0x6b6f7a).toString(16).padStart(6, '0')}`;
-    const jn = info.junction === 'none' ? '' : info.junction === 'signal' ? 'signalled junction' : info.junction === 'roundabout' ? 'roundabout' : info.junction === 'flyover' ? 'flyover' : 'junction';
+    const JN: Record<RoadInfo['junction'], string> = { none: '', yield: 'junction', signal: 'signalled junction', roundabout: 'roundabout', flyover: 'flyover', mini: 'mini-roundabout', bigRoundabout: 'roundabout', interchange: 'interchange', pelican: 'signal crossing' };
+    const jn = JN[info.junction] ?? 'junction';
     let html = `<h3><span class="sw" style="background:${swatch}"></span>${st ? esc(st.name) : what}${cls ? `<span style="color:var(--muted);font-weight:400">${esc(cls)}</span>` : ''} <span style="color:var(--muted);font-weight:400">${st && info.bridge ? 'bridge, ' : ''}${info.bridge ? `${info.bridge.style}, ${info.bridge.span} tile${info.bridge.span === 1 ? '' : 's'} over the water` : jn}</span></h3>`;
     if (other) html += `<div class="sub">${info.junction === 'none' ? 'corner of' : 'meets'} ${esc(other.name)}</div>`;
     html += `<div class="sub">${info.parcel ? `${esc(info.parcel.name)} · ${esc(info.parcel.owner)}` : 'public road'}</div>`;
@@ -712,10 +718,16 @@ export class UI {
     html += `<div class="bar heat"><i style="width:${pct}%"></i></div>`;
     html += row('Cars on this tile', `${info.vehiclesNow}${info.queuedNow ? ` · ${info.queuedNow} queued` : ''}`);
     html += row('Speed', `${Math.round(info.speedPct * 100)}% of free flow`);
-    if (info.junction === 'signal') html += row('Signal', `${info.amber ? 'amber' : 'green'} ${info.green === 'ns' ? 'north–south' : 'east–west'}`);
+    if (info.junction === 'signal') html += row('Signal', `${info.amber ? 'amber' : 'green'} ${info.green === 'ns' ? 'north–south' : 'east–west'}${info.leftPhase ? ', left turns only' : ''}`);
     else if (info.junction === 'yield') html += row('Control', 'give way');
     else if (info.junction === 'roundabout') html += row('Control', 'give way to traffic on the ring (it goes round anticlockwise)');
+    else if (info.junction === 'bigRoundabout') html += row('Control', 'give way to traffic on the ring; two lanes, the inner for cars going past the second exit');
+    else if (info.junction === 'mini') html += row('Control', 'one car at a time goes round, giving way to the left');
     else if (info.junction === 'flyover') html += row('Control', 'none needed: one road passes over the other, no turns');
+    else if (info.junction === 'interchange') html += row('Control', 'the street goes over the motorway; slip roads give way where they meet it');
+    else if (info.junction === 'pelican') html += row('Signal crossing', info.pelican === 'red' ? 'red: walkers crossing' : info.pelican === 'flash' ? 'flashing amber: give way to walkers' : info.pelican === 'amber' ? 'amber' : 'green (press to cross)');
+    if (info.group && info.group.w * info.group.h > 1) html += row('Junction', `${info.group.w * info.group.h} tiles working as one, ${info.group.phases === 4 ? 'four phases with protected left turns' : 'two phases'}`);
+    for (const l of info.rules ?? []) html += row('Sign', esc(l));
     if (info.kerbParked) html += row('Parked at the kerb', `${info.kerbParked} (slows traffic)`);
     tip.innerHTML = html;
     tip.classList.remove('hidden');

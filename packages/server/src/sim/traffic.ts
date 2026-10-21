@@ -3,7 +3,9 @@ import {
   VehicleClass, BIKE_CLASS, isRoad, hasFeature, signalTiming, signalPhaseOf, signalArms, signalledArms, type SignalPhase,
   isJunctionAux, isRingAux, isFlyoverAux, islandOf, ringPos, isArmPos, RING_POS, isCrossing, isBridgeAux, isDeck, bridgeStyle, BridgeStyle, basculeBarrierAt,
   CHUNK_SIZE, chunkOf, localIndex, hash2,
-  isClassAux, edgeLanes, classDef, carStepOk, auxJunction, signalSite, isMotorwayAux, isPedestrianAux, oneWayDir, auxDir, isDividedAux,
+  isClassAux, edgeLanes, classDef, carStepOk, isMotorwayAux, isPedestrianAux, oneWayDir, auxDir, isDividedAux,
+  groupPhaseOf, groupArms, inGroup, isRingClassAux, isDeckClassAux, deckAxisStep, isMiniAux, CDIRS, pelicanPhase, pelicanReady, implicitPelican,
+  slipJunction, groupTiming, groupMain, MINI_AUX, type JunctionGroup,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
@@ -109,6 +111,8 @@ interface RoadChunk {
   caux: Int16Array;
   /** junction control by tile (Traffic.junction), dropped round any road change */
   junc: (Junction | undefined)[];
+  /** signal crossings (R4, Traffic.pelicanAt): 1 a crossing, 0 not, -1 not worked out (dropped round road changes and when a road rule changes) */
+  pel: Int8Array;
   /** the congestion entries of Traffic.cong by tile (the same objects; cong keeps their order) */
   cong: (Cong | undefined)[];
   /** movers that drove on each tile this tick, and those of them held up (the congestion's inputs, endTick), from tick `presAt` */
@@ -121,11 +125,19 @@ interface RoadChunk {
 }
 interface Junction {
   signal: boolean; ver: number; deg: number; pid: number; offset: number; period: number; act?: Actuation;
-  /** one tile of a divided road's crossing (roadclass.ts signalSite): the tile its timing is the crossing's, else absent */
-  gx?: number; gy?: number;
   /** the main road's axis (Traffic.mainAxis) and the tick it was worked out */
   main?: number; mainAt?: number;
+  /**
+   * R4: the junction group this tile is part of when it is more than one tile (an avenue crossing,
+   * shared/src/signals.ts junctionGroup): its lights are one controller timed from the anchor (`offset`, `period` are
+   * the anchor's) running `phases` 2 or 4, and `ctl` is the anchor's own Junction (actuation state lives there once).
+   */
+  g?: JunctionGroup; phases?: number; ctl?: Junction;
 }
+/** Vehicles no longer than this may wait in a divided road's median box (a car or a bike; vans, lorries and buses not). */
+const MEDIAN_LEN = 0.36;
+/** Lane progress at which a car waits in the median box: centred on the edge between the two carriageways' tiles. */
+const MEDIAN_PROG = 0.5;
 /** Ticks a junction's main road (Traffic.mainAxis) is kept before it is worked out again (roads further along may change). */
 const MAIN_TTL = 500;
 /** Actuated signal state: the axis on green, when that green began and when it is due to end. */
@@ -508,7 +520,7 @@ export class Traffic {
     if (!rc) {
       rc = {
         lanes: new Array(CELLS * 4), deg: new Int8Array(CELLS).fill(-1), jaux: new Int16Array(CELLS).fill(-1), xing: new Int8Array(CELLS).fill(-1), caux: new Int16Array(CELLS).fill(-1),
-        junc: new Array(CELLS), cong: new Array(CELLS), pres: new Uint16Array(CELLS), stop: new Uint16Array(CELLS), presAt: new Uint32Array(CELLS),
+        junc: new Array(CELLS), pel: new Int8Array(CELLS).fill(-1), cong: new Array(CELLS), pres: new Uint16Array(CELLS), stop: new Uint16Array(CELLS), presAt: new Uint32Array(CELLS),
         xm: new Uint8Array(CELLS * 2), xmAt: new Uint32Array(CELLS * 2),
       };
       this.roads.set((chunkOf(x) + 0x800) * 0x1000 + chunkOf(y) + 0x800, rc);
@@ -640,7 +652,7 @@ export class Traffic {
     if (d < 0) {
       d = 0;
       for (let k = 0; k < 4; k++) { const t = this.w.peekTile(x + DIRS[k][0], y + DIRS[k][1]); if (t !== undefined && isRoad(t) && this.linked(x, y, k)) d++; }
-      if (isFlyoverAux(this.junctionAux(x, y))) d = 2; // two roads straight through on two levels: no junction box
+      if (isFlyoverAux(this.junctionAux(x, y)) || (this.w.anyRoadClass && isDeckClassAux(this.classAux(x, y)))) d = 2; // two roads straight through on two levels (a flyover, an interchange's deck): no junction box
       rc.deg[i] = d;
     }
     return d;
@@ -665,7 +677,6 @@ export class Traffic {
   }
   /** A road cars may use (a pedestrian street is not one, for the signals' arms). */
   private carRoadAt = (x: number, y: number) => this.isRoadAt(x, y) && !isPedestrianAux(this.classAux(x, y));
-  private armsFn = (x: number, y: number) => signalArms(this.carRoadAt, x, y);
   /**
    * The lane m takes across the edge from path node k to k + 1 (a strand, Mover.s1), `prev` being the lane it crossed
    * the edge before that in. A single-lane edge: 0. Two lanes (a one-way tile, roadclass.ts edgeLanes): the lane for its
@@ -678,12 +689,55 @@ export class Traffic {
     const ax = p[k * 2], ay = p[k * 2 + 1], bx = p[k * 2 + 2], by = p[k * 2 + 3];
     const d = dirBetween(ax, ay, bx, by);
     if (edgeLanes(this.classAux(ax, ay), this.classAux(bx, by), d) < 2) return 0;
+    // a big roundabout (R4): its inner lane for cars going past the second exit, the outer for the rest and before an exit
+    const ring = this.ringStrand(m, k);
+    if (ring >= 0) return ring;
+    // turn lanes (R4): the last two tiles of a one-way approach to a junction hold the lane, the left for left turns
+    // and U-turns, the right for straight on and right; not on a motorway, where nobody turns left
+    if (TT.turnLanes && !isMotorwayAux(this.classAux(ax, ay))) {
+      for (let j = k + 1; j + 1 < n && j <= k + 3; j++) {
+        const jx = p[j * 2], jy = p[j * 2 + 1];
+        if (this.degreeOf(jx, jy) < 3) continue;
+        const jn = this.junction(jx, jy), g = jn.g;
+        if (TT.turnLanes === 2 && jn.phases !== 4) break;
+        const inH = dirBetween(p[j * 2 - 2], p[j * 2 - 1], jx, jy);
+        for (let q = j; q + 1 < n; q++) {
+          if (g && inGroup(g, p[q * 2 + 2], p[q * 2 + 3])) continue;
+          const outH = dirBetween(p[q * 2], p[q * 2 + 1], p[q * 2 + 2], p[q * 2 + 3]);
+          return outH === LEFT[inH] || outH === OPP[inH] ? 1 : 0;
+        }
+        break;
+      }
+    }
     for (let j = k + 1; j + 1 < n && j <= k + 6; j++) {
       const dj = dirBetween(p[j * 2], p[j * 2 + 1], p[j * 2 + 2], p[j * 2 + 3]);
       if (dj !== d) return dj === LEFT[d] ? 1 : 0;
     }
     if (k > 0 && edgeLanes(this.classAux(p[k * 2 - 2], p[k * 2 - 1]), this.classAux(ax, ay), dirBetween(p[k * 2 - 2], p[k * 2 - 1], ax, ay)) === 2) return prev;
     return hash2(m.id * 7 + 3, ax * 31 + ay * 17 + d) < 0.5 ? 0 : 1;
+  }
+  /**
+   * The lane on a big roundabout (R4, road class 6) for m's edge from path node k: -1 when the edge is not on the ring
+   * or its approach. Counting the ring tiles m drives from where it comes on to where it leaves: more than nine (past the
+   * second exit), the inner lane (1) but for the last four; six to nine (the second exit, straight over), either lane by
+   * the driver's hash but the last two; otherwise the outer (0); the approach takes the lane the ring will want.
+   */
+  private ringStrand(m: Mover, k: number): number {
+    const p = m.path, n = p.length / 2;
+    let r0 = -1;
+    for (let j = k + 1; j < n && j <= k + 3; j++) if (isRingClassAux(this.classAux(p[j * 2], p[j * 2 + 1]))) { r0 = j; break; }
+    if (r0 < 0) return -1;
+    // back to where m came onto the ring
+    let s0 = r0;
+    while (s0 - 1 >= 0 && isRingClassAux(this.classAux(p[s0 * 2 - 2], p[s0 * 2 - 1]))) s0--;
+    let e = r0;
+    while (e + 1 < n && isRingClassAux(this.classAux(p[e * 2 + 2], p[e * 2 + 3]))) e++;
+    const total = e - s0 + 1, left = e - Math.max(k + 1, s0) + 1;
+    // past the second exit (ten ring tiles or more): the inner lane, out again four tiles before the exit; to the second
+    // exit (six to nine, straight over): either lane, by the driver, out two tiles before; to the first: the outer
+    if (total > 9) return left > 4 ? 1 : 0;
+    if (total > 5) return left > 2 && hash2(m.id * 31 + s0, 0x51ab) < 0.5 ? 1 : 0;
+    return 0;
   }
   /**
    * After m's path changed ahead of it (a re-route), the lane it leaves the tile ahead by. A road's class changing under
@@ -743,14 +797,15 @@ export class Traffic {
     return this.isCrossingAt(mx, my) && this.barrierDownAt(mx, my) && !(x0 > mx + 0.02 && x0 < mx + 0.98 && y0 > my + 0.02 && y0 < my + 0.98);
   }
   /** No car is left at the kerb of a roundabout, a flyover, a level crossing or a bridge. */
-  kerbless(x: number, y: number): boolean { const ca = this.classAux(x, y); return !!this.junctionAux(x, y) || this.isCrossingAt(x, y) || isBridgeAux(this.w.auxAt(x, y)) || isMotorwayAux(ca) || isPedestrianAux(ca); }
+  kerbless(x: number, y: number): boolean { const ca = this.classAux(x, y); return !!this.junctionAux(x, y) || this.isCrossingAt(x, y) || isBridgeAux(this.w.auxAt(x, y)) || isMotorwayAux(ca) || isPedestrianAux(ca) || isRingClassAux(ca) || ((this.w.anyRoadClass || this.w.roadRules.size > 0) && this.pelicanAt(x, y)); }
   /** Speed factor for a turn through tile (x, y): 0.6 at a plain junction; on a roundabout 1 round a corner, TRAFFIC_TUNING.ringSlow on or off at an arm. */
   private turnSlow(x: number, y: number) {
     const a = this.junctionAux(x, y);
+    if (!a && this.w.anyRoadClass && isRingClassAux(this.classAux(x, y))) return TT.ringSlow; // a big roundabout's wide corners and its ways on and off
     return !isRingAux(a) ? 0.6 : isArmPos(ringPos(a)) ? TT.ringSlow : 1;
   }
   /** Is (x, y) a flyover tile (positions in tile units)? On one the deck and the road beneath never meet. */
-  private flyAt(x: number, y: number) { return isFlyoverAux(this.junctionAux(Math.floor(x), Math.floor(y))); }
+  private flyAt(x: number, y: number) { const fx = Math.floor(x), fy = Math.floor(y); return isFlyoverAux(this.junctionAux(fx, fy)) || (this.w.anyRoadClass && isDeckClassAux(this.classAux(fx, fy))); }
   /** Two cars that cannot touch: one is on a flyover tile and they drive along different axes (deck and road beneath). */
   private apart(a: Mover, b: Mover) { return a.lane >= 0 && b.lane >= 0 && isEW(laneDir(a.lane)) !== isEW(laneDir(b.lane)) && (this.flyAt(a.x, a.y) || this.flyAt(b.x, b.y)); }
   isRoadAt(x: number, y: number) { const t = this.w.peekTile(x, y); return t !== undefined && isRoad(t); }
@@ -759,8 +814,11 @@ export class Traffic {
     if (rc) { const i = localIndex(x, y); rc.deg[i] = -1; rc.jaux[i] = -1; rc.xing[i] = -1; rc.caux[i] = -1; }
     for (const [dx, dy] of DIRS) { const nc = this.roadChunkIf(x + dx, y + dy); if (nc) nc.deg[localIndex(x + dx, y + dy)] = -1; }
     this.dropCostFlags(x, y); for (const [dx, dy] of DIRS) this.dropCostFlags(x + dx, y + dy);
-    // signal arms look at diagonal neighbours too (wide-road twins), so re-check the 3x3 around the change
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const jc = this.roadChunkIf(x + dx, y + dy); if (jc) jc.junc[localIndex(x + dx, y + dy)] = undefined; }
+    // signal arms look at diagonal neighbours too (wide-road twins), so re-check the 3x3 around the change; with road
+    // classes a junction group (R4) reaches three tiles out, so the 7x7
+    const r = this.w.anyRoadClass ? 3 : 1;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const jc = this.roadChunkIf(x + dx, y + dy); if (jc) jc.junc[localIndex(x + dx, y + dy)] = undefined; }
+    if (this.w.anyRoadClass) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const pc = this.roadChunkIf(x + dx, y + dy); if (pc) pc.pel[localIndex(x + dx, y + dy)] = -1; }
   }
   private roadAt = (x: number, y: number) => this.isRoadAt(x, y);
   /**
@@ -776,26 +834,73 @@ export class Traffic {
     const deg = this.degreeOf(x, y), pid = this.w.parcelIdAt(x, y);
     if (!j || j.ver !== this.w.techVersion || j.deg !== deg || j.pid !== pid) {
       const ca = this.w.anyRoadClass ? this.classAux(x, y) : 0;
-      // a divided road's crossing is one junction (roadclass.ts signalSite): its arms as a whole, one timing for its tiles
-      const site = ca && auxJunction(ca) ? signalSite(x, y, this.carRoadAt, this.auxFn, this.armsFn, signalledArms) : null;
-      const lit = site ? site.signalled : signalledArms(signalArms(this.w.anyRoadClass ? this.carRoadAt : this.roadAt, x, y));
-      const signal = deg >= 3 && !this.junctionAux(x, y) && !isMotorwayAux(ca) && lit && this.w.ownerHas(x, y, 'signals', hasFeature);
+      // R4: the tiles of an avenue crossing work as one junction (signals.ts junctionGroup)
+      const gr = deg >= 3 && isDividedAux(ca) ? this.w.groupAt(x, y) : null, g = gr && (gr.w > 1 || gr.h > 1) ? gr : null;
+      let signal: boolean;
+      if (g && TT.groupSignals) {
+        let bar = false; // a motorway, roundabout or flyover in it: no lights
+        for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) if (isMotorwayAux(this.classAux(tx, ty)) || this.junctionAux(tx, ty) || isRingClassAux(this.classAux(tx, ty))) bar = true;
+        signal = !bar && signalledArms(groupArms(this.carRoadAt, g)) && this.w.ownerHas(g.x, g.y, 'signals', hasFeature);
+      } else signal = deg >= 3 && !this.junctionAux(x, y) && !isMotorwayAux(ca) && !isRingClassAux(ca) && !(this.w.anyRoadClass && slipJunction(this.auxFn, x, y)) && signalledArms(signalArms(this.w.anyRoadClass ? this.carRoadAt : this.roadAt, x, y)) && this.w.ownerHas(x, y, 'signals', hasFeature);
+      const was = j?.g;
       j = j ?? { signal, ver: 0, deg, pid, ...signalTiming(x, y) };
-      if (site?.group) { Object.assign(j, signalTiming(site.tx, site.ty)); j.gx = site.tx; j.gy = site.ty; } else if (j.gx !== undefined) { Object.assign(j, signalTiming(x, y)); j.gx = j.gy = undefined; }
       j.signal = signal; j.ver = this.w.techVersion; j.deg = deg; j.pid = pid; j.main = undefined;
+      j.g = g ?? undefined; j.phases = g && TT.groupSignals ? (TT.groupSignals === 2 ? 2 : g.phases) : 2; j.ctl = undefined;
+      if (g && TT.groupSignals) { const t = groupTiming(g.x, g.y); j.offset = t.offset; j.period = t.period; j.act = undefined; }
+      else if (was) { const t = signalTiming(x, y); j.offset = t.offset; j.period = t.period; j.act = undefined; }
       rc.junc[i] = j;
     }
+    if (j.g && TT.groupSignals && !j.ctl) j.ctl = j.g.x === x && j.g.y === y ? j : this.junction(j.g.x, j.g.y);
     return j;
   }
-  junctionKind(x: number, y: number): 'none' | 'yield' | 'signal' | 'roundabout' | 'flyover' {
+  /**
+   * Does the light at junction B hold m now (B is path node `bi` of m's route, entered heading inD)? Only coming into
+   * a signalled junction from outside it: inside a junction group (R4) the moves between its tiles answer only to the
+   * box rules. Emergencies on a call go through. At a four-phase group the protected left phase lets through only the
+   * green axis's left turns and U-turns, the through phase only its straight on and right turns.
+   */
+  private lightHolds(m: Mover, bi: number, inD: number): boolean {
+    const bx = m.path[bi * 2], by = m.path[bi * 2 + 1];
+    const j = this.junction(bx, by);
+    if (!j.signal || m.priority) return false;
+    if (j.g && TT.groupSignals && bi > 0 && inGroup(j.g, m.path[(bi - 1) * 2], m.path[(bi - 1) * 2 + 1])) return false;
+    const ph = this.signalPhase(bx, by);
+    if ((ph.green === 'ew') !== isEW(inD) || ph.amber) return true;
+    return j.phases === 4 && !!ph.left !== this.groupLeft(m, bi, j.g!, inD);
+  }
+  /** Does m, coming into group g at path node bi heading inD, turn left (or round) by the time it leaves the group? */
+  private groupLeft(m: Mover, bi: number, g: JunctionGroup, inD: number): boolean {
+    const p = m.path, n = p.length / 2;
+    for (let k = bi; k + 1 < n; k++) {
+      if (inGroup(g, p[k * 2 + 2], p[k * 2 + 3])) continue;
+      const out = dirBetween(p[k * 2], p[k * 2 + 1], p[k * 2 + 2], p[k * 2 + 3]);
+      return out === LEFT[inD] || out === OPP[inD];
+    }
+    return false;
+  }
+  junctionKind(x: number, y: number): 'none' | 'yield' | 'signal' | 'roundabout' | 'flyover' | 'mini' | 'bigRoundabout' | 'interchange' | 'pelican' {
     const a = this.junctionAux(x, y);
-    if (a) return isRingAux(a) ? 'roundabout' : 'flyover';
-    if (this.degreeOf(x, y) < 3) return 'none';
+    if (a) return isRingAux(a) ? 'roundabout' : isMiniAux(a) ? 'mini' : isFlyoverAux(a) ? 'flyover' : 'bigRoundabout';
+    if (this.w.anyRoadClass) {
+      const ca = this.classAux(x, y);
+      if (isRingClassAux(ca)) return 'bigRoundabout';
+      if (isDeckClassAux(ca)) return 'interchange';
+    }
+    if (this.degreeOf(x, y) < 3) return (this.w.anyRoadClass || this.w.roadRules.size) && this.pelicanAt(x, y) ? 'pelican' : 'none';
     return this.junction(x, y).signal ? 'signal' : 'yield';
   }
+  /** The junction group (R4) of a junction tile, when it is more than one tile. */
+  groupOf(x: number, y: number): JunctionGroup | undefined { return this.degreeOf(x, y) >= 3 ? this.junction(x, y).g : undefined; }
+  /** How many phases the lights at (x, y) run (2, or 4 at a group of two divided roads crossing). */
+  phasesAt(x: number, y: number): number { return this.degreeOf(x, y) >= 3 ? this.junction(x, y).phases ?? 2 : 2; }
   /** The signal phase at (x,y) now (the same pure function of tick the client draws). Shared scratch: copy what you keep. */
   signalPhase(x: number, y: number): SignalPhase {
     const j = this.junction(x, y);
+    if (j.ctl) {
+      // a junction group (R4): one controller, at its anchor; actuated only when it runs two phases
+      if (TT.signalActuated && j.signal && j.phases === 2) return this.actuated(j.ctl, j.g!.x, j.g!.y);
+      return groupPhaseOf(j, j.phases ?? 2, this.w.tick + this.lookTicks, this.phase, groupMain(j.g!));
+    }
     if (TT.signalActuated && j.signal) return this.actuated(j, x, y);
     return signalPhaseOf(j, this.w.tick + this.lookTicks, this.phase);
   }
@@ -822,6 +927,16 @@ export class Traffic {
   }
   /** Any car in a lane arriving at (x,y) along this axis? */
   private approaching(x: number, y: number, axis: 'ns' | 'ew'): boolean {
+    const g = this.junction(x, y).g;
+    if (g && TT.groupSignals) {
+      // a group: the lanes coming into any of its tiles from outside it
+      for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) for (let d = 0; d < 4; d++) {
+        if (isEW(d) !== (axis === 'ew') || inGroup(g, tx - DIRS[d][0], ty - DIRS[d][1])) continue;
+        const q = this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
+        if (q && q.length) return true;
+      }
+      return false;
+    }
     for (let d = 0; d < 4; d++) {
       if (isEW(d) !== (axis === 'ew')) continue;
       const q = this.laneQ(x - DIRS[d][0], y - DIRS[d][1], d);
@@ -833,8 +948,9 @@ export class Traffic {
   /** Signalled junction whose crossed carriageway has a red now: may a walker heading `xd` (Polyline.xdir) step out? */
   walkSignal(x: number, y: number, xd: number): boolean {
     const ph = this.signalPhase(x, y);
-    // the road you walk beside has the green, so the road you cross has red; on a box crossing that is the road you entered by
-    return !ph.amber && (ph.green === 'ew') === isEW(xd & 3);
+    // the road you walk beside has the green, so the road you cross has red; on a box crossing that is the road you entered by.
+    // Not in a four-phase group's protected left phase (R4): the turning cars drive over the crossings beside the green road
+    return !ph.amber && !ph.left && (ph.green === 'ew') === isEW(xd & 3);
   }
 
   // ---- occupancy -------------------------------------------------------------
@@ -905,14 +1021,15 @@ export class Traffic {
     // inside a chunk, not on its edge: every lane looked at is in this tile's RoadChunk
     const lx = tx - Math.floor(tx / CHUNK_SIZE) * CHUNK_SIZE, ly = ty - Math.floor(ty / CHUNK_SIZE) * CHUNK_SIZE;
     const inner = lx >= 1 && lx <= CHUNK_SIZE - 2 && ly >= 1 && ly <= CHUNK_SIZE - 2;
-    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx;
+    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx, med = this.w.anyRoadClass;
     if (inner && !rc) return 0;
     for (let d = 0; d < 4; d++) {
       // arriving lanes: from the neighbour on the opposite side, heading d
       const q = rc ? rc.lanes[(i0 - DIRS[d][0] - DIRS[d][1] * CHUNK_SIZE) * 4 + d] : this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
-      if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m)) { M[n] = m; I[n] = d; O[n] = this.nextDirOf(m); SI[n] = m.s1 ?? 0; SO[n] = m.s2 ?? 0; n++; }
+      // a car waiting in a median box (R4: there are none without road classes) is in neither carriageway's box
+      if (q) for (const m of q) if (TT.boxByCommit ? m.committed : m.prog > this.stopLine(m) && !(med && m.med)) { M[n] = m; I[n] = d; O[n] = this.nextDirOf(m); SI[n] = m.s1 ?? 0; SO[n] = m.s2 ?? 0; n++; }
       const o = rc ? rc.lanes[i0 * 4 + d] : this.laneQ(tx, ty, d);
-      if (o) for (const m of o) if (m.prog < this.clearAt(m)) { M[n] = m; I[n] = m.inDir; O[n] = d; SI[n] = m.s0 ?? 0; SO[n] = m.s1 ?? 0; n++; }
+      if (o) for (const m of o) if (m.prog < this.clearAt(m) && !(med && m.med)) { M[n] = m; I[n] = m.inDir; O[n] = d; SI[n] = m.s0 ?? 0; SO[n] = m.s1 ?? 0; n++; }
     }
     return n;
   }
@@ -953,13 +1070,13 @@ export class Traffic {
     // inBox, stopping at the first mover found other than m
     const lx = tx - Math.floor(tx / CHUNK_SIZE) * CHUNK_SIZE, ly = ty - Math.floor(ty / CHUNK_SIZE) * CHUNK_SIZE;
     const inner = lx >= 1 && lx <= CHUNK_SIZE - 2 && ly >= 1 && ly <= CHUNK_SIZE - 2;
-    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx;
+    const rc = inner ? this.roadChunkIf(tx, ty) : undefined, i0 = ly * CHUNK_SIZE + lx, med = this.w.anyRoadClass;
     if (inner && !rc) return false;
     for (let d = 0; d < 4; d++) {
       const q = rc ? rc.lanes[(i0 - DIRS[d][0] - DIRS[d][1] * CHUNK_SIZE) * 4 + d] : this.laneQ(tx - DIRS[d][0], ty - DIRS[d][1], d);
-      if (q) for (const o of q) if ((TT.boxByCommit ? o.committed : o.prog > this.stopLine(o)) && o !== m) return true;
+      if (q) for (const o of q) if ((TT.boxByCommit ? o.committed : o.prog > this.stopLine(o) && !(med && o.med)) && o !== m) return true;
       const l = rc ? rc.lanes[i0 * 4 + d] : this.laneQ(tx, ty, d);
-      if (l) for (const o of l) if (o.prog < this.clearAt(o) && o !== m) return true;
+      if (l) for (const o of l) if (o.prog < this.clearAt(o) && !(med && o.med) && o !== m) return true;
     }
     return false;
   }
@@ -1011,7 +1128,7 @@ export class Traffic {
       if (i >= 0) q.splice(i, 1);
       if (q.length === 0) this.dropLane(m.lane);
     }
-    m.lane = -1; m.committed = false;
+    m.lane = -1; m.committed = false; if (m.med) m.med = false;
   }
   /** The queue of lane (x, y, d), if anyone is in it (the same array as in `cells`). */
   private laneQ(x: number, y: number, d: number): Mover[] | undefined {
@@ -1127,6 +1244,9 @@ export class Traffic {
         const ob = cars[nc] ??= { x: 0, y: 0, hx: 0, hy: 0, len: 0 };
         ob.x = o.x; ob.y = o.y; ob.hx = oh[0]; ob.hy = oh[1]; ob.len = o.len;
         if (obbOverlap(now, ob, 0)) continue;
+        // a car waiting in a median box (R4) stands clear of both carriageways' lanes by a twentieth of a tile, less
+        // than the guard's margin on both bodies: it is tested body to body, or it would hold the reservation-side lane
+        this.gMed[nc] = !!o.med;
         nc++;
       }
     }
@@ -1156,7 +1276,7 @@ export class Traffic {
         if (!hit && nc) {
           const me = this.gMe;
           me.x = c[0]; me.y = c[1]; me.hx = ux; me.hy = uy; me.len = m.len;
-          for (let j = 0; j < nc; j++) if (obbOverlap(me, cars[j], GUARD_MARGIN)) { hit = true; break; }
+          for (let j = 0; j < nc; j++) if (obbOverlap(me, cars[j], this.gMed[j] ? 0 : GUARD_MARGIN)) { hit = true; break; }
         }
       }
       if (hit) return (allowed * (k - 1)) / 3;
@@ -1180,6 +1300,8 @@ export class Traffic {
     return false;
   }
   private gCars: Obb[] = [];
+  /** gatherCars: whether each gathered car is waiting in a median box (tested without the margin) */
+  private gMed: boolean[] = [];
   /**
    * A two-wheeler and a car in the same lane, or one in the lane the other drives into next, both going straight: the
    * bike rides past at the kerb edge. While either is turning, their paths cross and the body guard holds them as any two.
@@ -1243,7 +1365,7 @@ export class Traffic {
         // only what is ahead: a car behind me keeps its own distance (and a turning car's rear swings toward it)
         if (now && (o.x - m.x) * now.hx + (o.y - m.y) * now.hy <= 0) continue;
         const ob = { x: o.x, y: o.y, hx: h[0], hy: h[1], len: o.len };
-        if (!obbOverlap(me, ob, GUARD_MARGIN)) continue;
+        if (!obbOverlap(me, ob, o.med ? 0 : GUARD_MARGIN)) continue;
         if (now && obbOverlap(now, ob, 0)) continue; // already touching: moving on is how it ends
         return true;
       }
@@ -1286,7 +1408,7 @@ export class Traffic {
     if (m.pi >= n) return null;
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1], bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
     const dir = dirBetween(ax, ay, bx, by), last = m.pi + 1 >= n;
-    const fly = isFlyoverAux(this.junctionAux(bx, by));
+    const fly = isFlyoverAux(this.junctionAux(bx, by)) || (this.w.anyRoadClass && isDeckClassAux(this.classAux(bx, by)));
     const M = this.boxM, I = this.boxIn, O = this.boxOut;
     const SI = this.boxSi, SO = this.boxSo, s1 = m.s1 ?? 0, s2 = m.s2 ?? 0;
     if (last) { for (let i = 0, k = this.inBox(bx, by); i < k; i++) if (M[i] !== m && !(fly && isEW(I[i]) !== isEW(dir)) && conflictsS(dir, dir, s1, s2, I[i], O[i], SI[i], SO[i])) return M[i]; return null; }
@@ -1420,17 +1542,17 @@ export class Traffic {
     const deg = this.degreeOf(bx, by);
     // nobody waits in a junction box for a level crossing's barriers: they hold at the junction's stop line instead
     if (deg >= 3 && this.crossingClosed(bx + DIRS[outD][0], by + DIRS[outD][1], outD)) return false;
-    const ja = this.junctionAux(bx, by), ring = isRingAux(ja) && TT.ringMerge > 0;
+    const ja = this.junctionAux(bx, by), classes = this.w.anyRoadClass;
+    const ring = (isRingAux(ja) || (classes && isRingClassAux(this.classAux(bx, by)))) && TT.ringMerge > 0;
     if (nq && nq.length && deg >= 3 && !ring) {
       // at a junction the car ahead in the exit lane must be out of the box before we go in behind it;
       // on plain road the following gap in step() is all that is needed, so cars can close up inside a tile
       const tail = leaderIn(nq, nq.length, isBike(m), m.s2 ?? 0);
       if (tail && tail.prog < this.clearAt(tail) + MIN_GAP && !(TT.platoon && (TT.platoon === 1 || this.junction(bx, by).signal) && this.platoonBehind(m, tail, inD))) return false;
     }
-    if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
-    const jb = deg >= 3 ? this.junction(bx, by) : null;
-    // inside a divided road's crossing, from one of its tiles to another, the car is already through the lights
-    const signal = !!jb && jb.signal && !trapped && !(jb.gx !== undefined && this.degreeOf(ax, ay) >= 3 && this.junction(ax, ay).gx === jb.gx && this.junction(ax, ay).gy === jb.gy);
+    // a mini-roundabout (R4) holds one car at a time: it needs no don't-block-the-box rule
+    if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && ja !== MINI_AUX && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
+    const jb = deg >= 3 ? this.junction(bx, by) : null, signal = !!jb && jb.signal && !trapped;
     const walkers = trapped ? 0 : this.crossingsAt(bx, by);
     if (walkers && ((!signal && !isRingAux(ja)) || (walkers & movementMask(inD, outD)))) {
       // at lights only the crossings this movement drives over hold it (straight through on green passes people crossing the red road);
@@ -1438,16 +1560,19 @@ export class Traffic {
       if (TT.carYieldMax <= 0 || m.wait < TT.carYieldMax) return false;
       if (!this.predicting) this.cnt.carNosed++;
     }
+    // green for my approach axis, and not its amber: cars already committed clear the box before the other axis goes
+    // (a junction group's lights, R4, gate only cars coming into the group: lightHolds)
     if (signal && !m.priority) {
-      // green for my approach axis, and not its amber: cars already committed clear the box before the other axis goes
-      const ph = this.signalPhase(bx, by);
-      if ((ph.green === 'ew') !== isEW(inD) || ph.amber) return false;
+      if (jb!.g) { if (this.lightHolds(m, m.pi, inD)) return false; }
+      else { const ph = this.signalPhase(bx, by); if ((ph.green === 'ew') !== isEW(inD) || ph.amber) return false; }
     }
     if (TT.ringYield > 0 && isRingAux(ja) && !m.priority && !trapped && !this.ringGiven(m, bx, by, inD, outD, ja)) return false;
+    // R4's junctions (a big roundabout, a mini-roundabout, a signal crossing, the median box): their own entry rules
+    if ((ja || classes || this.w.roadRules.size) && !this.r4Entry(m, ax, ay, bx, by, inD, outD, ja, deg, trapped)) return false;
     // a slip road: from any other road onto a motorway, give way to the cars coming along it (roadclass.ts), lights or none
     if (this.w.anyRoadClass && !m.priority && !trapped && m.wait < TT.minorWaitMax * 3) {
       const cb = this.classAux(bx, by);
-      if (isMotorwayAux(cb) && !isMotorwayAux(this.classAux(ax, ay)) && this.mainComing(m, bx, by, inD, outD, isEW(auxDir(cb)) ? 1 : 0, SLIP_GAP)) return false;
+      if (isMotorwayAux(cb) && !isMotorwayAux(this.classAux(ax, ay)) && !(isDeckClassAux(cb) && deckAxisStep(cb, DIRS[inD][0])) && this.mainComing(m, bx, by, inD, outD, isEW(auxDir(cb)) ? 1 : 0, SLIP_GAP)) return false;
     }
     // main-road priority without lights: from a side road, give way to cars coming along the main one
     if (TT.mainRoad && deg >= 3 && !signal && !ja && !m.priority && !trapped && m.wait < TT.minorWaitMax) {
@@ -1456,6 +1581,54 @@ export class Traffic {
     }
     if (!trapped && this.w.anyRoadClass && !this.overMedian(m, bx, by, outD)) return false;
     return !this.boxConflict(m, bx, by, inD, outD, trapped);
+  }
+  /**
+   * The entry rules of R4's junctions (canEnter): may m go on into tile B? A big roundabout's give way and never full; a
+   * mini-roundabout's give way to the left; a signal crossing's amber and red; the median box's one car a way.
+   */
+  private r4Entry(m: Mover, ax: number, ay: number, bx: number, by: number, inD: number, outD: number, ja: number, deg: number, trapped: boolean): boolean {
+    if (trapped) return true;
+    const classes = this.w.anyRoadClass;
+    // a big roundabout: coming on, give way to the ring and never fill it
+    if (classes && !m.priority && isRingClassAux(this.classAux(bx, by)) && !this.bigRingGiven(m, ax, ay, bx, by)) return false;
+    // a mini-roundabout: giving way to a car coming in from the left (one car in the box at a time with miniOne)
+    if (ja === MINI_AUX && !this.miniGiven(m, bx, by, inD)) return false;
+    // a signal crossing: stop on its amber and red (cars already on it drive off)
+    if (!m.priority && deg < 3 && (classes || this.w.roadRules.size) && this.pelicanAt(bx, by)) {
+      const lamp = pelicanPhase(this.walkAtOf(bx, by), this.w.tick + this.lookTicks);
+      if (lamp === 'amber' || lamp === 'red') return false;
+    }
+    // the median box holds one car a way: nobody comes into B to cross the reservation while one is waiting to
+    if (classes && TT.medianBox && this.medianEdge(bx, by, outD) && this.medianTaken(m, bx, by, outD)) return false;
+    return true;
+  }
+  /**
+   * Is the edge out of junction tile B heading d a crossing of a divided road's reservation inside one junction group
+   * (R4: B and the tile beyond in the same group of two or four tiles)? There a car may wait in the median box.
+   */
+  private medianEdge(bx: number, by: number, d: number): boolean {
+    if (!isDividedAux(this.classAux(bx, by)) || this.degreeOf(bx, by) < 3) return false;
+    const g = this.junction(bx, by).g;
+    return !!g && inGroup(g, bx + DIRS[d][0], by + DIRS[d][1]);
+  }
+  /** Does m, held at the edge of the next tile, wait in the median box over a divided road's reservation (R4)? */
+  private medianWaits(m: Mover, ax: number, ay: number, dir: number): boolean {
+    return !!m.med || (TT.medianBox > 0 && m.len <= MEDIAN_LEN && this.medianEdge(ax, ay, dir));
+  }
+  /**
+   * How far m may move towards its median box this tick: up to the edge between the carriageways (centred on it, clear
+   * of both), rather than the stop line in the first carriageway's box; it is in the median once there.
+   */
+  private medianAllowed(m: Mover, allowed: number): number {
+    const a = Math.max(0, Math.min(allowed, MEDIAN_PROG - m.prog));
+    if (m.prog + a >= MEDIAN_PROG - 1e-9) m.med = true;
+    return a;
+  }
+  /** Is the median box out of B heading d taken (a car other than m in lane B→d not yet let on over the reservation)? */
+  private medianTaken(m: Mover, bx: number, by: number, d: number): boolean {
+    const q = this.laneQ(bx, by, d);
+    if (q) for (const o of q) if (o !== m && !o.committed) return true;
+    return false;
   }
   /**
    * Crossing a divided road (roadclass.ts): a car going from one of its junction tiles B straight on into the other, C
@@ -1590,6 +1763,105 @@ export class Traffic {
     return n <= 8 * cap - TT.ringSpare;
   }
   /**
+   * Give way on to a big roundabout (R4, road class 6): may m, coming from A (not a ring tile), come onto ring tile B?
+   * Not while a car going round, and moving, is within ringYield of B's box on the ring tile before it (or the one before
+   * that) and stays on the ring past B, unless m has waited minorWaitMax already (the box rules still hold it while
+   * anything crosses its way); and never when the ring would fill (bigRingSpare places free, both lanes).
+   */
+  private bigRingGiven(m: Mover, ax: number, ay: number, bx: number, by: number): boolean {
+    if (isRingClassAux(this.classAux(ax, ay))) return true;
+    const gap = TT.ringYield;
+    const on = (c: Mover, k: number) => k * 2 + 1 < c.path.length && isRingClassAux(this.classAux(c.path[k * 2], c.path[k * 2 + 1]));
+    const at = (c: Mover, k: number, x: number, y: number) => k * 2 + 1 < c.path.length && c.path[k * 2] === x && c.path[k * 2 + 1] === y;
+    // the ring tile before B, and the one before that
+    let px = 0, py = 0, pd = -1;
+    for (let d = 0; d < 4; d++) { const tx = bx - DIRS[d][0], ty = by - DIRS[d][1], a = this.classAux(tx, ty); if (isRingClassAux(a) && auxDir(a) === d) { px = tx; py = ty; pd = d; break; } }
+    // a driver held this long by the ring's traffic goes when the box is clear anyway (no starving), as at a main road
+    if (pd >= 0 && gap > 0 && m.wait < TT.minorWaitMax) {
+      // joining the outer lane, a car going round in the inner one that stays there crosses nobody
+      const outer = !(m.s2 ?? 0);
+      const q1 = this.laneQ(px, py, pd);
+      if (q1) for (const c of q1) if (c !== m && c.wait < 2 && at(c, c.pi, bx, by) && on(c, c.pi + 1) && !(outer && c.s1 && c.s2) && this.stopLine(c) - c.prog < gap) return false;
+      for (let d = 0; d < 4; d++) {
+        const tx = px - DIRS[d][0], ty = py - DIRS[d][1], a = this.classAux(tx, ty);
+        if (!isRingClassAux(a) || auxDir(a) !== d) continue;
+        const q0 = this.laneQ(tx, ty, d);
+        if (q0) for (const c of q0) if (c !== m && c.wait < 2 && at(c, c.pi, px, py) && at(c, c.pi + 1, bx, by) && on(c, c.pi + 2) && 1 - c.prog + this.stopLine(c) < gap) return false;
+        break;
+      }
+    }
+    // never fill the ring: round its sixteen tiles by their ways out, counting the cars on it and those committed coming on
+    const cap = TT.laneByLength ? Math.floor(TT.laneRoom / (VEHICLE_LEN[0] + MIN_GAP)) : TT.laneCap;
+    let n = 1, tx = bx, ty = by;
+    for (let i = 0; i < 16; i++) {
+      const a = this.classAux(tx, ty);
+      if (!isRingClassAux(a)) break;
+      const d = auxDir(a);
+      n += this.laneQ(tx, ty, d)?.length ?? 0;
+      for (let e = 0; e < 4; e++) {
+        if (e === d) continue;
+        const sx = tx - DIRS[e][0], sy = ty - DIRS[e][1];
+        if (isRingClassAux(this.classAux(sx, sy))) continue;
+        const lane = this.laneQ(sx, sy, e);
+        if (lane) for (const c of lane) if (c !== m && c.committed) n++;
+      }
+      tx += DIRS[d][0]; ty += DIRS[d][1];
+      if (tx === bx && ty === by) break;
+    }
+    return n <= 16 * 2 * cap - TT.bigRingSpare;
+  }
+  /**
+   * A mini-roundabout (R4, MINI_AUX): may m, coming in heading inD, go into its box? With miniOne only when nobody else is
+   * in it (otherwise the box's own conflict rules decide, after this), and not while a moving car is about to come in from
+   * the arm on m's left (traffic goes round anticlockwise, so that is
+   * the way the cars going round come from) within miniYield of the box. Cars that are all standing give way to nobody:
+   * the first to move goes, so four waiting at once never lock.
+   */
+  private miniGiven(m: Mover, bx: number, by: number, inD: number): boolean {
+    if (TT.miniOne && this.boxBusyExcept(bx, by, m)) return false;
+    if (TT.miniYield <= 0 || m.wait >= TT.minorWaitMax) return true;
+    const e = RIGHT[inD], q = this.laneQ(bx - DIRS[e][0], by - DIRS[e][1], e);
+    if (q) for (const c of q) {
+      if (c === m || c.committed || c.wait >= 2 || c.pi * 2 + 1 >= c.path.length) continue;
+      if (c.path[c.pi * 2] !== bx || c.path[c.pi * 2 + 1] !== by) continue;
+      if (this.stopLine(c) - c.prog < TT.miniYield) return false;
+    }
+    return true;
+  }
+
+  // ---- signal crossings (pelicans, R4: shared/src/signals.ts pelicanPhase) ------------------------------------------
+
+  /** Is (x, y) a signal crossing: one placed (a road rule) or where a pedestrian street crosses a street? Cached per tile. */
+  pelicanAt(x: number, y: number): boolean {
+    if (this.w.rulesVersion !== this.rulesSeen) { this.rulesSeen = this.w.rulesVersion; for (const rc of this.roads.values()) rc.pel.fill(-1); }
+    const rc = this.roadChunk(x, y), i = localIndex(x, y);
+    let v = rc.pel[i];
+    if (v < 0) {
+      v = this.isRoadAt(x, y) && (!!this.w.roadRuleAt(x, y)?.pelican || (this.w.anyRoadClass && !!implicitPelican(this.roadAt, (tx, ty) => this.classAux(tx, ty), x, y))) ? 1 : 0;
+      rc.pel[i] = v;
+    }
+    return v === 1;
+  }
+  private rulesSeen = -1;
+  /** each signal crossing's last walk grant (shared/src/signals.ts pelicanPhase), by tile key; the grants made since the last drainWalks, flat [x, y, walkAt, ...] */
+  private walks = new Map<number, number>();
+  private freshWalks: number[] = [];
+  walkAtOf(x: number, y: number): number { return this.walks.get(tkey(x, y)) ?? -1e9; }
+  /** What a signal crossing's lamps show cars now. */
+  pelicanLamp(x: number, y: number) { return pelicanPhase(this.walkAtOf(x, y), this.w.tick); }
+  /** A walker at the kerb presses the button: the walk phase is granted at once when the last cycle and its minimum green are done. */
+  pressPelican(x: number, y: number) {
+    const at = this.walkAtOf(x, y);
+    if (!pelicanReady(at, this.w.tick + 1)) return;
+    const t = this.w.tick + 1;
+    this.walks.set(tkey(x, y), t);
+    this.freshWalks.push(x, y, t);
+  }
+  /** Every crossing's last grant, for a client joining (flat [x, y, walkAt, ...]). */
+  walksList(): number[] { const out: number[] = []; for (const [k, t] of this.walks) out.push(tileX(k), tileY(k), t); return out; }
+  /** The grants since the last call, for the broadcast. */
+  drainWalks(): number[] { const u = this.freshWalks; this.freshWalks = []; return u; }
+  /**
    * Keep the track clear: may m drive onto level crossing B (on into lane B→C) expecting to get right off it? The car
    * ahead must be off it, and there must be room beyond (roomBeyond). With a junction straight after the crossing a
    * vehicle waits at that junction's stop line with its tail in B: a car is short enough to stand clear of the train
@@ -1607,12 +1879,13 @@ export class Traffic {
     const d2 = dirBetween(cx, cy, m.path[(i + 1) * 2], m.path[(i + 1) * 2 + 1]);
     const s3 = m.s2 || m.s1 ? this.strandFor(m, i, m.s2 ?? 0) : 0;
     if (!this.laneRoom(cx, cy, Traffic.laneKey(cx, cy, d2), m, null, s3)) return false;
-    if (this.junction(cx, cy).signal) { const ph = this.signalPhase(cx, cy); if ((ph.green === 'ew') !== isEW(outD) || ph.amber) return false; }
+    if (this.junction(cx, cy).signal && this.lightHolds(m, i, outD)) return false;
     return !this.boxConflict(m, cx, cy, outD, d2, false, m.s2 ?? 0, s3);
   }
   /** Is a movement inD -> outD through tile B blocked by a car already in that box? */
   private boxConflict(m: Mover, bx: number, by: number, inD: number, outD: number, trapped = false, ms1 = m.s1 ?? 0, ms2 = m.s2 ?? 0): boolean {
-    const ja = this.junctionAux(bx, by), fly = isFlyoverAux(ja), ring = isRingAux(ja) && TT.ringMerge > 0;
+    const ja = this.junctionAux(bx, by), classes = this.w.anyRoadClass;
+    const fly = isFlyoverAux(ja) || (classes && isDeckClassAux(this.classAux(bx, by))), ring = (isRingAux(ja) || (classes && isRingClassAux(this.classAux(bx, by)))) && TT.ringMerge > 0;
     for (let i = 0, n = this.inBox(bx, by); i < n; i++) {
       const om = this.boxM[i], oIn = this.boxIn[i], oOut = this.boxOut[i], si = this.boxSi[i], so = this.boxSo[i];
       if (om === m) continue;
@@ -1697,7 +1970,7 @@ export class Traffic {
    */
   private heldAhead(m: Mover, bx: number, by: number, inD: number, outD: number, lightsOnly: boolean): boolean {
     const deg = this.degreeOf(bx, by), signal = deg >= 3 && this.junction(bx, by).signal;
-    if (signal && !m.priority) { const ph = this.signalPhase(bx, by); if ((ph.green === 'ew') !== isEW(inD) || ph.amber) return true; }
+    if (signal && this.lightHolds(m, m.pi, inD)) return true;
     if (this.isCrossingAt(bx, by) && this.crossingClosed(bx, by, inD)) return true;
     if (lightsOnly) return false;
     const walkers = this.crossingsAt(bx, by);
@@ -1728,7 +2001,7 @@ export class Traffic {
       // the class of the road under the car sets its pace (roadclass.ts speed); a lane gone from under it (the road's
       // class changed) is the right-hand one
       const ca = m.prog < 0.5 ? this.classAux(ax, ay) : this.classAux(bx, by);
-      if (ca) base *= classDef(ca & 7).speed;
+      if (ca && !(isDeckClassAux(ca) && deckAxisStep(ca, DIRS[dir][0]))) base *= classDef(ca & 7).speed; // on an interchange's deck, a street's pace
       if (m.s1 && edgeLanes(this.classAux(ax, ay), this.classAux(bx, by), dir) < 2) m.s1 = 0;
       if (m.s2 && !last && edgeLanes(this.classAux(bx, by), this.classAux(m.path[(m.pi + 1) * 2], m.path[(m.pi + 1) * 2 + 1]), nextDir) < 2) m.s2 = 0;
     }
@@ -1802,7 +2075,8 @@ export class Traffic {
     if (!m.committed && m.prog + allowed >= stop) {
       // into the next road tile: the full entry rules; into the destination building: one vehicle in its forecourt at a time
       const ok = last ? this.forecourtFree(m, bx, by, dir) : this.canEnter(m, bx, by, dir, nextDir);
-      if (ok) m.committed = true;
+      if (ok) { m.committed = true; if (m.med) m.med = false; }
+      else if (this.w.anyRoadClass && !last && this.medianWaits(m, ax, ay, dir)) allowed = this.medianAllowed(m, allowed);
       else allowed = Math.max(0, stop - m.prog);
     }
 
@@ -1826,7 +2100,7 @@ export class Traffic {
         moved = allowed;
         q.splice(idx, 1); if (q.length === 0) this.dropLane(m.lane);
         this.push(Traffic.laneKey(bx, by, nextDir), m);
-        m.inDir = dir; m.pi++; m.prog = Math.min(over, 0.3); m.committed = false;
+        m.inDir = dir; m.pi++; m.prog = Math.min(over, 0.3); m.committed = false; if (m.med) m.med = false;
         if (this.w.anyRoadClass) { m.s0 = m.s1 ?? 0; m.s1 = m.s2 ?? 0; m.s2 = this.strandFor(m, m.pi, m.s1); }
         // a bus never comes into a lane already past its stop line before a junction: its nose would be in the box,
         // in the way of whatever turns there (a bus turning round sweeps the whole box: sim/busroute.ts)
@@ -1912,13 +2186,19 @@ export class Traffic {
       if (outD === inD) {
         const deg = this.degreeOf(path[i * 2], path[i * 2 + 1]);
         const armRight = this.isRoadAt(path[i * 2] + DIRS[r][0], path[i * 2 + 1] + DIRS[r][1]);
+        // a signal crossing (R4) walked straight over, across its road: a crossing, as at a junction's arm
+        const tx = path[i * 2], ty = path[i * 2 + 1];
+        const pel = deg < 3 && (this.w.anyRoadClass || this.w.roadRules.size > 0) && this.pelicanAt(tx, ty) && this.carRoadAt(tx + DIRS[r][0], ty + DIRS[r][1]) && this.carRoadAt(tx - DIRS[r][0], ty - DIRS[r][1]);
+        const x = (deg >= 3 && armRight) || pel;
         pathPoint(path[i * 2], path[i * 2 + 1], inD, outD, 0, O, p); push(p[0], p[1], 0, i);
-        pathPoint(path[i * 2], path[i * 2 + 1], inD, outD, 1, O, p); push(p[0], p[1], deg >= 3 && armRight ? tk : 0, -1, deg >= 3 && armRight ? inD : -1);
+        pathPoint(path[i * 2], path[i * 2 + 1], inD, outD, 1, O, p); push(p[0], p[1], x ? tk : 0, -1, x ? inD : -1);
       } else if (outD === RIGHT[inD]) {
         for (const s of [0, 0.5, 1]) { pathPoint(path[i * 2], path[i * 2 + 1], inD, outD, s, O, p); push(p[0], p[1], 0, s === 0 ? i : -1); }
       } else {
         // a left turn crosses the box, except round a roundabout's corner: that is the ring's outer kerb
-        const a = this.junctionAux(path[i * 2], path[i * 2 + 1]), x = isRingAux(a) && !isArmPos(ringPos(a)) ? 0 : tk;
+        const a = this.junctionAux(path[i * 2], path[i * 2 + 1]);
+        const corner = (isRingAux(a) && !isArmPos(ringPos(a))) || (this.w.anyRoadClass && isRingClassAux(this.classAux(path[i * 2], path[i * 2 + 1])) && this.degreeOf(path[i * 2], path[i * 2 + 1]) < 3);
+        const x = corner ? 0 : tk;
         for (let k = 0; k <= 6; k++) { pathPoint(path[i * 2], path[i * 2 + 1], inD, outD, k / 6, O, p); push(p[0], p[1], k === 0 ? 0 : x, k === 0 ? i : -1, k === 0 || !x ? -1 : inD + 4); }
       }
     }

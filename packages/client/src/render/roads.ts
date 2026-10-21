@@ -6,10 +6,13 @@ import {
   CHUNK_SIZE, Terrain, hash2, isRoad, terrainOf, signalArms, armCount, signalledArms, isMarkedJunction, mouthControl, mouthCrossing,
   boxJunction, leafySide, streetTreeAt, midZebraAt, MouthCrossing, MouthControl, isRingAux, ringPos, isArmPos, RING_POS, isFlyoverAux, deckEW,
   isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, isRailAux, railMask, streetRun, streetLine, MOTORWAY_KIND,
-  auxClass, oneWayDir, isDividedAux, isMotorwayAux, auxJunction, RoadCls, signalSite,
+  auxClass, oneWayDir, isDividedAux, isMotorwayAux, auxJunction, RoadCls,
+  isMiniAux, isRingClassAux, isDeckClassAux, isClassAux, isPedestrianAux, bigRingAt, implicitPelican, junctionGroup, slipJunction, linkedDegree, roadsLinked,
+  carStepOk, inGroup, turnAllowed, TRAFFIC_TUNING, type RoadRule, type JunctionGroup,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
-import { Geo, buildTile, buildRing, surfaceY, ringSurfaceY, STREET, SIDE, CLASS_PROFILES, type RoadTile, type RoadProfile, type ClassInfo } from './roadGeo';
+import { Geo, buildTile, buildRing, buildBigRing, surfaceY, ringSurfaceY, bigRingSurfaceY, STREET, SIDE, CLASS_PROFILES, type RoadTile, type RoadProfile, type ClassInfo, type BigRingTile } from './roadGeo';
+import { junctionLights } from './signals';
 import { lampTexture, OVL_SIZE, groundMaterial, lanternMaterial, sceneUniforms } from './materials';
 import { Kit } from './kit';
 
@@ -152,6 +155,7 @@ interface TileCache {
   sig: string;
   t: RoadTile | null;
   ring: { pos: number; arm: boolean } | null;
+  big?: BigRingTile | null;
   p: Float32Array; n: Float32Array; c: Float32Array; uv: Float32Array; idx: Uint32Array;
   furn: Furn[];
   /** the road tile's aRoad value (16 + its N E S W road bits) */
@@ -187,6 +191,9 @@ export class RoadLayer {
   private ctx: RoadCtx | null = null;
   /** the catalogue kind standing on a tile (main.ts: world.kindIdAt), for a road that runs on into a motorway connection's apron */
   kindAt: (x: number, y: number) => number = () => 0;
+  /** the road rule records (main.ts: the client world): signal crossings placed with the tool are painted (R4) */
+  rules: { ruleAt(x: number, y: number): RoadRule | undefined; rulesVersion: number } | null = null;
+  private rulesSeen = -1;
   private furnDirty = false;
   private lampDirty = false;
   private lampData = lampTexture.image.data as Uint8Array;
@@ -259,8 +266,14 @@ export class RoadLayer {
     if (changed && performance.now() - e.wearBuilt > 60000) e.dirty = true;
   }
 
-  /** Ownership or technology changed: junctions whose lights came or went are re-marked. */
+  /** Ownership, technology or road rules changed: junctions whose lights came or went are re-marked, signal crossings repainted. */
   invalidate() {
+    if (this.rules && this.rules.rulesVersion !== this.rulesSeen) {
+      // a rule changed somewhere: every near chunk looks again (each tile whose look is unchanged is reused as it is)
+      this.rulesSeen = this.rules.rulesVersion;
+      for (const e of this.entries.values()) e.dirty = true;
+      return;
+    }
     for (const e of this.entries.values()) {
       if (!e.junctions.length || !this.ctx) continue;
       const x0 = e.cx * CHUNK_SIZE, z0 = e.cy * CHUNK_SIZE;
@@ -303,6 +316,7 @@ export class RoadLayer {
     if (!tc) return 0;
     if (tc.t) return surfaceY(tc.t, x, z);
     if (tc.ring) return ringSurfaceY(tx, tz, tc.ring.pos, tc.ring.arm, STREET, x, z);
+    if (tc.big) return bigRingSurfaceY(tx, tz, tc.big, x, z);
     return 0;
   }
 
@@ -334,13 +348,16 @@ export class RoadLayer {
     return best;
   }
 
+  /** Has junction tile (x, z) lights? As the lights are drawn (render/signals.ts junctionLights): a junction group as one, from its anchor. */
   private isSignalled(x: number, z: number): boolean {
     const c = this.ctx!;
-    const road = this.roadFn;
-    // a divided road's crossing is one junction, lit or not as a whole (shared roadclass.ts signalSite, as the server and signals.ts)
-    return signalSite(x, z, road, c.aux, this.armsFn, signalledArms).signalled && c.signalled(x, z);
+    const j = junctionLights(this.roadKnown, c.aux, x, z);
+    return !!j && j.lit && c.signalled(j.g.x, j.g.y);
   }
-  private armsFn = (x: number, z: number) => signalArms(this.roadFn, x, z);
+  /** road for the rules (unloaded tiles are not road), as the lights and the server see it */
+  private roadKnown = (x: number, z: number) => { const t = this.ctx!.tile(x, z); return t !== undefined && isRoad(t); };
+  /** a tile's class byte for drawing: a motorway under a deck (class 7) is drawn as the motorway it is */
+  private cAux = (x: number, z: number) => drawAux(this.ctx!.aux(x, z));
   /** road for shapes: an unloaded neighbour is taken as road (the street carries on), as the ground cells do */
   private roadFn = (x: number, z: number) => { const t = this.ctx!.tile(x, z); return t === undefined ? true : isRoad(t); };
 
@@ -377,11 +394,11 @@ export class RoadLayer {
       if (old && old.sig === d.sig) { keep.set(i, old); continue; }
       job.fresh++;
       const g = new Geo();
-      if (d.t) buildTile(d.t, g); else if (d.ring) buildRing(x, z, d.ring.pos, d.ring.arm, STREET, g);
+      if (d.t) buildTile(d.t, g); else if (d.ring) buildRing(x, z, d.ring.pos, d.ring.arm, STREET, g); else if (d.big) buildBigRing(x, z, d.big, g, e.wearAt[i]);
       keep.set(i, {
-        sig: d.sig, t: d.t, ring: d.ring, road: 16 + (d.t ? d.t.m8 & 15 : 15),
+        sig: d.sig, t: d.t, ring: d.ring, big: d.big, road: 16 + (d.t ? d.t.m8 & 15 : 15),
         p: new Float32Array(g.p), n: new Float32Array(g.n), c: new Float32Array(g.c), uv: new Float32Array(g.uv), idx: new Uint32Array(g.idx),
-        furn: d.t ? this.furnish(d.t) : d.ring ? this.furnishRing(x, z) : [],
+        furn: d.t ? this.furnish(d.t) : d.ring || d.big ? this.furnishRing(x, z) : [],
       });
     }
     e.job = null;
@@ -436,14 +453,20 @@ export class RoadLayer {
   }
 
   /** Everything a road tile's look depends on, and a signature of it; null for tiles drawn by others (decks, ramps). */
-  private describe(x: number, z: number, tw: number, a: number, wear: number): { sig: string; t: RoadTile | null; ring: { pos: number; arm: boolean } | null } | null {
+  private describe(x: number, z: number, tw: number, a0: number, wear: number): { sig: string; t: RoadTile | null; ring: { pos: number; arm: boolean } | null; big?: BigRingTile | null } | null {
     const ctx = this.ctx!, road = this.roadFn;
     if (terrainOf(tw) === Terrain.Water) return null; // a bridge deck: render/bridges.ts
-    if (isRingAux(a)) {
-      const p = ringPos(a), arm = isArmPos(p) && road(x + RING_POS[p][0], z + RING_POS[p][1]);
+    if (isRingAux(a0)) {
+      const p = ringPos(a0), arm = isArmPos(p) && road(x + RING_POS[p][0], z + RING_POS[p][1]);
       return { sig: `R${p}${arm ? 1 : 0}`, t: null, ring: { pos: p, arm } };
     }
-    if (this.isRamp(x, z, a)) return null; // under a flyover's or a bridge's ramp
+    if (isRingClassAux(a0)) {
+      // a 5×5 roundabout's ring (R4); one whose island has gone is drawn as the one-way street it drives as
+      const b = this.bigRing(x, z, a0);
+      if (b) return { sig: `B${b.turn}${b.corner ? 1 : 0}${b.arm},${b.armC},${wear}`, t: null, ring: null, big: b };
+    }
+    if (this.isRamp(x, z, a0)) return null; // under a flyover's or a bridge's ramp, or an interchange's (render/junctions.ts)
+    const a = isRingClassAux(a0) ? (a0 & ~7) | RoadCls.OneWay : drawAux(a0);
     const under = isFlyoverAux(a);
     let m8 = 0;
     const DIAG: [number, number][] = [[1, -1], [1, 1], [-1, 1], [-1, -1]];
@@ -452,21 +475,38 @@ export class RoadLayer {
     for (let s = 0; s < 4; s++) if (road(x + DIAG[s][0], z + DIAG[s][1])) m8 |= 16 << s;
     if (under) m8 &= deckEW(a) ? ~(2 | 8 | 0xf0) : ~(1 | 4 | 0xf0); // the deck's ramps are not this road's sides
     const arms = under ? (deckEW(a) ? 5 : 10) & m8 : signalArms(road, x, z);
-    const junction = !under && isMarkedJunction(road, a, x, z);
-    const sig0 = junction && this.isSignalled(x, z);
+    const mini = isMiniAux(a);
+    const junction = !under && (mini || isMarkedJunction(road, a, x, z));
+    const sig0 = junction && !mini && this.isSignalled(x, z);
+    // where an interchange's slips meet its street (R4): the slips give way, the street runs on
+    const slipX = junction && slipJunction(ctx.aux, x, z) ? (isDeckClassAux(ctx.aux(x + 2, z)) || isDeckClassAux(ctx.aux(x - 2, z)) ? 1 : 2) : 0;
     const cross = [0, 0, 0, 0], ctrl = [0, 0, 0, 0], nCross = [0, 0, 0, 0], nCtrl = [0, 0, 0, 0], nArms = [0, 0, 0, 0];
+    let nTurns: number[] | undefined;
     let leafy = 0;
     for (let s = 0; s < 4; s++) {
       const bit = 1 << s, nx = x + SIDE[s][0], nz = z + SIDE[s][1];
-      if (junction && arms & bit && !isRingAux(ctx.aux(nx, nz))) { cross[s] = mouthCrossing(x, z, bit, sig0); ctrl[s] = mouthControl(road, x, z, bit, sig0); }
+      if (junction && arms & bit && !isRingAux(ctx.aux(nx, nz))) {
+        cross[s] = mouthCrossing(x, z, bit, sig0);
+        ctrl[s] = mini ? MouthControl.GiveWay : slipX ? slipCtrl(slipX, s) : mouthControl(road, x, z, bit, sig0);
+      }
       // the junction next door, when this tile is one of its arms (not its twin lane)
       if (arms & bit && !junction && !under) {
-        const na = ctx.aux(nx, nz), nt = ctx.tile(nx, nz);
-        if (nt !== undefined && isMarkedJunction(road, na, nx, nz)) {
-          const nArm = signalArms(road, nx, nz), back = 1 << ((s + 2) & 3);
+        const na = ctx.aux(nx, nz), nt = ctx.tile(nx, nz), back = 1 << ((s + 2) & 3);
+        if (nt === undefined || !isRoad(nt)) { /* nothing */ }
+        else if (isMiniAux(na)) {
+          // a mini-roundabout: every arm gives way
+          nArms[s] = signalArms(road, nx, nz) | back; nCtrl[s] = MouthControl.GiveWay; nCross[s] = mouthCrossing(nx, nz, back, false);
+        } else if (isRingClassAux(na) && !isRingClassAux(a0)) {
+          // a road coming onto a 5×5 roundabout's ring gives way at its edge
+          nArms[s] = back; nCtrl[s] = MouthControl.GiveWay;
+        } else if (isMarkedJunction(road, na, nx, nz)) {
+          const nArm = signalArms(road, nx, nz);
           if (nArm & back) {
-            const ns = this.isSignalled(nx, nz);
-            nCross[s] = mouthCrossing(nx, nz, back, ns); nCtrl[s] = mouthControl(road, nx, nz, back, ns); nArms[s] = nArm;
+            const ns = this.isSignalled(nx, nz), nSlip = slipJunction(ctx.aux, nx, nz) ? (isDeckClassAux(ctx.aux(nx + 2, nz)) || isDeckClassAux(ctx.aux(nx - 2, nz)) ? 1 : 2) : 0;
+            nCross[s] = mouthCrossing(nx, nz, back, ns); nCtrl[s] = nSlip ? slipCtrl(nSlip, (s + 2) & 3) : mouthControl(road, nx, nz, back, ns); nArms[s] = nArm;
+            // the arrows: where a car going in may leave the junction (its group's ways out, no U-turn, no banned turn)
+            const j = this.junctionAt(nx, nz);
+            if (j) { const tm = sidesOf(this.turnsFrom(j.g, SIDE_DIR[s])); if ((tm | back) !== (nArm | back)) (nTurns ??= [-1, -1, -1, -1])[s] = tm; }
           }
         }
       }
@@ -475,16 +515,59 @@ export class RoadLayer {
     const cls = auxClass(a);
     // no marked crossings on a lane, a motorway or a pedestrian street (its walkers have it all)
     if (cls === RoadCls.Lane || cls === RoadCls.Motorway || cls === RoadCls.Pedestrian) cross.fill(0);
-    const box = junction && cls !== RoadCls.Lane && cls !== RoadCls.Pedestrian && cls !== RoadCls.Motorway && boxJunction(road, x, z, sig0, wear >= 2);
+    const box = junction && !mini && cls !== RoadCls.Lane && cls !== RoadCls.Pedestrian && cls !== RoadCls.Motorway && boxJunction(road, x, z, sig0, wear >= 2);
     const rail = isRailAux(a) ? railMask(a) : 0;
-    const zebra = !junction && !under && midZebraAt(road, a, x, z);
+    // a signal crossing (R4): placed on a straight with the tool, or where a pedestrian street crosses this one
+    const ped = (tx: number, tz: number) => { const b = ctx.aux(tx, tz); return isClassAux(b) ? b : 0; };
+    let pelican: 'ns' | 'ew' | undefined;
+    if (!under && cls !== RoadCls.Pedestrian && cls !== RoadCls.Motorway) {
+      if (!junction && (arms === 5 || arms === 10) && this.rules?.ruleAt(x, z)?.pelican) pelican = arms === 5 ? 'ns' : 'ew';
+      else if (junction) pelican = implicitPelican(this.roadKnown, ped, x, z) ?? undefined;
+    }
+    if (pelican && junction) cross.fill(0);
+    // a signal crossing next door along this straight: its zigzags run on over the near half
+    let zig = 0;
+    if (!junction && !under && !pelican && (arms === 5 || arms === 10) && cls !== RoadCls.Pedestrian) for (let s = 0; s < 4; s++) {
+      if (!(arms & (1 << s))) continue;
+      const nx = x + SIDE[s][0], nz = z + SIDE[s][1], along = s === 0 || s === 2 ? 'ns' : 'ew';
+      if (this.rules?.ruleAt(nx, nz)?.pelican || implicitPelican(this.roadKnown, ped, nx, nz) === along) zig |= 1 << s;
+    }
+    const zebra = !junction && !under && !pelican && midZebraAt(road, a, x, z);
     const prof = profileOf(tw, a);
     const t: RoadTile = { x, z, prof, m8, arms, junction, cross, ctrl, box, nCross, nCtrl, nArms, leafy, rail, under, zebra, wear };
+    if (mini) t.mini = true;
+    if (pelican) t.pelican = pelican;
+    if (zig) t.zig = zig;
+    if (nTurns) t.nTurns = nTurns.map((m, i) => (m < 0 ? nArms[i] : m));
     if (cls) t.cl = this.classInfo(x, z, a, cls, arms, junction, nArms, m8);
     const cl = t.cl;
-    const clSig = cl ? `|C${cl.cls},${cl.flow},${cl.twin},${cl.divJ ? 1 : 0},${cl.eC.join(',')},${cl.eK.join(',')},${cl.nose},${cl.slip},${cl.gore},${cl.mouth},${cl.arrow ? 1 : 0},${cl.jbox},${cl.jAhead ? 1 : 0}` : '';
-    const sig = `${prof.carriage},${prof.lanes},${prof.median},${prof.oneWay ? 1 : 0}|${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0}${zebra ? 1 : 0},${wear}${clSig}`;
+    const clSig = cl ? `|C${cl.cls},${cl.flow},${cl.twin},${cl.divJ ? 1 : 0},${cl.eC.join(',')},${cl.eK.join(',')},${cl.nose},${cl.slip},${cl.gore},${cl.mouth},${cl.arrow ? 1 : 0},${cl.jbox},${cl.jAhead ? 1 : 0},${cl.hold ?? 0}${cl.holdL ?? 0}${cl.holdR ?? 0},${cl.mbox ?? 0}` : '';
+    const sig = `${prof.carriage},${prof.lanes},${prof.median},${prof.oneWay ? 1 : 0}|${m8},${arms},${junction ? 1 : 0}${cross.join('')}${ctrl.join('')}${box ? 1 : 0}${nCross.join('')}${nCtrl.join('')},${nArms.join('.')},${leafy},${rail},${under ? 1 : 0}${zebra ? 1 : 0},${wear}${mini ? 'M' : ''}${pelican ?? ''}${zig || ''}${t.nTurns ? `T${t.nTurns.join('.')}` : ''}${clSig}`;
     return { sig, t, ring: null };
+  }
+
+  /**
+   * A 5×5 roundabout's ring tile (R4, road class 6): its place round the island (the frame buildBigRing turns), and the
+   * road joining it from outside the box, if any (cars coming on, going off, or both).
+   */
+  private bigRing(x: number, z: number, a: number): BigRingTile | null {
+    const ctx = this.ctx!;
+    const box = bigRingAt(ctx.aux, x, z);
+    if (!box) return null;
+    const ox = x - box[0], oz = z - box[1];
+    const corner = (ox === 0 || ox === 4) && (oz === 0 || oz === 4);
+    const turn = corner ? (ox === 4 && oz === 0 ? 0 : ox === 0 && oz === 0 ? 1 : ox === 0 ? 2 : 3) : ox === 4 ? 0 : oz === 0 ? 1 : ox === 0 ? 2 : 3;
+    let arm = 0, armC = STREET.carriage;
+    if (!corner) {
+      const [dx, dz] = [[1, 0], [0, -1], [-1, 0], [0, 1]][turn], nx = x + dx, nz = z + dz, nb = ctx.aux(nx, nz);
+      if (this.roadKnown(nx, nz) && !isPedestrianAux(nb)) {
+        const na = isClassAux(nb) ? nb : 0, din = dx > 0 ? 1 : dx < 0 ? 0 : dz > 0 ? 3 : 2; // the step from the arm onto the ring
+        if (carStepOk(na, a, din)) arm |= 1;
+        if (carStepOk(a, na, [1, 0, 3, 2][din])) arm |= 2;
+        armC = CLASS_PROFILES[auxClass(drawAux(na))]?.carriage ?? STREET.carriage;
+      }
+    }
+    return { turn, corner, arm, armC };
   }
 
   /**
@@ -495,7 +578,7 @@ export class RoadLayer {
     const ctx = this.ctx!, P = CLASS_PROFILES[cls];
     const ow = oneWayDir(a), flow = ow >= 0 ? DIR_SIDE[ow] : -1;
     const roadAt = (s: number) => { const t = ctx.tile(x + SIDE[s][0], z + SIDE[s][1]); return t !== undefined && isRoad(t); };
-    const auxS = (s: number) => ctx.aux(x + SIDE[s][0], z + SIDE[s][1]);
+    const auxS = (s: number) => this.cAux(x + SIDE[s][0], z + SIDE[s][1]);
     let twin = -1;
     if (flow >= 0 && isDividedAux(a)) {
       const s = (flow + 3) & 3, b = auxS(s), bo = oneWayDir(b);
@@ -521,10 +604,10 @@ export class RoadLayer {
     if (cls === RoadCls.Motorway && flow >= 0 && !slip) {
       const o = (flow + 1) & 3;
       for (const e of [flow, (flow + 2) & 3]) {
-        const ex = x + SIDE[e][0], ez = z + SIDE[e][1], b = ctx.aux(ex, ez);
+        const ex = x + SIDE[e][0], ez = z + SIDE[e][1], b = this.cAux(ex, ez);
         if (!isMotorwayAux(b) || oneWayDir(b) !== ow) continue;
         const tx = ex + SIDE[o][0], tz = ez + SIDE[o][1], tt = ctx.tile(tx, tz);
-        if (tt !== undefined && isRoad(tt) && !isMotorwayAux(ctx.aux(tx, tz))) gore |= 1 << e;
+        if (tt !== undefined && isRoad(tt) && !isMotorwayAux(this.cAux(tx, tz))) gore |= 1 << e;
       }
     }
     const nsAxis = flow >= 0 ? flow === 0 || flow === 2 : (arms & 5) !== 0 && (arms & 10) === 0;
@@ -539,7 +622,7 @@ export class RoadLayer {
     // as one when every one of them is a crossing (road on all four sides), at about seven crossings in ten
     let jbox = -1;
     if (cls === RoadCls.Avenue && auxJunction(a) && (m8 & 15) === 15) {
-      const isJ = (px: number, pz: number) => { const t = ctx.tile(px, pz); return t !== undefined && isRoad(t) && auxJunction(ctx.aux(px, pz)); };
+      const isJ = (px: number, pz: number) => { const t = ctx.tile(px, pz); return t !== undefined && isRoad(t) && auxJunction(this.cAux(px, pz)); };
       const four = (px: number, pz: number) => SIDE.every(([dx, dz]) => { const t = ctx.tile(px + dx, pz + dz); return t !== undefined && isRoad(t); });
       const sides = [0, 1, 2, 3].filter((s) => isJ(x + SIDE[s][0], z + SIDE[s][1]));
       const members: [number, number][] = [[x, z], ...sides.map((s): [number, number] => [x + SIDE[s][0], z + SIDE[s][1]])];
@@ -557,8 +640,68 @@ export class RoadLayer {
     const fx = flow >= 0 ? x + SIDE[flow][0] : 0, fz = flow >= 0 ? z + SIDE[flow][1] : 0;
     const jAhead = flow >= 0 && isDividedAux(a) && roadAt(flow) && isDividedAux(ahead) && auxJunction(ahead)
       && SIDE.every(([dx, dz]) => { const t = ctx.tile(fx + dx, fz + dz); return t !== undefined && isRoad(t); }); // a crossing, not a bend or an end
-    return { cls, flow, twin, divJ: auxJunction(a), eC, eK, nose, slip, gore, mouth, arrow, line, pos, jbox, jAhead };
+    const info: ClassInfo = { cls, flow, twin, divJ: auxJunction(a), eC, eK, nose, slip, gore, mouth, arrow, line, pos, jbox, jAhead };
+    // R4 turn lanes: the last two tiles of a one-way approach (not a motorway) hold the lanes (TRAFFIC_TUNING.turnLanes)
+    const TL = TRAFFIC_TUNING.turnLanes;
+    if (TL && ow >= 0 && (cls === RoadCls.OneWay || cls === RoadCls.Avenue) && !junction) {
+      const [dx, dz] = SIDE[flow];
+      for (let k = 1; k <= 2; k++) {
+        const jx = x + dx * k, jz = z + dz * k;
+        const j = this.junctionAt(jx, jz);
+        if (!j) {
+          // the lanes must run on to it: the tile between one-way the same way
+          const b = this.cAux(jx, jz);
+          if (!this.roadKnown(jx, jz) || oneWayDir(b) !== ow) break;
+          continue;
+        }
+        if (TL === 2 && j.phases !== 4) break;
+        const ex = this.turnsFrom(j.g, ow), L = [3, 2, 0, 1][ow], R = [2, 3, 1, 0][ow];
+        info.hold = k;
+        info.holdL = ex & (1 << L) ? 2 : 0;
+        info.holdR = (ex & (1 << ow) ? 1 : 0) | (ex & (1 << R) ? 4 : 0);
+        break;
+      }
+    }
+    // R4 median box: the edges of a junction group's tile shared with another of its tiles (a reservation a car crossing may wait on)
+    if (TRAFFIC_TUNING.medianBox && junction && cls === RoadCls.Avenue && auxJunction(a)) {
+      const g = this.junctionAt(x, z)?.g;
+      if (g && (g.w > 1 || g.h > 1)) {
+        let mbox = 0;
+        for (let s = 0; s < 4; s++) if (inGroup(g, x + SIDE[s][0], z + SIDE[s][1])) mbox |= 1 << s;
+        if (mbox) info.mbox = mbox;
+      }
+    }
+    return info;
   }
+
+  /** The junction at (x, z) as the traffic sees it (three or more arms that join for cars): its group and phases; null for none. */
+  private junctionAt(x: number, z: number): { g: JunctionGroup; phases: number } | null {
+    const ca = this.clsFn, road = this.roadKnown;
+    if (!road(x, z) || isPedestrianAux(ca(x, z)) || isFlyoverAux(this.ctx!.aux(x, z)) || isDeckClassAux(ca(x, z)) || linkedDegree(road, ca, x, z) < 3) return null;
+    const g = TRAFFIC_TUNING.groupSignals && isDividedAux(ca(x, z)) ? junctionGroup(road, ca, x, z) : null;
+    if (g && (g.w > 1 || g.h > 1)) return { g, phases: TRAFFIC_TUNING.groupSignals === 2 ? 2 : g.phases };
+    return { g: { x, y: z, w: 1, h: 1, phases: 2 }, phases: 2 };
+  }
+  /** The ways out of a junction (group): DIRS bits (E 1, W 2, S 4, N 8) where a car may leave it. */
+  private exits(g: JunctionGroup): number {
+    const ca = this.clsFn, CD = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    let m = 0;
+    for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) for (let d = 0; d < 4; d++) {
+      const nx = tx + CD[d][0], nz = ty + CD[d][1];
+      if (inGroup(g, nx, nz) || !this.roadKnown(nx, nz) || isPedestrianAux(ca(nx, nz)) || !roadsLinked(ca, tx, ty, d) || !carStepOk(ca(tx, ty), ca(nx, nz), d)) continue;
+      m |= 1 << d;
+    }
+    return m;
+  }
+  /** The ways (DIRS bits) a car coming into junction group g heading inH may leave it: its ways out, less the U-turn and any turn the junction's signs ban. */
+  private turnsFrom(g: JunctionGroup, inH: number): number {
+    const r = this.rules?.ruleAt(g.x, g.y);
+    let m = this.exits(g) & ~(1 << [1, 0, 3, 2][inH]);
+    if (r) for (let d = 0; d < 4; d++) if (m & (1 << d) && !turnAllowed(r, inH, d)) m &= ~(1 << d);
+    return m;
+  }
+  /** a tile's class byte, 0 for a street or any other byte (what the traffic rules read) */
+  private clsFn = (x: number, z: number) => { const a = this.ctx!.aux(x, z); return isClassAux(a) ? a : 0; };
 
   /** A road tile under a flyover's ramp or a bridge's landing ramp (those draw it; render/junctions.ts, bridges.ts). */
   private isRamp(x: number, z: number, a: number): boolean {
@@ -568,6 +711,8 @@ export class RoadLayer {
       if (!na) continue;
       const alongX = s === 1 || s === 3;
       if (isFlyoverAux(na) && deckEW(na) === alongX) { const nt = ctx.tile(nx, nz); if (nt !== undefined && isRoad(nt)) return true; }
+      // an interchange's ramp (R4): the street tile either side of its deck, along the deck (a deck over a north-south motorway runs east-west)
+      if (isDeckClassAux(na) && !isDeckClassAux(a) && (((na >> 3) & 3) >= 2) === alongX) { const nt = ctx.tile(nx, nz); if (nt !== undefined && isRoad(nt)) return true; }
       if (isBridgeAux(na) && bridgeNS(na) === !alongX) {
         const nt = ctx.tile(nx, nz);
         if (nt === undefined || terrainOf(nt) !== Terrain.Water) continue;
@@ -585,7 +730,7 @@ export class RoadLayer {
   /** Where a road tile's lamp stands (tile-local), where its light falls, and its habits; null for none. */
   private lampOf(x: number, z: number, tw: number, a: number): { px: number; pz: number; lx: number; lz: number; yaw: number; on: number; flags: number; design: number } | null {
     const road = this.roadFn;
-    if (terrainOf(tw) === Terrain.Water || isRailAux(a) || isFlyoverAux(a) || isBridgeAux(a) || this.isRamp(x, z, a)) return null;
+    if (terrainOf(tw) === Terrain.Water || isRailAux(a) || isFlyoverAux(a) || isBridgeAux(a) || isDeckClassAux(a) || this.isRamp(x, z, a)) return null;
     if (midZebraAt(road, a, x, z)) return null; // the zebra's beacons stand there
     const r = (n: number) => hash2(x * 41 + n * 13, z * 37 - n * 7);
     const cls = auxClass(a);
@@ -597,6 +742,13 @@ export class RoadLayer {
       // on the outer corner of the ring, leaning in over it
       const [ox, oz] = RING_POS[p];
       px = ox * 0.44; pz = oz * 0.44; lx = ox * 0.3; lz = oz * 0.3; line = x; st = z;
+    } else if (isRingClassAux(a)) {
+      // a 5×5 roundabout (R4): on the outer pavement of about one side tile in two, the outer corner of each corner tile
+      const b = this.bigRing(x, z, a);
+      if (!b || b.arm || r(1) > (b.corner ? 0.8 : 0.45)) return null;
+      let p: [number, number] = b.corner ? [0.43, -0.43] : [0.465, (r(2) - 0.5) * 0.3], l: [number, number] = b.corner ? [0.3, -0.3] : [0.3, p[1]];
+      for (let i = 0; i < b.turn; i++) { p = [p[1], -p[0]]; l = [l[1], -l[0]]; }
+      [px, pz] = p; [lx, lz] = l; line = Math.floor(x / 5); st = Math.floor(z / 5);
     } else {
       const arms = signalArms(road, x, z), n = armCount(arms);
       if (arms === 5 || arms === 10) {
@@ -795,7 +947,7 @@ export class RoadLayer {
     const ns = ux === 0, along = ns ? t.z : t.x, edge = ns ? t.x + Math.max(0, nx) : t.z + Math.max(0, nz);
     const h = (n: number) => hash2(edge * 31 + n * 7, along * 17 - n * 3);
     const sideOf = (dx: number, dz: number) => SIDE.findIndex(([x, z]) => x === dx && z === dz);
-    const umax = cl.nose & (1 << sideOf(ux, uz)) ? 0.22 : 0.42, umin = cl.nose & (1 << sideOf(-ux, -uz)) ? -0.22 : -0.42;
+    const umax = cl.nose & (1 << sideOf(ux, uz)) ? 0.1 : 0.42, umin = cl.nose & (1 << sideOf(-ux, -uz)) ? -0.1 : -0.42; // (a nose keeps clear for the signal pole on it, R4)
     const stretchK = Math.floor(along / 8), style = hash2(edge * 5 + 2, stretchK * 3 + 1), K = t.prof.kerb;
     const sp = hash2(edge * 3 + 9, stretchK * 7 + 2), odd = h(1) < 0.12;
     const kind = odd ? h(8) : sp; // species: plane/lime greens, a column of poplars, cherries in blossom
@@ -911,6 +1063,14 @@ export class RoadLayer {
     };
   }
 }
+
+/** side (N E S W) to DIRS (E W S N) index, and DIRS bits to side bits */
+const SIDE_DIR = [3, 0, 2, 1];
+const sidesOf = (dirs: number) => (dirs & 1 ? 2 : 0) | (dirs & 2 ? 8 : 0) | (dirs & 4 ? 4 : 0) | (dirs & 8 ? 1 : 0);
+/** a tile's byte for drawing: a motorway carriageway under an interchange's deck (class 7, R4) is drawn as the motorway */
+const drawAux = (a: number) => (isDeckClassAux(a) ? (a & ~7) | RoadCls.Motorway : a);
+/** the control on arm s of the junction where an interchange's slips meet its street (`axis` 1: the street runs east-west): the slips give way */
+const slipCtrl = (axis: number, s: number) => ((s === 0 || s === 2) === (axis === 1) ? MouthControl.GiveWay : MouthControl.None);
 
 /** congestion smoothed (0..1) to a wear level 0..3 */
 const wearLevel = (w: number) => (w > 0.45 ? 3 : w > 0.25 ? 2 : w > 0.1 ? 1 : 0);

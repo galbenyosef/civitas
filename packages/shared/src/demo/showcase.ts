@@ -13,7 +13,9 @@ import { techFor, TRACK_NAMES } from '../tech';
 import { VALUE_NAMES, VALUE_COUNT, topValues, valuesOf } from '../motivation';
 import { RUNWAY_COST, RUNWAY_MIN, RUNWAY_MAX, TERMINAL_ROW } from '../airport';
 import { RAIL_COST, CROSSING_COST } from '../rail';
-import { ROUNDABOUT_COST, FLYOVER_COST } from '../junctions';
+import { ROUNDABOUT_COST, FLYOVER_COST, MINI_ROUNDABOUT_COST, BIG_ROUNDABOUT_COST, INTERCHANGE_COST, isMiniAux } from '../junctions';
+import { TURN_RULE_COST, PELICAN_COST, ARM_WORDS, type ArmState } from '../roadrules';
+import { junctionGroup } from '../signals';
 import { BRIDGE_TILE_COST, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES, BridgeStyle, isBridgeAux, bridgeStyle, bridgeSpanAt, basculeSeed, basculeLiftAt } from '../bridges';
 import { isCrossing } from '../rail';
 import { GROW_FORMS, firstLevelOf } from '../zones';
@@ -31,7 +33,7 @@ import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REF
 import { zoneOf, levelOf, Zone, isRoad } from '../tile';
 import { isMarkedJunction, mouthCrossing, MouthCrossing, boxJunction, sandboxSignalled, streetTreeAt, midZebraAt } from '../roadlook';
 import { signalArms } from '../signals';
-import { ROAD_CLASS_DEFS, RoadCls, auxClass, oneWayDir, isMotorwayAux, isPedestrianAux, auxJunction } from '../roadclass';
+import { ROAD_CLASS_DEFS, RoadCls, auxClass, oneWayDir, isMotorwayAux, isPedestrianAux, auxJunction, isRingClassAux, isDeckClassAux } from '../roadclass';
 import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
 import { FIRE } from '../fires';
 import { DEATH } from '../remembrance';
@@ -106,8 +108,12 @@ export interface DemoUtilLink { id: string; name: string; mode: LinkMode; from: 
  * bascule span is drawn as (Tower Bridge), which then counts as placed in the city's demo.
  */
 export interface DemoBridge { id: string; name: string; from: DemoXY; to: DemoXY; style?: keyof typeof BridgeStyle; landmark?: string }
-/** a roundabout or flyover clicked on the junction `at` (junctions.ts); a flyover's deck carries the `deck` road */
-export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover'; at: DemoXY; deck?: 'ew' | 'ns' }
+/**
+ * A junction tool clicked at `at` (junctions.ts, roadrules.ts): a roundabout (the 5×5 two-lane ring when `at` is an
+ * avenue's junction) or flyover on the junction (a flyover's deck carries the `deck` road), a mini-roundabout, an
+ * interchange on the motorway, a turn rule on the arm tile `at` (set to `rule`), a signal crossing on the street tile.
+ */
+export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican'; at: DemoXY; deck?: 'ew' | 'ns'; rule?: ArmState }
 /** A tour stop on something that is neither a kind nor a drag (a level crossing, the river): its caption is SPOT_CAPTIONS[spot]. */
 /** `view`: the tour turns the underground view ('under') or the world map ('map', docs/world-map.md) on at this stop */
 /** `view` 'ranks': the stop plays a rank-up celebration over the rect (client ranks.ts preview, docs/ranks.md) */
@@ -221,12 +227,27 @@ const ROAD_LOOK_RECT: DemoRect = [23, 7, 11, 8];
  * running on into the town's street at y -20 at the perimeter road; and a country lane out to the edge (Hedge Lane, y -18).
  */
 export const ROAD_CLASSES_LAND: DemoRect = [-60, -40, 25, 23];
+/**
+ * The junctions (R4, docs/roads.md "Junctions") on the open land south of the road classes, between the High Street and
+ * the power station: Regent Avenue (y -6 west, -5 east) from the perimeter road crossed by Queen's Avenue (x -50 south,
+ * -49 north) at a four-phase signalled junction with protected lefts; Mill Road (y 1) crossing Queen's Avenue (a no left
+ * turn from the west) and Church Lane (x -55) at a mini-roundabout, with a signal crossing between its shops and homes;
+ * Hedge Lane, the country lane, out to the edge from Queen's Avenue. Kingsway's 5×5 roundabout and Market Street's
+ * diamond interchange stand in the road classes' own land.
+ */
+export const JUNCTIONS_LAND: DemoRect[] = [[-60, -13, 25, 9], [-60, -4, 21, 10]];
 export const ROAD_CLASS_STOPS = {
   pedestrian: { rect: [-57, -39, 19, 4] as DemoRect, inspect: [-52, -37] as DemoXY },
   oneway: { rect: [-58, -35, 23, 7] as DemoRect, inspect: [-44, -34] as DemoXY },
-  avenue: { rect: [-58, -29, 23, 7] as DemoRect, inspect: [-48, -25] as DemoXY },
-  motorway: { rect: [-60, -23, 25, 5] as DemoRect, inspect: [-48, -21] as DemoXY },
-  lane: { rect: [-60, -19, 25, 2] as DemoRect, inspect: [-50, -18] as DemoXY },
+  avenue: { rect: [-58, -29, 13, 6] as DemoRect, inspect: [-48, -26] as DemoXY },
+  motorway: { rect: [-60, -23, 25, 6] as DemoRect, inspect: [-55, -21] as DemoXY },
+  lane: { rect: [-60, -11, 11, 3] as DemoRect, inspect: [-56, -10] as DemoXY },
+};
+/** The R4 junction stops: the avenue × avenue group's rect, the 5×5's, the interchange's, Mill Road's mini-roundabout and signs. */
+export const JUNCTION_STOPS = {
+  group: { rect: [-54, -9, 9, 8] as DemoRect, inspect: [-50, -6] as DemoXY },
+  big: { rect: [-43, -29, 7, 7] as DemoRect, inspect: [-40, -28] as DemoXY },
+  interchange: { rect: [-53, -24, 11, 8] as DemoRect, inspect: [-48, -23] as DemoXY },
 };
 /** the news helicopter's orbit over the drill (shared newsHelis.ts NEWS_HELI.radius), framed from above */
 const NEWS_HELI_RECT: DemoRect = [-33, -35, 9, 9];
@@ -345,30 +366,50 @@ const mobileRoleAt = (spot: MobileSpot, x: number, y: number, t: number, a: numb
 
 export const SECTIONS: DemoSection[] = [
   {
-    id: 'roads', name: 'Road classes',
-    blurb: 'One street of every road class, west of the town: a pedestrian high street, a one-way pair, an avenue, a motorway from its own connection with a slip road, and a country lane out to the edge.',
-    land: [{ name: 'Road classes', rect: ROAD_CLASSES_LAND }],
+    id: 'roads', name: 'Road classes and junctions',
+    blurb: 'One street of every road class, west of the town: a pedestrian high street, a one-way pair, an avenue with a two-lane roundabout, a motorway from its own connection with a diamond interchange, and a country lane out to the edge; south of them the junctions: an avenue crossing with protected left turns, a mini-roundabout, a turn ban and a signal crossing.',
+    land: [{ name: 'Road classes', rect: ROAD_CLASSES_LAND }, { name: 'Junctions', rect: JUNCTIONS_LAND[0] }, { name: 'Mill Road', rect: JUNCTIONS_LAND[1] }],
     classRoads: [
       { cls: 5, from: [-57, -37], to: [-39, -37] }, // Cheapside, the pedestrian street, first: the streets that meet it end at it
-      { cls: 0, from: [-58, -37], to: [-58, -26] }, // the west street, joining the one-way pair and the avenue's end
+      { cls: 0, from: [-58, -37], to: [-58, -25] }, // the west street, joining the one-way pair and the avenue's end
       { cls: 0, from: [-38, -37], to: [-38, -35] }, // Cheapside's east end to North Parade
       { cls: 2, from: [-57, -34], to: [-36, -34] }, // North Parade, one way east
       { cls: 2, from: [-36, -30], to: [-57, -30] }, // South Parade, one way west
-      { cls: 3, from: [-36, -25], to: [-57, -25] }, // Kingsway: the drag's row west at y -25, its twin east at -24
+      { cls: 3, from: [-36, -26], to: [-57, -26] }, // Kingsway: the drag's row west at y -26, its twin east at -25
+      { cls: 0, from: [-40, -30], to: [-40, -27] }, // Crown Street, from South Parade down to Kingsway's roundabout
       { cls: 4, from: [-57, -20], to: [-36, -20] }, // the motorway: its row east at y -20 (on into the town's street), its twin west at -21
-      { cls: 0, from: [-48, -36], to: [-48, -22] }, // Market Street, across both Parades and Kingsway to the motorway's slip
-      { cls: 1, from: [-36, -18], to: [-60, -18] }, // Hedge Lane, out to the edge
+      { cls: 0, from: [-48, -36], to: [-48, -22] }, // Market Street, across both Parades and Kingsway to the motorway, where the interchange takes it over
+      // the junctions (R4): Regent Avenue from the perimeter road, Queen's Avenue across it, Mill Road and Church Lane, Hedge Lane
+      { cls: 3, from: [-59, -5], to: [-36, -5] }, // Regent Avenue: its row east at y -5, its twin west at -6
+      { cls: 3, from: [-50, -12], to: [-50, 4] }, // Queen's Avenue: its row south at x -50, its twin north at -49
+      { cls: 0, from: [-59, 1], to: [-41, 1] }, // Mill Road, across Queen's Avenue
+      { cls: 0, from: [-55, -4], to: [-55, 4] }, // Church Lane, from Regent Avenue across Mill Road (the mini-roundabout)
+      { cls: 1, from: [-51, -10], to: [-60, -10] }, // Hedge Lane, from Queen's Avenue out to the edge
     ],
     zones: [
       { zone: 'commercial', rect: [-57, -38, 19, 1], level: 2 }, { zone: 'commercial', rect: [-57, -36, 9, 1], level: 2 }, { zone: 'commercial', rect: [-47, -36, 9, 1], level: 2 },
       { zone: 'residential', rect: [-57, -33, 9, 3] }, { zone: 'residential', rect: [-47, -33, 11, 3] },
-      { zone: 'office', rect: [-57, -29, 9, 4] }, { zone: 'office', rect: [-47, -29, 11, 4] },
-      { zone: 'residential', rect: [-57, -23, 9, 1], level: 2 }, { zone: 'residential', rect: [-47, -23, 11, 1], level: 2 },
+      { zone: 'office', rect: [-57, -29, 9, 3] }, { zone: 'office', rect: [-47, -29, 5, 3] }, { zone: 'office', rect: [-37, -29, 2, 3] },
+      { zone: 'residential', rect: [-57, -24, 9, 1], level: 2 }, { zone: 'residential', rect: [-47, -24, 4, 1], level: 2 }, { zone: 'residential', rect: [-36, -24, 1, 1], level: 2 },
+      // the junctions' streets: offices on Regent Avenue, homes and shops either side of Mill Road
+      { zone: 'office', rect: [-59, -8, 9, 2] }, { zone: 'office', rect: [-48, -8, 12, 2] },
+      { zone: 'residential', rect: [-59, -4, 4, 2] }, { zone: 'residential', rect: [-54, -4, 4, 2] }, { zone: 'residential', rect: [-48, -4, 8, 2] },
+      { zone: 'residential', rect: [-59, 0, 4, 1] }, { zone: 'residential', rect: [-54, 0, 4, 1] }, { zone: 'residential', rect: [-48, 0, 8, 1] },
+      { zone: 'commercial', rect: [-59, 2, 4, 1], level: 2 }, { zone: 'commercial', rect: [-54, 2, 4, 1], level: 2 }, { zone: 'commercial', rect: [-48, 2, 8, 1], level: 2 },
     ],
     placements: [{ id: 'motorway-west', kind: 'motorway', door: [-58, -20], rot: 1 }],
+    junctions: [
+      { id: 'roundabout-big', tool: 'roundabout', at: [-40, -26] }, // on Kingsway: the 5×5 two-lane ring
+      { id: 'interchange', tool: 'interchange', at: [-48, -21] }, // Market Street over the motorway
+      { id: 'roundabout-mini', tool: 'miniroundabout', at: [-55, 1] },
+      { id: 'turn-ban', tool: 'turnrule', at: [-51, 1], rule: 'noLeft' }, // Mill Road's west arm at Queen's Avenue: no left turn
+      { id: 'pelican', tool: 'pelican', at: [-45, 1] },
+    ],
     streets: [
       { at: [-52, -37], name: 'Cheapside' }, { at: [-44, -34], name: 'North Parade' }, { at: [-44, -30], name: 'South Parade' },
-      { at: [-52, -25], name: 'Kingsway' }, { at: [-52, -24], name: 'Kingsway' }, { at: [-48, -32], ns: true, name: 'Market Street' }, { at: [-50, -18], name: 'Hedge Lane' },
+      { at: [-52, -26], name: 'Kingsway' }, { at: [-52, -25], name: 'Kingsway' }, { at: [-37, -26], name: 'Kingsway' }, { at: [-37, -25], name: 'Kingsway' }, // both sides of its roundabout { at: [-48, -32], ns: true, name: 'Market Street' }, { at: [-40, -29], ns: true, name: 'Crown Street' },
+      { at: [-44, -5], name: 'Regent Avenue' }, { at: [-44, -6], name: 'Regent Avenue' }, { at: [-50, -2], ns: true, name: "Queen's Avenue" }, { at: [-49, -2], ns: true, name: "Queen's Avenue" },
+      { at: [-57, 1], name: 'Mill Road' }, { at: [-55, -2], ns: true, name: 'Church Lane' }, { at: [-56, -10], name: 'Hedge Lane' },
     ],
     spots: [
       { id: 'road-pedestrian', spot: 'road-pedestrian', name: 'Pedestrian street', ...ROAD_CLASS_STOPS.pedestrian },
@@ -376,6 +417,7 @@ export const SECTIONS: DemoSection[] = [
       { id: 'road-avenue', spot: 'road-avenue', name: 'Avenue', ...ROAD_CLASS_STOPS.avenue },
       { id: 'road-motorway', spot: 'road-motorway', name: 'Motorway', ...ROAD_CLASS_STOPS.motorway },
       { id: 'road-lane', spot: 'road-lane', name: 'Country lane', ...ROAD_CLASS_STOPS.lane },
+      { id: 'junction-group', spot: 'junction-group', name: 'Avenue crossing', ...JUNCTION_STOPS.group },
     ],
   },
   {
@@ -724,7 +766,7 @@ export const TOUR: string[] = [
   'block-residential', 'focus-groups', 'block-commercial', 'high-street', 'big-screens', 'block-office', 'block-industrial', 'block-deep', 'block-garden',
   'cab-office', 'takeaway', 'waste-depot', 'parcel-depot',
   'bus-depot', 'bus-stop', 'line-bus-1', 'line-bus-2', 'kerbside-bays', 'parking', 'multi-storey', 'park-and-ride', 'motorway', 'camp', 'roundabout', 'flyover', 'road-look',
-  'road-pedestrian', 'road-oneway', 'road-avenue', 'road-motorway', 'road-lane',
+  'road-pedestrian', 'road-oneway', 'road-avenue', 'roundabout-big', 'road-motorway', 'interchange', 'junction-group', 'road-lane', 'roundabout-mini', 'turn-ban', 'pelican',
   'gp-surgery', 'health-centre', 'walk-in-centre', 'hospital', 'community-hospital', 'general-hospital', 'teaching-hospital',
   'police-box', 'police-post', 'police', 'divisional-station', 'police-hq', 'helipads',
   'fire-post', 'house-fire', 'fire-spread', 'fire', 'large-fire-station', 'fire-hq',
@@ -776,7 +818,7 @@ export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER |
  * tool fails the typecheck here until it is listed, and `demo:check` then fails until the showcase uses it.
  */
 type SurfaceTool = Exclude<Tool, 'road' | 'bulldoze' | KindToolId>;
-export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, pylons: true, cable: true };
+export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, miniroundabout: true, interchange: true, turnrule: true, pelican: true, pylons: true, cable: true };
 /** Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. */
 export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, ferry: true, freight: true };
 
@@ -803,7 +845,31 @@ const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
     title: 'Roundabout',
     what: 'A crossroads or T-junction rebuilt as a one-way ring round a planted island. Traffic goes round anticlockwise (it drives on the right), and a car coming in gives way to cars already on the ring, so there are no lights and no waiting for a green.',
     how: 'Pick Roundabout and click a junction. The four corner lots round it must be empty: the ring takes them. Side roads join in the middle of each side. Bulldozing any of it turns it back into a crossroads.',
-    facts: [['Tool', 'Roundabout (no key), click a junction'], ['Footprint', '3×3: the junction becomes the island'], ['Needs', 'three or four roads meeting, empty corner lots'], ['Technology', techLine('roundabout')], ['Cost', money(ROUNDABOUT_COST)]],
+    facts: [['Tool', 'Roundabout (no key), click a junction'], ['Footprint', '3×3: the junction becomes the island; 5×5 on an avenue'], ['Needs', 'three or four roads meeting, empty corner lots'], ['Technology', techLine('roundabout')], ['Cost', `${money(ROUNDABOUT_COST)}; ${money(BIG_ROUNDABOUT_COST)} the big one`]],
+  },
+  miniroundabout: {
+    title: 'Mini-roundabout',
+    what: 'A roundabout painted on a street junction: a white disc with arrows round it and give-way lines at each arm. One car at a time goes round it, giving way to a car already coming round from the left, so a quiet crossroads keeps moving with no lights and no corner lots taken.',
+    how: 'Pick Mini-roundabout and click a crossroads or T-junction of streets or lanes. Avenues and one-way streets need the big roundabout or lights. Bulldozing the junction tile takes it away.',
+    facts: [['Tool', 'Mini-roundabout (no key), click a junction'], ['Footprint', 'the junction tile'], ['Needs', 'three or four two-way streets or lanes meeting'], ['Technology', techLine('miniroundabout')], ['Cost', money(MINI_ROUNDABOUT_COST)]],
+  },
+  interchange: {
+    title: 'Interchange',
+    what: 'A diamond interchange: the street goes over the motorway on a bridge, and a slip road leaves each carriageway before it and joins again after, meeting the street at a junction where it gives way. Traffic on the motorway never stops.',
+    how: 'Pick Interchange and click a motorway where a street meets or should cross it. It needs a straight motorway five tiles either side and 9×6 tiles of open ground or empty lots beside it. Bulldozing the bridge cuts the street again.',
+    facts: [['Tool', 'Interchange (no key), click a motorway'], ['Footprint', '9 along the motorway × 6 across'], ['Needs', 'a straight motorway, open ground beside it'], ['Technology', `${techLine('interchange')} and ${techFor('motorways')?.name ?? 'Motorways'}`], ['Cost', money(INTERCHANGE_COST)]],
+  },
+  turnrule: {
+    title: 'Turn rules',
+    what: 'A sign on one arm of a junction: no left turn, no right turn, no straight on, or no entry. Drivers plan round them (a no-entry arm is one way out of the junction), and a driver whose way a new sign breaks finds another. Fire engines and ambulances on a call ignore turn bans, never a no-entry.',
+    how: 'Pick Turn rules and click the road just before a junction, on the arm you want the sign on: each click goes on to the next rule (none, no left, no right, no straight on, no entry).',
+    facts: [['Tool', 'Turn rules (no key), click an arm'], ['Needs', 'a junction'], ['Technology', techLine('turnrule')], ['Cost', `${money(TURN_RULE_COST)} a sign`]],
+  },
+  pelican: {
+    title: 'Signal crossing',
+    what: 'A crossing with lights: a walker presses the button, and after the traffic has had its minimum green the lights go amber, then red, and the walkers cross; then a flashing amber while the last of them finish. Where a pedestrian street crosses a street there is one already.',
+    how: 'Pick Signal crossing and click a straight stretch of street away from a junction. Click it again to take it away.',
+    facts: [['Tool', 'Signal crossing (no key), click a street'], ['Needs', 'a straight two-way street tile, not next to a junction'], ['Technology', techLine('pelican')], ['Cost', money(PELICAN_COST)]],
   },
   flyover: {
     title: 'Flyover',
@@ -824,6 +890,13 @@ const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
     facts: [['Tool', 'Buried cable (no key), drag'], ['Needs', 'a plant or node of yours at each end'], ['Technology', techLine('cable')], ['Cost', `${money(UTIL.buriedCost)} a tile, ${money(UTIL.buriedWaterCost)} under water`]],
   },
 };
+/** The 5×5 roundabout on the tour (the roundabout tool on an avenue's junction). */
+const BIG_ROUNDABOUT_CAPTION: Caption = {
+  title: 'Two-lane roundabout',
+  what: 'Kingsway meets Crown Street at a big roundabout: a 5×5 ring of two lanes round a planted island, anticlockwise. Cars going past the second exit take the inner lane and move out before they leave; the rest keep to the outer. Coming on, a car gives way to traffic already going round, and the ring never fills, so it never locks.',
+  how: 'Pick Roundabout and click an avenue\'s junction: on an avenue the tool builds the 5×5 two-lane ring (it needs Avenues). The land round the junction must be road, open ground or empty lots. Bulldozing any of it leaves the ring as streets and the island bare.',
+  facts: [['Tool', 'Roundabout (no key), click an avenue junction'], ['Footprint', '5×5: a 3×3 island in a two-lane ring'], ['Lanes', 'two, the inner for cars going past the second exit'], ['Technology', `${techLine('roundabout')} and ${techFor('avenues')?.name ?? 'Avenues'}`], ['Cost', money(BIG_ROUNDABOUT_COST)]],
+};
 /** A bridge on the tour (not a tool of its own: the road tool lays it over water). */
 const BRIDGE_CAPTION: Caption = {
   title: 'Bridge',
@@ -839,7 +912,7 @@ const STYLE_NOTES: Record<keyof typeof BridgeStyle, string> = {
   Bascule: 'This one lifts, drawn as Tower Bridge: a few times a day its two leaves rise for a sailing barge, the barriers close the road and the traffic waits, as at a level crossing. The road tool never picks this style; scenarios lay it.',
 };
 /** Tour stops on things that are neither a kind nor a drag. A spot names one of these. */
-export type SpotKind = 'road-look' | 'road-lane' | 'road-oneway' | 'road-avenue' | 'road-motorway' | 'road-pedestrian' | 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
+export type SpotKind = 'road-look' | 'junction-group' | 'road-lane' | 'road-oneway' | 'road-avenue' | 'road-motorway' | 'road-pedestrian' | 'level-crossing' | 'river' | 'helipads' | 'tube-crossover' | 'world-map' | 'sea-gate' | 'pool-of-london' | 'house-fire' | 'fire-spread' | 'fire-blast' | 'ranks' | 'high-street' | 'blackout' | 'focus-groups' | 'news-heli' | 'live-tv' | 'funeral' | MobileSpot;
 const roadFacts = (cls: number): [string, string][] => {
   const d = ROAD_CLASS_DEFS[cls];
   return [['Tool', `Road (3), ${d.title}`], ['Lanes', d.access === 'pedestrian' ? 'none: paving for walkers and bikes' : d.divided ? `${d.lanes} each way, a tile each way` : d.oneWay ? `${d.lanes}, one way` : 'one each way'],
@@ -848,7 +921,7 @@ const roadFacts = (cls: number): [string, string][] => {
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'road-lane': {
     title: 'Country lane',
-    what: 'Hedge Lane runs out to the edge of the land between grass verges: no kerbs, no centre line, no lamps, and cars take it at four fifths of a street\'s pace. It is the cheapest road there is, and every frontier starts with one from its motorway connection.',
+    what: 'Hedge Lane runs from Queen\'s Avenue out to the edge of the land between grass verges: no kerbs, no centre line, no lamps, and cars take it at four fifths of a street\'s pace. It is the cheapest road there is, and every frontier starts with one from its motorway connection.',
     how: ROAD_CLASS_DEFS[1].howTo, facts: roadFacts(1),
   },
   'road-oneway': {
@@ -858,18 +931,24 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   },
   'road-avenue': {
     title: 'Avenue',
-    what: 'Kingsway is two tiles wide: two lanes each way either side of a planted reservation, twice what a street carries, and the main road at a junction. Cars cross the reservation and turn round only at junctions; Market Street crosses it here. A car crossing waits in the first carriageway for a gap in the second.',
+    what: 'Kingsway is two tiles wide: two lanes each way either side of a planted reservation, twice what a street carries, and the main road at a junction. Cars cross the reservation and turn round only at junctions; Market Street crosses it here, its two junction tiles working as one set of lights. A car crossing, or turning left across it, waits in the reservation\'s median box for a gap in the far carriageway, and on the last two tiles before the lights the left lane is for turning left.',
     how: `${ROAD_CLASS_DEFS[3].howTo} Dragged over a street it widens it in place, keeping its junctions, and asks before demolishing what stands in the new row.`, facts: roadFacts(3),
   },
   'road-motorway': {
     title: 'Motorway',
-    what: 'A motorway from its own connection at the west edge: two lanes each way at a quarter faster than a street, with no buildings on it. Market Street joins it by a slip road, giving way, and cannot cross it; at the perimeter road it runs on into the town\'s street. The homes beside it face Kingsway, not the motorway.',
+    what: 'A motorway from its own connection at the west edge: two lanes each way at a quarter faster than a street, with no buildings on it. Market Street meets it at a diamond interchange, over it on a bridge with slip roads off and on each carriageway; at the perimeter road it runs on into the town\'s street. The homes beside it face Kingsway, not the motorway.',
     how: ROAD_CLASS_DEFS[4].howTo, facts: roadFacts(4),
   },
   'road-pedestrian': {
     title: 'Pedestrian street',
     what: 'Cheapside is paved from wall to wall for walkers and bikes, with bollards where Market Street ends at it. No cars but fire engines and ambulances on a call, and delivery lorries before 10:00 and after 19:00. Its shops see every passer-by: the footfall bonus is left for the leisure and commerce cards to use.',
     how: ROAD_CLASS_DEFS[5].howTo, facts: roadFacts(5),
+  },
+  'junction-group': {
+    title: 'Avenue crossing',
+    what: 'Regent Avenue crosses Queen\'s Avenue: four junction tiles, one for each carriageway over each, working as one junction with one set of lights. It runs four phases: north-south straight on and right, then north-south left turns on their own (a green arrow), then the same east-west. On each approach the last two tiles before the lights hold the lanes, the left one for turning left, so through traffic is never stuck behind a car waiting to turn. Where an avenue meets a street (Market Street on Kingsway) the lights run two phases, and cars turning left across the avenue wait for a gap in the reservation\'s median box.',
+    how: 'Lay two avenues across each other with Road (3), Avenue; with Traffic signals the lights come by themselves.',
+    facts: [['Tiles', '2×2, one controller'], ['Phases', 'four, with protected left turns'], ['Turn lanes', 'the last two tiles of each approach'], ['Technology', `${techLine('avenues')}; ${techLine('signals')}`]],
   },
   'road-look': {
     title: 'Streets',
@@ -1170,8 +1249,12 @@ export function demoTour(id: DemoId): TourStop[] {
       }
       const j = s.junctions?.find((q) => q.id === sid);
       if (j) {
-        const area = [j.at[0] - 2, j.at[1] - 2, 5, 5] as const;
-        out.push({ id: sid, ...base, ...SURFACE_CAPTIONS[j.tool], ...framing(area[0], area[1], area[2], area[3], 0, 0.8), rect: j.tool === 'roundabout' ? [j.at[0] - 1, j.at[1] - 1, 3, 3] : [j.at[0], j.at[1], 1, 1], inspect: j.tool === 'roundabout' ? [j.at[0] + 1, j.at[1]] : j.at });
+        // R4: the 5×5 roundabout and the interchange have their own frames; a sign and a crossing show a little round them
+        const big = sid === 'roundabout-big', stop = big ? JUNCTION_STOPS.big : j.tool === 'interchange' ? JUNCTION_STOPS.interchange : null;
+        const area = stop ? stop.rect : [j.at[0] - 2, j.at[1] - 2, 5, 5] as const;
+        const cap = big ? BIG_ROUNDABOUT_CAPTION : j.tool === 'turnrule' && j.rule ? { ...SURFACE_CAPTIONS.turnrule, what: `${SURFACE_CAPTIONS.turnrule.what} Here: ${ARM_WORDS[j.rule]} for cars coming along Mill Road from the west, so they turn at the mini-roundabout instead.` } : SURFACE_CAPTIONS[j.tool];
+        const rect: DemoRect = stop ? stop.rect : j.tool === 'roundabout' ? [j.at[0] - 1, j.at[1] - 1, 3, 3] : [j.at[0], j.at[1], 1, 1];
+        out.push({ id: sid, ...base, ...cap, ...framing(area[0], area[1], area[2], area[3], 0, 0.8), rect, inspect: stop ? stop.inspect : j.tool === 'roundabout' ? [j.at[0] + 1, j.at[1]] : j.at });
         continue;
       }
       const br = s.bridges?.find((q) => q.id === sid);
@@ -1328,7 +1411,7 @@ const metroInterchange = interchange('metro'), ferryInterchange = interchange('f
 // Typed against the source unions, so a new bridge style, junction tool, plane type or helicopter service fails the
 // typecheck here until it has an entry, and demo:check then fails until the showcase shows it.
 const BRIDGE_TOUR: Record<keyof typeof BridgeStyle, string> = { Arch: 'bridge-arch', Girder: 'bridge-girder', Suspension: 'bridge-suspension', Bascule: 'bridge-bascule' };
-const JUNCTION_TOUR: Record<DemoJunction['tool'], string> = { roundabout: 'roundabout', flyover: 'flyover' };
+const JUNCTION_TOUR: Record<DemoJunction['tool'], string> = { roundabout: 'roundabout', flyover: 'flyover', miniroundabout: 'roundabout-mini', interchange: 'interchange', turnrule: 'turn-ban', pelican: 'pelican' };
 const PLANE_CAPTIONS: Record<PlaneType, string> = {
   turboprop: 'a turboprop', regional: 'a regional jet', narrowbody: 'a narrow-body jet', widebody: 'a wide-body jet', jumbo: 'a jumbo jet', bizjet: 'a business jet',
 };
@@ -1449,6 +1532,20 @@ function roadClasses(d: SeededDemo) {
   return out;
 }
 const classRoad = (cls: number) => (ss: readonly DemoSection[]) => ss.some((s) => s.classRoads?.some((r) => r.cls === cls));
+/** The junction tools' feature words, and the tiles that show one was built (R4). */
+const JUNCTION_WORDS: Record<DemoJunction['tool'], string> = { roundabout: 'roundabout', flyover: 'flyover', miniroundabout: 'mini-roundabout (a painted one on a street crossroads)', interchange: 'diamond interchange (a street over a motorway, with slip roads)', turnrule: 'turn ban (a no left turn sign on a junction\'s arm)', pelican: 'signal crossing for walkers (a pelican)' };
+const JUNCTION_SEEN: Partial<Record<DemoJunction['tool'], (d: SeededDemo) => boolean>> = {
+  miniroundabout: (d) => anyTile(d, (_x, _y, t, a) => isRoad(t) && isMiniAux(a)),
+  interchange: (d) => anyTile(d, (_x, _y, t, a) => isRoad(t) && isDeckClassAux(a)),
+};
+/** Is there a group of four junction tiles (two divided roads crossing: shared/src/signals.ts junctionGroup)? */
+const groupSeen = (d: SeededDemo) => {
+  const tiles = new Map<string, number>();
+  d.scan((x, y, t) => tiles.set(`${x},${y}`, t));
+  const road = (x: number, y: number) => { const t = tiles.get(`${x},${y}`); return t !== undefined && isRoad(t); };
+  const ca = (x: number, y: number) => { const a = d.aux(x, y); return a > 0 && a < 0x40 ? a : 0; };
+  return anyTile(d, (x, y, t, a) => isRoad(t) && auxJunction(a) && junctionGroup(road, ca, x, y)?.phases === 4);
+};
 
 /**
  * The feature registry: everything interesting the showcase must show that is not a catalogue kind (those are checked
@@ -1478,8 +1575,14 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   { id: 'level-crossing', caption: 'a level crossing (a road over track, with barriers)', tour: 'level-crossing',
     seeded: (d) => anyTile(d, (_x, _y, t, a) => isCrossing(t, a)) },
   ...(Object.keys(JUNCTION_TOUR) as DemoJunction['tool'][]).map((tool): ShowcaseFeature => ({
-    id: tool, caption: `a ${tool}`, tour: JUNCTION_TOUR[tool], scenario: (ss) => ss.some((s) => s.junctions?.some((j) => j.tool === tool)),
+    id: tool, caption: `a ${JUNCTION_WORDS[tool]}`, tour: JUNCTION_TOUR[tool], scenario: (ss) => ss.some((s) => s.junctions?.some((j) => j.tool === tool && j.id !== 'roundabout-big')),
+    ...(JUNCTION_SEEN[tool] ? { seeded: JUNCTION_SEEN[tool] } : {}),
   })),
+  // ---- junctions (R4, docs/roads.md "Junctions")
+  { id: 'big-roundabout', caption: 'a 5×5 two-lane roundabout on an avenue', tour: 'roundabout-big', scenario: (ss) => ss.some((s) => s.junctions?.some((j) => j.id === 'roundabout-big')),
+    seeded: (d) => anyTile(d, (_x, _y, _t, a) => isRingClassAux(a)) },
+  { id: 'junction-group', caption: 'an avenue crossing an avenue: four junction tiles as one, four phases with protected left turns', tour: 'junction-group',
+    scenario: (ss) => ss.some((s) => s.spots?.some((sp) => sp.spot === 'junction-group')), seeded: (d) => groupSeen(d) },
   { id: 'motorway-gateway', caption: 'a motorway connection, the gateway newcomers, visitors and freight arrive through', tour: 'motorway',
     scenario: placedKind('motorway'), seeded: (d) => (d.kinds.get(MOTORWAY_KIND) ?? 0) > 0 },
   // ---- the look of the streets (shared/src/roadlook.ts, client render/roads.ts), all seen at the road-look stop

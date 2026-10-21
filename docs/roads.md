@@ -1,8 +1,8 @@
 # Roads: the tool, street names and the Commons
 
 The roads programme (UTD card 5c3e5cd0) rebuilds roads in phases: R1 the look (render/), R2 the tools (this page),
-R3 classes, R4 junctions, R5 traffic control. This page is R2: what the road tool does, how streets are named, and
-how the Commons is laid out. The code is `shared/src/roadtool.ts` (the plan both sides use), `shared/src/streets.ts`
+R3 classes, R4 junctions, R5 traffic control. This page is R2 (what the road tool does, how streets are named, and
+how the Commons is laid out), R3 ("Classes") and R4 ("Junctions"). The code is `shared/src/roadtool.ts` (the plan both sides use), `shared/src/streets.ts`
 (the name generator), `client/src/input.ts` and `client/src/roadtool.ts` (the drag and its preview),
 `server/src/net.ts` (`road`, `undoRoad`, `renameStreet`), `server/src/streets.ts` (the street book) and
 `server/src/seed.ts` (the Commons).
@@ -105,11 +105,11 @@ it. A street crossing a one-way street, an avenue crossing a street, and an aven
 junctions as you would expect.
 
 **One crossing, not two.** A street crossing an avenue is two junction tiles one tile apart (four where avenues cross),
-and they are one junction (`signalSite`): lit or not by the arms of the whole crossing (a street over an avenue is a
-crossroads), one controller whose timing is the crossing's north-west tile's, so the crossing street gets one green
-through both halves; a car going from one of its tiles to another is already through the lights. The server
-(`Traffic.junction`), the lights (`render/signals.ts`), the markings and the yellow box (`render/roads.ts`, one box over
-the crossing's tiles) all read it. A street meeting an avenue from one side makes both carriageways' tiles the
+and they are one junction (R4's junction group, `shared/src/signals.ts` junctionGroup: see "Junctions" below): lit or
+not by the arms of the whole crossing (a street over an avenue is a crossroads), one controller whose timing is the
+crossing's north-west tile's, so the crossing street gets one green through both halves; a car going from one of its
+tiles to another is already through the lights. The server (`Traffic.junction`), the lights (`render/signals.ts`), the
+markings and the yellow box (`render/roads.ts`, one box over the crossing's tiles) all read it. A street meeting an avenue from one side makes both carriageways' tiles the
 junction, so a car turning across goes through one junction. Measured: one controller took the avenue grid's give-ups
 from 508 to 436, level with the doubled streets it replaced (docs/traffic-tuning.md "Road classes").
 
@@ -164,9 +164,127 @@ streets.
 
 **Showcase.** The "Road classes" section (west of district A1, `ROAD_CLASSES_LAND`): Cheapside, a pedestrian street of
 shops that Market Street ends at; North and South Parade, a one-way pair round a block of homes; Kingsway, an avenue
-through offices and homes crossed by Market Street; a motorway from a motorway connection of its own with Market Street
-joining it by a slip road; Hedge Lane, a country lane out to the edge. A tour stop each, and five registered features
-(`road-class-*`) that demo:check enforces.
+through offices and homes crossed by Market Street (y -26 and -25 since R4, with its 5×5 roundabout at Crown Street);
+a motorway from a motorway connection of its own that Market Street crosses at a diamond interchange (R4; it was a slip
+road); Hedge Lane, a country lane out to the edge (since R4 from Queen's Avenue, on the junctions' land south of the
+section). A tour stop each, and five registered features (`road-class-*`) that demo:check enforces.
+
+## Junctions
+
+R4 (card d5da6ea9). What a junction is to the traffic and the tools beyond the give-way box, the lights, the 3×3
+roundabout and the flyover. The code: `shared/src/signals.ts` (junction groups, their phases, signal crossings),
+`shared/src/junctions.ts` (the mini-roundabout, the 5×5 roundabout and the diamond interchange: bytes and planners;
+where a turn sign or a crossing may go), `shared/src/roadrules.ts` (the road rule record), `server/src/sim/traffic.ts`
+(the rules a car follows), `server/src/pathfinding.ts`, `sim/busroute.ts` and `sim/transit.ts` (routing round turn
+bans), `server/src/net.ts` (the tools), `World.roadRules` (the store) and `client/src/junctiontools.ts` (the ghost).
+
+**Avenue crossings work as one junction.** Where an avenue (or a motorway) is crossed or joined, the crossing is two
+junction tiles (an avenue and a street, a T on an avenue) or four (an avenue and an avenue). `junctionGroup` finds them:
+the 4-connected divided-road tiles with three or more arms, in a 1×2 or 2×2 box (anything bigger, and every other
+junction, is a group of one, exactly as before). A group has one controller: its timing is seeded from its **anchor**
+(the min x, min y tile), its lights gate only cars coming into the group from outside it, and a move between two of its
+tiles answers only to the box rules. Two phases at an avenue × street (as every junction: north-south, then east-west,
+each ending in amber; lefts go on the green and give way). Four at an avenue × avenue, with **protected left turns**:
+north-south straight on and right, then north-south lefts and U-turns on their own (`leftPhase` of a through phase,
+half by default), then east-west the same. Walkers cross only in the through phases. The groups along an avenue run a
+**green wave** (`TRAFFIC_TUNING.greenWave` 2, the default: their offsets timed for `waveSpeed` along the diagonal, as R0's
+wave; every single junction keeps its own timing, so a town of streets runs as before). The server
+(`Traffic.signalPhase`) and the client draw from the same `groupTiming` and `groupPhaseOf`, so the lamps match. Signals
+at a T (`signalT`) and the hold rule (`signalActuated`, two-phase groups only) carry over; the junction where an
+interchange's slips meet its street never has lights (`slipJunction`).
+
+**Turn lanes.** On a one-way approach (an avenue's carriageway, a one-way street; not a motorway, where nobody turns
+left) to a four-phase group, where the lefts have a phase of their own, the last two tiles before the junction hold the
+lane: the left lane for left turns and U-turns only, the right for straight on and right turns; the lane changes happen
+on the tile before (`TRAFFIC_TUNING.turnLanes` 2, the default). Approaching any other junction a car takes the lane for
+its next turn within six tiles and goes straight on in either, as in R3 (the arrows read left and ahead, ahead and
+right). `turnLanes` 1 holds the lanes at every junction: on a give-way avenue corridor that halves the straight-on
+lanes where they meet and costs a sixth of the throughput (docs/traffic-tuning.md "Junctions"). A street approaching an
+avenue gets no new lane: the queue at its stop line is the lane.
+
+**The median box.** A car crossing an avenue, or turning left across it, may wait in the reservation between the two
+carriageways' junction tiles: centred on their shared edge (lane progress 0.5), clear of both carriageways' lanes by a
+twentieth of a tile, in neither tile's box. Each such edge holds one car each way (nobody comes into the first tile to
+cross while one is waiting to; `medianTaken`); vans, lorries and buses (longer than 0.36) wait in the first box as
+before. R3's `overMedian` rule (no car into a box while one crossing the other way waits in the twin's) stays for them.
+The body guard tests a car in the median body to body, without its margin: there is room, but not for the margin on
+both bodies.
+
+**Mini-roundabouts.** A painted roundabout on the junction tile of a crossroads or T of streets or country lanes
+(`MINI_AUX`, 0xfb; the tile stays road and loses any lights). A car coming in gives way to a moving car about to come
+in from the arm on its left (traffic goes round anticlockwise, so that is where the circulating cars come from:
+`miniYield`, 0.6 tiles; the brief said "from the right", the UK's way round); standing cars give way to nobody, so four
+waiting at once never lock; there is no don't-block-the-box rule. `miniOne` 1 lets only one car into the box at a time
+(the brief's model): it carries a third of a give-way crossroads, so the default is 0, the box's own conflict rules.
+Cars drive the tile's ordinary turn paths over the disc, as real ones may.
+
+**Big roundabouts.** The Roundabout tool on an avenue's junction builds a **5×5 two-lane ring** (`planBigRoundabout`):
+the group at the box's middle (the box from the anchor less two each way), a 3×3 island round it (`BIG_ISLAND_AUX`,
+0xfc, not road, planted as one from its centre tile), and sixteen ring tiles of road class 6 (`RoadCls.Ring`, one way
+round in each tile's direction, a corner's the way out; two lanes, as R3 drives every one-way tile). An avenue's two
+carriageways join a side at its second and third tiles (the way out first in driving order, then the way in), a street
+at its middle; corners take no road. Cars going past the second exit (more than nine ring tiles) take the inner lane and
+move out four tiles before they leave; cars for the second exit (straight over, six to nine) take either lane by the
+driver's hash and move out two tiles before; cars for the first keep to the outer; the approach takes the lane the ring
+will want. A car coming on gives way to a moving car on the ring tile before it (or the one before that) that stays on
+past it, within `ringYield` (joining the outer lane, not to one in the inner lane that stays there), and never fills the
+ring (`bigRingSpare` places free over both lanes); after `minorWaitMax` ticks it goes when the box is clear anyway, so a
+side street does not starve behind a busy avenue. Bulldozing any of it leaves the ring
+as plain streets and the island bare.
+
+**The diamond interchange.** The Interchange tool, clicked on a motorway where a street meets or should cross it
+(`planInterchange`): the street goes over both carriageways on a deck (road class 7, `RoadCls.Deck`: a motorway tile to
+everything under it, and a step along the deck's axis is a street step on route layer 1, as on a flyover, so nobody
+turns between the two); each carriageway gets an off slip that leaves it four tiles before the bridge and an on slip
+that joins it four tiles after, one-way streets running parallel a tile out (a verge row between) to a junction with
+the street, where they give way. Footprint 9 along the motorway × 6 across; it needs a straight plain motorway five
+tiles either side. Every part is an ordinary road tile of its class: the diverge is a one-way tile beside the
+carriageway, the merge gives way to the motorway as any slip does (`SLIP_GAP`). Bulldozing the deck takes it away (the
+motorway whole again, the slips left as one-way streets). A motorway-to-motorway interchange (a trumpet) is not built:
+motorways meeting are a plain junction, as in R3.
+
+**Turn bans and no entry.** The Turn rules tool: click the road just before a junction, on the arm you want the sign
+on; each click goes on to the next of no rule, no left turn, no right turn, no straight on, no entry
+(`junctionArmAt`, `nextArmState`). The signs live in the junction's **road rule record** (`shared/src/roadrules.ts`):
+one small typed record per junction anchor, `{ ban?, noEntry?, pelican? }`, the bans as bit `arm × 3 + turn`, arms in
+DIRS order (E, W, S, N; arm d the road leaving the junction heading d); a U-turn counts as a left. The store is
+`World.roadRules` (an optional snapshot field `roadRules`, absent in older saves; every client gets the list on hello
+and on each change), and R5's traffic control adds its own fields to the same record. A record follows its junction:
+when a road change moves a group's anchor the record moves with it, and when the junction goes the signs go. Every
+router honours them: A* checks where a route leaves a ruled junction against the heading it came in by (back up its
+parents), keeps a ruled tile's arrivals along x and along y apart (so a ban on one arm does not shut the tile to a route
+from another) and, where any rule exists, never turns straight back on the road (which would get round a sign); the bus
+router checks its exact (tile, heading) states and its turns round; a bus lap a new sign breaks is re-planned
+(`lapValid`); a driver whose way ahead a new sign breaks finds another (`Simulation.recheckClasses`, from the tile
+ahead, without the stuck rule's avoidance of the tile after it). Fire engines, ambulances and patrols on a call ignore
+turn bans, never a no entry.
+
+**Signal crossings** (pelicans). The Signal crossing tool, on a straight two-way street or lane tile a tile or more from a
+junction (`pelicanProblem`), or clicked again to take it away; and wherever a pedestrian street crosses a street there
+is one already (`implicitPelican`). A walker at its kerb presses: the walk phase is granted once the last cycle and its
+minimum green are done (`pelicanReady`), and runs amber (2 ticks), red (6: walkers cross), flashing amber (2: cars give
+way to anyone still on it), then green for at least 12 (`PELICAN`, `pelicanPhase`). Cars stop at its stop line on amber
+and red; walkers cross only on the red. The server sends each grant's tick (`walks`), and the client draws the lamps
+from it with the same function.
+
+**Tools, technology and costs.** The tools sit on the tool bar after the road tool, beside Roundabout and Flyover, one
+click each (no keys: every letter is taken); the ghost outlines the footprint green or red with the reason, and the
+status line gives the cost.
+
+| Tool | What | Technology | Cost |
+| --- | --- | --- | --- |
+| Roundabout on a street junction | 3×3 ring | Junction design | $600 |
+| Roundabout on an avenue junction | 5×5 two-lane ring | Junction design and Avenues | $1,500 |
+| Mini-roundabout | painted on a street junction | Junction design | $150 |
+| Interchange | diamond, street over a motorway | Junction design and Motorways | $2,500 |
+| Turn rules | a sign on a junction's arm | Traffic signals | $40 a sign (taking one down is free) |
+| Signal crossing | a pelican on a street | Traffic signals | $250 |
+
+**Showcase.** In the "Road classes and junctions" section: Kingsway's 5×5 roundabout where Crown Street meets it,
+Market Street's diamond over the motorway, and on the land south of them Regent Avenue crossing Queen's Avenue (the
+four-phase group), Mill Road's mini-roundabout at Church Lane, its no left turn at Queen's Avenue and its signal crossing
+between the homes and shops; a tour stop each, and six features (`miniroundabout`, `interchange`, `turnrule`,
+`pelican`, `big-roundabout`, `junction-group`) that demo:check enforces.
 
 ## Street names
 

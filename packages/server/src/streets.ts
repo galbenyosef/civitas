@@ -178,6 +178,13 @@ export class StreetBook {
         if (along) note(streetRun(px, py, r.ns, this.isRoadAt));
       }
     }
+    // and a street crossing just beyond either end (meeting it at a corner, diagonally): streetClashes counts those too
+    const [ex, ey] = r.ns ? [0, 1] : [1, 0];
+    for (const [i, s] of [[0, -1], [streetLength(r) - 1, 1]]) {
+      const [x, y] = streetTile(r, i), bx = x + ex * s, by = y + ey * s;
+      if (this.isRoadAt(bx, by)) continue; // the street goes on (a bend or a junction there is seen above)
+      for (const t of [1, -1]) if (this.isRoadAt(bx + ax * t, by + ay * t)) note(streetRun(bx + ax * t, by + ay * t, !r.ns, this.isRoadAt));
+    }
     return out;
   }
 

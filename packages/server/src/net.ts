@@ -5,7 +5,9 @@ import {
   isRoad, isBuildable, isGrowable, zoneOf, levelOf, terrainOf, packTile, chunkKey, chunkOf, parseKey, packCitizenFlags, localIndex, isStructureAux,
   u16ToB64, i32ToB64, u8ToB64, hasFeature, techFor, TECH_BY_ID, ALL_TECH_IDS, checkPurchase, ZONE_TOOLS, CIVIC_TOOLS, MANIFEST,
   isMultiTile, planStructure, planRunway, isAirfieldAux, RUNWAY_MAX, isRailAux, isRailStationKind, RAIL_DRAG_MAX, familyOf, subFor, kindManifest, isHarbourId,
-  isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover,
+  isJunctionAux, isRingAux, isIslandAux, planRoundabout, planFlyover, planMiniRoundabout, planBigRoundabout, planInterchange, isMiniAux, isBigIslandAux,
+  isRingClassAux, isDeckClassAux, isDividedAux, junctionArmAt, pelicanProblem,
+  armState, nextArmState, withArmState, ARM_WORDS, TURN_RULE_COST, PELICAN_COST, type JunctionPlan,
   isBridgeAux, BRIDGE_STYLE_NAMES,
   type LandRect, type ClientMsg, type ServerMsg, type Tool, type HintId, BUS_STOP_KIND, type TransitLine, TICKS_PER_HOUR, underConstruction,
   isMetroStationKind, CITIZEN_UNDER, isFerryPierKind, CAMP_KIND, type RecoverAction, Cause, nameFor,
@@ -317,6 +319,8 @@ export class Net {
     if (this.adverts) this.send(c, { t: 'ads', ...this.adverts.dto() });
     if (this.news) this.send(c, { t: 'news', s: this.news.recent(), all: true });
     this.send(c, { t: 'graves', list: this.sim.death.graves() });
+    this.send(c, { t: 'roadRules', r: this.w.roadRulesList() });
+    { const u = this.sim.traffic.walksList(); if (u.length) this.send(c, { t: 'walks', u }); }
     if (this.utilities) { this.send(c, this.utilities.linksMsg()); this.send(c, this.utilities.stateMsg()); }
     c.goalsSig = undefined; this.goals(c);
     c.rankSig = undefined; this.rankTo(c);
@@ -573,7 +577,9 @@ export class Net {
     if (tool === 'runway') return this.runway(c, tiles, dev);
     if (tool === 'rail') return this.track(c, tiles, dev);
     if (tool === 'pylons' || tool === 'cable') return this.trunk(c, tool, tiles, dev);
-    if (tool === 'roundabout' || tool === 'flyover') return this.junction(c, tool, tiles, dev);
+    if (tool === 'roundabout' || tool === 'flyover' || tool === 'miniroundabout' || tool === 'interchange') return this.junction(c, tool, tiles, dev);
+    if (tool === 'turnrule') return this.turnRule(c, tiles, dev);
+    if (tool === 'pelican') return this.pelican(c, tiles, dev);
     let spent = 0, zoned = false;
     const recount = new Set<number>();
     // zoning and parking lots go round roads and buildings instead of paving over them (counted for one toast)
@@ -608,8 +614,9 @@ export class Net {
         if (paint) { skipBuilt++; continue; }
         if (isAirfieldAux(this.w.auxAt(x, y))) { this.toast(c, 'That is part of a runway; bulldoze it first'); return; }
         if (isRailAux(this.w.auxAt(x, y))) { this.toast(c, 'That is railway track; bulldoze it first'); return; }
-        else if (isJunctionAux(this.w.auxAt(x, y))) {
-          this.toast(c, `That is part of a ${isRingAux(this.w.auxAt(x, y)) || isIslandAux(this.w.auxAt(x, y)) ? 'roundabout' : 'flyover'}; bulldoze it first`); return;
+        else if (isJunctionAux(this.w.auxAt(x, y)) || isRingClassAux(this.w.auxAt(x, y)) || isDeckClassAux(this.w.auxAt(x, y))) {
+          const a = this.w.auxAt(x, y);
+          this.toast(c, `That is part of ${isRingAux(a) || isIslandAux(a) || isRingClassAux(a) || isBigIslandAux(a) ? 'a roundabout' : isMiniAux(a) ? 'a mini-roundabout' : isDeckClassAux(a) ? 'an interchange' : 'a flyover'}; bulldoze it first`); return;
         } else {
           const s = this.w.structureAt(x, y);
           if (s) { this.toast(c, `That is part of a ${KIND_NAMES[s.kind]}; bulldoze it first`); return; }
@@ -671,8 +678,9 @@ export class Net {
         apply = () => this.w.setTile(x, y, packTile(terrainOf(t), false, Zone.Parking, 1)); // a lot is just paint and paving
       } else if (tool === 'bulldoze') {
         if (parcel && !ownsIt) { this.toast(c, 'Not your land'); return; }
-        if (isJunctionAux(this.w.auxAt(x, y))) {
-          // a roundabout or flyover goes back to the crossroads it was (shared/src/junctions.ts); bulldoze again for the road
+        if (isJunctionAux(this.w.auxAt(x, y)) || isRingClassAux(this.w.auxAt(x, y)) || isDeckClassAux(this.w.auxAt(x, y))) {
+          // a roundabout or flyover goes back to the crossroads it was (shared/src/junctions.ts); bulldoze again for the road.
+          // A big roundabout's ring stays as streets, its island bare; an interchange's deck goes, the motorway whole again
           const touched = new Set<number>();
           for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const q = this.w.parcelIdAt(x + dx, y + dy); if (q) touched.add(q); }
           apply = () => { this.w.removeJunction(x, y); for (const q of touched) recount.add(q); };
@@ -940,9 +948,10 @@ export class Net {
    * A roundabout or flyover on the clicked junction (shared/src/junctions.ts). Land as for roads: the player's own,
    * or unclaimed land with Public works. Clicking a flyover again swaps the road on the deck.
    */
-  private junction(c: Client, tool: 'roundabout' | 'flyover', tiles: [number, number][], dev: boolean) {
+  private junction(c: Client, tool: 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange', tiles: [number, number][], dev: boolean) {
     const p = c.player!;
     if (!dev) { const need = this.locked(p, tool); if (need) return this.toast(c, `${need} is needed before you can build that`); }
+    if (tool === 'interchange' && !dev) { const need = this.locked(p, 'motorways'); if (need) return this.toast(c, `${need} is needed before you can build an interchange`); }
     const x = Math.floor(Number(tiles?.[0]?.[0])), y = Math.floor(Number(tiles?.[0]?.[1]));
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     const pub = dev || !this.locked(p, 'publicRoads');
@@ -951,17 +960,79 @@ export class Net {
       aux: (tx: number, ty: number) => this.w.auxAt(tx, ty),
       land: (tx: number, ty: number) => { const q = this.w.parcelAt(tx, ty); return q ? (this.mayEdit(p, q.owner) ? null : 'Not your land') : pub ? null : 'Buy this land first (or research Public works)'; },
     };
-    const plan = tool === 'roundabout' ? planRoundabout(x, y, env) : planFlyover(x, y, env);
-    if (!plan.ok) return this.toast(c, plan.reason ?? `A ${tool} cannot go there`);
-    if (this.w.spendable(p) < plan.cost!) return this.toast(c, this.w.shortOf(p, plan.cost!, `for that ${tool}`));
+    // the roundabout tool on an avenue's junction builds the big two-lane ring (R4), which needs Avenues too
+    const big = tool === 'roundabout' && this.avenueJunction(x, y);
+    if (big && !dev) { const need = this.locked(p, 'avenues'); if (need) return this.toast(c, `${need} is needed before you can build a roundabout on an avenue`); }
+    const plan: JunctionPlan = tool === 'miniroundabout' ? planMiniRoundabout(x, y, env) : tool === 'interchange' ? planInterchange(x, y, env) : big ? planBigRoundabout(x, y, env) : tool === 'roundabout' ? planRoundabout(x, y, env) : planFlyover(x, y, env);
+    const what = tool === 'miniroundabout' ? 'mini-roundabout' : big ? 'roundabout' : tool;
+    if (!plan.ok) return this.toast(c, plan.reason ?? `A ${what} cannot go there`);
+    if (this.w.spendable(p) < plan.cost!) return this.toast(c, this.w.shortOf(p, plan.cost!, `for that ${what}`));
     const swap = tool === 'flyover' && isJunctionAux(this.w.auxAt(x, y));
     this.w.placeJunction(plan.tiles!);
     const touched = new Set<number>();
     for (let i = 0; i < plan.tiles!.length; i += 4) { const q = this.w.parcelIdAt(plan.tiles![i], plan.tiles![i + 1]); if (q) touched.add(q); }
     for (const q of touched) this.w.recountRoads(q);
     if (plan.cost) this.w.credit(p.id, -plan.cost, 'build'); // construction, not upkeep (the credit default for a cost)
-    this.toast(c, swap ? 'The other road is on the deck now' : tool === 'roundabout' ? `Roundabout built for $${plan.cost}: traffic goes round anticlockwise and gives way to the ring` : `Flyover built for $${plan.cost}: nobody turns here now`, 'info');
+    this.toast(c, swap ? 'The other road is on the deck now'
+      : tool === 'miniroundabout' ? `Mini-roundabout painted for $${plan.cost}: one car at a time goes round, giving way to the left`
+      : tool === 'interchange' ? `Interchange built for $${plan.cost}: the street goes over the motorway, and slip roads leave and join each carriageway`
+      : big ? `Roundabout built for $${plan.cost}: two lanes round anticlockwise, the inner one for cars going past the second exit`
+      : tool === 'roundabout' ? `Roundabout built for $${plan.cost}: traffic goes round anticlockwise and gives way to the ring` : `Flyover built for $${plan.cost}: nobody turns here now`, 'info');
   }
+  /** Is (x, y) a junction tile where an avenue (a divided road that is not a motorway) is crossed or joined? Then the roundabout tool builds the big ring. */
+  private avenueJunction(x: number, y: number): boolean {
+    const g = this.w.groupAt(x, y);
+    if (!g) return false;
+    for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) { const a = this.w.auxAt(tx, ty); if (isDividedAux(a)) return true; }
+    return false;
+  }
+
+  /**
+   * Turn rules (R4, shared/src/roadrules.ts): a click on the road just before a junction moves that arm's sign on to the
+   * next in the cycle (none, no left turn, no right turn, no straight on, no entry). Kept in the junction's record by its
+   * group's anchor; drivers whose way it breaks find another (Simulation.recheckClasses).
+   */
+  private turnRule(c: Client, tiles: [number, number][], dev: boolean) {
+    const p = c.player!;
+    if (!dev) { const need = this.locked(p, 'turnrule'); if (need) return this.toast(c, `${need} is needed before you can put up turn signs`); }
+    const x = Math.floor(Number(tiles?.[0]?.[0])), y = Math.floor(Number(tiles?.[0]?.[1]));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const r = junctionArmAt(this.ruleEnv, x, y);
+    if (typeof r === 'string') return this.toast(c, r);
+    const { g, arm } = r;
+    const q = this.w.parcelAt(g.x, g.y);
+    if (q ? !this.mayEdit(p, q.owner) : !(dev || !this.locked(p, 'publicRoads'))) return this.toast(c, q ? 'Not your junction' : 'Buy this land first (or research Public works)');
+    const rule = this.w.roadRuleAt(g.x, g.y), next = nextArmState(armState(rule, arm));
+    const cost = next === 'none' ? 0 : TURN_RULE_COST;
+    if (this.w.spendable(p) < cost) return this.toast(c, this.w.shortOf(p, cost, 'for a sign'));
+    this.w.setRoadRule(g.x, g.y, withArmState(rule, arm, next));
+    if (cost) this.w.credit(p.id, -cost, 'build');
+    const side = ['east', 'west', 'south', 'north'][arm];
+    this.toast(c, next === 'none' ? `The ${side} arm's sign is gone` : next === 'noEntry' ? `No entry to the ${side} arm ($${cost}): drivers find another way` : `Cars coming in from the ${side}: ${ARM_WORDS[next]} ($${cost})`, 'info');
+  }
+  /** What the road-rule tools read (shared/src/junctions.ts junctionArmAt, pelicanProblem). */
+  private ruleEnv = { road: (x: number, y: number) => { const t = this.w.peekTile(x, y); return t !== undefined && isRoad(t); }, aux: (x: number, y: number) => this.w.auxAt(x, y) };
+  /**
+   * A signal crossing (pelican, R4) on a straight stretch of street, or taken away again: walkers press, and the road
+   * gets a red after its minimum green (shared/src/signals.ts pelicanPhase; Traffic grants the presses).
+   */
+  private pelican(c: Client, tiles: [number, number][], dev: boolean) {
+    const p = c.player!;
+    if (!dev) { const need = this.locked(p, 'pelican'); if (need) return this.toast(c, `${need} is needed before you can build a signal crossing`); }
+    const x = Math.floor(Number(tiles?.[0]?.[0])), y = Math.floor(Number(tiles?.[0]?.[1]));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const q = this.w.parcelAt(x, y);
+    if (q ? !this.mayEdit(p, q.owner) : !(dev || !this.locked(p, 'publicRoads'))) return this.toast(c, q ? 'Not your land' : 'Buy this land first (or research Public works)');
+    const rule = this.w.roadRuleAt(x, y);
+    if (rule?.pelican) { this.w.setRoadRule(x, y, { ...rule, pelican: undefined }); return this.toast(c, 'Signal crossing taken away', 'info'); }
+    const why = pelicanProblem(this.ruleEnv, x, y);
+    if (why) return this.toast(c, why);
+    if (this.w.spendable(p) < PELICAN_COST) return this.toast(c, this.w.shortOf(p, PELICAN_COST, 'for a signal crossing'));
+    this.w.setRoadRule(x, y, { ...(rule ?? {}), pelican: 1 });
+    this.w.credit(p.id, -PELICAN_COST, 'build');
+    this.toast(c, `Signal crossing built for $${PELICAN_COST}: walkers press, and the traffic stops after its minimum green`, 'info');
+  }
+
 
   /**
    * The bulldozer in the underground view (docs/underground.md): fill each dragged tunnel tile that no line runs
@@ -1042,6 +1113,8 @@ export class Net {
     for (const c of this.clients) if (c.player && !c.player.devUnlimited) for (const m of this.onboarding.advise(c.player)) this.send(c, m);
   }
 
+  /** the World.rulesVersion last broadcast */
+  private rulesSent = -1;
   /** Whether a player has a builders' yard (any family member: yard, depot, construction company), built or being built. */
   private hasYard(owner: string) {
     for (const b of this.w.buildings.values()) if (b.zone === Zone.Yard && this.w.parcelAt(b.x, b.y)?.owner === owner) return true;
@@ -1295,6 +1368,9 @@ export class Net {
     if (this.adverts?.changed) { this.adverts.changed = false; this.broadcast({ t: 'ads', ...this.adverts.dto() }); }
     // the news (sim/news.ts): stories new or changed since the last frame
     if (this.news?.fresh.size) this.broadcast({ t: 'news', s: this.news.drain() });
+    // road rules (R4: turn bans, no entry, signal crossings): the whole short list whenever one changed; walk phases granted this tick
+    if (w.rulesVersion !== this.rulesSent) { this.rulesSent = w.rulesVersion; this.broadcast({ t: 'roadRules', r: w.roadRulesList() }); }
+    { const u = this.sim.traffic.drainWalks(); if (u.length) this.broadcast({ t: 'walks', u }); }
     // graves and funerals under way (sim/death.ts): the whole list when it changed, at most every 25 ticks
     if (this.sim.death.changed && w.tick - this.gravesAt >= 25) { this.sim.death.changed = false; this.gravesAt = w.tick; this.broadcast({ t: 'graves', list: this.sim.death.graves() }); }
     // deaths (sim/death.ts): a town's first is an advisor line and brings in the burial goal; no burial space is a hint, the rest toasts

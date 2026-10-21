@@ -217,5 +217,21 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
   pd('pointerdown', 0, 5); pd('pointermove', 9, 5); pd('pointerup', 9, 5);
   ok(roads[1]?.length === 10 && roads[1].every(([, y]) => y === 5), 'a drag along a road sends every tile of it: the server upgrades them in place');
 }
+{ // the junction tools (R4, docs/roads.md "Junctions"): one click builds one junction or sets one sign; a drag paints nothing more; Esc keeps the scheme
+  const built: [string, [number, number][]][] = [];
+  const m = make(() => {}, { onBuild: (tool: string, tiles: [number, number][]) => built.push([tool, tiles]) });
+  (m.input as any).tileAt = (px: number, py: number) => [Math.floor(px / 10), Math.floor(py / 10)];
+  const pd = (type: string, tx: number, ty: number, extra: Record<string, unknown> = {}) => m.handlers.get(type)!({ type, button: 0, clientX: tx * 10 + 5, clientY: ty * 10 + 5, offsetX: tx * 10 + 5, offsetY: ty * 10 + 5, movementX: 0, movementY: 0, altKey: false, shiftKey: false, pointerId: 1, ...extra });
+  for (const tool of ['roundabout', 'miniroundabout', 'flyover', 'interchange', 'turnrule', 'pelican'] as const) {
+    built.length = 0;
+    m.input.setTool(tool);
+    pd('pointerdown', 4, 4); pd('pointermove', 5, 4); pd('pointermove', 8, 4); pd('pointerup', 8, 4);
+    ok(built.length === 1 && built[0][0] === tool && built[0][1].length === 1 && built[0][1][0].join() === '4,4', `${tool}: a click sends the one tile clicked, a drag after it nothing more (${built.length} message(s))`);
+    pd('pointerdown', 4, 4, { shiftKey: true }); pd('pointermove', 6, 4, { shiftKey: true }); pd('pointerup', 6, 4);
+    ok(built.length === 1, `${tool}: Shift at the press pans, as with every tool`);
+  }
+  m.win.get('keydown')!({ code: 'Escape', key: 'Escape', target: null, repeat: false, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, preventDefault() {} });
+  ok(m.input.tool === 'select', 'Esc with a junction tool: back to select');
+}
 console.log(fails ? `${fails} FAILED` : 'all passed');
 process.exit(fails ? 1 : 0);

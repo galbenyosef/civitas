@@ -4,6 +4,7 @@ import {
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
   isClassAux, isDividedAux, divJunction, CLASS_JUNCTION, twinTileOf, auxDir, classByte, RoadCls, noFrontageAux, MOTORWAY_KIND, classDef, auxClass, ROAD_UPKEEP,
+  isMiniAux, isBigIslandAux, isRingClassAux, isDeckClassAux, bigRingAt, junctionGroup, linkedDegree, ruleEmpty, type RoadRule, type RoadRuleDTO, type JunctionGroup,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
   type LedgerCat, type LedgerDTO, type FinanceDTO, ECONOMY_TUNING, spendableMoney, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate, type EduFields, hasPolicy, type PolicyId,
 } from '@msimcity/shared';
@@ -103,6 +104,8 @@ export interface Mover {
    */
   s0?: number; s1?: number; s2?: number;
   committed: boolean;                   // past the stop line, crossing into the next tile
+  /** waiting in a divided road's median box (R4, Traffic.step): centred on the edge between the carriageways, in neither's box */
+  med?: boolean;
   /** lane progress moved last tick: the speed car following starts from (TRAFFIC_TUNING.follow); 0 or absent when it pulls out or a save loads */
   v?: number;
   priority: boolean;                    // emergency vehicles ignore signals
@@ -388,6 +391,7 @@ export class World {
     if (c.aux[i] && isStructureAux(c.aux[i]) && this.structureWrite(x, y, packed)) return;
     if (c.aux[i] && isJunctionAux(c.aux[i]) && !isRoad(packed)) this.removeJunction(x, y); // a ring or flyover tile dug up: the junction goes back to a crossroads
     if (c.aux[i] && isBridgeAux(c.aux[i]) && !isRoad(packed)) this.setAux(x, y, 0); // a bridge deck tile taken away: open water again
+    if (c.aux[i] && isRingClassAux(c.aux[i]) && !isRoad(packed)) this.removeBigRoundabout(x, y); // a big roundabout's ring dug up: the whole ring goes
     if (c.aux[i] && isClassAux(c.aux[i]) && !isRoad(packed)) { const was = c.aux[i]; this.setAux(x, y, 0); this.orphanTwin(x, y, was); } // a road of a class dug up: its class goes with it
     if (c.tiles[i] === packed) return;
     const roadChanged = isRoad(c.tiles[i]) !== isRoad(packed);
@@ -426,6 +430,7 @@ export class World {
       const v = (a & ~CLASS_JUNCTION) | (divJunction(tx, ty, this.roadFn, this.auxFn) ? CLASS_JUNCTION : 0);
       if (v !== a) { this.setAux(tx, ty, v); this.onTileChanged?.(tx, ty); this.onRoadClass?.(tx, ty); }
     }
+    if (this.roadRules.size) this.checkRoadRules(x, y);
   }
   /**
    * A divided road's tile (x, y), whose byte was `was`, stopped being one (dug up, or made another class): the tile of
@@ -576,7 +581,17 @@ export class World {
       const x = tiles[i], y = tiles[i + 1], road = tiles[i + 3] === 1, t = this.getTile(x, y);
       if (isRoad(t) !== road || (!road && zoneOf(t) !== Zone.None)) this.setTile(x, y, packTile(terrainOf(t), road, 0, 0));
     }
-    for (let i = 0; i < tiles.length; i += 4) { this.setAux(tiles[i], tiles[i + 1], tiles[i + 2]); this.onTileChanged?.(tiles[i], tiles[i + 1]); }
+    let classes = false;
+    for (let i = 0; i < tiles.length; i += 4) {
+      const a = tiles[i + 2];
+      if (this.auxAt(tiles[i], tiles[i + 1]) !== a && (isClassAux(a) || isClassAux(this.auxAt(tiles[i], tiles[i + 1])))) classes = true;
+      this.setAux(tiles[i], tiles[i + 1], a); this.onTileChanged?.(tiles[i], tiles[i + 1]);
+      // R4 prefabs (a big roundabout's ring, an interchange's slips and deck) are road classes: the routers and the
+      // traffic model's per-class work must see them, and drivers check the way ahead against them
+      if (isClassAux(a)) { this.minRouteCost = Math.min(this.minRouteCost, classDef(auxClass(a)).routeCost); this.anyRoadClass = true; }
+    }
+    if (classes) for (let i = 0; i < tiles.length; i += 4) { this.refreshRoadFlags(tiles[i], tiles[i + 1]); this.onRoadClass?.(tiles[i], tiles[i + 1]); }
+    else if (this.roadRules.size) for (let i = 0; i < tiles.length; i += 4) this.checkRoadRules(tiles[i], tiles[i + 1]);
   }
   /** Lay a bridge's deck (shared/src/bridges.ts planBridge, already checked): `tiles` is the plan's flat [x, y, aux]. */
   placeBridge(tiles: number[]) {
@@ -598,7 +613,9 @@ export class World {
    */
   removeJunction(x: number, y: number) {
     const a = this.auxAt(x, y);
-    if (isFlyoverAux(a)) { this.setAux(x, y, 0); this.onTileChanged?.(x, y); return; }
+    if (isFlyoverAux(a) || isMiniAux(a)) { this.setAux(x, y, 0); this.onTileChanged?.(x, y); if (this.roadRules.size) this.checkRoadRules(x, y); return; }
+    if (isBigIslandAux(a) || isRingClassAux(a)) { this.removeBigRoundabout(x, y); return; }
+    if (isDeckClassAux(a)) { this.removeDeck(x, y); return; }
     if (!isRingAux(a) && !isIslandAux(a)) return;
     const [ix, iy] = isIslandAux(a) ? [x, y] : islandOf(x, y, a);
     const ring: [number, number, boolean][] = [];
@@ -616,6 +633,116 @@ export class World {
     if (!isRoad(t)) this.setTile(ix, iy, packTile(terrainOf(t), true, 0, 0));
     this.onTileChanged?.(ix, iy);
   }
+  /**
+   * Take away the big roundabout (R4, shared/src/junctions.ts planBigRoundabout) one of whose ring or island tiles is
+   * (x, y): the ring becomes plain street (its roads stay, a square loop, for the player to rebuild) and the island bare
+   * ground.
+   */
+  removeBigRoundabout(x: number, y: number) {
+    const box = bigRingAt((tx, ty) => this.auxAt(tx, ty), x, y);
+    if (!box) { if (isRingClassAux(this.auxAt(x, y))) this.setAux(x, y, 0); return; }
+    const [X0, Y0] = box, ring: [number, number][] = [];
+    for (let oy = 0; oy < 5; oy++) for (let ox = 0; ox < 5; ox++) {
+      const tx = X0 + ox, ty = Y0 + oy, a = this.auxAt(tx, ty);
+      if (isBigIslandAux(a)) { this.setAux(tx, ty, 0); this.onTileChanged?.(tx, ty); }
+      else if (isRingClassAux(a)) { this.setAux(tx, ty, 0); ring.push([tx, ty]); this.onTileChanged?.(tx, ty); this.onRoadClass?.(tx, ty); }
+    }
+    for (const [tx, ty] of ring) this.refreshRoadFlags(tx, ty);
+  }
+  /**
+   * Take the street deck off an interchange (R4, planInterchange) one of whose deck tiles is (x, y): both carriageways
+   * are plain motorway again and the street is cut there (its slips stay, ordinary one-way streets).
+   */
+  removeDeck(x: number, y: number) {
+    const tiles: [number, number][] = [[x, y]];
+    for (const [dx, dy] of DIRS) if (isDeckClassAux(this.auxAt(x + dx, y + dy))) tiles.push([x + dx, y + dy]);
+    for (const [tx, ty] of tiles) {
+      const a = this.auxAt(tx, ty);
+      this.setAux(tx, ty, classByte(RoadCls.Motorway, auxDir(a)));
+      this.onTileChanged?.(tx, ty); this.onRoadClass?.(tx, ty);
+    }
+    for (const [tx, ty] of tiles) this.refreshRoadFlags(tx, ty);
+  }
+
+  // ---- road rules (R4, shared/src/roadrules.ts: turn bans, no entry, signal crossings) ----------------------------
+
+  /** Road rule records by their anchor's tile key (tkey): a junction group's min corner, or a crossing's tile. Persisted (snapshot `roadRules`). */
+  roadRules = new Map<number, RoadRule>();
+  /** Bumped on every change to roadRules (the network layer sends the list again). */
+  rulesVersion = 0;
+  /**
+   * Every tile of a junction whose rule restricts movements (turn bans, no entry), to the anchor's key: what the routers
+   * test (pathfinding.ts, sim/busroute.ts). Empty, so free, in a world without one.
+   */
+  ruleTiles = new Map<number, number>();
+  /** A road's group (shared/src/signals.ts junctionGroup) as the traffic model sees roads: car roads and their class bytes. */
+  groupAt(x: number, y: number): JunctionGroup | null {
+    return junctionGroup(this.roadFn, (tx, ty) => { const a = this.auxAt(tx, ty); return isClassAux(a) ? a : 0; }, x, y);
+  }
+  roadRuleAt(x: number, y: number): RoadRule | undefined { return this.roadRules.get(tkey(x, y)); }
+  /** Set (or with null clear) the record anchored at (x, y). */
+  setRoadRule(x: number, y: number, r: RoadRule | null) {
+    const k = tkey(x, y);
+    if (!r || ruleEmpty(r)) { if (!this.roadRules.delete(k)) return; }
+    else this.roadRules.set(k, r);
+    this.rulesVersion++;
+    this.indexRuleTiles();
+    this.onRoadRule?.(x, y);
+  }
+  /** Told when a road rule changes (the simulation has drivers check their way: Simulation.recheckClasses). */
+  onRoadRule: ((x: number, y: number) => void) | null = null;
+  private indexRuleTiles() {
+    this.ruleTiles.clear();
+    for (const [k, r] of this.roadRules) {
+      if (!r.ban && !r.noEntry) continue;
+      const [x, y] = untkey(k), g = this.groupAt(x, y);
+      if (!g) continue;
+      for (let ty = g.y; ty < g.y + g.h; ty++) for (let tx = g.x; tx < g.x + g.w; tx++) this.ruleTiles.set(tkey(tx, ty), k);
+    }
+  }
+  /**
+   * After a road change at (x, y): every record anchored near it checked again. A junction rule whose junction is gone
+   * goes; one whose group grew or shrank moves to the new anchor; a signal crossing whose tile is no longer a straight
+   * road goes.
+   */
+  private checkRoadRules(x: number, y: number) {
+    let changed = false;
+    for (const [k, r] of [...this.roadRules]) {
+      const [ax, ay] = untkey(k);
+      if (Math.abs(ax - x) > 3 || Math.abs(ay - y) > 3) continue;
+      if (r.pelican) {
+        const t = this.peekTile(ax, ay), a = this.auxAt(ax, ay);
+        if (t === undefined || !isRoad(t) || (a && !isClassAux(a)) || linkedDegree(this.roadFn, (tx, ty) => { const b = this.auxAt(tx, ty); return isClassAux(b) ? b : 0; }, ax, ay) !== 2) { delete r.pelican; changed = true; }
+      }
+      if (r.ban || r.noEntry) {
+        const g = this.groupAt(ax, ay);
+        if (!g) { delete r.ban; delete r.noEntry; changed = true; }
+        else if (g.x !== ax || g.y !== ay) {
+          const nk = tkey(g.x, g.y);
+          if (!this.roadRules.has(nk)) this.roadRules.set(nk, { ban: r.ban, noEntry: r.noEntry });
+          delete r.ban; delete r.noEntry; changed = true;
+        }
+      }
+      if (ruleEmpty(r)) this.roadRules.delete(k);
+    }
+    // ruled junctions' tiles may have changed even where no record moved
+    if (changed || this.ruleTiles.size) { if (changed) this.rulesVersion++; this.indexRuleTiles(); }
+  }
+  /** The records for the snapshot and the wire. */
+  roadRulesList(): RoadRuleDTO[] { return [...this.roadRules].map(([k, r]) => { const [x, y] = untkey(k); return [x, y, { ...r }]; }); }
+  loadRoadRules(list: RoadRuleDTO[] | undefined) {
+    this.roadRules.clear();
+    for (const e of list ?? []) if (Array.isArray(e) && e.length === 3 && Number.isFinite(e[0]) && Number.isFinite(e[1]) && e[2] && typeof e[2] === 'object') {
+      const r: RoadRule = {};
+      if (Number.isInteger(e[2].ban) && e[2].ban! > 0) r.ban = e[2].ban! & 0xfff;
+      if (Number.isInteger(e[2].noEntry) && e[2].noEntry! > 0) r.noEntry = e[2].noEntry! & 0xf;
+      if (e[2].pelican) r.pelican = 1;
+      if (!ruleEmpty(r)) this.roadRules.set(tkey(e[0], e[1]), r);
+    }
+    this.rulesVersion++;
+    this.indexRuleTiles();
+  }
+
   /**
    * Clear every tile of a structure back to bare ground (bulldozing any of its tiles lands here). A merged zone
    * building (zones.ts) breaks back into empty lots of its zone instead, so the land stays zoned.

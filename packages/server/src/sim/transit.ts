@@ -1,5 +1,5 @@
 import {
-  TICKS_PER_DAY, TICKS_PER_HOUR, WALK_SPEED, DRIVE_SPEED, TRAFFIC_TUNING as TT, TRANSIT, VehicleClass, VehicleKind,
+  turnAllowed, TICKS_PER_DAY, TICKS_PER_HOUR, WALK_SPEED, DRIVE_SPEED, TRAFFIC_TUNING as TT, TRANSIT, VehicleClass, VehicleKind,
   isRoad, hash2, stopName, inServiceHours, stopModeOf, walkCost, BUS_DEPOT_KIND, LifeStage, zoneOf, terrainOf, Terrain, problemText,
   type TransitLine, type TransitMode, type StopRef, type LineInfo, type StopInfo, type BusInfo, type CitizenInfo, type LinePreview, type LineProblem,
 } from '@msimcity/shared';
@@ -866,6 +866,18 @@ export class BusService implements ModeService {
       if (t === undefined) return false;
       if (!isRoad(t)) { if (this.w.kindIdAt(x, y) !== BUS_DEPOT_KIND) return false; continue; }
       if (isReversal(p, i) && !turnAt(net, x, y)) return false;
+    }
+    // a turn ban or no entry put up since (R4, World.ruleTiles): round the lap, each ruled junction's way in and out
+    const RT = this.w.ruleTiles;
+    if (RT.size) for (let i = 0; i < n; i++) {
+      const at = (j: number) => { const k = ((j % n) + n) % n; return tkey(p[k * 2], p[k * 2 + 1]); };
+      const rk = RT.get(at(i));
+      if (rk === undefined || RT.get(at(i - 1)) === rk) continue;
+      let j = i;
+      while (j - i < n && RT.get(at(j + 1)) === rk) j++;
+      const xy = (j: number) => { const k = ((j % n) + n) % n; return [p[k * 2], p[k * 2 + 1]]; };
+      const [ax, ay] = xy(i - 1), [bx, by] = xy(i), [cx, cy] = xy(j), [dx, dy] = xy(j + 1);
+      if (!turnAllowed(this.w.roadRules.get(rk), dirBetween(ax, ay, bx, by), dirBetween(cx, cy, dx, dy))) return false;
     }
     return true;
   }
