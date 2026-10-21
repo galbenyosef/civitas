@@ -446,7 +446,8 @@ function paint(t: RoadTile, g: Geo) {
       decal(ns ? rect(ox, oz, 0, m, 0, 1, L, 0.024) : rect(ox, oz, m, 0, 1, 0, L, 0.024), white);
     }
     for (const s of toJ) approachPaint(t, s, decal, white);
-  } else if (!t.under) {
+  } else if (!t.under && (t.m8 & 15) === t.arms) {
+    // (a corner of a wide road's crossing, where twin lanes meet, has no line of its own)
     const bits = t.arms;
     const n = (bits & 1) + ((bits >> 1) & 1) + ((bits >> 2) & 1) + ((bits >> 3) & 1);
     if (n === 2) {
