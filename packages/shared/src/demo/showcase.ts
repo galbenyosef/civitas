@@ -13,7 +13,8 @@ import { techFor, TRACK_NAMES } from '../tech';
 import { VALUE_NAMES, VALUE_COUNT, topValues, valuesOf } from '../motivation';
 import { RUNWAY_COST, RUNWAY_MIN, RUNWAY_MAX, TERMINAL_ROW } from '../airport';
 import { RAIL_COST, CROSSING_COST } from '../rail';
-import { ROUNDABOUT_COST, FLYOVER_COST } from '../junctions';
+import { ROUNDABOUT_COST, FLYOVER_COST, MINI_ROUNDABOUT_COST, BIG_ROUNDABOUT_COST, INTERCHANGE_COST } from '../junctions';
+import { TURN_RULE_COST, PELICAN_COST } from '../roadrules';
 import { BRIDGE_TILE_COST, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES, BridgeStyle, isBridgeAux, bridgeStyle, bridgeSpanAt, basculeSeed, basculeLiftAt } from '../bridges';
 import { isCrossing } from '../rail';
 import { GROW_FORMS, firstLevelOf } from '../zones';
@@ -776,7 +777,7 @@ export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER |
  * tool fails the typecheck here until it is listed, and `demo:check` then fails until the showcase uses it.
  */
 type SurfaceTool = Exclude<Tool, 'road' | 'bulldoze' | KindToolId>;
-export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, pylons: true, cable: true };
+export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, miniroundabout: true, interchange: true, turnrule: true, pelican: true, pylons: true, cable: true };
 /** Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. */
 export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, ferry: true, freight: true };
 
@@ -803,7 +804,31 @@ const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
     title: 'Roundabout',
     what: 'A crossroads or T-junction rebuilt as a one-way ring round a planted island. Traffic goes round anticlockwise (it drives on the right), and a car coming in gives way to cars already on the ring, so there are no lights and no waiting for a green.',
     how: 'Pick Roundabout and click a junction. The four corner lots round it must be empty: the ring takes them. Side roads join in the middle of each side. Bulldozing any of it turns it back into a crossroads.',
-    facts: [['Tool', 'Roundabout (no key), click a junction'], ['Footprint', '3×3: the junction becomes the island'], ['Needs', 'three or four roads meeting, empty corner lots'], ['Technology', techLine('roundabout')], ['Cost', money(ROUNDABOUT_COST)]],
+    facts: [['Tool', 'Roundabout (no key), click a junction'], ['Footprint', '3×3: the junction becomes the island; 5×5 on an avenue'], ['Needs', 'three or four roads meeting, empty corner lots'], ['Technology', techLine('roundabout')], ['Cost', `${money(ROUNDABOUT_COST)}; ${money(BIG_ROUNDABOUT_COST)} the big one`]],
+  },
+  miniroundabout: {
+    title: 'Mini-roundabout',
+    what: 'A roundabout painted on a street junction: a white disc with arrows round it and give-way lines at each arm. One car at a time goes round it, giving way to a car already coming round from the left, so a quiet crossroads keeps moving with no lights and no corner lots taken.',
+    how: 'Pick Mini-roundabout and click a crossroads or T-junction of streets or lanes. Avenues and one-way streets need the big roundabout or lights. Bulldozing the junction tile takes it away.',
+    facts: [['Tool', 'Mini-roundabout (no key), click a junction'], ['Footprint', 'the junction tile'], ['Needs', 'three or four two-way streets or lanes meeting'], ['Technology', techLine('miniroundabout')], ['Cost', money(MINI_ROUNDABOUT_COST)]],
+  },
+  interchange: {
+    title: 'Interchange',
+    what: 'A diamond interchange: the street goes over the motorway on a bridge, and a slip road leaves each carriageway before it and joins again after, meeting the street at a junction where it gives way. Traffic on the motorway never stops.',
+    how: 'Pick Interchange and click a motorway where a street meets or should cross it. It needs a straight motorway five tiles either side and 9×6 tiles of open ground or empty lots beside it. Bulldozing the bridge cuts the street again.',
+    facts: [['Tool', 'Interchange (no key), click a motorway'], ['Footprint', '9 along the motorway × 6 across'], ['Needs', 'a straight motorway, open ground beside it'], ['Technology', `${techLine('interchange')} and ${techFor('motorways')?.name ?? 'Motorways'}`], ['Cost', money(INTERCHANGE_COST)]],
+  },
+  turnrule: {
+    title: 'Turn rules',
+    what: 'A sign on one arm of a junction: no left turn, no right turn, no straight on, or no entry. Drivers plan round them (a no-entry arm is one way out of the junction), and a driver whose way a new sign breaks finds another. Fire engines and ambulances on a call ignore turn bans, never a no-entry.',
+    how: 'Pick Turn rules and click the road just before a junction, on the arm you want the sign on: each click goes on to the next rule (none, no left, no right, no straight on, no entry).',
+    facts: [['Tool', 'Turn rules (no key), click an arm'], ['Needs', 'a junction'], ['Technology', techLine('turnrule')], ['Cost', `${money(TURN_RULE_COST)} a sign`]],
+  },
+  pelican: {
+    title: 'Signal crossing',
+    what: 'A crossing with lights: a walker presses the button, and after the traffic has had its minimum green the lights go amber, then red, and the walkers cross; then a flashing amber while the last of them finish. Where a pedestrian street crosses a street there is one already.',
+    how: 'Pick Signal crossing and click a straight stretch of street away from a junction. Click it again to take it away.',
+    facts: [['Tool', 'Signal crossing (no key), click a street'], ['Needs', 'a straight two-way street tile, not next to a junction'], ['Technology', techLine('pelican')], ['Cost', money(PELICAN_COST)]],
   },
   flyover: {
     title: 'Flyover',

@@ -70,6 +70,32 @@ export const TRAFFIC_TUNING = {
   /** 1: hold a green while nobody waits on red and someone waits on green, up to 2× the period (server-side only: the client would not show it). */
   signalActuated: 0,
 
+  // ---- junctions (R4, docs/roads.md "Junctions"; 0 restores R3's rule for each, for ab.ts) --------------------------
+  /**
+   * 1: the junction tiles of one avenue crossing work as one junction (shared/src/signals.ts junctionGroup): one
+   * controller timed from the group's anchor, the lights gating only cars coming in, a four-phase cycle with protected
+   * lefts where two divided roads cross. 0: every tile its own junction, as in R3.
+   */
+  groupSignals: 1,
+  /** A four-phase group's protected left phase, as a share of its through phase (shared with the client: signals.ts leftTicks). */
+  leftPhase: 0.5,
+  /**
+   * 1: a car crossing a divided road's reservation may wait in the median box (straddling the edge between the two
+   * carriageways' junction tiles, clear of both), one a way at each; 0: it waits in the first carriageway's box (R3).
+   */
+  medianBox: 1,
+  /**
+   * Turn lanes on one-way approaches (an avenue's carriageway, a one-way street, a motorway): the last two tiles before a
+   * junction hold the lane: 1 the left lane for left turns (and U-turns) only, the right lane for straight on and
+   * right; 2 the same at four-phase groups only (protected lefts), elsewhere straight-on traffic may use either; 0 R3's
+   * choice (the lane for the next turn within six tiles, straight on in either).
+   */
+  turnLanes: 1,
+  /** A mini-roundabout: an arriving car gives way to a moving car within this many tiles of the box on the arm to its left (0: first come, first served). */
+  miniYield: 0.6,
+  /** A 5×5 roundabout: places round the ring (both lanes) a car coming on must leave free, so it never fills and locks. */
+  bigRingSpare: 6,
+
   // ---- junction entry rules ---------------------------------------------------------------
   /**
    * Same approach, different exit: 0 the follower waits until the leader has left the box; 1 may enter once the

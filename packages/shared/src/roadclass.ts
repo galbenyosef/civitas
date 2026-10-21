@@ -22,7 +22,7 @@ import { ROAD_COST, ROAD_UPKEEP } from './constants';
  */
 
 /** Class ids (the low three bits of the byte). */
-export const RoadCls = { Street: 0, Lane: 1, OneWay: 2, Avenue: 3, Motorway: 4, Pedestrian: 5 } as const;
+export const RoadCls = { Street: 0, Lane: 1, OneWay: 2, Avenue: 3, Motorway: 4, Pedestrian: 5, Ring: 6, Deck: 7 } as const;
 export type RoadClsId = (typeof RoadCls)[keyof typeof RoadCls];
 
 export interface RoadClassDef {
@@ -76,8 +76,23 @@ export const ROAD_CLASS_DEFS: readonly RoadClassDef[] = [
     blurb: 'Paving and bollards: walkers and bikes only, with emergency vehicles, and deliveries before 10:00 and after 19:00. Shops on it see the most passers-by.', howTo: 'Road (3), Pedestrian street: drag along a row of shops.' },
 ];
 export const ROAD_CLASS_COUNT = ROAD_CLASS_DEFS.length;
+/**
+ * The two classes no drag lays (R4, docs/roads.md "Junctions"): they are parts of junction prefabs, written by the
+ * junction tools, and the picker never shows them. **Ring** (6): a tile of a 5×5 two-lane roundabout (shared/src/
+ * junctions.ts planBigRoundabout), one way round in its direction (a corner: the way out of it), two lanes. **Deck** (7):
+ * a motorway carriageway tile with a street carried over it on a deck on the other axis (the diamond interchange's
+ * bridge, planInterchange): to everything under it a motorway tile; a step along the deck's axis is a street step on
+ * route layer 1 (routeLayer), as a flyover's.
+ */
+export const JUNCTION_CLASS_DEFS: readonly RoadClassDef[] = [
+  { id: 6, name: 'roundabout', title: 'Roundabout', lanes: 2, oneWay: true, divided: false, speed: 1, routeCost: 0.9, capacity: 4, access: 'all', cost: 0, upkeep: 1, feature: 'roundabout', rank: 3, colour: 0x9fc86a,
+    blurb: 'A two-lane ring round a planted island: the inner lane for cars going past the second exit.', howTo: 'Roundabout, click an avenue junction.' },
+  { id: 7, name: 'motorway', title: 'Motorway', lanes: 2, oneWay: true, divided: true, speed: 1.25, routeCost: 0.8, capacity: 4, access: 'noFrontage', cost: 0, upkeep: 2, feature: 'motorways', rank: 4, colour: 0x5f9be8,
+    blurb: 'A motorway under a street bridge.', howTo: 'Interchange, click where a street meets a motorway.' },
+];
+/** A class the road tool may lay (the picker's six). */
 export const isRoadClass = (cls: number) => Number.isInteger(cls) && cls >= 0 && cls < ROAD_CLASS_COUNT;
-export const classDef = (cls: number): RoadClassDef => ROAD_CLASS_DEFS[cls] ?? ROAD_CLASS_DEFS[0];
+export const classDef = (cls: number): RoadClassDef => ROAD_CLASS_DEFS[cls] ?? JUNCTION_CLASS_DEFS[cls - ROAD_CLASS_COUNT] ?? ROAD_CLASS_DEFS[0];
 
 /** Does a street's name already say its class ("Kingsway Avenue" on an avenue, "Hedge Lane" on a country lane)? Then the class is not said again. */
 export const namesClass = (name: string, cls: number) => name.toLowerCase().endsWith(` ${classDef(cls).name.split(' ').pop()}`);
@@ -111,9 +126,16 @@ export const roadClassAt = (tile: number, aux: number) => (isRoad(tile) ? auxCla
 /** The one-way direction stored in a class byte (DIRS index), whatever the junction flag says. */
 export const auxDir = (a: number) => (a >> 3) & 3;
 export const auxJunction = (a: number) => isClassAux(a) && (a & CLASS_JUNCTION) !== 0;
-export const isOneWayAux = (a: number) => isClassAux(a) && ROAD_CLASS_DEFS[a & 7]?.oneWay === true;
-export const isDividedAux = (a: number) => isClassAux(a) && ROAD_CLASS_DEFS[a & 7]?.divided === true;
-export const isMotorwayAux = (a: number) => isClassAux(a) && (a & 7) === RoadCls.Motorway;
+export const isOneWayAux = (a: number) => isClassAux(a) && classDef(a & 7).oneWay;
+export const isDividedAux = (a: number) => isClassAux(a) && classDef(a & 7).divided;
+/** A motorway carriageway tile: the motorway class, or a deck tile (the motorway under a street bridge). */
+export const isMotorwayAux = (a: number) => isClassAux(a) && ((a & 7) === RoadCls.Motorway || (a & 7) === RoadCls.Deck);
+/** A 5×5 roundabout's ring tile (class 6). */
+export const isRingClassAux = (a: number) => isClassAux(a) && (a & 7) === RoadCls.Ring;
+/** A motorway tile under a street deck (class 7): `(a & 0xe7) === 7`, the test routers make in their inner loops. */
+export const isDeckClassAux = (a: number) => (a & 0xe7) === RoadCls.Deck;
+/** Is the step (dx, ·) on deck tile byte a along its deck (the street over the motorway), not along the motorway? */
+export const deckAxisStep = (a: number, dx: number) => ((a >> 3) & 3) < 2 ? dx === 0 : dx !== 0;
 export const isPedestrianAux = (a: number) => isClassAux(a) && (a & 7) === RoadCls.Pedestrian;
 /** The way traffic must go on this tile (DIRS index), or -1: two-way, or a divided road's junction tile. */
 export const oneWayDir = (a: number) => (isOneWayAux(a) && !(a & CLASS_JUNCTION) ? (a >> 3) & 3 : -1);
@@ -129,6 +151,10 @@ export const oneWayDir = (a: number) => (isOneWayAux(a) && !(a & CLASS_JUNCTION)
  */
 export function carStepOk(aA: number, aB: number, d: number, service = false): boolean {
   if (!(aA > 0 && aA < 0x40) && !(aB > 0 && aB < 0x40)) return true;
+  // on a deck tile (class 7) a step along the deck is the street over the motorway: a street step
+  if (isDeckClassAux(aA) && deckAxisStep(aA, d < 2 ? 1 : 0)) aA = 0;
+  if (isDeckClassAux(aB) && deckAxisStep(aB, d < 2 ? 1 : 0)) aB = 0;
+  if (!aA && !aB) return true;
   if (!service && isPedestrianAux(aB)) return false;
   const ea = oneWayDir(aA), eb = oneWayDir(aB), back = COPP[d];
   if (ea === back || eb === back) return false;
@@ -144,6 +170,7 @@ export function carStepOk(aA: number, aB: number, d: number, service = false): b
  */
 export function edgeLanes(aA: number, aB: number, d: number): number {
   if (!isOneWayAux(aA) || !isOneWayAux(aB)) return 1;
+  if ((isDeckClassAux(aA) && deckAxisStep(aA, d < 2 ? 1 : 0)) || (isDeckClassAux(aB) && deckAxisStep(aB, d < 2 ? 1 : 0))) return 1; // the street on the deck
   const ea = oneWayDir(aA), eb = oneWayDir(aB), back = COPP[d];
   if (ea === back || eb === back) return 1;
   return ea === d || eb === d ? 2 : 1;
@@ -161,8 +188,8 @@ export const noFrontageAux = (a: number) => isMotorwayAux(a);
  */
 export function divJunction(x: number, y: number, road: (x: number, y: number) => boolean, aux: (x: number, y: number) => number): boolean {
   const a = aux(x, y);
-  if (!isDividedAux(a)) return false;
-  const d = auxDir(a), [dx, dy] = CDIRS[d], motorway = (a & 7) === RoadCls.Motorway;
+  if (!isDividedAux(a) || isDeckClassAux(a)) return false; // a deck tile is a carriageway under a bridge, never a junction
+  const d = auxDir(a), [dx, dy] = CDIRS[d], motorway = isMotorwayAux(a);
   const twinAt = (tx: number, ty: number) => { const b = aux(tx, ty); return isDividedAux(b) && sameAxis(auxDir(b), d); };
   for (const s of [1, -1]) {
     const nx = x - dy * s, ny = y + dx * s;

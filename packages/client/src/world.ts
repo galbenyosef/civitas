@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, b64ToU16, b64ToI32, b64ToU8, chunkKey, chunkOf, localIndex, structureAt, kindIdOf, zoneOf, isRoad, type Placed, type ChunkDTO, type ParcelDTO, type PlayerDTO } from '@msimcity/shared';
+import { CHUNK_SIZE, b64ToU16, b64ToI32, b64ToU8, chunkKey, chunkOf, localIndex, structureAt, kindIdOf, zoneOf, isRoad, type Placed, type ChunkDTO, type ParcelDTO, type PlayerDTO, type RoadRule, type RoadRuleDTO } from '@msimcity/shared';
 
 export interface ClientChunk { cx: number; cy: number; tiles: Uint16Array; parcel: Int32Array; aux: Uint8Array; /** kind ids of sub-kinds (docs/sub-kinds.md) */ sub: Uint8Array; /** tunnels and platforms (docs/underground.md) */ under: Uint8Array; dirty: boolean }
 
@@ -28,6 +28,25 @@ export class ClientWorld {
   overlayDirty = new Set<string>();
   /** your own parcels' problems (message 'problems'): flat triples x, y, code */
   problems: number[] = [];
+  /**
+   * Road rule records (shared/src/roadrules.ts: turn bans and no entry on a junction's arms, signal crossings) by their
+   * anchor tile "x,y" (a junction group's min corner, or the crossing's tile), from 'roadRules'; `rulesVersion` bumps on
+   * every change so views can rebuild.
+   */
+  roadRules = new Map<string, RoadRule>();
+  rulesVersion = 0;
+  /** each signal crossing's last granted walk phase by tile "x,y" (shared/src/signals.ts pelicanPhase), from 'walks' */
+  walks = new Map<string, number>();
+  applyRoadRules(r: RoadRuleDTO[]) {
+    this.roadRules.clear();
+    for (const [x, y, rule] of r) this.roadRules.set(`${x},${y}`, rule);
+    this.rulesVersion++;
+  }
+  applyWalks(u: number[]) { for (let i = 0; i + 2 < u.length; i += 3) this.walks.set(`${u[i]},${u[i + 1]}`, u[i + 2]); }
+  /** the road rule record anchored at (x, y), if any */
+  ruleAt(x: number, y: number): RoadRule | undefined { return this.roadRules.get(`${x},${y}`); }
+  /** the tick a signal crossing at (x, y) last began its walk phase (-Infinity: never, its lamps green) */
+  walkAt(x: number, y: number): number { return this.walks.get(`${x},${y}`) ?? -Infinity; }
 
   /** a read-only showcase (SPECTATE on the server, from the welcome): nothing may be changed, a sandbox included */
   spectate = false;

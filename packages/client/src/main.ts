@@ -302,6 +302,8 @@ net.on('chunk', (m) => {
   }
 });
 net.on('aux', (m) => world.applyAux(m.u));
+net.on('roadRules', (m) => { world.applyRoadRules(m.r); roads.invalidate(); lights.invalidate(); });
+net.on('walks', (m) => world.applyWalks(m.u));
 net.on('sub', (m) => world.applySub(m.u));
 net.on('under', (m) => world.applyUnder(m.u));
 net.on('tiles', (m) => world.applyTiles(m.u));

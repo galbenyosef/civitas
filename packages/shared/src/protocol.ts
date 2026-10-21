@@ -1,3 +1,4 @@
+import type { RoadRuleDTO } from './roadrules';
 import type { KindToolId } from './buildings/compiled';
 import type { StopInfo, BusInfo, LineInfo, LineStats, LinePreview, TransitLine, TransitMode } from './transit';
 import type { RailLineDef, RailRoute } from './rail';
@@ -14,7 +15,7 @@ import type { StoryDTO } from './news';
 import type { GraveSiteDTO, DeceasedInfo, RemembranceInfo, FamilyRef } from './remembrance';
 import type { UtilityInfo, UtilLinkDTO } from './utilities';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
-export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'pylons' | 'cable' | KindToolId;
+export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'pylons' | 'cable' | KindToolId;
 
 export interface ParcelStats {
   population: number;
@@ -408,11 +409,19 @@ export interface RoadInfo {
   queuedNow: number;
   /** average speed of the cars on it as a fraction of free flow */
   speedPct: number;
-  junction: 'none' | 'yield' | 'signal' | 'roundabout' | 'flyover';
+  junction: 'none' | 'yield' | 'signal' | 'roundabout' | 'flyover' | 'mini' | 'bigRoundabout' | 'interchange' | 'pelican';
   /** which axis has green right now, for signals */
   green?: 'ns' | 'ew';
   /** the green is in its last (amber) ticks */
   amber?: boolean;
+  /** a four-phase junction group's protected left phase is on (shared/src/signals.ts groupPhaseOf) */
+  leftPhase?: boolean;
+  /** the junction group this tile is part of (R4: an avenue crossing's tiles work as one): its tiles and how many phases its lights run */
+  group?: { x: number; y: number; w: number; h: number; phases: number };
+  /** the junction's turn rules, one line per restricted arm (shared/src/roadrules.ts ruleLines) */
+  rules?: string[];
+  /** a signal crossing: what its lamps show cars now */
+  pelican?: 'green' | 'amber' | 'red' | 'flash';
   kerbParked: number;
   parcel?: { name: string; owner: string };
   /** on a bridge deck (shared/src/bridges.ts): its style name and length in tiles */
@@ -631,6 +640,10 @@ export type ServerMsg =
   | { t: 'tiles'; u: number[] }
   /** flat triples: x, y, aux byte; only for tiles whose aux changed, sent just before the matching 'tiles' */
   | { t: 'aux'; u: number[] }
+  /** every road rule record (shared/src/roadrules.ts: turn bans, no entry, signal crossings), on hello and whenever one changes */
+  | { t: 'roadRules'; r: RoadRuleDTO[] }
+  /** signal crossings whose walk phase was granted this tick: flat [x, y, walkAt, ...] (shared/src/signals.ts pelicanPhase); on hello, every crossing's last */
+  | { t: 'walks'; u: number[] }
   /** flat triples: x, y, sub byte (kind id of a sub-kind, 0 = base kind); only for tiles whose sub changed, sent after 'aux' and before 'tiles' */
   | { t: 'sub'; u: number[] }
   /** flat triples: x, y, under byte (docs/underground.md); only for tiles whose under byte changed, sent before 'aux' and 'tiles' */
