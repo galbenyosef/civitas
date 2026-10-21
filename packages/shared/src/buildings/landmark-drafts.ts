@@ -83,7 +83,7 @@ const TEMPLATE: KindDef = {
  * dial's radius `r`. The recipe draws four white dials flat on the stage; render/landmarks.ts lays a lit face over
  * each at dusk with hands at the game's time, following the same constant so the two stay in step.
  */
-export const CLOCK_TOWER = { x: 0, z: 0.35, y: 1.21, face: 0.3, r: 0.2 };
+export const CLOCK_TOWER = { x: -0.3, z: 0.35, y: 1.21, face: 0.3, r: 0.2 };
 const CT = CLOCK_TOWER;
 
 /** Four flat dials, one on each face of the clock stage: a dark bezel under a white face. */
@@ -96,6 +96,8 @@ const dials = (): Op[] => ([[0, 1], [0, -1], [1, 0], [-1, 0]] as const).flatMap(
   ];
 });
 
+const TX = CLOCK_TOWER.x; // the tower stands on the hall's bays 1 and 2 (x -0.6..0), over the door tile [0, 1] (x -1..0)
+
 /** Hall (back, 1.8 × 0.8), tower (front, 0.6 square, on whole cells of the hall's front wall), clock stage, belfry, spire. */
 const clockTowerOps = (): Op[] => [
   slab(2, 2, PAVING),
@@ -105,28 +107,28 @@ const clockTowerOps = (): Op[] => [
   ['roof', 1.84, 0.22, 0.8, 0, 0.62, -0.35, 'slate'],
   ['cornice', 'hall', 2, 'stone'],
   // the tower base: two storeys of windows over a door, then a plain band (the hall's roof ridge rises against it)
-  ['box', 0.6, 0.9, 0.6, 0, 0.02, 0.35, 'sand', true, { name: 'tower', facade: { storeys: 2, bays: 3, sideBays: 3, margin: 0.04, top: 0.3 } }],
+  ['box', 0.6, 0.9, 0.6, TX, 0.02, 0.35, 'sand', true, { name: 'tower', facade: { storeys: 2, bays: 3, sideBays: 3, margin: 0.04, top: 0.3 } }],
   ['door', 'tower', 'front', 1],
   ['cornice', 'tower', 2, 'stone'],
-  ['box', 0.7, 0.04, 0.7, 0, 0.92, 0.35, 'stone'],
+  ['box', 0.7, 0.04, 0.7, TX, 0.92, 0.35, 'stone'],
   // the clock stage: plain walls with a dial on each face
-  ['box', 0.6, 0.5, 0.6, 0, 0.96, 0.35, 'sand'],
+  ['box', 0.6, 0.5, 0.6, TX, 0.96, 0.35, 'sand'],
   ...dials(),
-  ['box', 0.68, 0.04, 0.68, 0, 1.46, 0.35, 'stone'],
+  ['box', 0.68, 0.04, 0.68, TX, 1.46, 0.35, 'stone'],
   // the belfry: lancet windows under a cap, a pinnacle at each corner
-  ['box', 0.5, 0.26, 0.5, 0, 1.5, 0.35, 'sand', 'civic', { name: 'belfry', facade: { storeys: 1, bays: 2, sideBays: 2, margin: 0.04 } }],
-  ['box', 0.6, 0.04, 0.6, 0, 1.76, 0.35, 'stone'],
-  ...([[-1, -1], [1, -1], [-1, 1], [1, 1]] as const).map(([sx, sz]): Op => ['taper', 0.06, 0.06, 0, 0, 0.18, sx * 0.25, 1.8, 0.35 + sz * 0.25, 'sand']),
+  ['box', 0.5, 0.26, 0.5, TX, 1.5, 0.35, 'sand', 'civic', { name: 'belfry', facade: { storeys: 1, bays: 2, sideBays: 2, margin: 0.04 } }],
+  ['box', 0.6, 0.04, 0.6, TX, 1.76, 0.35, 'stone'],
+  ...([[-1, -1], [1, -1], [-1, 1], [1, 1]] as const).map(([sx, sz]): Op => ['taper', 0.06, 0.06, 0, 0, 0.18, TX + sx * 0.25, 1.8, 0.35 + sz * 0.25, 'sand']),
   // the spire: an eight-sided slate cone with every second facet picked out, and a gilt finial
-  ['lathe', 0, 1.8, 0.35, 'slate', [0.26, 0, 0.24, 0.12, 0.16, 0.34, 0.08, 0.52, 0.025, 0.6, 0, 0.6], { seg: 8, stripe: 'roofGrey', every: 2, width: 1 }],
-  ['cyl', 0.006, 0.016, 0.1, 0, 2.4, 0.35, 'gold', 6],
+  ['lathe', TX, 1.8, 0.35, 'slate', [0.26, 0, 0.24, 0.12, 0.16, 0.34, 0.08, 0.52, 0.025, 0.6, 0, 0.6], { seg: 8, stripe: 'roofGrey', every: 2, width: 1 }],
+  ['cyl', 0.006, 0.016, 0.1, TX, 2.4, 0.35, 'gold', 6],
   // a flagpole on the hall roof, lamps either side of the door, railings and two trees
   ['flag', 0.72, 0.84, -0.35, 'red'],
-  ...lampPost(-0.42, 0.78, 0.2, 'yellow'), ...lampPost(0.42, 0.78, 0.2, 'yellow'),
+  ...lampPost(TX - 0.42, 0.78, 0.2, 'yellow'), ...lampPost(TX + 0.42, 0.78, 0.2, 'yellow'),
   ...fence(0, 0.94, 1.5, true, 'charcoal'),
   ...tree(-0.78, 0.7, 0.95), ...tree(0.8, 0.74, 0.85),
   // two stone steps up to the door
-  ...repeat(2, (i): Op => ['box', 0.34 - i * 0.06, 0.02, 0.1, 0, 0.02 + i * 0.02, 0.7 - i * 0.04, 'stone']),
+  ...repeat(2, (i): Op => ['box', 0.34 - i * 0.06, 0.02, 0.1, TX, 0.02 + i * 0.02, 0.7 - i * 0.04, 'stone']),
 ];
 
 const clockTower: KindDef = {
