@@ -1,5 +1,5 @@
 import {
-  LifeStage, Zone, CitizenState, TICKS_PER_DAY, TICKS_PER_HOUR, VALUE_COUNT, Value, MOTIVE, ARCHETYPES, capacityOf, hash2, tileKey, isCivicId, isUtilityKind, familyOf, wageOf, wageMul, skillNeed,
+  LifeStage, Zone, CitizenState, TICKS_PER_DAY, TICKS_PER_HOUR, VALUE_COUNT, Value, MOTIVE, ARCHETYPES, capacityOf, hash2, tileKey, isCivicId, isUtilityKind, familyOf, OCCUPATIONS, wageOf, wageMul, skillNeed,
   valuesOf, packWeights, archetypeBlend, jitterValues, seededValues, describeValues, type FocusInfo,
 } from '@msimcity/shared';
 import type { Building, Citizen, World } from '../world';
@@ -331,7 +331,8 @@ export class Motivation {
     this.needyAt = now;
     this.needy = [];
     for (const b of this.w.buildings.values()) {
-      if (b.level <= 0 || !essentialJob(b.id) || (this.w.mothballed.size && this.w.mothballed.has(tileKey(b.x, b.y)))) continue;
+      // only workplaces with a roster: a cemetery, a park or a car park is civic but employs nobody (hire() picks a shift)
+      if (b.level <= 0 || !essentialJob(b.id) || !OCCUPATIONS[b.id] || (this.w.mothballed.size && this.w.mothballed.has(tileKey(b.x, b.y)))) continue;
       const cap = capacityOf(b.id, b.level);
       if (cap > 0 && b.occupants < cap / 2) this.needy.push(b);
     }
