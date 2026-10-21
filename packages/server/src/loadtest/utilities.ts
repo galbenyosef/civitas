@@ -24,7 +24,7 @@
 import {
   TICKS_PER_DAY, TICKS_PER_HOUR, KIND_ID, Zone, DEFAULT_TAX, UTIL, UtilState, UTIL_STATE_WORDS, UTIL_RADIUS_OF, UTIL_IMPORT_OF,
   UtilityField, utilityReach, solveNetwork, utilKey, packTile, terrainOf, subFor, tileKey, planStructure, workOf, mulberry32, isMultiTile, FleetKind,
-  type UtilEnv, type UtilNode, type SolveNode,
+  type UtilEnv, type UtilNode, type SolveNode, PLAYER_KEYS, WORLD_KEYS,
 } from '@msimcity/shared';
 import { World, emptyStats, type Building } from '../world';
 import { seedCity } from './cities';
@@ -33,6 +33,7 @@ import { createGame, type Game } from '../game';
 import { snapshotOf, worldFromSnapshot } from '../snapshot';
 import type { Conn } from '../transport';
 import { playF } from './botf';
+import { historyOf } from '../history';
 
 const argv = process.argv.slice(2);
 const get = (n: string, d: number) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? Number(argv[i + 1]) : d; };
@@ -174,6 +175,19 @@ let townA: ReturnType<typeof city>;
   ok(!!info?.power?.node && info.power.node[0] === sub.x && info.power.state === UtilState.Ok, `a building's panel names its substation (${JSON.stringify(info?.power)})`);
   const pinfo = g.utilities.info(gas);
   ok(pinfo?.network?.role === 'plant' && (pinfo.network.output ?? 0) > 0 && pinfo.network.nodes === 1, `the plant's panel: its output and its network (${JSON.stringify(pinfo?.network)})`);
+  // the power charts (a7ba07e8): the hourly solve's figures by owner, sampled into the history rings
+  const ph = g.utilities.hourly.get('ada'), hist = historyOf(w);
+  const ps = hist.playerSample('ada'), at = (k: string) => ps[PLAYER_KEYS.indexOf(k)];
+  ok(!!ph && ph.thermal > 0 && ph.wind === 0 && ph.demand > 0 && ph.homes > 0 && Math.abs(ph.supplied - ph.thermal - ph.imported) < 1e-6, `the solve's power by owner: ${JSON.stringify(ph && { thermal: Math.round(ph.thermal), imported: Math.round(ph.imported), demand: Math.round(ph.demand), homes: ph.homes, dark: ph.dark })}`);
+  ok(at('pwrThermal') > 0 && at('pwrDemand') > 0 && at('pwrSupplied') > 0 && at('pwrDarkPct') >= 0 && at('pwrDarkPct') <= 100, `the charts' player series: ${['pwrThermal', 'pwrImport', 'pwrDemand', 'pwrSupplied', 'pwrDarkPct', 'pwrBrownPct'].map((k) => `${k} ${at(k)}`).join(', ')}`);
+  ok(hist.playerRings('ada')!.read(PLAYER_KEYS.indexOf('pwrThermal'), 0)!.v.some((x) => x > 0), 'and the hourly ring holds them');
+  // a fault darkens the substation's homes: the outage shares rise, yours and the world's
+  const fx = g.utilities.openFault('node', utilKey(sub.x, sub.y), 'ada', sub.x, sub.y);
+  steps(g, 2 * TPH);
+  const dark = hist.playerSample('ada')[PLAYER_KEYS.indexOf('pwrDarkPct')], worldOut = hist.lastWorld[WORLD_KEYS.indexOf('pwrOutPct')];
+  ok(dark > 0 && worldOut > 0, `a fault: ${dark}% of your homes without power, ${worldOut}% of the world's homes in a cut or brownout`);
+  for (let i = 0; i < 12 * TPH && g.utilities.openFaults.some((q) => q.id === fx.id); i++) g.step(); // the contractor (no depot yet)
+  steps(g, TPH);
 }
 {
   // a frontier: the gate's road runs into the charter, so a substation at the road end takes the grid

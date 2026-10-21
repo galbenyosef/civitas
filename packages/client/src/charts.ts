@@ -8,9 +8,9 @@ import type { NetClient } from './net';
  * Small-multiple line charts on canvas, one shared hover time across all of them.
  */
 
-type Tab = 'city' | 'economy' | 'traffic' | 'education';
+type Tab = 'city' | 'economy' | 'traffic' | 'education' | 'power';
 type Range = 'day' | 'week' | 'month' | 'all';
-const TABS: { id: Tab; label: string }[] = [{ id: 'city', label: 'City' }, { id: 'economy', label: 'Economy' }, { id: 'traffic', label: 'Traffic & transport' }, { id: 'education', label: 'Education' }];
+const TABS: { id: Tab; label: string }[] = [{ id: 'city', label: 'City' }, { id: 'economy', label: 'Economy' }, { id: 'traffic', label: 'Traffic & transport' }, { id: 'education', label: 'Education' }, { id: 'power', label: 'Power' }];
 const RANGES: { id: Range; label: string; title: string }[] = [
   { id: 'day', label: 'Day', title: 'The last game day, hour by hour' },
   { id: 'week', label: 'Week', title: 'The last 7 game days, hour by hour' },
@@ -18,7 +18,7 @@ const RANGES: { id: Range; label: string; title: string }[] = [
   { id: 'all', label: 'All', title: 'Everything kept: daily, then weekly once the daily record is full' },
 ];
 
-const C = { green: '#62d2a2', blue: '#5aa8ff', orange: '#ffa14a', violet: '#b48bff', red: '#ff7a7a', teal: '#4dd0e1' };
+const C = { green: '#62d2a2', blue: '#5aa8ff', orange: '#ffa14a', violet: '#b48bff', red: '#ff7a7a', teal: '#4dd0e1', yellow: '#f2cc5b' };
 interface SeriesSpec {
   key: string; label: string; color: string; src?: 'w' | 'p';
   /** a series worked out from two others (net = income - spending) */
@@ -48,6 +48,11 @@ const CHARTS: ChartSpec[] = [
   { id: 'levels', tab: 'education', title: 'Adults by highest qualification', unit: '', series: [W('lvlNone', 'None', C.red), W('lvlPrimary', 'Primary', C.orange), W('lvlSecondary', 'GCSEs', C.teal), W('lvlFurther', 'Level 3', C.blue), W('lvlDegree', 'Degree', C.green), W('lvlPostgrad', 'Postgraduate', C.violet)] },
   { id: 'myschools', tab: 'education', title: 'Your schools', unit: '', series: [P('myPupils', 'Pupils', C.blue), P('myPlaces', 'Places', C.orange)], note: 'School places on your land, and how many are filled' },
   { id: 'mygrads', tab: 'education', title: 'Graduates on your land', unit: '', series: [P('myGrads', 'Graduates', C.green)], note: 'Residents of your parcels with a degree or more' },
+  // power (a7ba07e8): units an hour at each hourly solve, and the homes it left dark or dimmed
+  { id: 'pwrGen', tab: 'power', title: 'Power generated, units an hour', unit: '/h', series: [P('pwrThermal', 'Power stations', C.orange), P('pwrWind', 'Wind', C.teal), P('pwrSolar', 'Solar', C.yellow), P('pwrImport', 'Grid import', C.violet)], note: 'What your networks drew from each source (gas and coal are power stations)' },
+  { id: 'pwrUse', tab: 'power', title: 'Power wanted and supplied, units an hour', unit: '/h', series: [P('pwrDemand', 'Wanted', C.orange), P('pwrSupplied', 'Supplied', C.blue)], note: 'Wanted by the streets your substations reach; a gap is a cut or a brownout' },
+  { id: 'pwrOut', tab: 'power', title: 'Your homes in a power cut or brownout', unit: '%', series: [P('pwrDarkPct', 'Without power', C.red), P('pwrBrownPct', 'Brownout', C.orange)], note: 'Of your homes on a substation\'s streets: a rolling cut, a fault or no supply leaves them dark' },
+  { id: 'pwrWorld', tab: 'power', title: 'Homes in a cut or brownout, whole world', unit: '%', series: [W('pwrOutPct', 'Cut or brownout', C.red)] },
   { id: 'tick', tab: 'traffic', title: 'Server tick time (ms)', unit: 'ms', series: [W('tickMs', 'Average', C.blue), W('tickP95', '95th percentile', C.orange)], note: 'Over the last minute at each sample' },
 ];
 const TAB_OF = new Map(CHARTS.map((c) => [c.id, c.tab]));

@@ -128,6 +128,7 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   let slow = 0, loops = 0;
   // city history for the charts (history.ts): one sample per game hour, pushed to the clients that have the panel open
   const hist = historyOf(world);
+  hist.power = () => utilities.hourly;
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
   const game: Game = {
     world, sim, airports, rail, metro, ferry, harbours, finance, issues, fires, adverts, news, utilities, net, tickWin, steps,
