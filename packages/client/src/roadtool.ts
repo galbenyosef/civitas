@@ -1,6 +1,6 @@
 import { BufferGeometry, Color, Float32BufferAttribute, Group, InstancedMesh, LineBasicMaterial, LineSegments, Matrix4, MeshBasicMaterial, PlaneGeometry, Vector3, type PerspectiveCamera } from 'three';
 import {
-  KIND_NAMES, hasFeature, techFor, isRoad, spendableMoney, planRoad, parallelGap, describeDemolition, ROAD_DRAG_MAX,
+  KIND_NAMES, BRIDGE_STYLE_NAMES, hasFeature, techFor, isRoad, spendableMoney, planRoad, parallelGap, describeDemolition, ROAD_DRAG_MAX,
   type RoadPlan, type RoadEnv, type RoadShape, type RoadTileState,
 } from '@msimcity/shared';
 import type { ClientWorld } from './world';
@@ -163,8 +163,7 @@ export class RoadTool {
     if (!path) return ' · drag to lay road: one corner like track, hold Shift while dragging for a loop; Ctrl/Cmd+Z undoes the last drag';
     const v = this.plan(path);
     let s = v.fresh || v.upgrade ? ` · ${money(v.cost)} · ${plural(v.fresh, 'tile')}${v.unclaimed ? ` · ${v.unclaimed} on unclaimed land` : ''}` : ' · road already';
-    const bridges = v.bridges.filter((b) => b.plan.ok && b.plan.tiles?.length).length;
-    if (bridges) s += ` · ${bridges === 1 ? 'a bridge' : `${bridges} bridges`}`;
+    for (const b of v.bridges) if (b.plan.ok && b.plan.tiles?.length) s += ` · a ${BRIDGE_STYLE_NAMES[b.plan.style!]} of ${plural(b.plan.tiles.length / 3, 'tile')}, ${money(b.plan.cost!)}`;
     if (v.demolish.n) s += ` · ${describeDemolition(v.demolish.kinds)} in the way`;
     if (v.refused) s += ` · ${plural(v.refused, 'tile')} refused: ${v.reason}`;
     if (this.depth) s += ` · block ${this.depth} deep`;

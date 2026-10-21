@@ -710,7 +710,9 @@ export class Net {
       this.toast(c, `Left ${what} as they were: bulldoze first to build there`, 'info');
     }
     const noRoad = zonedAt.filter(([x, y]) => !this.w.hasRoadAccess(x, y)).length;
-    if (noRoad) this.toast(c, `${noRoad} of the lots you zoned ${noRoad === 1 ? 'has' : 'have'} no road beside ${noRoad === 1 ? 'it' : 'them'}: only a building of the same zone next door can grow back into ${noRoad === 1 ? 'it' : 'them'} until a road is laid`, 'info');
+    // a lot with no road on any side waits for the building in front to grow back into it as a deep plot, which only a
+    // building of two storeys or more does (Masonry and power, sim/blocks.ts): say so, or a new player waits for nothing (797ee40a)
+    if (noRoad) this.toast(c, `${noRoad} of the lots you zoned ${noRoad === 1 ? 'has' : 'have'} no road beside ${noRoad === 1 ? 'it' : 'them'}: ${noRoad === 1 ? 'it stays' : 'they stay'} empty until a road reaches ${noRoad === 1 ? 'it' : 'them'}, or the building in front, once it is two storeys (Masonry and power), grows back into the lot behind it`, 'info');
     if (zoned && this.w.tick - c.lastHint > HINT_EVERY && !this.anyYard()) {
       c.lastHint = this.w.tick;
       this.toast(c, "Nothing gets built without builders: place a builders' yard somewhere on the road network", 'info');

@@ -138,3 +138,21 @@ export function cleanStreetName(s: unknown): string {
   if (typeof s !== 'string') return '';
   return s.replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, STREET_NAME_MAX).trim();
 }
+
+/**
+ * How many pairs of streets share a base name while crossing or running alongside each other (lines within `near`
+ * tiles whose stretches overlap): what "no two neighbouring streets alike" forbids. Streets on the same line do not
+ * count (a street broken by a gap keeps its name on both sides).
+ */
+export function streetClashes(list: readonly (StreetRun & { name: string })[], near = 8): number {
+  let n = 0;
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j];
+    if (streetBase(a.name) !== streetBase(b.name)) continue;
+    const meet = a.ns === b.ns
+      ? a.line !== b.line && Math.abs(a.line - b.line) <= near && a.from <= b.to && b.from <= a.to
+      : b.line >= a.from - 1 && b.line <= a.to + 1 && a.line >= b.from - 1 && a.line <= b.to + 1;
+    if (meet) n++;
+  }
+  return n;
+}

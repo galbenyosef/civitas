@@ -1,6 +1,6 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
-  OVERLAY_TEXT, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
+  OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
   terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
@@ -994,7 +994,16 @@ function buyVerdict(r: Rect) {
  * placement verdict, worked out on the loaded chunks), the whole structure under the cursor, else the tile.
  */
 let placeMemo: { key: string; kind: number; at: number; v: PlaceVerdict } | null = null;
-function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: number; verdict?: PlaceVerdict; placed?: Placed; existing?: boolean } {
+/** A zoning tool over land with no road on any side (797ee40a): such a lot builds only when the building in front grows back into it. */
+const NO_ROAD_LOT = 'no road beside this lot: it stays empty until the building in front of it grows back into it (two storeys: Masonry and power) or a road reaches it';
+function zoneNoRoad(x: number, y: number): boolean {
+  if (!(input.tool in ZONE_TOOLS)) return false;
+  const t = world.getTile(x, y);
+  if (t === undefined || isRoad(t) || terrainOf(t) === Terrain.Water) return false;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const n = world.getTile(x + dx, y + dy); if (n === undefined || (isRoad(n) && terrainOf(n) !== Terrain.Water)) return false; }
+  return true;
+}
+function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: number; verdict?: PlaceVerdict; placed?: Placed; existing?: boolean; warn?: boolean } {
   const kind = structureTool(input.tool);
   if (kind) {
     const rot = input.rotationOf(input.tool);
@@ -1023,7 +1032,7 @@ function hoverArea(h: [number, number]): { x: number; y: number; w: number; h: n
     return r ? { x: r.x, y: r.y, w: r.w, h: r.h, verdict: v.ok ? { ok: true } as PlaceVerdict : { ok: false, reason: v.reason ?? '' } } : { x: h[0], y: h[1], w: 1, h: 1, verdict: { ok: false, reason: v.reason ?? '' } };
   }
   const s = world.structureAt(h[0], h[1]);
-  return s ? { x: s.ax, y: s.ay, w: s.w, h: s.h, placed: s, existing: true } : { x: h[0], y: h[1], w: 1, h: 1 };
+  return s ? { x: s.ax, y: s.ay, w: s.w, h: s.h, placed: s, existing: true } : { x: h[0], y: h[1], w: 1, h: 1, warn: zoneNoRoad(h[0], h[1]) };
 }
 /** The server's runway rules on the loaded chunks: snap onto a terminal's runway row, check the strip. */
 let runwayMemo: { key: string; at: number; v: RunwayPlan } | null = null;
@@ -1065,6 +1074,7 @@ function updateStatus() {
     else if (isRoad(t) && (power.overlayOn || structureTool(input.tool))) s += power.roadStatus(x, y);
     if (input.tool === 'road') s += input.roadPath ? roadTool.status(input.roadPath, input.roadShape) : terr === Terrain.Water && !isRoad(t) ? ' · drag a road straight across from a road on the bank to bridge the water' : roadTool.status(null, 'line');
     if (input.tool === 'roundabout' || input.tool === 'flyover') s += junctions.status(input.tool, x, y);
+    if (zoneNoRoad(x, y)) s += ` · ${NO_ROAD_LOT}`;
     if (input.tool === 'runway') {
       const rv = runwayVerdict(input.runwayLine ?? [h]);
       s += input.runwayLine
@@ -1324,8 +1334,8 @@ function frame(now: number) {
     hoverMesh.scale.set(area.w, 1, area.h);
     hoverMesh.position.set(area.x + area.w / 2, 0.04, area.y + area.h / 2);
     const hm = hoverMesh.material as MeshBasicMaterial;
-    hm.color.setHex(area.verdict ? (area.verdict.ok ? 0x62d2a2 : 0xff3b30) : 0xffffff);
-    hm.opacity = area.verdict ? (area.verdict.ok ? 0.45 : 0.6) : 0.22; // a refusal must read as red over grass
+    hm.color.setHex(area.verdict ? (area.verdict.ok ? 0x62d2a2 : 0xff3b30) : area.warn ? 0xffb020 : 0xffffff);
+    hm.opacity = area.verdict ? (area.verdict.ok ? 0.45 : 0.6) : area.warn ? 0.5 : 0.22; // a refusal must read as red over grass; a lot with no road beside it amber
     // outline, door arrow and marks: full strength for a footprint being placed, faint over a structure that stands
     if (area.placed && !input.buyRect) {
       const p = area.placed, ahead = world.getTile(p.frontX, p.frontY);

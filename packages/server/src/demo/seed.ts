@@ -207,6 +207,12 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
     if (typeof r === 'string') { problems.push(`${s.id}: estate ${e.name}: ${r}`); continue; }
     for (const id of ids) { const p = w.parcels.get(id!); if (p) p.name = e.name; }
   }
+  // street names a scenario gives (shared/src/streets.ts), as the owner renames a street from its context menu
+  for (const s of sections) for (const n of s.streets ?? []) {
+    const run = w.streets.streetsAt(n.at[0], n.at[1]).find((r) => r.ns === !!n.ns);
+    if (!run) { problems.push(`${s.id}: no ${n.ns ? 'north-south' : 'east-west'} street through ${at(n.at)} to name ${n.name}`); continue; }
+    w.streets.rename(run, n.name);
+  }
   return problems;
 }
 

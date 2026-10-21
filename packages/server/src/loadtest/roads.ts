@@ -212,11 +212,10 @@ ok(own(11, 0) && own(30, 10), "Ada owns 20×22 east of the Commons");
   const fresh = () => { const w = new World(4242); seedCommons(w, 0); return w; };
   const w1 = fresh(), w2 = fresh();
   let same = 0, total = 0;
-  for (const s of list) {
-    const at = (w: World) => w.streets.streetsAt(s.ns ? s.line : s.from, s.ns ? s.from : s.line).find((q) => q.ns === s.ns);
-    const r1 = at(w1), r2 = at(w2);
-    total++;
-    if (r1 && r2 && w1.streets.nameOf(r1) === w2.streets.nameOf(r2)) same++;
+  for (let y = -11; y <= 10; y++) for (let x = -11; x <= 10; x++) {
+    if (!isRoad(w1.getTile(x, y))) continue;
+    const r1 = w1.streets.streetsAt(x, y), r2 = w2.streets.streetsAt(x, y);
+    for (let i = 0; i < r1.length; i++) { total++; if (r2[i] && w1.streets.nameOf(r1[i]) === w2.streets.nameOf(r2[i])) same++; }
   }
   ok(same === total, `two servers with the same seed: the same names (${same}/${total})`);
   // rename by the owner; a stranger may not
@@ -254,6 +253,31 @@ ok(own(11, 0) && own(30, 10), "Ada owns 20×22 east of the Commons");
   ok(streetName(1, { ns: false, line: 0, from: 0, to: 5 }, { length: 6, joined: 1, homes: 8, shops: 0, works: 0, offices: 0 }).endsWith('Close')
     || /Court|Gardens/.test(streetName(1, { ns: false, line: 0, from: 0, to: 5 }, { length: 6, joined: 1, homes: 8, shops: 0, works: 0, offices: 0 })), 'a short dead end of homes is a close (or court, gardens)');
   ok(/Road|Way/.test(streetName(1, { ns: false, line: 0, from: 0, to: 30 }, { length: 31, joined: 2, homes: 0, shops: 0, works: 0, offices: 0 })), 'a long through route is a road (or way)');
+}
+
+// ---- the Commons on a mix of block sizes (seed.ts COMMONS): blocks of 3, 4, 6 and 8 along their streets, T-junctions
+{
+  const w = new World(4242); seedCommons(w, 0);
+  const road = (x: number, y: number) => isRoad(w.getTile(x, y));
+  const lengths = new Set<number>();
+  for (let y = -10; y <= 9; y++) { let run = 0; for (let x = -10; x <= 10; x++) { if (road(x, y)) { if (run) lengths.add(run); run = 0; } else run++; } }
+  let tees = 0, crosses = 0;
+  for (let y = -10; y <= 9; y++) for (let x = -10; x <= 9; x++) {
+    if (!road(x, y)) continue;
+    const n = [road(x + 1, y), road(x - 1, y), road(x, y + 1), road(x, y - 1)].filter(Boolean).length;
+    if (n === 3) tees++; else if (n === 4) crosses++;
+  }
+  ok([3, 4, 6, 8].every((n) => lengths.has(n)), `the Commons' blocks run ${[...lengths].sort((a, b) => a - b).join(', ')} tiles along their streets`);
+  ok(tees > 2 * crosses, `inside it, ${tees} T-junctions to ${crosses} crossroads`);
+}
+
+// ---- lots one back (797ee40a): no road on any side, and the zoning says why they wait
+{
+  a.send({ t: 'build', tool: 'road', tiles: roadDragPath([12, 1], [20, 1]) });
+  a.send({ t: 'build', tool: 'res', tiles: roadDragPath([13, 2], [19, 2]) });
+  a.send({ t: 'build', tool: 'res', tiles: roadDragPath([13, 3], [19, 3]) });
+  ok(world.hasRoadAccess(15, 2) && !world.hasRoadAccess(15, 3), 'a lot beside the road has access, the one behind it none');
+  ok(/stay empty until a road reaches them, or the building in front, once it is two storeys \(Masonry and power\)/.test(a.toasts().join('|')), `zoning a row behind says why it will wait ("${a.toasts().find((t) => /no road beside/.test(t))}")`);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
