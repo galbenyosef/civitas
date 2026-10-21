@@ -104,6 +104,23 @@ divided road, a drag keeps that road's tile (a crossing, not a downgrade); a ped
 it. A street crossing a one-way street, an avenue crossing a street, and an avenue crossing an avenue all make
 junctions as you would expect.
 
+**One crossing, not two.** A street crossing an avenue is two junction tiles one tile apart (four where avenues cross),
+and they are one junction (`signalSite`): lit or not by the arms of the whole crossing (a street over an avenue is a
+crossroads), one controller whose timing is the crossing's north-west tile's, so the crossing street gets one green
+through both halves; a car going from one of its tiles to another is already through the lights. The server
+(`Traffic.junction`), the lights (`render/signals.ts`), the markings and the yellow box (`render/roads.ts`, one box over
+the crossing's tiles) all read it. A street meeting an avenue from one side makes both carriageways' tiles the
+junction, so a car turning across goes through one junction. Measured: one controller took the avenue grid's give-ups
+from 508 to 436, level with the doubled streets it replaced (docs/traffic-tuning.md "Road classes").
+
+**The pair stays a pair.** One drag lays both rows, the ghost shows both with their arrows, and a street upgraded to
+an avenue asks once, with the cost, about the buildings in the row beside it (R2's rule; one answer for the drag).
+Dragged back along itself the other way, an avenue is road already, not a third carriageway (`planRoad` reads the drag
+the way the traffic goes). Bulldozing a tile of one carriageway, or dragging another class over it, leaves the tile
+of the other a one-way street going its own way (`World.orphanTwin`), so no half-avenue is left; the tiles either side
+of the gap become the ends' junction tiles. The tooltip names the avenue once: the step across the reservation is no
+street of its own.
+
 **The junction flag.** An avenue or motorway tile is a junction tile where a road crosses or joins it from the side
 (not its twin), where it turns a corner, and where it or its twin ends. A junction tile has no direction of its own:
 cars cross the reservation and turn round only there. Streets meet a motorway by slips: a street beside a motorway does

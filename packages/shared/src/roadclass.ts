@@ -155,29 +155,87 @@ export const noFrontageAux = (a: number) => isMotorwayAux(a);
 /**
  * Should divided road tile (x, y) be a junction tile (CLASS_JUNCTION)? Where a crossing road meets it from the side
  * (any road but its own twin, the parallel tile of the same road; a motorway is met only by another motorway, since
- * streets join it by slips and never cross), where it ends or begins (no road ahead or behind, so traffic can turn
- * round), and where its twin ends. A corner of an avenue is therefore a junction. A pure function of the byte and
- * road tiles at most one step away, so the server keeps it by looking at the 3×3 round any road change.
+ * streets join it by slips and never cross), and where one meets its twin so (a street ending at an avenue from one
+ * side makes both carriageways' tiles the junction: one crossing, not two); where it ends or begins (no road ahead or
+ * behind, so traffic can turn round), and where its twin ends. A corner of an avenue is therefore a junction. A pure
+ * function of the byte and road tiles at most two steps away, so the server keeps it by looking at the 5×5 round any
+ * road change (World.refreshRoadFlags).
  */
 export function divJunction(x: number, y: number, road: (x: number, y: number) => boolean, aux: (x: number, y: number) => number): boolean {
   const a = aux(x, y);
   if (!isDividedAux(a)) return false;
-  const d = auxDir(a), [dx, dy] = CDIRS[d], motorway = (a & 7) === RoadCls.Motorway;
-  const twinAt = (tx: number, ty: number) => { const b = aux(tx, ty); return isDividedAux(b) && sameAxis(auxDir(b), d); };
-  for (const s of [1, -1]) {
-    const nx = x - dy * s, ny = y + dx * s;
-    if (!road(nx, ny) || twinAt(nx, ny)) continue;
-    if (motorway && !isMotorwayAux(aux(nx, ny))) continue;
-    return true;
-  }
+  if (crossedDivided(x, y, a, road, aux)) return true;
+  const d = auxDir(a), [dx, dy] = CDIRS[d];
   if (!road(x + dx, y + dy) || !road(x - dx, y - dy)) return true;
   for (const s of [1, -1]) {
-    const nx = x - dy * s, ny = y + dx * s;
-    if (!road(nx, ny) || !twinAt(nx, ny)) continue;
-    const [tx, ty] = CDIRS[auxDir(aux(nx, ny))];
-    if (!road(nx + tx, ny + ty) || !road(nx - tx, ny - ty)) return true;
+    const nx = x - dy * s, ny = y + dx * s, b = aux(nx, ny);
+    if (!road(nx, ny) || !isDividedAux(b) || !sameAxis(auxDir(b), d)) continue;
+    const [tx, ty] = CDIRS[auxDir(b)];
+    if (!road(nx + tx, ny + ty) || !road(nx - tx, ny - ty) || crossedDivided(nx, ny, b, road, aux)) return true;
   }
   return false;
+}
+/** A road other than its twin meets divided tile (x, y) (byte a) from the side (divJunction's first rule). */
+function crossedDivided(x: number, y: number, a: number, road: (x: number, y: number) => boolean, aux: (x: number, y: number) => number): boolean {
+  const d = auxDir(a), [dx, dy] = CDIRS[d], motorway = (a & 7) === RoadCls.Motorway;
+  for (const s of [1, -1]) {
+    const nx = x - dy * s, ny = y + dx * s;
+    if (!road(nx, ny)) continue;
+    const b = aux(nx, ny);
+    if (isDividedAux(b) && sameAxis(auxDir(b), d)) continue; // its twin
+    if (motorway && !isMotorwayAux(b)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** The tile on the left of divided tile (x, y) (byte a): where its twin carriageway runs. */
+export const twinTileOf = (x: number, y: number, a: number): [number, number] => { const [dx, dy] = CDIRS[auxDir(a)]; return [x + dy, y - dx]; };
+
+// ---- one junction of a divided road's crossing ---------------------------------------------------------------------
+
+/** Mask bits N 1, E 2, S 4, W 8 (signals.ts ARM_STEPS) as steps. */
+const SIDES: readonly (readonly [number, number, number])[] = [[1, 0, -1], [2, 1, 0], [4, 0, 1], [8, -1, 0]];
+export interface SignalSite {
+  /** the sides of this tile that are approaches with lights: a road comes in there from outside the junction */
+  arms: number;
+  /** the junction has lights (signalledArms of its arms as one junction) when its owner has the technology */
+  signalled: boolean;
+  /** the tile whose signal timing every tile of the junction takes, so they change together */
+  tx: number; ty: number;
+  /** more than one tile (a divided road's crossing) */
+  group: boolean;
+}
+/**
+ * The lights of road tile (x, y). A divided road's junction tiles that touch (an avenue's two carriageways where a
+ * street crosses, or the four tiles where two avenues cross) are one junction: one controller, its timing the
+ * north-west tile's, signalled by the arms of the whole crossing (a street crossing an avenue is a crossroads), each
+ * tile showing heads on the approaches into it from outside the crossing that traffic can come in by. Any other tile is
+ * its own junction (signalArms), as always. `signalArms`, `signalledArms` come from signals.ts; passed in to keep this
+ * module free of it.
+ */
+export function signalSite(x: number, y: number, road: (x: number, y: number) => boolean, aux: (x: number, y: number) => number,
+  arms: (x: number, y: number) => number, signalled: (mask: number) => boolean): SignalSite {
+  const a = aux(x, y);
+  if (!isDividedAux(a) || !(a & CLASS_JUNCTION)) { const m = arms(x, y); return { arms: m, signalled: signalled(m), tx: x, ty: y, group: false }; }
+  const tiles: [number, number][] = [[x, y]], seen = new Set([`${x},${y}`]);
+  const inGroup = (tx: number, ty: number) => { const b = aux(tx, ty); return road(tx, ty) && isDividedAux(b) && (b & CLASS_JUNCTION) !== 0; };
+  for (let i = 0; i < tiles.length && tiles.length < 9; i++) for (const [, sx, sy] of SIDES) {
+    const nx = tiles[i][0] + sx, ny = tiles[i][1] + sy, k = `${nx},${ny}`;
+    if (seen.has(k) || Math.abs(nx - x) > 2 || Math.abs(ny - y) > 2 || !inGroup(nx, ny)) continue;
+    seen.add(k); tiles.push([nx, ny]);
+  }
+  let sides = 0, mine = 0, tx = x, ty = y;
+  for (const [px, py] of tiles) {
+    if (py < ty || (py === ty && px < tx)) { tx = px; ty = py; }
+    for (const [bit, sx, sy] of SIDES) {
+      const nx = px + sx, ny = py + sy;
+      if (seen.has(`${nx},${ny}`) || !road(nx, ny)) continue;
+      sides |= bit;
+      if (px === x && py === y && carStepOk(aux(nx, ny), a, cdirOf(-sx, -sy))) mine |= bit;
+    }
+  }
+  return { arms: mine, signalled: signalled(sides), tx, ty, group: tiles.length > 1 };
 }
 
 // ---- laying a divided road -----------------------------------------------------------------------------------------

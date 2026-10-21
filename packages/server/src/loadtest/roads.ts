@@ -10,7 +10,7 @@
 import {
   ROAD_COST, PUBLIC_ROAD_COST, BULLDOZE_COST, Zone, Terrain, packTile, isRoad, zoneOf, levelOf, withConstruction, KIND_ID, familyOf, subFor,
   roadDragPath, snapRoadEnd, planRoad, parallelGap, streetBase, streetName, ROAD_UNDO_MS, houseNumber, isJunctionAux,
-  RoadCls, ROAD_CLASS_DEFS, classByte, auxClass, auxDir, auxJunction, oneWayDir, isClassAux, twinRow, carStepOk, edgeLanes, MSG_ROAD_FRONTAGE,
+  RoadCls, ROAD_CLASS_DEFS, signalSite, signalArms, signalledArms, classByte, auxClass, auxDir, auxJunction, oneWayDir, isClassAux, twinRow, carStepOk, edgeLanes, MSG_ROAD_FRONTAGE,
   type RoadEnv, type ServerMsg, type ClientMsg,
 } from '@msimcity/shared';
 import { findRoute } from '../pathfinding';
@@ -339,6 +339,18 @@ ok(own(11, 0) && own(30, 10), "Ada owns 20×22 east of the Commons");
   ok(m0 - me.money === 18 * (avD.cost - ROAD_COST) + 16 * avD.cost, `charged the difference on the 18 tiles of road upgraded and the full price for the 16 new ($${m0 - me.money})`);
   ok(auxJunction(w.auxAt(19, 0)) === false && auxJunction(w.auxAt(12, 0)) && auxJunction(w.auxAt(28, -1)), 'junction flags at the avenue\'s ends; none along it');
   ok(isRoad(w.getTile(20, -1)) && auxClass(w.auxAt(20, -1)) === RoadCls.Avenue, 'the crossing street crosses both carriageways');
+  // one crossing, not two: the street over both carriageways is one junction, one controller, one timing
+  const env2 = (x: number, y: number) => isRoad(w.getTile(x, y));
+  const site0 = signalSite(20, 0, env2, (x, y) => w.auxAt(x, y), (x, y) => signalArms(env2, x, y), signalledArms), site1 = signalSite(20, -1, env2, (x, y) => w.auxAt(x, y), (x, y) => signalArms(env2, x, y), signalledArms);
+  ok(site0.group && site0.signalled && site0.tx === site1.tx && site0.ty === site1.ty, `a street crossing an avenue: one junction of two tiles, lit as a crossroads, one timing (from ${site0.tx},${site0.ty})`);
+  const tj = (x: number, y: number) => (g.sim.traffic as unknown as { junction(x: number, y: number): { signal: boolean; offset: number; period: number } }).junction(x, y);
+  ok(tj(20, 0).signal && tj(20, -1).signal && tj(20, 0).offset === tj(20, -1).offset && tj(20, 0).period === tj(20, -1).period, 'the traffic model lights both tiles on the same phase');
+  // a street ending at the avenue from one side: both carriageways' tiles are the junction
+  c.send({ t: 'build', tool: 'road', tiles: roadDragPath([24, -6], [24, -2]) });
+  ok(auxJunction(w.auxAt(24, -1)) && auxJunction(w.auxAt(24, 0)), 'a T from one side makes both carriageways\' tiles the junction');
+  // dragged back along itself the other way, an avenue is road already (no third carriageway)
+  const back = planRoad(roadDragPath([28, 0], [12, 0]), { tile: (x, y) => w.getTile(x, y), aux: (x, y) => w.auxAt(x, y), kindId: () => 0, land: () => null, claimed: () => true, structure: () => undefined, bridgeLock: null }, { cls: RoadCls.Avenue });
+  ok(back.fresh === 0 && back.cost === 0, `an avenue dragged back along itself the other way: nothing new (${back.fresh} new, $${back.cost})`);
   // routes: never across the reservation mid-block, never against the one-way
   const cost = (x: number, y: number) => g.sim.traffic.cost(x, y);
   const r1 = findRoute(w, 15, 0, 15, -1, cost, 0.4, 20000);
@@ -368,6 +380,9 @@ ok(own(11, 0) && own(30, 10), "Ada owns 20×22 east of the Commons");
   ok(one && m1 - me.money === 9 * (ROAD_CLASS_DEFS[RoadCls.OneWay].cost - ROAD_COST) && isRoad(w.getTile(20, 6)), `a street made one-way in place: the difference charged ($${m1 - me.money}), the junction still a road`);
   c.send({ t: 'undoRoad' });
   ok(auxClass(w.auxAt(16, 6)) === 0 && w.auxAt(20, 6) === before && me.money === m1, `undo: back to a street, refunded ("${c.toast()}")`);
+  // bulldozing one carriageway leaves the other a one-way street, not half an avenue
+  c.send({ t: 'build', tool: 'bulldoze', tiles: [[15, -1]] });
+  ok(!isRoad(w.getTile(15, -1)) && auxClass(w.auxAt(15, 0)) === RoadCls.OneWay && oneWayDir(w.auxAt(15, 0)) === 0, `one carriageway's tile bulldozed: its twin is a one-way street eastbound (class ${auxClass(w.auxAt(15, 0))})`);
   // save and load: every class byte and flag kept
   const bytes: number[] = [];
   for (let y = -11; y <= 10; y++) for (let x = 11; x <= 30; x++) bytes.push(w.auxAt(x, y));
@@ -377,12 +392,13 @@ ok(own(11, 0) && own(30, 10), "Ada owns 20×22 east of the Commons");
   ok(bytes.join() === after.join() && bytes.some((b) => isClassAux(b)), `saved and loaded: every class byte kept (${bytes.filter((b) => isClassAux(b)).length} tiles of classes)`);
   // the address and the tooltip name the class
   w.setTile(16, 7, packTile(Terrain.Grass, false, Zone.Residential, 1));
-  c.send({ t: 'inspect', x: 16, y: -1 });
+  c.send({ t: 'inspect', x: 18, y: -1 });
   const info = c.last('road')?.info;
   ok(info?.cls === RoadCls.Avenue && info.flow === 1, `the road tooltip says avenue, westbound (cls ${info?.cls}, flow ${info?.flow})`);
   ok(/Avenue$/.test(info?.streets?.[0]?.name ?? ''), `an avenue names itself an Avenue ("${info?.streets?.[0]?.name}")`);
-  c.send({ t: 'inspect', x: 16, y: 0 });
+  c.send({ t: 'inspect', x: 18, y: 0 });
   ok(c.last('road')?.info?.streets?.[0]?.name === info?.streets?.[0]?.name, 'both carriageways are one street');
+  ok(info?.streets?.length === 1, `mid-block the tooltip names the avenue once (${info?.streets?.map((q) => q.name).join(' / ')})`);
 }
 {
   // traffic: an avenue carries more than a street, with no car-car overlaps (loadtest/classbench.ts)
