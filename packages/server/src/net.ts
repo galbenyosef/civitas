@@ -760,8 +760,9 @@ export class Net {
       this.w.bump(p.id, 'roads', 1);
       const q = this.w.parcelIdAt(tp.x, tp.y);
       if (q) recount.add(q);
-      // what undo puts back: the lot as it was, empty (a building that came down stays down)
-      undo.tiles.push({ x: tp.x, y: tp.y, was: packTile(terrainOf(t), false, zoneOf(t), 0), sub, aux: this.w.auxAt(tp.x, tp.y) });
+      // what undo puts back: a zoned lot as it was, empty (a building that came down stays down); anything else bare land
+      const lot = isGrowable(zoneOf(t));
+      undo.tiles.push({ x: tp.x, y: tp.y, was: packTile(terrainOf(t), false, lot ? zoneOf(t) : 0, 0), sub: lot ? sub : 0, aux: this.w.auxAt(tp.x, tp.y) });
       undo.refund += tp.cost - (tp.state === 'demolish' && levelOf(t) > 0 ? BULLDOZE_COST : 0);
     }
     for (const b of plan.bridges) {
