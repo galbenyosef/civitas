@@ -261,6 +261,7 @@ ui.roadPicker = new RoadClassPicker({
   locked: (msg) => ui.toast('error', msg),
 });
 ui.roadClassName = () => (roadTool.roadClass ? classDef(roadTool.roadClass).title : '');
+ui.roadClassCost = () => classDef(roadTool.roadClass).cost;
 ui.roadClassChanged();
 
 net.onStatus = (ok) => { ui.setConn(ok); if (!ok) subscribed.clear(); };

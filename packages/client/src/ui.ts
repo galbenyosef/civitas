@@ -204,6 +204,8 @@ export class UI {
   roadPicker: RoadClassPicker | null = null;
   /** the class the road tool lays now, for its button (main.ts keeps it) */
   roadClassName: () => string = () => '';
+  /** what a tile of that class costs, for the button */
+  roadClassCost: () => number = () => ROAD_COST;
   private roadButton() { return $('tools').querySelector<HTMLButtonElement>('button[data-tool="road"]'); }
   /** The road button: select the road tool and open its class picker, or close it again. */
   private roadClick() {
@@ -217,6 +219,8 @@ export class UI {
   roadClassChanged() {
     const em = this.roadButton()?.querySelector('em.tier');
     if (em) { const n = this.roadClassName(); em.textContent = n ? `· ${n}` : ''; }
+    const cost = this.roadButton()?.querySelector('.cost');
+    if (cost) cost.textContent = `$${this.roadClassCost()}`;
     this.roadPicker?.refresh();
   }
 

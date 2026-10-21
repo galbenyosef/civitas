@@ -672,7 +672,7 @@ Stops and dead stops are per 10 tiles (the baseline is 3.86 and 1.78 at 08:00 wi
   green within a few ticks, a common period throws away the ±20% that keeps neighbouring lights from switching
   together, and an actuated green holds the whole box for one approach.
 - **Main-road priority** without lights is within the noise (−30 ± 17 give-ups at 08:00, +4 ± 13 at 17:00). It is
-  off; `Traffic.roadRank` is the hook for R3's road classes to rank the arms before straightness does.
+  off; R3 made `Traffic.roadRank` the road class's rank (see "Road classes" below, where it is measured again).
 
 ### Chosen values and the result
 
@@ -766,7 +766,33 @@ interleaved pairs, +0.6%, within the noise).
 side by side) an avenue; `avenues=1` also widens the middle street (10) into an avenue over the row of lots beside it
 (11), which loses those lots; `oneway=1` makes the inner streets (5, 10, 15) one-way, alternating, the edges two-way.
 
-ROADS_CLASSES_RESULTS
+Six seeds (1-6), 08:00, 1,500 ticks; give-ups are the window's, means over the seeds (the differences paired by seed,
+± one standard error):
+
+| Variant | Lights: give-ups, mainRoad 0 → 1 | Give-way everywhere (`noSignals=1`): give-ups, mainRoad 0 → 1 | Drivers' commute (ticks) | Car-car overlaps |
+| --- | --- | --- | --- | --- |
+| plain (doubled edge streets) | 431 → 445 (+14 ± 32) | 378 → 388 (+10 ± 20) | 97 | 0 |
+| `avenues=2` (edge pairs as avenues) | 508 → 461 (**−46 ± 32**) | 443 → 420 (−23 ± 51) | 103 | 0 |
+| `avenues=1` (and the middle streets widened) | 566 → 571 (+4 ± 7) | | 125 | 0 |
+| `oneway=1` (inner streets one-way) | 621 → 603 (−18 ± 14) | 599 → 609 (+10 ± 24) | 179 | 0 |
+
+Reading it:
+
+- **mainRoad with real hierarchy** (`Traffic.roadRank` is the class rank now) helps a little on the avenue grid with
+  lights (about a tenth fewer give-ups, 1.4 standard errors) and on the one-way grid with lights; with give-way
+  everywhere, and on the plain grid, it is within the noise, as it was before classes. It stays off: the gain is not
+  yet clear of the noise, and R4 (turn lanes and signal timing on avenues) changes what an avenue junction is.
+- **An avenue does not beat the two streets it replaces on this grid.** The doubled edge road was already four lanes
+  (two street tiles); as an avenue it has the same lanes, but each carriageway goes one way, so a lot on the far side
+  is reached by going on to the next junction and crossing, and a car crossing the reservation waits in the first
+  carriageway for a gap in the second (the reservation stores no car). On a grid with junctions every five tiles that
+  costs more than the main-road priority wins. Widening the middle streets (`avenues=1`) loses a row of lots and
+  lengthens commutes. Where an avenue replaces a single street on a through route it carries more (the corridor bench
+  below). R4's turn lanes and wider reservations are where an avenue grid should start to pay.
+- **One-way grids lengthen trips** (drivers' commute 179 ticks against 97): in a 22-tile district most trips are
+  short and the detours dominate; the junctions have fewer conflicting movements but not enough to pay for them.
+- No car-car body overlaps in any run, on any class. The tick cost of a world with classes is higher where the trips
+  are longer (the one-way grid 1.2 ms a tick against 0.85: more cars on the road for longer, and longer searches).
 
 **The corridor bench** (`loadtest/classbench.ts`: a corridor 25 tiles long crossed by a two-way street at its middle,
 cars from both ends and a quarter as many over the crossing street, give-way): at 40 cars an hour each way an avenue

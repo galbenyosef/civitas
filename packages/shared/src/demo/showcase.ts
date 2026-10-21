@@ -217,16 +217,16 @@ const ROAD_LOOK_RECT: DemoRect = [23, 7, 11, 8];
  * streets joining the perimeter road at x = -35. North to south: a pedestrian high street of shops (Cheapside, y -37)
  * that a street ends at; a one-way pair round a block of homes (North and South Parade, y -34 east and y -30 west); an
  * avenue through offices and homes (Kingsway, y -25 west and -24 east), crossed by Market Street (x -48); a motorway from
- * a motorway connection of its own at the west edge (y -22 west and -21 east) that Market Street joins by a slip road and
- * the perimeter road meets at its far end; and a country lane out to the edge (Hedge Lane, y -19).
+ * a motorway connection of its own at the west edge (y -21 west and -20 east) that Market Street joins by a slip road,
+ * running on into the town's street at y -20 at the perimeter road; and a country lane out to the edge (Hedge Lane, y -18).
  */
-export const ROAD_CLASSES_LAND: DemoRect = [-60, -40, 25, 22];
+export const ROAD_CLASSES_LAND: DemoRect = [-60, -40, 25, 23];
 export const ROAD_CLASS_STOPS = {
   pedestrian: { rect: [-57, -39, 19, 4] as DemoRect, inspect: [-52, -37] as DemoXY },
   oneway: { rect: [-58, -35, 23, 7] as DemoRect, inspect: [-44, -34] as DemoXY },
   avenue: { rect: [-58, -29, 23, 7] as DemoRect, inspect: [-48, -25] as DemoXY },
-  motorway: { rect: [-60, -24, 25, 5] as DemoRect, inspect: [-48, -22] as DemoXY },
-  lane: { rect: [-60, -21, 25, 3] as DemoRect, inspect: [-50, -19] as DemoXY },
+  motorway: { rect: [-60, -23, 25, 5] as DemoRect, inspect: [-48, -21] as DemoXY },
+  lane: { rect: [-60, -19, 25, 2] as DemoRect, inspect: [-50, -18] as DemoXY },
 };
 /** the news helicopter's orbit over the drill (shared newsHelis.ts NEWS_HELI.radius), framed from above */
 const NEWS_HELI_RECT: DemoRect = [-33, -35, 9, 9];
@@ -355,9 +355,9 @@ export const SECTIONS: DemoSection[] = [
       { cls: 2, from: [-57, -34], to: [-36, -34] }, // North Parade, one way east
       { cls: 2, from: [-36, -30], to: [-57, -30] }, // South Parade, one way west
       { cls: 3, from: [-36, -25], to: [-57, -25] }, // Kingsway: the drag's row west at y -25, its twin east at -24
-      { cls: 4, from: [-57, -21], to: [-36, -21] }, // the motorway: its row east at y -21, its twin west at -22
-      { cls: 0, from: [-48, -36], to: [-48, -23] }, // Market Street, across both Parades and Kingsway to the motorway's slip
-      { cls: 1, from: [-36, -19], to: [-60, -19] }, // Hedge Lane, out to the edge
+      { cls: 4, from: [-57, -20], to: [-36, -20] }, // the motorway: its row east at y -20 (on into the town's street), its twin west at -21
+      { cls: 0, from: [-48, -36], to: [-48, -22] }, // Market Street, across both Parades and Kingsway to the motorway's slip
+      { cls: 1, from: [-36, -18], to: [-60, -18] }, // Hedge Lane, out to the edge
     ],
     zones: [
       { zone: 'commercial', rect: [-57, -38, 19, 1], level: 2 }, { zone: 'commercial', rect: [-57, -36, 9, 1], level: 2 }, { zone: 'commercial', rect: [-47, -36, 9, 1], level: 2 },
@@ -365,10 +365,10 @@ export const SECTIONS: DemoSection[] = [
       { zone: 'office', rect: [-57, -29, 9, 4] }, { zone: 'office', rect: [-47, -29, 11, 4] },
       { zone: 'residential', rect: [-57, -23, 9, 1], level: 2 }, { zone: 'residential', rect: [-47, -23, 11, 1], level: 2 },
     ],
-    placements: [{ id: 'motorway-west', kind: 'motorway', door: [-58, -21], rot: 1 }],
+    placements: [{ id: 'motorway-west', kind: 'motorway', door: [-58, -20], rot: 1 }],
     streets: [
       { at: [-52, -37], name: 'Cheapside' }, { at: [-44, -34], name: 'North Parade' }, { at: [-44, -30], name: 'South Parade' },
-      { at: [-52, -25], name: 'Kingsway' }, { at: [-52, -24], name: 'Kingsway' }, { at: [-48, -32], ns: true, name: 'Market Street' }, { at: [-50, -19], name: 'Hedge Lane' },
+      { at: [-52, -25], name: 'Kingsway' }, { at: [-52, -24], name: 'Kingsway' }, { at: [-48, -32], ns: true, name: 'Market Street' }, { at: [-50, -18], name: 'Hedge Lane' },
     ],
     spots: [
       { id: 'road-pedestrian', spot: 'road-pedestrian', name: 'Pedestrian street', ...ROAD_CLASS_STOPS.pedestrian },
@@ -863,7 +863,7 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   },
   'road-motorway': {
     title: 'Motorway',
-    what: 'A motorway from its own connection at the west edge: two lanes each way at a quarter faster than a street, with no buildings on it. Market Street joins it by a slip road, giving way, and cannot cross it; it ends at the perimeter road. The homes beside it face Kingsway, not the motorway.',
+    what: 'A motorway from its own connection at the west edge: two lanes each way at a quarter faster than a street, with no buildings on it. Market Street joins it by a slip road, giving way, and cannot cross it; at the perimeter road it runs on into the town\'s street. The homes beside it face Kingsway, not the motorway.',
     how: ROAD_CLASS_DEFS[4].howTo, facts: roadFacts(4),
   },
   'road-pedestrian': {
