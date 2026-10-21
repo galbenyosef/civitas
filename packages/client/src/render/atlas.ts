@@ -14,6 +14,8 @@ import { mulberry32 } from '@msimcity/shared';
 export const CELL = 128, COLS = 8, ROWS = 8;
 export const Cell = {
   Grass: 0, Water: 1, Sand: 2, Pavement: 3, Lot: 4, Dirt: 5, Road: 8,
+  /** the road geometry's surfaces (render/roadGeo.ts): plain asphalt, flat white for paint and stone (tinted by vertex colour), tactile paving, setts */
+  Asphalt: 6, Paint: 7, Tactile: 29, Setts: 30,
   Rwy: 32, RwyTdz: 33, RwyEnd: 34, Shoulder: 35, ShoulderEndFar: 36, ShoulderEndNear: 37,
   TaxiInner: 38, TaxiInnerEnd: 39, TaxiCentre: 40, TaxiCentreEnd: 41, TaxiOuter: 42,
   /** railway track: Rail + mask (N 1, E 2, S 4, W 8), cells 48-63 */
@@ -70,42 +72,61 @@ export function buildAtlas() {
   });
   at(Cell.Dirt, (g) => { g.fillStyle = '#8a6b45'; g.fillRect(0, 0, CELL, CELL); speckle(g, ['#7d5f3c', '#9a7a52', '#6f5434'], 220, 3); });
 
+  // ---- roads. Near the camera roads are geometry (render/roads.ts); these cells are what a road looks like from far
+  // off, drawn to the same plan so the change of detail does not jump: pavements 0.125 wide along closed sides, a
+  // rounded pavement corner where two arms meet, an outer corner rounded about the tile centre, white centre dashes.
+  const ASPHALT = '#3d3f45', PAVE = '#a3a7ae', KERBLINE = '#b9bcc1';
+  const asphaltBase = (g: CanvasRenderingContext2D) => { g.fillStyle = ASPHALT; g.fillRect(0, 0, CELL, CELL); speckle(g, ['#404248', '#393b41'], 80, 3); };
+  at(Cell.Asphalt, asphaltBase);
+  at(Cell.Paint, (g) => { g.fillStyle = '#ffffff'; g.fillRect(0, 0, CELL, CELL); });
+  at(Cell.Tactile, (g) => {
+    g.fillStyle = '#f0f0ec'; g.fillRect(0, 0, CELL, CELL);
+    g.fillStyle = 'rgba(0,0,0,0.16)';
+    for (let y = 4; y < CELL; y += 8) for (let x = 4; x < CELL; x += 8) { g.beginPath(); g.arc(x, y, 2.2, 0, Math.PI * 2); g.fill(); }
+  });
+  at(Cell.Setts, (g) => {
+    g.fillStyle = '#8a8379'; g.fillRect(0, 0, CELL, CELL);
+    g.fillStyle = 'rgba(0,0,0,0.13)';
+    for (let y = 0; y < CELL; y += 6) for (let x = (y / 6) % 2 ? 3 : 0; x < CELL; x += 6) g.fillRect(x + rand(), y + rand(), 1.2, 5);
+  });
+  const SW = 16, C = CELL / 2 - SW; // pavement width; half the carriageway (from the centre)
   for (let mask = 0; mask < 16; mask++) at(Cell.Road + mask, (g) => {
-    g.fillStyle = '#3d3f45'; g.fillRect(0, 0, CELL, CELL);
-    speckle(g, ['#404248', '#393b41'], 80, 3);
+    asphaltBase(g);
     const open = (b: number) => (mask & b) !== 0;
-    const arms = [N, E, S, W].filter(open).length;
-    // sidewalks along closed edges
-    const sw = 16;
-    g.fillStyle = '#a3a7ae';
-    if (!open(N)) g.fillRect(0, 0, CELL, sw);
-    if (!open(S)) g.fillRect(0, CELL - sw, CELL, sw);
-    if (!open(W)) g.fillRect(0, 0, sw, CELL);
-    if (!open(E)) g.fillRect(CELL - sw, 0, sw, CELL);
-    // where an arm is open, continue the sidewalk strips of the perpendicular closed edges... already handled by the strips above
-    // curb line
-    g.strokeStyle = '#7f838a'; g.lineWidth = 2;
-    if (!open(N)) { g.beginPath(); g.moveTo(0, sw); g.lineTo(CELL, sw); g.stroke(); }
-    if (!open(S)) { g.beginPath(); g.moveTo(0, CELL - sw); g.lineTo(CELL, CELL - sw); g.stroke(); }
-    if (!open(W)) { g.beginPath(); g.moveTo(sw, 0); g.lineTo(sw, CELL); g.stroke(); }
-    if (!open(E)) { g.beginPath(); g.moveTo(CELL - sw, 0); g.lineTo(CELL - sw, CELL); g.stroke(); }
-    // dashed centre line on straights, crosswalks on junctions
-    g.strokeStyle = '#e3c75a'; g.lineWidth = 4; g.setLineDash([18, 14]);
-    if (mask === (N | S)) { g.beginPath(); g.moveTo(CELL / 2, 0); g.lineTo(CELL / 2, CELL); g.stroke(); }
-    if (mask === (E | W)) { g.beginPath(); g.moveTo(0, CELL / 2); g.lineTo(CELL, CELL / 2); g.stroke(); }
-    g.setLineDash([]);
-    if (arms >= 3) {
-      g.fillStyle = 'rgba(255,255,255,0.85)';
-      const bars = (horizontal: boolean, pos: number) => {
-        for (let i = 0; i < 6; i++) {
-          const a = sw + 6 + i * 16;
-          if (horizontal) g.fillRect(a, pos, 9, 12); else g.fillRect(pos, a, 12, 9);
-        }
-      };
-      if (open(N)) bars(true, 4);
-      if (open(S)) bars(true, CELL - 16);
-      if (open(W)) bars(false, 4);
-      if (open(E)) bars(false, CELL - 16);
+    // each quarter as render/roadGeo.ts quarterShape: corners (x, y) of the cell, signs out from the centre
+    g.fillStyle = PAVE; g.strokeStyle = KERBLINE; g.lineWidth = 2.5;
+    for (const [sx, sy, hb, vb] of [[1, -1, E, N], [1, 1, E, S], [-1, 1, W, S], [-1, -1, W, N]]) {
+      const h = open(hb), v = open(vb), X = (a: number) => CELL / 2 + sx * a, Y = (b: number) => CELL / 2 + sy * b;
+      const half = CELL / 2;
+      g.beginPath();
+      if (h && v) { g.moveTo(X(half), Y(half)); g.arc(X(half), Y(half), SW, 0, Math.PI * 2); g.fill(); continue; }
+      if (v) { g.fillRect(Math.min(X(C), X(half)), Math.min(Y(0), Y(half)), SW, half); continue; }
+      if (h) { g.fillRect(Math.min(X(0), X(half)), Math.min(Y(C), Y(half)), half, SW); continue; }
+      // outer corner: everything in the quarter beyond a circle of radius C about the centre
+      g.save(); g.beginPath(); g.rect(Math.min(X(0), X(half)), Math.min(Y(0), Y(half)), half, half); g.clip();
+      g.beginPath(); g.rect(0, 0, CELL, CELL); g.arc(CELL / 2, CELL / 2, C, 0, Math.PI * 2, true); g.fill('evenodd');
+      g.restore();
+    }
+    // the kerb's edge, as a light line where pavement meets carriageway
+    g.save(); g.beginPath(); g.rect(0, 0, CELL, CELL); g.clip();
+    for (const [sx, sy, hb, vb] of [[1, -1, E, N], [1, 1, E, S], [-1, 1, W, S], [-1, -1, W, N]]) {
+      const h = open(hb), v = open(vb), X = (a: number) => CELL / 2 + sx * a, Y = (b: number) => CELL / 2 + sy * b, half = CELL / 2;
+      g.beginPath();
+      if (h && v) g.arc(X(half), Y(half), SW, 0, Math.PI * 2);
+      else if (v) { g.moveTo(X(C), Y(0)); g.lineTo(X(C), Y(half)); }
+      else if (h) { g.moveTo(X(0), Y(C)); g.lineTo(X(half), Y(C)); }
+      else { const mid = Math.atan2(sy, sx); g.arc(CELL / 2, CELL / 2, C, mid - Math.PI / 4, mid + Math.PI / 4); }
+      g.stroke();
+    }
+    g.restore();
+    // white centre dashes on straights and round bends
+    g.fillStyle = 'rgba(242,242,238,0.95)';
+    if (mask === (N | S)) for (const y of [32, 96]) g.fillRect(CELL / 2 - 1.5, y - 11, 3, 22);
+    else if (mask === (E | W)) for (const x of [32, 96]) g.fillRect(x - 11, CELL / 2 - 1.5, 22, 3);
+    else if ([N | E, E | S, S | W, W | N].includes(mask)) {
+      const kx = mask & E ? CELL : 0, ky = mask & S ? CELL : 0;
+      g.strokeStyle = 'rgba(242,242,238,0.95)'; g.lineWidth = 3; g.setLineDash([18, 22]); g.lineDashOffset = -8;
+      g.beginPath(); g.arc(kx, ky, CELL / 2, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
     }
   });
 

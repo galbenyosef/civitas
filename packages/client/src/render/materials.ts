@@ -1,4 +1,4 @@
-import { MeshLambertMaterial, Texture, DataTexture, RedFormat, UnsignedByteType, NearestFilter, RepeatWrapping } from 'three';
+import { MeshLambertMaterial, Texture, DataTexture, RedFormat, RGBAFormat, UnsignedByteType, NearestFilter, RepeatWrapping } from 'three';
 
 /** Side of the data overlay's map (render/overlayMap.ts): one texel per tile, wrapped, so the streamed window (well under this) never needs re-centring. */
 export const OVL_SIZE = 1024;
@@ -16,6 +16,19 @@ export const overlayTexture = (() => {
  */
 export const powerTexture = (() => {
   const t = new DataTexture(new Uint8Array(OVL_SIZE * OVL_SIZE), OVL_SIZE, OVL_SIZE, RedFormat, UnsignedByteType);
+  t.magFilter = t.minFilter = NearestFilter; t.wrapS = t.wrapT = RepeatWrapping; t.generateMipmaps = false; t.needsUpdate = true;
+  return t;
+})();
+
+/**
+ * Street lamps (render/roads.ts): one texel per tile, wrapped like the overlay's. R: the darkness at which the lamp
+ * comes on (0: no lamp on this tile); G, B: where in the tile its light falls (under the head, out over the road);
+ * A: flags, bit 0 dead, bit 1 sputtering, bit 2 a white LED lantern (else sodium-warm), bits 3-7 its brightness.
+ * The ground and road shaders pool light from the lamps of the nine tiles round each fragment; the lamp heads glow
+ * from the same bytes, so a lamp and its pool always agree.
+ */
+export const lampTexture = (() => {
+  const t = new DataTexture(new Uint8Array(OVL_SIZE * OVL_SIZE * 4), OVL_SIZE, OVL_SIZE, RGBAFormat, UnsignedByteType);
   t.magFilter = t.minFilter = NearestFilter; t.wrapS = t.wrapT = RepeatWrapping; t.generateMipmaps = false; t.needsUpdate = true;
   return t;
 })();
@@ -44,6 +57,8 @@ export const sceneUniforms = {
   uPowMap: { value: powerTexture as Texture },
   /** what the congestion path paints on the roads: 0 traffic, 1 the power overlay's states (utilities.ts) */
   uHeatMode: { value: 0 },
+  /** the street lamps' map (lampTexture) */
+  uLampMap: { value: lampTexture as Texture },
 };
 export const nightUniform = sceneUniforms.uNight;
 
@@ -615,43 +630,38 @@ uniform float uTime;
 uniform float uHeat;
 uniform float uHeatMode;
 uniform float uUnder;
+uniform sampler2D uLampMap;
 varying float vRoad;
 varying float vHeat;
 varying vec3 vWorldP;
 ${HASH}
 ${POW_PARS}
-// Light pool from the lamp (if any) standing on road tile \`tile\`.
+// Light pool at p from the street lamp (if any) of tile \`tile\` (lampTexture: where it falls, when it comes on, its flags).
 vec3 mscLamp(vec2 tile, vec2 p) {
-  float h = mscHash(tile * 0.731 + 2.3);
-  if (h > 0.3) return vec3(0.0);
-  float h2 = mscHash(tile + 4.1), h3 = mscHash(tile + 6.7), h4 = mscHash(tile + 8.9), h5 = mscHash(tile + 10.3);
-  vec2 c = tile + 0.5;
-  if (h2 < 0.5) c.x += (h3 < 0.5 ? -0.34 : 0.34); else c.y += (h3 < 0.5 ? -0.34 : 0.34);
-  float d = distance(p, c);
+  vec4 L = texture2D(uLampMap, (mod(tile, ${OVL_SIZE}.0) + 0.5) / ${OVL_SIZE}.0);
+  if (L.r < 0.002) return vec3(0.0);
+  float d = distance(p, tile + L.gb);
   float pool = smoothstep(1.05, 0.0, d);
   pool *= pool;
-  float onThr = 0.1 + 0.55 * h4;
-  float on = smoothstep(onThr - 0.04, onThr + 0.04, uNight);
-  if (h5 < 0.05) on = 0.0; // dead lamp
-  else if (h5 < 0.11) on *= 0.35 + 0.65 * step(0.2, sin(uTime * 19.0 + h3 * 50.0) * sin(uTime * 6.3 + h4 * 20.0)); // sputtering
+  float f = floor(L.a * 255.0 + 0.5);
+  float dead = mod(f, 2.0), sput = mod(floor(f / 2.0), 2.0), led = mod(floor(f / 4.0), 2.0), bright = floor(f / 8.0) / 31.0;
+  float on = smoothstep(L.r - 0.04, L.r + 0.04, uNight);
+  if (dead > 0.5) on = 0.0;
+  else if (sput > 0.5) on *= 0.35 + 0.65 * step(0.2, sin(uTime * 19.0 + L.g * 50.0) * sin(uTime * 6.3 + L.b * 20.0)); // sputtering
   float pl = mscPowAt(tile); // power (utilities.ts): out in a cut, dimmed and flickering in a brownout
   if (pl > 0.5) on = 0.0;
-  else if (pl > 0.004) on *= 1.0 - pl * (0.8 + 0.2 * sin(uTime * 12.0 + h3 * 30.0));
-  return vec3(1.0, 0.78, 0.45) * pool * on * (0.7 + 0.6 * h3);
+  else if (pl > 0.004) on *= 1.0 - pl * (0.8 + 0.2 * sin(uTime * 12.0 + L.g * 30.0));
+  vec3 c = led > 0.5 ? vec3(0.88, 0.92, 1.0) : vec3(1.0, 0.78, 0.45);
+  return c * pool * on * (0.75 + 0.6 * bright);
 }`;
 
-/** aRoad packs: 16 = this tile is road; bits 0-3 = N E S W neighbour is road. */
+/** aRoad: 16 + the N E S W road bits on a road tile; 1 or more on a tile with a road among its eight neighbours. */
 const LAMPS = /* glsl */ `
 if (vRoad > 0.5 && uNight > 0.001) {
-  float bits = floor(vRoad + 0.5);
   vec2 tile = floor(vWorldP.xz);
   vec2 p = vWorldP.xz;
   vec3 lamp = vec3(0.0);
-  if (bits >= 16.0) { lamp += mscLamp(tile, p); bits -= 16.0; }
-  if (mod(bits, 2.0) >= 1.0) lamp += mscLamp(tile + vec2(0.0, -1.0), p);
-  if (mod(bits, 4.0) >= 2.0) lamp += mscLamp(tile + vec2(1.0, 0.0), p);
-  if (mod(bits, 8.0) >= 4.0) lamp += mscLamp(tile + vec2(0.0, 1.0), p);
-  if (bits >= 8.0) lamp += mscLamp(tile + vec2(-1.0, 0.0), p);
+  for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) lamp += mscLamp(tile + vec2(float(dx), float(dz)), p);
   totalEmissiveRadiance += lamp * min(1.0, uNight * 1.5) * diffuseColor.rgb * 2.0;
 }`;
 
@@ -710,9 +720,13 @@ if (uHeat > 0.5 && vRoad >= 16.0 && uHeatMode > 0.5) {
   gl_FragColor.rgb = mix(gl_FragColor.rgb, heat, 0.55 + 0.35 * vHeat);
 }`;
 
-/** Textured, vertex-tinted ground with street-lamp pools along roads after dark. */
-export function groundMaterial(atlas: Texture) {
+/**
+ * Textured, vertex-tinted ground with street-lamp pools along roads after dark. `road`: the variant for the road
+ * geometry (render/roads.ts), pulled a touch towards the camera so it wins over the ground quads it lies on.
+ */
+export function groundMaterial(atlas: Texture, road = false) {
   const m = new MeshLambertMaterial({ map: atlas, vertexColors: true });
+  if (road) { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2; }
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, sceneUniforms);
     shader.vertexShader = shader.vertexShader
@@ -725,6 +739,36 @@ export function groundMaterial(atlas: Texture) {
       .replace('#include <dithering_fragment>', '#include <dithering_fragment>' + HEAT + GROUND_OVL + GROUND_UNDER);
   };
   m.customProgramCacheKey = () => 'msc-ground';
+  return m;
+}
+
+/**
+ * Street lamp lanterns (render/roads.ts), instanced: each glows after dark from its lamp's own bytes, as its pool on
+ * the road does (lampTexture). aLamp: switch-on darkness, flags (as the texture's A byte), the lamp's tile x and z.
+ */
+export function lanternMaterial() {
+  const m = new MeshLambertMaterial({ vertexColors: true });
+  m.onBeforeCompile = (shader) => {
+    for (const k of ['uNight', 'uTime', 'uPow', 'uPowMap'] as const) shader.uniforms[k] = sceneUniforms[k];
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 aLamp;\nvarying vec4 vLamp;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLamp = aLamp;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uNight;\nuniform float uTime;\nvarying vec4 vLamp;\n' + POW_PARS)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  {
+    float f = vLamp.y;
+    float dead = mod(f, 2.0), sput = mod(floor(f / 2.0), 2.0), led = mod(floor(f / 4.0), 2.0), bright = floor(f / 8.0) / 31.0;
+    float on = smoothstep(vLamp.x - 0.04, vLamp.x + 0.04, uNight);
+    if (dead > 0.5) on = 0.0;
+    else if (sput > 0.5) on *= 0.35 + 0.65 * step(0.2, sin(uTime * 19.0 + vLamp.z * 50.0) * sin(uTime * 6.3 + vLamp.w * 20.0));
+    float pl = mscPowAt(vLamp.zw);
+    if (pl > 0.5) on = 0.0; else if (pl > 0.004) on *= 1.0 - pl;
+    vec3 c = led > 0.5 ? vec3(0.85, 0.9, 1.0) : vec3(1.0, 0.72, 0.38);
+    totalEmissiveRadiance += c * on * (1.6 + 1.2 * bright);
+  }`);
+  };
+  m.customProgramCacheKey = () => 'msc-lantern';
   return m;
 }
 

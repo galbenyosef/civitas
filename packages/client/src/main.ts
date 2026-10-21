@@ -27,6 +27,7 @@ import { RailClient, trainHtml, setPlatformCrowd } from './rail';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
 import { BridgeView } from './render/bridges';
+import { RoadLayer } from './render/roads';
 import { LandmarkMotion } from './render/landmarks';
 import { UndergroundView } from './render/underground';
 import { FootprintOverlay } from './render/footprint';
@@ -202,16 +203,19 @@ const junctions = new JunctionView(world); scene.add(junctions.group); // rounda
 // utilities (utilities.ts, docs/utilities.md): reach from the tiles, the hourly node states, blackouts, the power overlay, pylons
 const power = new PowerClient(world, (k) => views.get(k)); scene.add(power.group);
 const bridges = new BridgeView(world); scene.add(bridges.group); // bridge decks, piers, towers and ramps (render/bridges.ts)
-citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz); // cars and walkers on a flyover deck or a bridge and their ramps
+// roads near the camera as geometry, their furniture and the street lamps' map (render/roads.ts)
+const roads = new RoadLayer(atlas); scene.add(roads.group, roads.furniture);
+ChunkView.onTint = (cx, cy, heat) => roads.setHeat(cx, cy, heat);
+citizens.roadY = (x, z, hx, hz) => junctions.roadY(x, z, hx, hz) || bridges.roadY(x, z, hx, hz) || roads.walkY(x, z); // cars and walkers on a flyover deck or a bridge and their ramps, walkers on a kerbed pavement
 const landmarks = new LandmarkMotion(); scene.add(landmarks.group); // the London Eye turning, Big Ben's dials (render/landmarks.ts)
 landmarks.auxAt = (x, y) => world.auxAt(x, y); // a Tower Bridge span running on into the next chunk
 landmarks.bargeHidden = (seed, day) => boats.liftBooked(seed, day); // real boats booked into a span's lifts replace its decorative barge
 // the underground view (N, the "underground" chip): tunnels and platforms from the under layer, street grates, the platform preview (render/underground.ts)
 const underground = new UndergroundView(world);
 scene.add(underground.group);
-underground.surface = [citizens.group, parked.group, parks.group, junctions.group, bridges.group, lights.group, landmarks.group, trains.group, airfield.group, helis.group, boats.group, buildings.mesh];
+underground.surface = [citizens.group, parked.group, parks.group, junctions.group, bridges.group, lights.group, landmarks.group, trains.group, airfield.group, helis.group, boats.group, buildings.mesh, roads.furniture];
 underground.buildings = buildings.mesh;
-underground.shaderMaterials = [groundMaterial, buildings.mesh.material as Material];
+underground.shaderMaterials = [groundMaterial, buildings.mesh.material as Material, roads.material];
 const airportParam = params.get('airport')?.split(',').map(Number);
 if (airportParam && airportParam.length >= 3 && airportParam.every((n) => Number.isFinite(n))) {
   planes.setPreviews([{ id: 1, x: airportParam[0], y: airportParam[1], dir: (airportParam[2] & 3) as 0 | 1 | 2 | 3, gates: airportParam[3] || 3, runwayLen: 12, flightsPerHour: airportParam[4] || 2 }]);
@@ -286,9 +290,9 @@ net.on('aux', (m) => world.applyAux(m.u));
 net.on('sub', (m) => world.applySub(m.u));
 net.on('under', (m) => world.applyUnder(m.u));
 net.on('tiles', (m) => world.applyTiles(m.u));
-net.on('parcels', (m) => { world.applyParcels(m.parcels, m.removed); lights.invalidate(); refreshPanel(); mapMode.parcelsChanged(); eduDirty = true; });
+net.on('parcels', (m) => { world.applyParcels(m.parcels, m.removed); lights.invalidate(); roads.invalidate(); refreshPanel(); mapMode.parcelsChanged(); eduDirty = true; });
 net.on('players', (m) => {
-  lights.invalidate();
+  lights.invalidate(); roads.invalidate();
   world.applyPlayers(m.players);
   onlineCount = m.players.filter((p) => p.online).length;
   const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger, me.fin); ui.setLocks(me.tech); ui.showTech(me); policies.show(me); adPanel.show(me, onboarding.activeGoal === 'adverts'); finance.show(me); devPanel?.sync(!!me.devUnlimited); }
@@ -557,6 +561,7 @@ function dropView(key: string) {
   trains.dropChunk(key);
   junctions.dropChunk(key);
   bridges.dropChunk(key);
+  roads.dropChunk(key);
   landmarks.dropChunk(key);
   power.dropChunk(key);
   world.dropChunk(key);
@@ -1264,7 +1269,7 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) { roads.scanChunk(key, c, getTile, auxAt); v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
   }
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (eduDirty && eduHeat.on) { eduHeat.rebuild(world.parcels.values()); eduDirty = false; }
@@ -1349,6 +1354,7 @@ function frame(now: number) {
   const cams = fpv.mode === 'off' ? [rig.camera] : [rig.camera, fpv.camera];
   if (feedCam) cams.push(feedCam);
   buildings.updateLod(cams, lighting.sun); // detail tiers and culling (render/buildings.ts)
+  roads.frame(cams, signalled); // road geometry near the cameras, its furniture, the lamp map (render/roads.ts)
   const overheadOnly = [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group];
   // the feed leaves out what is under a pixel at 160×90 from the helicopter: people, parked cars, signal heads
   tv.render(renderer, scene, [...overheadOnly, citizens.group, parked.group, junctions.group]);
@@ -1357,7 +1363,7 @@ function frame(now: number) {
 requestAnimationFrame(frame);
 
 // debugging hook: inspect client state from the devtools console
-(window as any).msc = { power, tv, tvDebug, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, gravesView, openDeceased, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
+(window as any).msc = { power, tv, tvDebug, adPanel, moment, fireworks, ranks, mapMode, metroMeta, ferryMeta, viewString: () => rig.shotString(lighting.mode === 'fixed' ? lighting.fixedHour : undefined), underground, setUnder, lines, world, rig, input, net, views, lighting, buildings, landmarks, bridges, citizens, lights, roads, liveTick, liveTickF, planes, helis, boats, boatMock, airfield, trains, rail, renderer, scene, streamChunks, streamWindow, subscribed, ui, selectCitizen, selectVehicle, vehicle: () => selectedVehicle, setHeat, routeView, routeInfo: () => routeInfo, setEduHeat, fpv, issuesView, firesView, gravesView, openDeceased, problems, overlayMenu, overlayMap, state: () => ({ selectedParcel, panelShown, selectedCitizen, following, subscribed: subscribed.size }) };
 void localIndex;
 
 // ---- boot -------------------------------------------------------------------------------------------
