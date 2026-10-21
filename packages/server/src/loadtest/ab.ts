@@ -96,7 +96,7 @@ export interface AbResult {
    * the share of car-ticks standing (speed under STOP_V), and of those not the first car at a junction's or a level
    * crossing's stop line (standing in the stream).
    */
-  smooth: { tiles: number; stops: number; stopsPer10: number; deadStops: number; jerk: number; harshPct: number; standPct: number; standStreamPct: number; carTicks: number };
+  smooth: { stopsAt: Record<string, number>; tiles: number; stops: number; stopsPer10: number; deadStops: number; jerk: number; harshPct: number; standPct: number; standStreamPct: number; carTicks: number };
   mobile: { onRoadMean: number; bikesCarOverlaps: number; bikePedContacts: number; fleetPedContacts: number; fleetPedWhere: Record<string, number>; taxi: Record<string, number>; food: Record<string, number>; bins: Record<string, number>; parcels: Record<string, number>; foodMinutes: number[] };
 }
 
@@ -220,6 +220,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
   // smoothness: each road vehicle's position and speed last tick, and whether it has moved off since its last stop
   let prevPos = new Map<number, { x: number; y: number; v: number; armed: boolean }>();
   let curPos = new Map<number, { x: number; y: number; v: number; armed: boolean }>();
+  const stopsAt: Record<string, number> = {};
   let smTiles = 0, smStops = 0, smDead = 0, smJerk = 0, smJerkN = 0, smHarsh = 0, smStand = 0, smStream = 0, smN = 0;
   const smooth = (m: Mover) => {
     const p = prevPos.get(m.id);
@@ -231,7 +232,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     if (v < STOP_V) {
       smStand++;
       if (!tr.headAtStopLine(m)) smStream++;
-      if (p.armed) { smStops++; armed = false; if (p.v >= DRIVE_SPEED / 2) smDead++; }
+      if (p.armed) { smStops++; armed = false; if (p.v >= DRIVE_SPEED / 2) smDead++; bump(stopsAt, tr.standing(m)); }
     }
     if (p.v >= 0) { const dv = Math.abs(v - p.v); smJerk += dv; smJerkN++; if (dv > DRIVE_SPEED / 5) smHarsh++; }
     curPos.set(m.id, { x: m.x, y: m.y, v, armed });
@@ -389,7 +390,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     carsMean: carsSum / opts.ticks, carsPeak, busesMean: busesSum / opts.ticks, busCarPerTick: busCar / opts.ticks, transit: transitDelta,
     legs: { n: samples.length, ratioMean: avg(ratios), ratioP50: ratios[Math.floor(ratios.length * 0.5)] ?? 0, ratioP90: ratios[Math.floor(ratios.length * 0.9)] ?? 0, lateShare: samples.length ? late / samples.length : 0, ticksMean: avg(samples.map(([e]) => e)) },
     smooth: {
-      tiles: smTiles, stops: smStops, stopsPer10: smTiles ? (10 * smStops) / smTiles : 0, deadStops: smDead,
+      stopsAt, tiles: smTiles, stops: smStops, stopsPer10: smTiles ? (10 * smStops) / smTiles : 0, deadStops: smDead,
       jerk: smJerkN ? smJerk / smJerkN : 0, harshPct: smJerkN ? (100 * smHarsh) / smJerkN : 0,
       standPct: smN ? (100 * smStand) / smN : 0, standStreamPct: smN ? (100 * smStream) / smN : 0, carTicks: smN,
     },
@@ -418,7 +419,7 @@ export function summary(r: AbResult): string {
     `  trips ${r.trips}, mean ${f1(r.tripMean)} ticks; planned walk ${r.modes.walk} drive ${r.modes.drive} transit ${r.modes.transit} (${f1(100 * r.modes.transitShare)}% transit); by transit ${r.transitTrips}, mean ${f1(r.transitTripMean)} ticks`,
     `  cars on the road ${f1(r.carsMean)} mean, ${r.carsPeak} peak; buses ${f1(r.busesMean)}; bus-car overlaps ${f3(r.busCarPerTick)}/tick; transit ${JSON.stringify(r.transit)}`,
     `  mobile jobs: ${f1(r.mobile.onRoadMean)} fleet vehicles on the road; taxi ${JSON.stringify(r.mobile.taxi)}; food ${JSON.stringify(r.mobile.food)}; bins ${JSON.stringify(r.mobile.bins)}; parcels ${JSON.stringify(r.mobile.parcels)}; bike-car overlaps ${r.mobile.bikesCarOverlaps}, bike-ped contacts ${r.mobile.bikePedContacts}, fleet-ped contacts ${r.mobile.fleetPedContacts} ${JSON.stringify(r.mobile.fleetPedWhere)}`,
-    `  smooth: ${f1(r.smooth.tiles)} tiles, ${r.smooth.stops} stops (${f3(r.smooth.stopsPer10)} per 10 tiles, ${r.smooth.deadStops} dead), jerk ${f3(r.smooth.jerk)} tiles/tick (harsh ${f1(r.smooth.harshPct)}%), standing ${f1(r.smooth.standPct)}% (in the stream ${f1(r.smooth.standStreamPct)}%)`,
+    `  smooth: ${f1(r.smooth.tiles)} tiles, ${r.smooth.stops} stops (${f3(r.smooth.stopsPer10)} per 10 tiles, ${r.smooth.deadStops} dead), jerk ${f3(r.smooth.jerk)} tiles/tick (harsh ${f1(r.smooth.harshPct)}%), standing ${f1(r.smooth.standPct)}% (in the stream ${f1(r.smooth.standStreamPct)}%); stops at ${JSON.stringify(r.smooth.stopsAt)}`,
     `  sim ${r.simMsPerTick.toFixed(3)} ms/tick over the window; wall ${f1(r.wallSec)} s`,
   ].join('\n');
 }

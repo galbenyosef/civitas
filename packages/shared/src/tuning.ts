@@ -180,6 +180,64 @@ export const TRAFFIC_TUNING = {
   ringSlow: 1,
   /** Places round the ring (lane capacity × 8) a car coming on must leave free, so the ring never fills and locks. */
   ringSpare: 4,
+
+  // ---- smooth flow (docs/traffic-tuning.md "Smooth flow"). Full speed is DRIVE_SPEED, 0.5 tiles a tick -----------
+  /**
+   * 1: car following with a speed per mover (Mover.v): a driver speeds up by at most `accel` a tick and slows for the
+   * car ahead, a turn, a bus halt and (with lookAhead) a stop line it will not be let over, braking at `brake`, so it
+   * eases up to a queue instead of stopping dead. The old rule (0) moves min(full speed, gap to the car ahead) each
+   * tick: from a stop to full speed and back in one tick. The gap, MIN_GAP, the stop lines, the conflict table and the
+   * body guard are hard limits either way.
+   */
+  follow: 0,
+  /** Acceleration, tiles per tick per tick, before the driver's own style (accelVar) and heavyAccel. */
+  accel: 0.15,
+  /** Each driver's acceleration is accel × (1 ± accelVar), from a hash of their id (the same driver every trip). */
+  accelVar: 0.25,
+  /** Trucks and buses accelerate at this share of a car's rate. */
+  heavyAccel: 0.6,
+  /** Comfortable braking, tiles per tick per tick: what a driver plans with (harder only when the gap closes unexpectedly). */
+  brake: 0.2,
+  /** Time headway, ticks: a driver keeps headway × its speed on top of MIN_GAP to a car ahead that is braking at `brake` too. */
+  headway: 0.5,
+  /**
+   * With follow, a driver standing behind a car that is standing too waits until there is this much room (tiles, beyond
+   * MIN_GAP) before moving up, or until that car moves off: a queue closes up in fewer, longer moves rather than
+   * shuffling forward one car length every time the front moves (0: always move up at once).
+   */
+  startGap: 0,
+  /**
+   * 1: look ahead to the stop line. Within braking distance of it, a driver asks the entry rules whether it would be
+   * let in on arrival (the light as it will be then: phases are a pure function of the tick) and brakes for the line
+   * only if not, so it glides to a red and rolls on into a green that comes before it gets there.
+   */
+  lookAhead: 0,
+  /**
+   * 1: platoons through junctions. A car following one that went in by the same approach and the same exit, moving and
+   * within platoonGap tiles, may go in behind it before it has left the box (the following gap keeps them apart);
+   * every other entry rule still applies (the light, crossings, conflicting movements).
+   */
+  platoon: 0,
+  platoonGap: 0.6,
+  /** the leader of a platoon must be moving at least this fast (tiles per tick) */
+  platoonV: 0.1,
+  /**
+   * Main-road priority at junctions without lights: 1 at T-junctions the side road gives way to cars on the through
+   * road (moving, within mainGap tiles of the junction, whose path crosses its own); 2 also at crossroads, where the
+   * straighter road (the longer straight run either side) is the main one. Never at lights or roundabouts.
+   */
+  mainRoad: 0,
+  mainGap: 1.0,
+  /** a side-road driver held this many ticks by main-road traffic goes when the box is clear anyway (no starving) */
+  minorWaitMax: 20,
+  /**
+   * 1: green waves. Every light has the same period (signalPeriod, no ±20%) and an offset of −(x + y) / waveSpeed
+   * ticks, so a car going east or south at waveSpeed meets each light in the same phase as the last (shared with the
+   * client, which draws the same lamps).
+   */
+  greenWave: 0,
+  /** the speed a green wave is timed for, tiles per tick */
+  waveSpeed: 0.3,
 };
 export type TrafficTuning = typeof TRAFFIC_TUNING;
 /** Hard cap on a pedestrian's wait at a signalled crossing: longer than any red. */

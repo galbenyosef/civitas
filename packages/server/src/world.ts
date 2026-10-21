@@ -94,6 +94,8 @@ export interface Mover {
   len: number;                          // vehicle length in tiles
   inDir: number;                        // direction the current lane was entered from (for turn geometry)
   committed: boolean;                   // past the stop line, crossing into the next tile
+  /** lane progress moved last tick: the speed car following starts from (TRAFFIC_TUNING.follow); 0 or absent when it pulls out or a save loads */
+  v?: number;
   priority: boolean;                    // emergency vehicles ignore signals
   /** a fire engine on its way to a fire (sim/fires.ts): it pulls out into its forecourt to wait for a gap, and drives on down the middle of the road when traffic stops it */
   call?: boolean;
