@@ -1273,8 +1273,8 @@ export class Traffic {
     const q = this.laneAt(m.lane);
     if (!q) return null;
     const idx = q.indexOf(m);
-    if (idx > 0 && !m.s1) return q[idx - 1];
-    if (idx > 0) { const l = leaderIn(q, idx, isBike(m), m.s1); if (l) return l; }
+    if (idx > 0 && !this.w.anyRoadClass) return q[idx - 1];
+    if (idx > 0) { const l = leaderIn(q, idx, isBike(m), m.s1 ?? 0) ?? (isBike(m) ? null : leaderIn(q, idx, true)); if (l) return l; } // the car ahead in its own lane (or a bike it follows)
     const n = m.path.length / 2;
     if (m.pi >= n) return null;
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1], bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];

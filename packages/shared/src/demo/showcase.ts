@@ -848,7 +848,7 @@ const roadFacts = (cls: number): [string, string][] => {
 const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   'road-lane': {
     title: 'Country lane',
-    what: 'Hedge Lane runs out to the edge of the land between grass verges: no kerbs, no centre line, no lamps, and cars take it at seven tenths of a street\'s pace. It is the cheapest road there is, and every frontier starts with one from its motorway connection.',
+    what: 'Hedge Lane runs out to the edge of the land between grass verges: no kerbs, no centre line, no lamps, and cars take it at four fifths of a street\'s pace. It is the cheapest road there is, and every frontier starts with one from its motorway connection.',
     how: ROAD_CLASS_DEFS[1].howTo, facts: roadFacts(1),
   },
   'road-oneway': {

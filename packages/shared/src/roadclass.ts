@@ -64,7 +64,7 @@ export interface RoadClassDef {
 export const ROAD_CLASS_DEFS: readonly RoadClassDef[] = [
   { id: 0, name: 'street', title: 'Street', lanes: 1, oneWay: false, divided: false, speed: 1, routeCost: 1, capacity: 2, access: 'all', cost: ROAD_COST, upkeep: ROAD_UPKEEP, feature: '', rank: 2, colour: 0x8fb8e8,
     blurb: 'The everyday road: a lane each way, pavements, lamps, and room to park at the kerb.', howTo: 'Road (3), Street: drag from a road.' },
-  { id: 1, name: 'country lane', title: 'Country lane', lanes: 1, oneWay: false, divided: false, speed: 0.7, routeCost: 1.4, capacity: 2, access: 'all', cost: 5, upkeep: 0.25, feature: '', rank: 1, colour: 0xc8b878,
+  { id: 1, name: 'country lane', title: 'Country lane', lanes: 1, oneWay: false, divided: false, speed: 0.8, routeCost: 1.2, capacity: 2, access: 'all', cost: 5, upkeep: 0.25, feature: '', rank: 1, colour: 0xc8b878,
     blurb: 'A cheap lane between grass verges: no kerbs, no centre line, and cars take it slowly.', howTo: 'Road (3), Country lane: drag out across open land.' },
   { id: 2, name: 'one-way street', title: 'One-way street', lanes: 2, oneWay: true, divided: false, speed: 1, routeCost: 1, capacity: 4, access: 'all', cost: 12, upkeep: 0.5, feature: 'onewayStreets', rank: 2, colour: 0x7fd0c0,
     blurb: 'Two lanes going one way: drag the way the traffic should go. Pair two of them to carry a busy route.', howTo: 'Road (3), One-way street: drag in the direction of travel; drag again the other way to reverse it.' },

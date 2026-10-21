@@ -751,3 +751,25 @@ kerb parking, car sharing and level crossings use the same hard limits as before
   before, and the drawing cannot soften those, since it does not know the stop is coming.
 - The test city is a grid of short blocks; long roads between junctions, where a car reaches and holds full speed,
   are where following and look-ahead would show more.
+
+## Road classes (R3, 2026-10-21)
+
+Docs/roads.md "Classes" has the model: two lanes on every one-way tile (a one-way street, each carriageway of an avenue
+or motorway), a lane per strand with its own following and room, lane changes through the box check, the conflict
+tables extended by strand (the all-zero entries are the old tables), class speed and route cost, slip give-way, and the
+over-the-median rule at an avenue's crossings. A world with no road of another class than the street takes none of the
+new code paths (`World.anyRoadClass`): **on the plain Commons `ab.ts` gives output identical to main**, line for line,
+and on the 2×2 city (`districts=2`) the output is identical too and the tick cost 2.70 against 2.69 ms (three
+interleaved pairs, +0.6%, within the noise).
+
+**Variants** (`ab.ts --set`): `avenues=2` makes every district's doubled edge road (local 20 and 21, two street tiles
+side by side) an avenue; `avenues=1` also widens the middle street (10) into an avenue over the row of lots beside it
+(11), which loses those lots; `oneway=1` makes the inner streets (5, 10, 15) one-way, alternating, the edges two-way.
+
+ROADS_CLASSES_RESULTS
+
+**The corridor bench** (`loadtest/classbench.ts`: a corridor 25 tiles long crossed by a two-way street at its middle,
+cars from both ends and a quarter as many over the crossing street, give-way): at 40 cars an hour each way an avenue
+carries 87 an hour to a street's 75, with a quarter of the give-ups, the one-way street 53 (one way only), the motorway
+90; at 60 an hour, 79 to 66. No car-car overlaps on any class. Most give-ups left are cars from the crossing street
+waiting for a gap in a busy road, as at any unsignalled crossing.
