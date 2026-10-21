@@ -4,7 +4,7 @@ import { planBridge, joinsBridgeSide, type BridgePlan } from './bridges';
 import { isRailAux, roadOverTrackProblem, CROSSING_COST } from './rail';
 import { isAirfieldAux } from './airport';
 import { isJunctionAux, isRingAux, isIslandAux } from './junctions';
-import { ROAD_CLASS_DEFS, RoadCls, isRoadClass, roadClassAt, classByte, isClassAux, auxDir, dragDirs, twinRow, type RoadClassDef } from './roadclass';
+import { ROAD_CLASS_DEFS, RoadCls, isRoadClass, roadClassAt, classByte, isClassAux, isOneWayAux, auxDir, dragDirs, twinRow, type RoadClassDef } from './roadclass';
 import { MOTORWAY_KIND } from './gateways';
 
 /**
@@ -182,6 +182,13 @@ function pairUp(tiles: RoadTile[], pairOf: Map<RoadTile, number>, demolish: bool
   }
 }
 
+/** Is there road either side of (x, y) across heading `dir` (a road the drag crosses there)? */
+function crossedAt(x: number, y: number, dir: number, env: RoadEnv): boolean {
+  const [dx, dy] = dir < 2 ? [0, 1] : [1, 0];
+  const r = (tx: number, ty: number) => { const t = env.tile(tx, ty); return t !== undefined && isRoad(t); };
+  return r(x + dx, y + dy) && r(x - dx, y - dy);
+}
+
 /** Everything a road drag along `path` (4-adjacent steps, in order) would do: see RoadTile and RoadPlan. */
 export function planRoad(path: readonly (readonly [number, number])[], env: RoadEnv, opts: RoadPlanOpts = {}): RoadPlan {
   const cls = opts.cls ?? 0, def = ROAD_CLASSES[cls] ?? ROAD_CLASSES[0];
@@ -220,6 +227,10 @@ export function planRoad(path: readonly (readonly [number, number])[], env: Road
       const from = env.roadClass ? env.roadClass(x, y) : roadClassAt(t, a);
       // a one-way street dragged the other way is reversed, for nothing
       if (from === cls && (!def.oneWay || def.divided || auxDir(a) === dir)) { tp.state = 'have'; continue; }
+      // a drag across a road keeps that road: a one-way street or a divided road running across the drag, and for a
+      // pedestrian street any road crossing it (road either side across the drag), stay as they are
+      if (isOneWayAux(a) && (auxDir(a) < 2) !== (dir < 2)) { tp.state = 'have'; continue; }
+      if (cls === RoadCls.Pedestrian && crossedAt(x, y, dir, env)) { tp.state = 'have'; continue; }
       tp.state = 'upgrade'; tp.cost = roadUpgradeCost(from, cls); tp.byte = classByte(cls, dir); // junction tiles keep their junction: only the class changes
       continue;
     }

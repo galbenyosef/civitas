@@ -1,4 +1,4 @@
-import { DEFAULT_TAX, Zone, isBuildable, packTile, terrainOf, ALL_TECH_IDS, Terrain, TICKS_PER_HOUR, FRONTIER_CHARTER, MOTORWAY_KIND, planStructure, workOf } from '@msimcity/shared';
+import { DEFAULT_TAX, Zone, isBuildable, packTile, terrainOf, ALL_TECH_IDS, Terrain, TICKS_PER_HOUR, FRONTIER_CHARTER, MOTORWAY_KIND, planStructure, workOf, classByte, RoadCls } from '@msimcity/shared';
 import { World, emptyStats } from './world';
 import { settleInteriors } from './sim/blocks';
 
@@ -84,7 +84,8 @@ export function seedFrontier(w: World) {
   const end: [number, number] = [charter.x + Math.floor(FRONTIER_CHARTER / 3), 0];
   const gateDoor: [number, number] = [charter.x - 14, 0];
   // the country road, a causeway where the seed put water, from the tile in front of the gate to the road end
-  for (let x = gateDoor[0] + 1; x <= end[0]; x++) w.setTile(x, 0, packTile(Terrain.Grass, true, 0, 0));
+  // a country lane (shared/src/roadclass.ts): grass verges, no kerbs, taken slowly; the player's own streets join it
+  for (let x = gateDoor[0] + 1; x <= end[0]; x++) { w.setTile(x, 0, packTile(Terrain.Grass, true, 0, 0)); w.setRoadClass(x, 0, classByte(RoadCls.Lane)); }
   // the gate: its door faces the road (east), the carriageways run off west; dry land under it
   for (let dx = -2; dx <= 0; dx++) for (let dy = -2; dy <= 2; dy++) { const t = w.getTile(gateDoor[0] + dx, dy); if (!isBuildable(t)) w.setTile(gateDoor[0] + dx, dy, packTile(Terrain.Grass, false, 0, 0)); }
   const v = planStructure(MOTORWAY_KIND, gateDoor[0], gateDoor[1], {

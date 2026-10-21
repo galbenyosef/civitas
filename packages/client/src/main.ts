@@ -1,7 +1,7 @@
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
+  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, classDef, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
@@ -25,6 +25,7 @@ import { AirfieldView } from './render/airfield';
 import { TrainsView } from './render/trains';
 import { RailClient, trainHtml, setPlatformCrowd } from './rail';
 import { RoadTool } from './roadtool';
+import { RoadClassPicker } from './roadpicker';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
 import { BridgeView } from './render/bridges';
@@ -252,6 +253,15 @@ const ui = new UI({
   onCloseBuilding: () => closeBuilding(),
   onCloseParcel: () => closeParcel(),
 });
+// the road tool's class picker (roadpicker.ts), hung off the road button and the 3 key
+ui.roadPicker = new RoadClassPicker({
+  picked: () => roadTool.picked,
+  lockOf: (cls) => roadTool.lockOf(cls),
+  pick: (cls) => { roadTool.pick(cls); ui.roadClassChanged(); updateStatus(); },
+  locked: (msg) => ui.toast('error', msg),
+});
+ui.roadClassName = () => (roadTool.roadClass ? classDef(roadTool.roadClass).title : '');
+ui.roadClassChanged();
 
 net.onStatus = (ok) => { ui.setConn(ok); if (!ok) subscribed.clear(); };
 net.on('welcome', (m) => {
@@ -600,7 +610,7 @@ const input = new Input(canvas, rig, {
   onRoad: (tiles, _shape) => {
     // buildings in the way: ask once, with the cost, and the answer goes for the whole drag (a0902fd7)
     const v = roadTool.plan(tiles);
-    const send = (demolish: boolean) => net.send({ t: 'build', tool: 'road', tiles, cls: 0, ...(demolish ? { demolish: true } : {}), ...(DEV_TOOLS ? { dev: true } : {}) });
+    const send = (demolish: boolean) => net.send({ t: 'build', tool: 'road', tiles, cls: roadTool.roadClass, ...(demolish ? { demolish: true } : {}), ...(DEV_TOOLS ? { dev: true } : {}) });
     if (!v.demolish.n) { send(false); return; }
     void roadTool.ask(v, mouse.x, mouse.y).then((a) => { if (a !== 'cancel') send(a === 'demolish'); });
   },

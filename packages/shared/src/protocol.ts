@@ -419,6 +419,8 @@ export interface RoadInfo {
   bridge?: { style: string; span: number };
   /** the streets through this tile (shared/src/streets.ts), the longer first: two at a crossroads or a bend; `mine` when the viewer may rename it */
   streets?: { name: string; ns: boolean; length: number; mine?: boolean }[];
+  /** the road's class (shared/src/roadclass.ts) when it is not a street, and on a one-way tile the way traffic goes (DIRS index: E W S N) */
+  cls?: number; flow?: number;
 }
 
 /** Live detail for one person or vehicle. */

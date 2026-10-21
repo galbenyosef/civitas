@@ -46,30 +46,30 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
 #tools button em.tier { font-style: normal; color: var(--muted); font-size: 11px; }
 
 /* size picker (client/src/picker.ts): a ladder's rungs beside the tool bar */
-#picker { position: absolute; z-index: 5; width: min(560px, calc(100vw - 260px)); max-height: calc(100vh - 70px); overflow-y: auto; padding: 10px;
+#picker, #roadPicker { position: absolute; z-index: 5; width: min(560px, calc(100vw - 260px)); max-height: calc(100vh - 70px); overflow-y: auto; padding: 10px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(8px); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
-#picker.hidden { display: none; }
-#picker .ph { display: flex; align-items: baseline; gap: 10px; margin: 0 2px 8px; }
-#picker .ph b { font-size: 14px; } #picker .ph span { color: var(--muted); font-size: 11px; }
-#picker .ph .x { margin-left: auto; border: 0; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
-#picker .ph .x:hover { color: var(--fg); }
-#picker .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 6px; }
-#picker .card { display: flex; flex-direction: column; gap: 2px; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,0.03);
+#picker.hidden, #roadPicker.hidden { display: none; }
+#picker .ph, #roadPicker .ph { display: flex; align-items: baseline; gap: 10px; margin: 0 2px 8px; }
+#picker .ph b, #roadPicker .ph b { font-size: 14px; } #picker .ph span, #roadPicker .ph span { color: var(--muted); font-size: 11px; }
+#picker .ph .x, #roadPicker .ph .x { margin-left: auto; border: 0; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
+#picker .ph .x:hover, #roadPicker .ph .x:hover { color: var(--fg); }
+#picker .cards, #roadPicker .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 6px; }
+#picker .card, #roadPicker .card { display: flex; flex-direction: column; gap: 2px; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,0.03);
   color: var(--fg); font: inherit; font-size: 11px; text-align: left; cursor: pointer; min-width: 0; }
-#picker .card:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); }
-#picker .card.on { border-color: rgba(98,210,162,0.7); background: rgba(98,210,162,0.12); }
-#picker .card.locked { opacity: 0.5; cursor: not-allowed; }
-#picker .card.locked img { filter: grayscale(1); }
-#picker .thumb { position: relative; display: block; aspect-ratio: 7 / 5; border-radius: 5px; overflow: hidden; background: #2a3a33; }
-#picker .thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
-#picker .thumb .fp, #picker .thumb .tn { position: absolute; bottom: 3px; padding: 0 5px; border-radius: 4px; background: rgba(14,17,22,0.78); font-size: 10px; font-variant-numeric: tabular-nums; }
-#picker .thumb .fp { right: 3px; } #picker .thumb .tn { left: 3px; color: var(--muted); }
-#picker .nm { font-weight: 600; font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#picker .ln { color: var(--muted); line-height: 1.3; } #picker .ln b { color: var(--fg); font-weight: 600; }
-#picker .tech { color: var(--muted); font-size: 10px; line-height: 1.3; }
-#picker .card:not(.locked) .tech { color: var(--accent); }
-#picker .about { margin: 8px 2px 0; padding-top: 8px; border-top: 1px solid var(--line); color: var(--fg); line-height: 1.4; font-size: 12px; }
-#picker .about span { color: var(--muted); }
+#picker .card:hover, #roadPicker .card:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); }
+#picker .card.on, #roadPicker .card.on { border-color: rgba(98,210,162,0.7); background: rgba(98,210,162,0.12); }
+#picker .card.locked, #roadPicker .card.locked { opacity: 0.5; cursor: not-allowed; }
+#picker .card.locked img, #roadPicker .card.locked img { filter: grayscale(1); }
+#picker .thumb, #roadPicker .thumb { position: relative; display: block; aspect-ratio: 7 / 5; border-radius: 5px; overflow: hidden; background: #2a3a33; }
+#picker .thumb img, #roadPicker .thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+#picker .thumb .fp, #roadPicker .thumb .fp, #picker .thumb .tn, #roadPicker .thumb .tn { position: absolute; bottom: 3px; padding: 0 5px; border-radius: 4px; background: rgba(14,17,22,0.78); font-size: 10px; font-variant-numeric: tabular-nums; }
+#picker .thumb .fp, #roadPicker .thumb .fp { right: 3px; } #picker .thumb .tn, #roadPicker .thumb .tn { left: 3px; color: var(--muted); }
+#picker .nm, #roadPicker .nm { font-weight: 600; font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#picker .ln, #roadPicker .ln { color: var(--muted); line-height: 1.3; } #picker .ln b, #roadPicker .ln b { color: var(--fg); font-weight: 600; }
+#picker .tech, #roadPicker .tech { color: var(--muted); font-size: 10px; line-height: 1.3; }
+#picker .card:not(.locked) .tech, #roadPicker .card:not(.locked) .tech { color: var(--accent); }
+#picker .about, #roadPicker .about { margin: 8px 2px 0; padding-top: 8px; border-top: 1px solid var(--line); color: var(--fg); line-height: 1.4; font-size: 12px; }
+#picker .about span, #roadPicker .about span { color: var(--muted); }
 
 #panel { position: absolute; top: 52px; right: 12px; width: 300px; max-height: calc(100vh - 70px); overflow-y: auto; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line);
   border-radius: 10px; backdrop-filter: blur(8px); }
@@ -107,7 +107,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
 @media (max-width: 700px) {
   #worldstats, #help { display: none; }
   #tools button { width: 42px; } #tools button span:not(.sw) { display: none; } #tools .tgroup { display: none; }
-  #picker { width: calc(100vw - 84px); } #picker .cards { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+  #picker, #roadPicker { width: calc(100vw - 84px); } #picker .cards, #roadPicker .cards { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
   #panel { width: calc(100vw - 80px); }
 }
 
@@ -329,9 +329,9 @@ body.fpv-full #tourLabels { display: none !important; }
 #fpv.full .fbody { left: 14px; right: auto; bottom: 18px; padding: 10px 14px; background: rgba(0,0,0,0.38); border-radius: 10px; font-size: 14px; max-width: 460px; }
 #fpv.full .fhint { display: block; position: absolute; right: 16px; bottom: 18px; padding: 5px 10px; border-radius: 999px; background: rgba(0,0,0,0.38); opacity: 0.85; pointer-events: none; }
 #fpv.full .ffade { display: block; position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
-body.fpv-full #tools, body.fpv-full #picker, body.fpv-full #help, body.fpv-full #status, body.fpv-full #panel, body.fpv-full #tech, body.fpv-full #policies, body.fpv-full #adverts, body.fpv-full #tip, body.fpv-full #cpanel { display: none !important; }
+body.fpv-full #tools, body.fpv-full #picker, body.fpv-full #roadPicker, body.fpv-full #help, body.fpv-full #status, body.fpv-full #panel, body.fpv-full #tech, body.fpv-full #policies, body.fpv-full #adverts, body.fpv-full #tip, body.fpv-full #cpanel { display: none !important; }
 /* a read-only showcase (SPECTATE on the server, main.ts): nothing to build, buy, unlock or spend */
-body.spectate #tools, body.spectate #picker, body.spectate #money, body.spectate #techBtn, body.spectate #tech, body.spectate #policiesBtn, body.spectate #policies, body.spectate #adsBtn, body.spectate #adverts, body.spectate #devBtn, body.spectate #devPanel { display: none !important; }
+body.spectate #tools, body.spectate #picker, body.spectate #roadPicker, body.spectate #money, body.spectate #techBtn, body.spectate #tech, body.spectate #policiesBtn, body.spectate #policies, body.spectate #adsBtn, body.spectate #adverts, body.spectate #devBtn, body.spectate #devPanel { display: none !important; }
 
 /* footprint labels: door, gate, platform, apron, stand and dock marks of a structure being placed or hovered (render/footprint.ts) */
 #markLabels { position: fixed; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
@@ -416,7 +416,7 @@ body.spectate #tools, body.spectate #picker, body.spectate #money, body.spectate
 #ctxmenu .ci.disabled:hover { background: transparent; }
 
 /* the world map (mapmode.ts, docs/world-map.md) */
-body.map-on #tools, body.map-on #panel, body.map-on #cpanel, body.map-on #tip, body.map-on #picker, body.map-on #tourLabels { display: none !important; }
+body.map-on #tools, body.map-on #panel, body.map-on #cpanel, body.map-on #tip, body.map-on #picker, body.map-on #roadPicker, body.map-on #tourLabels { display: none !important; }
 #ui > #mapLabels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 #mapLabels.hidden { display: none; }
 #mapLabels .mlabel { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: 11px; color: #f2f4f7; text-shadow: 0 1px 2px #000, 0 0 3px #000; }
@@ -529,3 +529,4 @@ body.adpick canvas { cursor: copy; }
 #roadAsk button { padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line); background: rgba(255,255,255,0.06); color: var(--fg); cursor: pointer; font: inherit; }
 #roadAsk button:hover, #roadAsk button:focus-visible { background: rgba(255,255,255,0.12); outline: none; }
 #roadAsk button.danger { border-color: rgba(255,107,107,0.5); color: #ffb3b3; }
+#roadChip .cls { font-weight: 600; }

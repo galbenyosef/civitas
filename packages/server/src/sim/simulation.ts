@@ -1,5 +1,5 @@
 import {
-  TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, pedestrianDeliveryOpen, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
+  TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, pedestrianDeliveryOpen, auxClass, oneWayDir, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
   DRIVE_MIN_TILES, CAR_FETCH_RADIUS, PARK_RADIUS, PARKING_FEE, KERB_CAP, FREIGHT_TRIPS_PER_LEVEL_PER_DAY, VISITORS_PER_100_PEAK_HOUR,
   Zone, CitizenState, VehicleClass, VehicleKind, KIND_COUNT, KIND_ID_COUNT, KIND_NAMES, CIVIC_UPKEEP, CONSTRUCTION_FEE, MAX_BUILDERS_PER_SITE, CAMP_KIND,
   capacityOf, parkingOf, wageOf, upkeepOf, workOf, familyOf, isGrowableId, isCivicId, isServiceId, isParkingId,
@@ -443,6 +443,8 @@ export class Simulation {
     if (parcel) info.parcel = { name: parcel.name, owner: this.w.players.get(parcel.owner)?.name ?? parcel.owner };
     const span = bridgeSpanAt(x, y, (bx, by) => this.w.auxAt(bx, by));
     if (span) info.bridge = { style: BRIDGE_STYLE_NAMES[span.style], span: span.len };
+    const a = this.w.auxAt(x, y), cls = auxClass(a);
+    if (cls) { info.cls = cls; if (oneWayDir(a) >= 0) info.flow = oneWayDir(a); }
     return info;
   }
   private *moversOn(x: number, y: number): Iterable<Mover> {
