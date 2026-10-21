@@ -7,24 +7,27 @@
  * 1.3 game days at 08:00, by when the population has settled), then measures `--ticks` ticks. Everything is
  * deterministic for a given --seed: Math.random is replaced by a seeded generator before the world is built.
  * `--set` overrides TRAFFIC_TUNING (shared/src/tuning.ts) for the whole run, fill included; `old=1` first restores
- * the rules as they were before the tuning (OLD_RULES); `carOwnership=0.55` also changes who owns a car (office
+ * the rules as they were before the tuning (OLD_RULES); `smooth=0` turns the smooth-flow rules off (UNSMOOTH); `carOwnership=0.55` also changes who owns a car (office
  * workers +0.15); `noLots=1` builds the city without its four parking lots; `noSignals=1` takes the signals technology
  * away (every junction is give-way); `ring=1` adds a public ring road two tiles outside the district, joined to the end
  * of every street; `bus=N` lays a bus network on the Commons (a depot and twelve stops on two lines, docs/transit.md) with
  * N buses per line (`busFare=…` changes the fare; `busTiles=1` lays the depot and stops but runs no lines, the control
- * for the homes and jobs they take); `edu=0` turns off education's effects on jobs (sim/skills.ts, the E4 control). Reports: vehicle-weighted mean speed, queued share,
+ * for the homes and jobs they take); `districts=2` builds a 2×2 city instead (the tick-cost check); `edu=0` turns off education's effects on jobs (sim/skills.ts, the E4 control). Reports: vehicle-weighted mean speed, queued share,
  * give-ups by kind (Traffic.counters), junction entries per tick, mean commute time, and true body overlaps
  * every tick (oriented rectangles VEHICLE_LEN × VEHICLE_WIDTH with the heading from the lane geometry, and
  * pedestrians as 0.07-radius discs; the same test as the live probe-obb.mjs).
- * Options: --hour H (default 8), --ticks N (1500), --seed S (1), --set k=v,..., --label L, --json FILE, --quiet.
+ * Options: --hour H (default 8), --ticks N (1500), --seed S (1), --set k=v,..., --then k=v,... (changed after the fill, for the
+ * measured window only: a tick-cost comparison on the same traffic), --label L, --json FILE, --quiet.
  */
 import { writeFileSync } from 'node:fs';
-import { TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, SKILLS, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, type TrafficTuning, type StopRef } from '@msimcity/shared';
+import { DRIVE_SPEED, TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, SKILLS, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, type TrafficTuning, type StopRef } from '@msimcity/shared';
 import { World, tkey, type Citizen, type Mover } from '../world';
 import { Simulation } from '../sim/simulation';
 import { seedCity } from './cities';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
+/** smoothness thresholds, tiles per tick (full speed DRIVE_SPEED is 0.5): standing under STOP_V, moving again over MOVE_V */
+const STOP_V = 0.01, MOVE_V = 0.05;
 const PED_R = 0.07, W = VEHICLE_WIDTH, BIKE_W = 0.05;
 
 function mulberry32(a: number) {
@@ -86,6 +89,15 @@ export interface AbResult {
   /** driven legs that ended in the window: count, mean elapsed / expected ratio, 50th and 90th percentile of it, share running late by the delayFrac / delayMinTicks test */
   legs: { n: number; ratioMean: number; ratioP50: number; ratioP90: number; lateShare: number; ticksMean: number };
   /** mobile jobs over the window (docs/mobile-jobs.md): fleet vehicles on the road per tick, and each service's counters */
+  /**
+   * Smoothness (docs/traffic-tuning.md "Smooth flow"), from each road vehicle's drawn position tick to tick (distance per
+   * tick in tiles, the speed a player sees): tiles driven; stops (speed falls under STOP_V after being over MOVE_V since
+   * the last stop) and stops per 10 tiles; dead stops (from at least half of full speed to a stop in one tick); mean
+   * |Δv| per car-tick (jerk) in tiles per tick, and the share of car-ticks with |Δv| over a fifth of full speed (harsh);
+   * the share of car-ticks standing (speed under STOP_V), and of those not the first car at a junction's or a level
+   * crossing's stop line (standing in the stream).
+   */
+  smooth: { stopsAt: Record<string, number>; tiles: number; stops: number; stopsPer10: number; deadStops: number; jerk: number; harshPct: number; standPct: number; standStreamPct: number; carTicks: number };
   mobile: { onRoadMean: number; bikesCarOverlaps: number; bikePedContacts: number; fleetPedContacts: number; fleetPedWhere: Record<string, number>; taxi: Record<string, number>; food: Record<string, number>; bins: Record<string, number>; parcels: Record<string, number>; foodMinutes: number[] };
 }
 
@@ -101,10 +113,13 @@ export const OLD_RULES: Partial<TrafficTuning> = {
   carYieldMax: 15, crossingWaitMax: 20, crossingLag: 1, pedPriority: 0, pedSignalPatient: 0, pedYieldAfter: 0, pedPathClear: 0,
   bodyGuard: 0, carGuard: 0, guardWaitMax: 40, pedRetreatAfter: 0, pedBehind: 0, guardDrawn: 0,
   delayReroute: 0,
+  follow: 0, platoon: 0, startGap: 0, lookAhead: 0, mainRoad: 0, greenWave: 0,
 };
+/** The smooth-flow rules (docs/traffic-tuning.md "Smooth flow") all off, as before 2026-10-21 (`--set smooth=0`). */
+export const UNSMOOTH: Partial<TrafficTuning> = { follow: 0, platoon: 0, startGap: 0, lookAhead: 0, mainRoad: 0, greenWave: 0 };
 
 /** Keys that change the test city rather than TRAFFIC_TUNING: car ownership, no parking lots, no signals technology. */
-const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile', 'edu'];
+const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile', 'edu', 'districts'];
 
 /**
  * A bus network on the Commons (local coordinates of the 22×22 district): a depot whose door faces the y=5 street;
@@ -140,13 +155,14 @@ export function parseSet(spec: string | undefined): Record<string, number> {
     const n = Number(v);
     if (!Number.isFinite(n)) throw new Error(`--set ${kv}: not a number`);
     if (k === 'old') { if (n) Object.assign(out, OLD_RULES); continue; }
+    if (k === 'smooth') { if (!n) Object.assign(out, UNSMOOTH); continue; }
     if (!CITY_KEYS.includes(k) && !(k in TRAFFIC_TUNING)) throw new Error(`--set ${k}: unknown tunable (known: ${Object.keys(TRAFFIC_TUNING).join(', ')}, ${CITY_KEYS.join(', ')}, old)`);
     out[k] = n;
   }
   return out;
 }
 
-export function runAb(opts: { hour: number; ticks: number; seed: number; set: Record<string, number>; label?: string; log?: (s: string) => void }): AbResult {
+export function runAb(opts: { hour: number; ticks: number; seed: number; set: Record<string, number>; then?: Record<string, number>; label?: string; log?: (s: string) => void }): AbResult {
   const t0 = performance.now();
   const log = opts.log ?? (() => {});
   Math.random = mulberry32(opts.seed * 2654435761);
@@ -159,7 +175,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
   }
 
   const w = new World(opts.seed);
-  const layout = seedCity(w, { districts: 1, built: 3, lots: !opts.set.noLots });
+  const layout = seedCity(w, { districts: opts.set.districts ?? 1, built: 3, lots: !opts.set.noLots });
   if (opts.set.noSignals) for (const p of w.players.values()) p.tech = p.tech.filter((t) => !TECH.find((n) => n.id === t)?.unlocks.includes('signals'));
   if (opts.set.ring) {
     // a public ring road two tiles outside the district, joined to the end of every street: a parallel way round
@@ -183,6 +199,8 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
 
   const start = DAY + Math.round(opts.hour * TPH);
   while (w.tick < start) sim.tick();
+  // --then: tunables changed only for the measured window (the same city and traffic, for a fair tick cost)
+  for (const [k, v] of Object.entries(opts.then ?? {})) if (k in TRAFFIC_TUNING) (TRAFFIC_TUNING as Record<string, number>)[k] = v;
   log(`[ab] filled to day ${Math.floor(w.tick / DAY)} ${opts.hour}:00, ${w.citizens.size} citizens`);
 
   const c0 = { ...tr.counters };
@@ -206,6 +224,26 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
   const fleetPedWhere: Record<string, number> = {};
   const mob0 = { taxi: { ...sim.taxis.stats }, food: { ...sim.delivery.stats }, bins: { ...sim.refuse.stats }, parcels: { ...sim.couriers.stats }, minutes: sim.delivery.minutes.length };
   sim.legSamples = [];
+  // smoothness: each road vehicle's position and speed last tick, and whether it has moved off since its last stop
+  let prevPos = new Map<number, { x: number; y: number; v: number; armed: boolean }>();
+  let curPos = new Map<number, { x: number; y: number; v: number; armed: boolean }>();
+  const stopsAt: Record<string, number> = {};
+  let smTiles = 0, smStops = 0, smDead = 0, smJerk = 0, smJerkN = 0, smHarsh = 0, smStand = 0, smStream = 0, smN = 0;
+  const smooth = (m: Mover) => {
+    const p = prevPos.get(m.id);
+    if (!p) { curPos.set(m.id, { x: m.x, y: m.y, v: -1, armed: false }); return; }
+    const v = Math.hypot(m.x - p.x, m.y - p.y);
+    if (v > 1) { curPos.set(m.id, { x: m.x, y: m.y, v: -1, armed: false }); return; } // a jump (a new trip): not driving
+    let armed = p.armed || v >= MOVE_V;
+    smTiles += v; smN++;
+    if (v < STOP_V) {
+      smStand++;
+      if (!tr.headAtStopLine(m)) smStream++;
+      if (p.armed) { smStops++; armed = false; if (p.v >= DRIVE_SPEED / 2) smDead++; bump(stopsAt, tr.standing(m)); }
+    }
+    if (p.v >= 0) { const dv = Math.abs(v - p.v); smJerk += dv; smJerkN++; if (dv > DRIVE_SPEED / 5) smHarsh++; }
+    curPos.set(m.id, { x: m.x, y: m.y, v, armed });
+  };
 
   let simMs = 0;
   for (let i = 0; i < opts.ticks; i++) {
@@ -238,6 +276,10 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
       if (c.leg?.drive && c.lane >= 0) { drove.add(c.id); if (sim.rerouteLog.byDay.size) { const d = sim.reroutesOf(c).day; if (d > maxDay) maxDay = d; } }
     }
 
+    for (const c of w.citizens.values()) if (c.leg?.drive && c.lane >= 0) smooth(c);
+    for (const veh of w.vehicles.values()) if (veh.phase !== 'dwell' && veh.lane >= 0) smooth(veh);
+    { const t = prevPos; prevPos = curPos; curPos = t; curPos.clear(); }
+
     // bodies this tick
     const cars: Body[] = [];
     const peds: Citizen[] = [];
@@ -252,7 +294,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     };
     for (const c of w.citizens.values()) {
       if (c.state === S.Home || c.state === S.Work || c.state === S.AtSite || c.state === S.AtVenue) continue;
-      if (c.leg?.drive) { if (c.lane >= 0) addCar(c); } else if (c.leg && !sim.transit.isRiding(c) && !sim.taxis.isAboard(c)) peds.push(c); // riders on board are inside the bus or the taxi
+      if (c.leg?.drive) { if (c.lane >= 0) addCar(c); } else if (c.leg && !sim.transit.isRiding(c) && !sim.taxis.isAboard(c) && !sim.pool.aboard(c)) peds.push(c); // riders on board are inside the bus, the taxi or a shared car
     }
     for (const veh of w.vehicles.values()) if (veh.phase !== 'dwell' && veh.lane >= 0) { addCar(veh); drove.add(veh.id); }
     { let n = 0, nb = 0; for (const b of cars) { if (b.m.cls === VehicleClass.Bus) nb++; else n++; } carsSum += n; busesSum += nb; if (n > carsPeak) carsPeak = n; }
@@ -269,9 +311,10 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
           if (b.m.id <= a.m.id) continue;
           if (Math.hypot(a.x - b.x, a.y - b.y) > (a.len + b.len) / 2 + 0.2) continue;
           if (!obbOverlap(a, b)) continue;
+          // a bike filtering past a car at the kerb edge is counted on its own (bike-car), not as two cars touching
+          if ((a.m.cls === BIKE_CLASS) !== (b.m.cls === BIKE_CLASS)) { bikeCar++; continue; }
           tcc++;
           if (a.m.cls === VehicleClass.Bus || b.m.cls === VehicleClass.Bus) busCar++;
-          if ((a.m.cls === BIKE_CLASS) !== (b.m.cls === BIKE_CLASS)) bikeCar++;
           const mx = Math.floor((a.x + b.x) / 2), my = Math.floor((a.y + b.y) / 2), mt = w.peekTile(mx, my);
           const deg = tr.degreeOf(mx, my);
           const sameLane = a.m.lane === b.m.lane;
@@ -306,6 +349,7 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     for (let i = 0; i < drawn.length; i++) for (let j = i + 1; j < drawn.length; j++) {
       const a = drawn[i], b = drawn[j];
       const rr = (a.len + b.len) / 2 + 0.2;
+      if ((a.m.cls === BIKE_CLASS) !== (b.m.cls === BIKE_CLASS)) continue;
       if (Math.abs(a.x - b.x) < rr && Math.abs(a.y - b.y) < rr && obbOverlap(a, b)) ccDrawn++;
     }
     for (const p of peds) for (const a of drawn) if (Math.abs(a.x - p.x) < a.len / 2 + 0.2 && Math.abs(a.y - p.y) < a.len / 2 + 0.2 && pointInObb(p.x, p.y, a)) {
@@ -352,6 +396,11 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     trips: allTrips.length, tripMean: avg(allTrips), transitTrips: rideTrips.length, transitTripMean: avg(rideTrips),
     carsMean: carsSum / opts.ticks, carsPeak, busesMean: busesSum / opts.ticks, busCarPerTick: busCar / opts.ticks, transit: transitDelta,
     legs: { n: samples.length, ratioMean: avg(ratios), ratioP50: ratios[Math.floor(ratios.length * 0.5)] ?? 0, ratioP90: ratios[Math.floor(ratios.length * 0.9)] ?? 0, lateShare: samples.length ? late / samples.length : 0, ticksMean: avg(samples.map(([e]) => e)) },
+    smooth: {
+      stopsAt, tiles: smTiles, stops: smStops, stopsPer10: smTiles ? (10 * smStops) / smTiles : 0, deadStops: smDead,
+      jerk: smJerkN ? smJerk / smJerkN : 0, harshPct: smJerkN ? (100 * smHarsh) / smJerkN : 0,
+      standPct: smN ? (100 * smStand) / smN : 0, standStreamPct: smN ? (100 * smStream) / smN : 0, carTicks: smN,
+    },
     mobile: {
       onRoadMean: fleetSum / opts.ticks, bikesCarOverlaps: bikeCar, bikePedContacts: bikePed, fleetPedContacts: fleetPed, fleetPedWhere,
       taxi: delta(sim.taxis.stats, mob0.taxi), food: delta(sim.delivery.stats, mob0.food), bins: delta(sim.refuse.stats, mob0.bins), parcels: delta(sim.couriers.stats, mob0.parcels),
@@ -377,6 +426,7 @@ export function summary(r: AbResult): string {
     `  trips ${r.trips}, mean ${f1(r.tripMean)} ticks; planned walk ${r.modes.walk} drive ${r.modes.drive} transit ${r.modes.transit} (${f1(100 * r.modes.transitShare)}% transit); by transit ${r.transitTrips}, mean ${f1(r.transitTripMean)} ticks`,
     `  cars on the road ${f1(r.carsMean)} mean, ${r.carsPeak} peak; buses ${f1(r.busesMean)}; bus-car overlaps ${f3(r.busCarPerTick)}/tick; transit ${JSON.stringify(r.transit)}`,
     `  mobile jobs: ${f1(r.mobile.onRoadMean)} fleet vehicles on the road; taxi ${JSON.stringify(r.mobile.taxi)}; food ${JSON.stringify(r.mobile.food)}; bins ${JSON.stringify(r.mobile.bins)}; parcels ${JSON.stringify(r.mobile.parcels)}; bike-car overlaps ${r.mobile.bikesCarOverlaps}, bike-ped contacts ${r.mobile.bikePedContacts}, fleet-ped contacts ${r.mobile.fleetPedContacts} ${JSON.stringify(r.mobile.fleetPedWhere)}`,
+    `  smooth: ${f1(r.smooth.tiles)} tiles, ${r.smooth.stops} stops (${f3(r.smooth.stopsPer10)} per 10 tiles, ${r.smooth.deadStops} dead), jerk ${f3(r.smooth.jerk)} tiles/tick (harsh ${f1(r.smooth.harshPct)}%), standing ${f1(r.smooth.standPct)}% (in the stream ${f1(r.smooth.standStreamPct)}%); stops at ${JSON.stringify(r.smooth.stopsAt)}`,
     `  sim ${r.simMsPerTick.toFixed(3)} ms/tick over the window; wall ${f1(r.wallSec)} s`,
   ].join('\n');
 }
@@ -387,7 +437,7 @@ if (isMain) {
   const get = (n: string) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : undefined; };
   const r = runAb({
     hour: Number(get('hour') ?? 8), ticks: Number(get('ticks') ?? 1500), seed: Number(get('seed') ?? 1),
-    set: parseSet(get('set')), label: get('label'), log: argv.includes('--quiet') ? undefined : (s) => process.stderr.write(s + '\n'),
+    set: parseSet(get('set')), then: parseSet(get('then')), label: get('label'), log: argv.includes('--quiet') ? undefined : (s) => process.stderr.write(s + '\n'),
   });
   console.log(summary(r));
   if (argv.includes('--examples')) console.log(r.examples.join('\n'));

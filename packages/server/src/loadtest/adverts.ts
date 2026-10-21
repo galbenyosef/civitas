@@ -213,7 +213,10 @@ if (victim) {
   w.setTile(victim.x, victim.y, packTile(terrainOf(w.getTile(victim.x, victim.y)), false, 0, 0)); // bulldozed: bare ground
   const n0 = ads.list().length;
   for (let i = 0; i < DAY; i++) g.step();
-  ok(ads.list().length === n0 - 1, `the poster on a building pulled down came down at midnight (${n0} -> ${ads.list().length})`);
+  // that poster, whatever else the day did (a building that grows or is rebuilt overnight takes its own poster with it, so
+  // the count alone depends on how the town happened to grow)
+  const gone = !ads.list().some((r) => r.x === victim.x && r.y === victim.y && r.i === victim.i);
+  ok(gone && ads.list().length < n0, `the poster on a building pulled down came down at midnight (${n0} -> ${ads.list().length})`);
 } else ok(false, 'a rented frame on a Commons shop to pull down');
 p.money = -ECONOMY_TUNING.overdraftLimit - 1e6; // past the overdraft, whatever the day's taxes bring in
 for (let i = 0; i < DAY; i++) g.step();

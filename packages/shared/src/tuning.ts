@@ -180,6 +180,82 @@ export const TRAFFIC_TUNING = {
   ringSlow: 1,
   /** Places round the ring (lane capacity × 8) a car coming on must leave free, so the ring never fills and locks. */
   ringSpare: 4,
+
+  // ---- smooth flow (docs/traffic-tuning.md "Smooth flow"). Full speed is DRIVE_SPEED, 0.5 tiles a tick -----------
+  /**
+   * 1: car following with a speed per mover (Mover.v): a driver speeds up by at most `accel` a tick and slows for the
+   * car ahead, a turn, a bus halt and (with lookAhead) a stop line it will not be let over, braking at `brake`, so it
+   * eases up to a queue instead of stopping dead. The old rule (0) moves min(full speed, gap to the car ahead) each
+   * tick: from a stop to full speed and back in one tick. The gap, MIN_GAP, the stop lines, the conflict table and the
+   * body guard are hard limits either way.
+   */
+  follow: 1,
+  /**
+   * Acceleration, tiles per tick per tick, before the driver's own style (accelVar) and heavyAccel. At 1 a car can be
+   * at full speed a tick after it moves off (a tick is 36 game seconds) and a truck or bus in two; anything slower costs
+   * the junctions throughput (0.15: 3 speed points, docs/traffic-tuning.md), so the drawing (client render/glide.ts) is
+   * what eases a car up to speed.
+   */
+  accel: 1,
+  /** Each driver's acceleration is accel × (1 ± accelVar), from a hash of their id (the same driver every trip). */
+  accelVar: 0.25,
+  /** Trucks and buses accelerate at this share of a car's rate. */
+  heavyAccel: 0.6,
+  /** Comfortable braking, tiles per tick per tick: what a driver plans with (harder only when the gap closes unexpectedly). */
+  brake: 0.2,
+  /**
+   * With follow, slow down before a turn, to be at the turn's speed (0.6 of full at a plain junction) as it begins: 1
+   * everywhere; 2 only into junctions with lights (at a give-way junction a turning car that slows early gets to the
+   * box later and loses its gap to the cross traffic: 1.5 speed points and 6% more give-ups in a town without
+   * signals, docs/traffic-tuning.md); 0 never (the turn's speed is taken at once inside the box).
+   */
+  followTurn: 2,
+  /** Time headway, ticks: a driver keeps headway × its speed on top of MIN_GAP to a car ahead that is braking at `brake` too. */
+  headway: 0.5,
+  /**
+   * With follow, a driver standing behind a car that is standing too waits until there is this much room (tiles, beyond
+   * MIN_GAP) before moving up, or until that car moves off: a queue closes up in fewer, longer moves rather than
+   * shuffling forward one car length every time the front moves (0: always move up at once). Off: 0.9 cut stops by 8%
+   * but doubled car–pedestrian contacts as drawn and cost give-ups without lights.
+   */
+  startGap: 0,
+  /**
+   * 1: look ahead to the stop line. Within braking distance of it, a driver asks the entry rules whether it would be
+   * let in on arrival (the light as it will be then: phases are a pure function of the tick) and brakes for the line
+   * only if not, so it glides to a red and rolls on into a green that comes before it gets there. 2: only for what
+   * will still be there then (a red or amber light on arrival, barriers, people on the crossing, an exit lane of
+   * standing cars), not a car passing through the box now. 3: only the lights and level-crossing barriers. Off: 1 cut
+   * dead stops by a quarter more for about 13 more give-ups a peak; 2 and 3 were worse.
+   */
+  lookAhead: 0,
+  /**
+   * 1: platoons through junctions. A car following one that went in by the same approach and the same exit, moving and
+   * within platoonGap tiles, may go in behind it before it has left the box (the following gap keeps them apart);
+   * every other entry rule still applies (the light, crossings, conflicting movements). 2: only at lights (at a give-way
+   * junction a platoon holds the box against the cross traffic: a sixth more give-ups in a town without signals).
+   */
+  platoon: 2,
+  platoonGap: 0.6,
+  /** the leader of a platoon must be moving at least this fast (tiles per tick) */
+  platoonV: 0.1,
+  /**
+   * Main-road priority at junctions without lights: 1 at T-junctions the side road gives way to cars on the through
+   * road (moving, within mainGap tiles of the junction, whose path crosses its own); 2 also at crossroads, where the
+   * straighter road (the longer straight run either side) is the main one. Never at lights or roundabouts. Off: within
+   * the noise on the Commons (Traffic.roadRank is the hook for road classes).
+   */
+  mainRoad: 0,
+  mainGap: 1.0,
+  /** a side-road driver held this many ticks by main-road traffic goes when the box is clear anyway (no starving) */
+  minorWaitMax: 20,
+  /**
+   * 1: green waves. Every light has the same period (signalPeriod, no ±20%) and an offset of −(x + y) / waveSpeed
+   * ticks, so a car going east or south at waveSpeed meets each light in the same phase as the last (shared with the
+   * client, which draws the same lamps). Off: 1.2 speed points worse on the Commons's short blocks.
+   */
+  greenWave: 0,
+  /** the speed a green wave is timed for, tiles per tick */
+  waveSpeed: 0.3,
 };
 export type TrafficTuning = typeof TRAFFIC_TUNING;
 /** Hard cap on a pedestrian's wait at a signalled crossing: longer than any red. */
