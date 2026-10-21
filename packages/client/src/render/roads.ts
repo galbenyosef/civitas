@@ -242,12 +242,12 @@ export class RoadLayer {
   }
 
   /** The congestion bytes for a chunk changed (ChunkView.tintRoads): the heat overlay's attribute, and the wear they leave. */
-  setHeat(cx: number, cy: number, heat: Uint8Array | undefined) {
+  setHeat(cx: number, cy: number, heat: Uint8Array | undefined, wear = true) {
     const e = this.entries.get(ckey(cx, cy));
     if (!e) return;
     e.heat = heat;
     this.tint(e);
-    if (!heat) return;
+    if (!heat || !wear) return; // another overlay's bytes (power, road classes) are no traffic: they leave no wear
     // wear follows traffic slowly: a smoothed congestion per tile, and a rebuild (cached tiles mostly) when a level changes
     let changed = false;
     for (let i = 0; i < N; i++) {

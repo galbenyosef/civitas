@@ -1,5 +1,5 @@
 import {
-  FRONT, Zone, isRoad, zoneOf, houseNumber, auxClass, classDef, namesClass, isDividedAux, auxJunction, auxDir, CDIRS, RoadCls, streetsThrough, streetRun, streetLine, streetLength, streetTile, streetName, streetBase, cleanStreetName,
+  FRONT, Zone, isRoad, zoneOf, houseNumber, auxClass, classDef, namesClass, isDividedAux, isMotorwayAux, auxJunction, auxDir, CDIRS, RoadCls, streetsThrough, streetRun, streetLine, streetLength, streetTile, streetName, streetBase, cleanStreetName,
   type StreetRun, type StreetCharacter,
 } from '@msimcity/shared';
 import type { World } from './world';
@@ -192,7 +192,8 @@ export class StreetBook {
       r = s.r & 3; [nx, ny] = [s.doorX + FRONT[r][0], s.doorY + FRONT[r][1]]; ox = s.ax; oy = s.ay;
       if (!this.isRoadAt(nx, ny)) return undefined;
     } else {
-      for (const q of [0, 1, 3, 2]) if (this.isRoadAt(x + FRONT[q][0], y + FRONT[q][1])) { r = q; break; }
+      // the road it faces: never a motorway (no frontage, shared/src/roadclass.ts), as the client turns it
+      for (const q of [0, 1, 3, 2]) if (this.isRoadAt(x + FRONT[q][0], y + FRONT[q][1]) && !isMotorwayAux(this.w.auxAt(x + FRONT[q][0], y + FRONT[q][1]))) { r = q; break; }
       if (r < 0) return undefined;
       [nx, ny] = [x + FRONT[r][0], y + FRONT[r][1]];
     }

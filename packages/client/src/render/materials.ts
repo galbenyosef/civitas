@@ -1,4 +1,5 @@
 import { MeshLambertMaterial, Texture, DataTexture, RedFormat, RGBAFormat, UnsignedByteType, NearestFilter, RepeatWrapping } from 'three';
+import { ROAD_CLASS_DEFS } from '@msimcity/shared';
 
 /** Side of the data overlay's map (render/overlayMap.ts): one texel per tile, wrapped, so the streamed window (well under this) never needs re-centring. */
 export const OVL_SIZE = 1024;
@@ -707,8 +708,18 @@ if (uOvl > 0.5) {
 }`;
 
 /** Congestion overlay: painted over the lit result so it reads the same by day and night. */
+const glslColour = (c: number) => `vec3(${(((c >> 16) & 255) / 255).toFixed(3)}, ${(((c >> 8) & 255) / 255).toFixed(3)}, ${((c & 255) / 255).toFixed(3)})`;
+/** the road classes overlay: a road tile's byte is (class + 1) * 32 (main.ts roadClassHeat), each class its own colour */
+const CLASS_COLOURS = ROAD_CLASS_DEFS.map((d, i) => `${i ? 'else ' : ''}if (k < ${i + 1.5}) pc = ${glslColour(d.colour)};`).join(' ');
 const HEAT = /* glsl */ `
-if (uHeat > 0.5 && vRoad >= 16.0 && uHeatMode > 0.5) {
+if (uHeat > 0.5 && vRoad >= 16.0 && uHeatMode > 1.5) {
+  if (vHeat > 0.05) {
+    float k = floor(vHeat * 255.0 / 32.0 + 0.5);
+    vec3 pc = vec3(0.5);
+    ${CLASS_COLOURS}
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, pc, 0.75);
+  }
+} else if (uHeat > 0.5 && vRoad >= 16.0 && uHeatMode > 0.5) {
   // the power overlay (utilities.ts heat bytes): supplied green, brownout amber, cut or fault red, a dead node's streets grey
   if (vHeat > 0.05) {
     vec3 pc = vHeat < 0.375 ? vec3(0.31, 0.83, 0.42) : vHeat < 0.625 ? vec3(0.95, 0.76, 0.19) : vHeat < 0.875 ? vec3(0.91, 0.22, 0.17) : vec3(0.55, 0.57, 0.62);

@@ -4,7 +4,7 @@ import {
   isPartAux, isAnchorAux, partDx, partDy, auxOrientation, isMultiTile, placedFromAnchor, footprintOf, type Placed,
   isAirfieldAux, airfieldOrientation, airfieldRow, FRONT, isRailAux, railMask,
   isRingAux, ringPos, isArmPos, isIslandAux, isFlyoverAux, deckEW, RING_POS,
-  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, KIND_ID, isClassAux, auxClass, oneWayDir, RoadCls,
+  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, KIND_ID, isClassAux, auxClass, oneWayDir, RoadCls, isMotorwayAux,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Cell, cellUV } from './atlas';
@@ -202,12 +202,13 @@ export class ChunkView {
       if (!building || part) continue;
       if (anchor) { this.structure(items, anchor, t, h2, pick, chunk.parcel[i]); continue; }
 
-      // ---- buildings: face the road, jitter a little, rise while under construction
+      // ---- buildings: face the road (never a motorway: no frontage, shared/src/roadclass.ts), jitter a little, rise while under construction
+      const front = (fx: number, fz: number) => roadAt(fx, fz) && getTile(fx, fz) !== undefined && !isMotorwayAux(auxAt(fx, fz));
       let yaw: number;
-      if (roadAt(x, z + 1) && getTile(x, z + 1) !== undefined) yaw = 0;
-      else if (roadAt(x + 1, z) && getTile(x + 1, z) !== undefined) yaw = Math.PI / 2;
-      else if (roadAt(x - 1, z) && getTile(x - 1, z) !== undefined) yaw = -Math.PI / 2;
-      else if (roadAt(x, z - 1) && getTile(x, z - 1) !== undefined) yaw = Math.PI;
+      if (front(x, z + 1)) yaw = 0;
+      else if (front(x + 1, z)) yaw = Math.PI / 2;
+      else if (front(x - 1, z)) yaw = -Math.PI / 2;
+      else if (front(x, z - 1)) yaw = Math.PI;
       else yaw = Math.floor(h * 4) * (Math.PI / 2);
       const s = 0.95 + 0.1 * h2;
       tmpP.set(x + 0.5, 0, z + 0.5);
