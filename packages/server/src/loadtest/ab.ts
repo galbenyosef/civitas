@@ -12,7 +12,9 @@
  * away (every junction is give-way); `ring=1` adds a public ring road two tiles outside the district, joined to the end
  * of every street; `bus=N` lays a bus network on the Commons (a depot and twelve stops on two lines, docs/transit.md) with
  * N buses per line (`busFare=…` changes the fare; `busTiles=1` lays the depot and stops but runs no lines, the control
- * for the homes and jobs they take); `districts=2` builds a 2×2 city instead (the tick-cost check); `edu=0` turns off education's effects on jobs (sim/skills.ts, the E4 control). Reports: vehicle-weighted mean speed, queued share,
+ * for the homes and jobs they take); `districts=2` builds a 2×2 city instead (the tick-cost check); `avenues=2` makes each district's doubled
+ * edge roads avenues, `avenues=1` also widens its middle streets into avenues over the lots beside them; `oneway=1` makes its inner streets
+ * one-way, alternating (road classes, docs/roads.md); `edu=0` turns off education's effects on jobs (sim/skills.ts, the E4 control). Reports: vehicle-weighted mean speed, queued share,
  * give-ups by kind (Traffic.counters), junction entries per tick, mean commute time, and true body overlaps
  * every tick (oriented rectangles VEHICLE_LEN × VEHICLE_WIDTH with the heading from the lane geometry, and
  * pedestrians as 0.07-radius discs; the same test as the live probe-obb.mjs).
@@ -20,10 +22,11 @@
  * measured window only: a tick-cost comparison on the same traffic), --label L, --json FILE, --quiet.
  */
 import { writeFileSync } from 'node:fs';
-import { DRIVE_SPEED, TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, SKILLS, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, type TrafficTuning, type StopRef } from '@msimcity/shared';
+import { DRIVE_SPEED, TICKS_PER_DAY, TICKS_PER_HOUR, TRAFFIC_TUNING, VEHICLE_LEN, VEHICLE_WIDTH, CitizenState as S, Zone, Terrain, TECH, TRANSIT, VehicleClass, BUS_STOP_KIND, BUS_DEPOT_KIND, BIKE_CLASS, MOBILE, SKILLS, hash2, isRoad, packTile, terrainOf, familyOf, subFor, planStructure, roadDragPath, RoadCls, type TrafficTuning, type StopRef } from '@msimcity/shared';
 import { World, tkey, type Citizen, type Mover } from '../world';
 import { Simulation } from '../sim/simulation';
 import { seedCity } from './cities';
+import { layClass } from './classbench';
 
 const DAY = TICKS_PER_DAY, TPH = TICKS_PER_HOUR;
 /** smoothness thresholds, tiles per tick (full speed DRIVE_SPEED is 0.5): standing under STOP_V, moving again over MOVE_V */
@@ -119,7 +122,7 @@ export const OLD_RULES: Partial<TrafficTuning> = {
 export const UNSMOOTH: Partial<TrafficTuning> = { follow: 0, platoon: 0, startGap: 0, lookAhead: 0, mainRoad: 0, greenWave: 0 };
 
 /** Keys that change the test city rather than TRAFFIC_TUNING: car ownership, no parking lots, no signals technology. */
-const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile', 'edu', 'districts'];
+const CITY_KEYS = ['carOwnership', 'noLots', 'noSignals', 'ring', 'bus', 'busFare', 'busTiles', 'mobile', 'edu', 'districts', 'avenues', 'oneway'];
 
 /**
  * A bus network on the Commons (local coordinates of the 22×22 district): a depot whose door faces the y=5 street;
@@ -185,6 +188,20 @@ export function runAb(opts: { hour: number; ticks: number; seed: number; set: Re
     for (let i = 0; i < span; i++) {
       if (i % 5 !== 0 && i !== span - 1) continue;
       road(x0 + i, y0 - 1); road(x0 + i, y0 + span); road(x0 - 1, y0 + i); road(x0 + span, y0 + i);
+    }
+  }
+  // road classes (R3, docs/roads.md "Classes"): every district's doubled edge roads (local 20 and 21) as avenues, and
+  // with avenues=1 also its middle streets (10) widened into avenues over the lots beside them (11); oneway=1 makes the
+  // inner streets (5, 10, 15) one-way, alternating, the edges staying two-way
+  if (opts.set.avenues || opts.set.oneway) for (const d of layout.districts) {
+    const L = (a: [number, number], b: [number, number], cls: number) => layClass(w, roadDragPath([d.x + a[0], d.y + a[1]], [d.x + b[0], d.y + b[1]]), cls);
+    if (opts.set.avenues) {
+      L([0, 21], [21, 21], RoadCls.Avenue); L([20, 0], [20, 21], RoadCls.Avenue); // drag row and its twin on the left: (y 21 east, 20 west), (x 20 south, 21 north)
+      if (opts.set.avenues === 1) { L([0, 11], [21, 11], RoadCls.Avenue); L([10, 0], [10, 21], RoadCls.Avenue); }
+    }
+    if (opts.set.oneway) for (const [i, v] of [5, 10, 15].entries()) {
+      L(i % 2 ? [21, v] : [0, v], i % 2 ? [0, v] : [21, v], RoadCls.OneWay);
+      L(i % 2 ? [v, 21] : [v, 0], i % 2 ? [v, 0] : [v, 21], RoadCls.OneWay);
     }
   }
   const busNet = opts.set.bus || opts.set.busTiles ? layBusNetwork(w, layout.x0, layout.y0) : null;

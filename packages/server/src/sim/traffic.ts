@@ -1445,7 +1445,32 @@ export class Traffic {
       const main = this.mainAxis(bx, by);
       if (main >= 0 && (isEW(inD) ? 1 : 0) !== main && this.mainComing(m, bx, by, inD, outD, main)) return false;
     }
+    if (!trapped && this.w.anyRoadClass && !this.overMedian(m, bx, by, outD)) return false;
     return !this.boxConflict(m, bx, by, inD, outD, trapped);
+  }
+  /**
+   * Crossing a divided road (roadclass.ts): a car going from one of its junction tiles B straight on into the other, C
+   * (over the central reservation), may go into B and wait there for a gap in C's traffic, as a car waits in a box to
+   * turn, but not while a car crossing the other way is in C's box heading into B: each would stand in one box
+   * waiting for the other's (the twin-box deadlock), so the first one in goes first. True when that is not the move.
+   */
+  private overMedian(m: Mover, bx: number, by: number, outD: number): boolean {
+    const a = this.classAux(bx, by);
+    if (!isDividedAux(a) || oneWayDir(a) >= 0) return true;
+    const i = m.pi + 1, n = m.path.length / 2;
+    if (i + 1 >= n) return true;
+    const cx = m.path[i * 2], cy = m.path[i * 2 + 1];
+    if (cx !== bx + DIRS[outD][0] || cy !== by + DIRS[outD][1]) return true;
+    const c = this.classAux(cx, cy);
+    if (!isDividedAux(c) || oneWayDir(c) >= 0 || auxDir(c) === auxDir(a) || isEW(auxDir(c)) !== isEW(auxDir(a))) return true; // not its twin across the reservation
+    for (let k = 0, nb = this.inBox(cx, cy); k < nb; k++) {
+      const o = this.boxM[k];
+      if (o === m || o.lane < 0) continue;
+      // o's tile after C: B means it is crossing towards me
+      const j = laneTile(o.lane) === tkey(cx, cy) ? o.pi : o.pi + 1;
+      if (j * 2 + 1 < o.path.length && o.path[j * 2] === bx && o.path[j * 2 + 1] === by) return false;
+    }
+    return true;
   }
   /**
    * The main road through junction (x, y) (TRAFFIC_TUNING.mainRoad): 0 north-south, 1 east-west, -1 none (every arm

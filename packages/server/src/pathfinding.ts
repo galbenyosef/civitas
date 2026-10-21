@@ -265,8 +265,8 @@ export function findRoute(
 ): { path: number[]; cost: number } | null {
   if (sx === gx && sy === gy) return { path: [sx, sy], cost: 0 };
   for (const [dx, dy] of DIRS) if (sx + dx === gx && sy + dy === gy) return { path: [sx, sy, gx, gy], cost: 1 };
-  if (!w.hasRoadAccess(gx, gy)) return null; // the goal is reached only from a road beside it: without one, skip the search
   const goalRoad = (() => { const t = w.peekTile(gx, gy); return t !== undefined && isRoad(t); })();
+  if (!goalRoad && !w.hasRoadAccess(gx, gy)) return null; // a building is reached only from a road beside it: without one, skip the search
   const S = slotsOf(w), st = nextStamp();
   // open set: binary heap on f
   let hn = 0;
