@@ -2584,7 +2584,8 @@ export class Simulation {
    */
   private recheckClasses(m: Mover, leg: Leg) {
     if (this.classSeen.get(m) === this.classEpoch) return;
-    const p = m.path, n = p.length / 2, service = m.priority || ('vkind' in m && (m as Vehicle).vkind === VehicleKind.Freight);
+    // a delivery may go on along a pedestrian street only in its hours (it may always drive off one: carStepOk checks the way on)
+    const p = m.path, n = p.length / 2, service = m.priority || ('vkind' in m && (m as Vehicle).vkind === VehicleKind.Freight && pedestrianDeliveryOpen((this.w.tick % TICKS_PER_DAY) / TICKS_PER_HOUR));
     let broken = false;
     for (let i = Math.max(1, m.pi); i + 1 < n && !broken; i++) {
       const ax = p[i * 2], ay = p[i * 2 + 1], bx = p[i * 2 + 2], by = p[i * 2 + 3];

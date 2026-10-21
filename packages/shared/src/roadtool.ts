@@ -4,7 +4,7 @@ import { planBridge, joinsBridgeSide, type BridgePlan } from './bridges';
 import { isRailAux, roadOverTrackProblem, CROSSING_COST } from './rail';
 import { isAirfieldAux } from './airport';
 import { isJunctionAux, isRingAux, isIslandAux } from './junctions';
-import { ROAD_CLASS_DEFS, RoadCls, isRoadClass, roadClassAt, classByte, isClassAux, isOneWayAux, auxDir, dragDirs, twinRow, type RoadClassDef } from './roadclass';
+import { ROAD_CLASS_DEFS, RoadCls, isRoadClass, roadClassAt, classByte, isClassAux, isOneWayAux, isDividedAux, auxDir, dragDirs, twinRow, type RoadClassDef } from './roadclass';
 import { MOTORWAY_KIND } from './gateways';
 
 /**
@@ -197,7 +197,16 @@ export function planRoad(path: readonly (readonly [number, number])[], env: Road
   const wet: number[] = []; // indices into plan.tiles of water tiles, in drag order
   // what to lay: the drag's tiles, each with the way the drag goes on from it; a divided class adds its twin row on the
   // left, each twin after the drag tile it pairs with (`pair`), so the money runs out on both rows together
-  const drag = path.slice(0, ROAD_DRAG_MAX), dirs = dragDirs(drag);
+  let drag = path.slice(0, ROAD_DRAG_MAX);
+  // a divided road dragged back along itself the other way is the same road (its twin stays where it is): read the drag
+  // the way its traffic goes, so it plans as road already there rather than a third carriageway beside it
+  if (def.divided && drag.length > 1) {
+    const d0 = dragDirs(drag);
+    let against = 0, along = 0;
+    drag.forEach(([x, y], i) => { const a = env.aux(x, y), t = env.tile(x, y); if (t === undefined || !isRoad(t) || !isDividedAux(a) || (auxDir(a) < 2) !== (d0[i] < 2)) return; if (auxDir(a) === d0[i]) along++; else against++; });
+    if (against > along) drag = drag.slice().reverse();
+  }
+  const dirs = dragDirs(drag);
   const units: { x: number; y: number; dir: number; pair: number }[] = [];
   const twins = def.divided ? twinRow(drag) : [];
   for (let i = 0; i < drag.length; i++) {

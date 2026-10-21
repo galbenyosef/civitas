@@ -182,30 +182,42 @@ export const noFrontageAux = (a: number) => isMotorwayAux(a);
 /**
  * Should divided road tile (x, y) be a junction tile (CLASS_JUNCTION)? Where a crossing road meets it from the side
  * (any road but its own twin, the parallel tile of the same road; a motorway is met only by another motorway, since
- * streets join it by slips and never cross), where it ends or begins (no road ahead or behind, so traffic can turn
- * round), and where its twin ends. A corner of an avenue is therefore a junction. A pure function of the byte and
- * road tiles at most one step away, so the server keeps it by looking at the 3×3 round any road change.
+ * streets join it by slips and never cross), and where one meets its twin so (a street ending at an avenue from one
+ * side makes both carriageways' tiles the junction: one crossing, not two); where it ends or begins (no road ahead or
+ * behind, so traffic can turn round), and where its twin ends. A corner of an avenue is therefore a junction. A pure
+ * function of the byte and road tiles at most two steps away, so the server keeps it by looking at the 5×5 round any
+ * road change (World.refreshRoadFlags).
  */
 export function divJunction(x: number, y: number, road: (x: number, y: number) => boolean, aux: (x: number, y: number) => number): boolean {
   const a = aux(x, y);
   if (!isDividedAux(a) || isDeckClassAux(a)) return false; // a deck tile is a carriageway under a bridge, never a junction
-  const d = auxDir(a), [dx, dy] = CDIRS[d], motorway = isMotorwayAux(a);
-  const twinAt = (tx: number, ty: number) => { const b = aux(tx, ty); return isDividedAux(b) && sameAxis(auxDir(b), d); };
-  for (const s of [1, -1]) {
-    const nx = x - dy * s, ny = y + dx * s;
-    if (!road(nx, ny) || twinAt(nx, ny)) continue;
-    if (motorway && !isMotorwayAux(aux(nx, ny))) continue;
-    return true;
-  }
+  if (crossedDivided(x, y, a, road, aux)) return true;
+  const d = auxDir(a), [dx, dy] = CDIRS[d];
   if (!road(x + dx, y + dy) || !road(x - dx, y - dy)) return true;
   for (const s of [1, -1]) {
-    const nx = x - dy * s, ny = y + dx * s;
-    if (!road(nx, ny) || !twinAt(nx, ny)) continue;
-    const [tx, ty] = CDIRS[auxDir(aux(nx, ny))];
-    if (!road(nx + tx, ny + ty) || !road(nx - tx, ny - ty)) return true;
+    const nx = x - dy * s, ny = y + dx * s, b = aux(nx, ny);
+    if (!road(nx, ny) || !isDividedAux(b) || !sameAxis(auxDir(b), d)) continue;
+    const [tx, ty] = CDIRS[auxDir(b)];
+    if (!road(nx + tx, ny + ty) || !road(nx - tx, ny - ty) || crossedDivided(nx, ny, b, road, aux)) return true;
   }
   return false;
 }
+/** A road other than its twin meets divided tile (x, y) (byte a) from the side (divJunction's first rule). */
+function crossedDivided(x: number, y: number, a: number, road: (x: number, y: number) => boolean, aux: (x: number, y: number) => number): boolean {
+  const d = auxDir(a), [dx, dy] = CDIRS[d], motorway = isMotorwayAux(a);
+  for (const s of [1, -1]) {
+    const nx = x - dy * s, ny = y + dx * s;
+    if (!road(nx, ny)) continue;
+    const b = aux(nx, ny);
+    if (isDividedAux(b) && sameAxis(auxDir(b), d)) continue; // its twin
+    if (motorway && !isMotorwayAux(b)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** The tile on the left of divided tile (x, y) (byte a): where its twin carriageway runs. */
+export const twinTileOf = (x: number, y: number, a: number): [number, number] => { const [dx, dy] = CDIRS[auxDir(a)]; return [x + dy, y - dx]; };
 
 // ---- laying a divided road -----------------------------------------------------------------------------------------
 

@@ -34,11 +34,12 @@ export class StreetBook {
   streetsAt(x: number, y: number): StreetRun[] {
     const out = streetsThrough(x, y, this.isRoadAt);
     const a = this.w.auxAt(x, y);
-    if (out.length < 2 || !isDividedAux(a) || auxJunction(a)) return out;
+    if (out.length < 2 || !isDividedAux(a)) return out;
     const along = auxDir(a) < 2; // the road runs east-west
+    // the step across to the other carriageway (two tiles, both the divided road's) names the avenue once, not twice
     return out.filter((r) => r.ns !== along || streetLength(r) > 2 || !this.allDivided(r));
   }
-  private allDivided(r: StreetRun) { for (let i = 0; i < streetLength(r); i++) { const [x, y] = streetTile(r, i); const a = this.w.auxAt(x, y); if (!isDividedAux(a) || auxJunction(a)) return false; } return true; }
+  private allDivided(r: StreetRun) { for (let i = 0; i < streetLength(r); i++) { const [x, y] = streetTile(r, i); if (!isDividedAux(this.w.auxAt(x, y))) return false; } return true; }
   /**
    * The other carriageway of a street on a divided road: the same stretch on the line beside it, on the left of the
    * traffic (roadclass.ts twinRow); undefined for any other street.
