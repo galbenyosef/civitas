@@ -14,7 +14,7 @@ import { VALUE_NAMES, VALUE_COUNT, topValues, valuesOf } from '../motivation';
 import { RUNWAY_COST, RUNWAY_MIN, RUNWAY_MAX, TERMINAL_ROW } from '../airport';
 import { RAIL_COST, CROSSING_COST } from '../rail';
 import { ROUNDABOUT_COST, FLYOVER_COST, MINI_ROUNDABOUT_COST, BIG_ROUNDABOUT_COST, INTERCHANGE_COST, isMiniAux } from '../junctions';
-import { TURN_RULE_COST, PELICAN_COST, ARM_WORDS, type ArmState } from '../roadrules';
+import { TURN_RULE_COST, PELICAN_COST, ARM_WORDS, STREET_RULE_DEFS, type ArmState } from '../roadrules';
 import { junctionGroup } from '../signals';
 import { BRIDGE_TILE_COST, BRIDGE_MAX_SPAN, BRIDGE_STYLE_NAMES, BridgeStyle, isBridgeAux, bridgeStyle, bridgeSpanAt, basculeSeed, basculeLiftAt } from '../bridges';
 import { isCrossing } from '../rail';
@@ -818,7 +818,7 @@ export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER |
  * tool fails the typecheck here until it is listed, and `demo:check` then fails until the showcase uses it.
  */
 type SurfaceTool = Exclude<Tool, 'road' | 'bulldoze' | KindToolId>;
-export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, miniroundabout: true, interchange: true, turnrule: true, pelican: true, pylons: true, cable: true };
+export const SURFACE_TOOLS: Record<SurfaceTool, true> = { runway: true, rail: true, roundabout: true, flyover: true, miniroundabout: true, interchange: true, turnrule: true, pelican: true, streetrule: true, pylons: true, cable: true };
 /** Line modes, plus freight (a rail line between yards); a new TransitMode fails the typecheck until listed. */
 export const LINE_MODES: Record<TransitMode | 'freight', true> = { bus: true, rail: true, metro: true, ferry: true, freight: true };
 
@@ -870,6 +870,12 @@ const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
     what: 'A crossing with lights: a walker presses the button, and after the traffic has had its minimum green the lights go amber, then red, and the walkers cross; then a flashing amber while the last of them finish. Where a pedestrian street crosses a street there is one already.',
     how: 'Pick Signal crossing and click a straight stretch of street away from a junction. Click it again to take it away.',
     facts: [['Tool', 'Signal crossing (no key), click a street'], ['Needs', 'a straight two-way street tile, not next to a junction'], ['Technology', techLine('pelican')], ['Cost', money(PELICAN_COST)]],
+  },
+  streetrule: {
+    title: 'Street rules',
+    what: 'Rules for a whole street, the way a council sets them: an HGV ban (no lorries but to deliver there), a bus lane on a one-way street or an avenue (buses, bikes, taxis and emergencies pass the queue in the kerb lane), double yellow lines (no kerb parking, so no lane slot lost to a parked car) and a 20 zone with speed humps (every vehicle at 60%, through traffic goes elsewhere, quieter and safer for walkers). The signs, the red lane, the yellow lines and the humps are drawn.',
+    how: 'Pick Street rules, choose a rule in its picker and click a street: the ghost covers the whole street with the cost and the day\'s upkeep (for an HGV ban, how far a lorry must go round). Drag along part of a street to set it there only. Click a street that has the rule to take it off. Ctrl+Z takes the last change back.',
+    facts: [['Tool', 'Street rules (no key), click a street or drag part of one'], ['Needs', 'a street; a bus lane needs two lanes one way'], ['Technology', `${techLine('streetrules')}; bus lanes ${techLine('buslane')}`], ['Cost', STREET_RULE_DEFS.map((d) => `${d.title} ${money(d.cost)} a tile`).join(', ')]],
   },
   flyover: {
     title: 'Flyover',

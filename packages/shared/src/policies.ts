@@ -5,7 +5,7 @@
  * school bus service in sim/schoolbus.ts). A player's switches are `Player.policies` (saved with players, optional,
  * so old saves load) and ride in `PlayerDTO.policies`; the `setPolicy` intent flips one, the server validates it.
  */
-export type PolicyId = 'meals' | 'buses' | 'learning' | 'apprentice' | 'fees';
+export type PolicyId = 'meals' | 'buses' | 'learning' | 'apprentice' | 'fees' | 'curfew';
 
 export interface PolicyDef {
   id: PolicyId;
@@ -20,6 +20,8 @@ export interface PolicyDef {
   effects: string[];
   /** which phase builds the effect, for the panel to be honest about a policy whose effect is not live yet */
   live: boolean;
+  /** the panel's section: education (the schools) or transport (R5's lorry curfew); absent is education */
+  group?: 'education' | 'transport';
 }
 
 /** Tunables of the policies, in one place (the pass bonus of free school meals is `EDU.mealsBonus`). Dollars per game day. */
@@ -34,6 +36,12 @@ export const POLICY = {
   apprenticeWageShare: 0.2, apprenticeShare: 0.1,
   /** tuition fees: income per student a day when on, the grant the player pays per student when off; on, this share of university places go unfilled, and graduates leave this much more readily (E4) */
   feePerStudent: 2, grantPerStudent: 1, feeDeter: 0.3, feeDrainMul: 1.5,
+  /**
+   * lorry curfew (R5, docs/roads.md "Traffic control"): no freight lorry sets off from or for the player's land between
+   * curfewFrom and curfewTo (the hours, game clock), motorway through-traffic exempt; deliveries due then wait for the
+   * morning. Its running cost, a day (enforcement).
+   */
+  curfewFrom: 22, curfewTo: 6, curfewPerDay: 10,
 };
 
 export const POLICIES: PolicyDef[] = [
@@ -57,7 +65,13 @@ export const POLICIES: PolicyDef[] = [
     blurb: 'Students at your universities pay their way. Off, you pay them a grant instead.',
     runs: `earns $${POLICY.feePerStudent} per student a day; off, you pay a $${POLICY.grantPerStudent} grant`,
     effects: [`${Math.round(POLICY.feeDeter * 100)}% fewer university places taken`, 'more graduates leave town'] },
+  { id: 'curfew', name: 'Lorry curfew', feature: 'curfew', setup: 150, live: true, group: 'transport',
+    blurb: `No lorries on your streets at night: deliveries to and from your land wait until ${String(POLICY.curfewTo).padStart(2, '0')}:00.`,
+    runs: `$${POLICY.curfewPerDay} a day`,
+    effects: [`no freight lorries ${POLICY.curfewFrom}:00-${String(POLICY.curfewTo).padStart(2, '0')}:00 from or for your land`, 'quieter nights for the homes on your streets', 'motorway through-traffic is exempt', 'shops are stocked by day instead'] },
 ];
+/** Is the time of day `hour` (game clock, 0-24) inside the lorry curfew? */
+export const inCurfew = (hour: number) => hour >= POLICY.curfewFrom || hour < POLICY.curfewTo;
 export const POLICY_BY_ID = new Map<string, PolicyDef>(POLICIES.map((p) => [p.id, p]));
 export const isPolicyId = (s: unknown): s is PolicyId => typeof s === 'string' && POLICY_BY_ID.has(s);
 /** Whether a player's switches (Player.policies, absent in old saves) have this policy on. */

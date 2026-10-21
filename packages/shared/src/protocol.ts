@@ -1,4 +1,4 @@
-import type { RoadRuleDTO } from './roadrules';
+import type { RoadRuleDTO, StreetRuleId } from './roadrules';
 import type { KindToolId } from './buildings/compiled';
 import type { StopInfo, BusInfo, LineInfo, LineStats, LinePreview, TransitLine, TransitMode } from './transit';
 import type { RailLineDef, RailRoute } from './rail';
@@ -15,7 +15,7 @@ import type { StoryDTO } from './news';
 import type { GraveSiteDTO, DeceasedInfo, RemembranceInfo, FamilyRef } from './remembrance';
 import type { UtilityInfo, UtilLinkDTO } from './utilities';
 /** Build tools: roads, bulldozing, runways (shared/src/airport.ts), railway track (shared/src/rail.ts), roundabouts and flyovers (shared/src/junctions.ts) and one per catalogue kind that has a tool (buildings/*.ts). */
-export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'pylons' | 'cable' | KindToolId;
+export type Tool = 'road' | 'bulldoze' | 'runway' | 'rail' | 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican' | 'streetrule' | 'pylons' | 'cable' | KindToolId;
 
 export interface ParcelStats {
   population: number;
@@ -582,6 +582,21 @@ export type ClientMsg =
       cls?: number; demolish?: boolean }
   /** the road tool's Ctrl/Cmd+Z: take back the player's last road drag (ROAD_UNDO_MS), refunded, while its tiles are still bare road */
   | { t: 'undoRoad' }
+  /**
+   * R5 street rules (shared/src/roadrules.ts StreetRule): put rule `rule` on these road tiles (a street the tool clicked,
+   * or a drag of part of one) or, with `on` false, take it off them. The server checks each tile and charges per tile.
+   */
+  | { t: 'streetRule'; rule: StreetRuleId; tiles: [number, number][]; on: boolean; dev?: boolean }
+  /** the Street rules tool's Ctrl/Cmd+Z: take back the player's last street rule change, refunded */
+  | { t: 'undoStreetRule' }
+  /** the Street rules tool's ghost (R5): what an HGV ban on these tiles does to a lorry's route past them; answered with 'ruleProbe' */
+  | { t: 'ruleProbe'; rule: StreetRuleId; tiles: [number, number][]; seq: number }
+  /** R5: the visitor limit on the gateway whose door is (x, y): half the visitors come in by it */
+  | { t: 'gatewayLimit'; x: number; y: number; on: boolean }
+  /** R5: the Traffic panel's figures (answered with 'trafficPanel'); asked again every few seconds while it is open */
+  | { t: 'trafficPanel' }
+  /** R5: why the traffic in chunk (cx, cy) is held up (answered with 'jamWhy'); asked only while the congestion overlay is on */
+  | { t: 'jamWhy'; cx: number; cy: number }
   /** rename the street through road tile (x, y) along `ns` (shared/src/streets.ts); an empty name gives back the generated one */
   | { t: 'renameStreet'; x: number; y: number; ns: boolean; name: string }
   /** `color` -1 clears it back to the owner's colour; on an estate member every setting applies to the whole estate */
@@ -672,6 +687,15 @@ export type ServerMsg =
   | { t: 'ferryLines'; lines: FerryLineDTO[] }
   | { t: 'train'; line: number; train: number; info: TrainInfo | null }
   | { t: 'pong'; n: number }
+  /** the Street rules tool's ghost (R5): a sample lorry's route cost past the tiles before and after an HGV ban (-1: no way round) */
+  | { t: 'ruleProbe'; seq: number; before: number; after: number }
+  /** R5: the Traffic panel (TrafficPanelInfo) */
+  | { t: 'trafficPanel'; info: TrafficPanelInfo }
+  /**
+   * R5: why the traffic is held up in chunk (cx, cy), from the simulation's own counters: per road tile with a queue,
+   * flat [x, y, cars, following, red, gap, box, parking, turning, freightOrVisitors, ...] (JAM_WHY_STRIDE numbers each)
+   */
+  | { t: 'jamWhy'; cx: number; cy: number; u: number[] }
   /** every transit line, and which line each bus on the road runs (flat [busId, lineId, …], for the livery) */
   | { t: 'lines'; lines: LineInfo[]; buses: number[]; saved?: number }
   /** between full 'lines' messages (sent when a line changes): what changes as the buses run, and the livery map */
@@ -776,4 +800,22 @@ export interface BoatInfo {
   landedToday?: number;
   /** a ship's call: containers landed and taken on, passengers off */
   cargo?: { imports: number; exports: number; passengers: number };
+}
+
+/** R5: the numbers per tile in a 'jamWhy' message, and the causes they count (after x, y and cars), for the overlay's tooltip */
+export const JAM_WHY_STRIDE = 10;
+export const JAM_CAUSES = ['following the car ahead', 'held at a red light', 'waiting for a gap', 'the box ahead blocked', 'looking for parking', 'turning'] as const;
+/** R5: the Traffic panel (client trafficpanel.ts, server Simulation.trafficPanel). */
+export interface TrafficPanelInfo {
+  /** cars on the road now, by who drives them */
+  onRoad: { residents: number; visitors: number; freight: number; buses: number; services: number };
+  /** visitors and lorries dispatched in the last game hour, and today's give-ups by kind */
+  lastHour: { visitors: number; freight: number };
+  giveUps: { residents: number; visitors: number; freight: number; other: number };
+  /** arrivals an hour by gateway (newcomers through the gate, and visitors by road through a motorway connection) */
+  gateways: { x: number; y: number; name: string; type: string; perHour: number; arrivalsToday: number; visitorsToday: number; visitorsYesterday: number; limit: boolean; mine: boolean; limitCost: number }[];
+  /** the worst five junctions by give-ups (cars that gave up waiting to get in) since the start of yesterday */
+  junctions: { x: number; y: number; name: string; giveUps: number }[];
+  /** the three streets with the most cars queued on them now */
+  streets: { x: number; y: number; name: string; queued: number; freightOrVisitors: number }[];
 }

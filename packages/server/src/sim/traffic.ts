@@ -6,6 +6,7 @@ import {
   isClassAux, edgeLanes, classDef, carStepOk, isMotorwayAux, isPedestrianAux, oneWayDir, auxDir, isDividedAux,
   groupPhaseOf, groupArms, inGroup, isRingClassAux, isDeckClassAux, deckAxisStep, isMiniAux, CDIRS, pelicanPhase, pelicanReady, implicitPelican,
   slipJunction, groupTiming, groupMain, MINI_AUX, type JunctionGroup,
+  StreetRule, ZONE20_SPEED, ZONE20_COST,
 } from '@msimcity/shared';
 import { DIRS, noteTrail, tkey, type Mover, type World } from '../world';
 import { env } from '../env';
@@ -83,6 +84,10 @@ const laneTile = (k: number) => Math.floor(k / 4);
 /** x and y of tile key t (tkey), likewise without `%` */
 const tileX = (t: number) => Math.floor(t / 65536) - 0x8000;
 const tileY = (t: number) => t - Math.floor(t / 65536) * 65536 - 0x8000;
+/** Street rules (R5) that keep a tile's kerb clear of parked cars: double yellows, and a bus lane. */
+const NO_KERB = StreetRule.NoParking | StreetRule.BusLane;
+/** Fleet vehicle kinds (sim/mobile.ts FLEET_VKIND 32 + FleetKind) that may use a bus lane: taxis and private hire. */
+const BUS_LANE_TAXI = 33, BUS_LANE_HIRE = 34;
 /** How far back (lane progress, tiles) a car coming along a motorway makes one joining it by a slip road wait. */
 const SLIP_GAP = 2;
 /** what a level crossing adds to a road tile's cost for the router: the expected wait for the barriers */
@@ -511,6 +516,8 @@ export class Traffic {
     // main-road priority (TRAFFIC_TUNING.mainRoad) by road class: a bigger road's arms are the main road (roadclass.ts rank)
     this.roadRank = (x, y) => (this.isRoadAt(x, y) ? classDef(this.classAux(x, y) & 7).rank : -1);
     w.kerb.onSet = (k, n) => { const c = this.costChunkOfKey(k); if (c) c.kerb[this.costCell] = n > 0 ? 1 : 0; };
+    // a street rule (R5) changes a tile's route cost (a 20 zone) and whether a car may park at its kerb
+    w.onStreetRules = (tiles) => { for (const [x, y] of tiles) this.dropCostFlags(x, y); };
   }
 
   static laneKey(x: number, y: number, dir: number) { return tkey(x, y) * 4 + dir; }
@@ -586,6 +593,7 @@ export class Traffic {
       f = cc.flags[i] = 1 | (this.degreeOf(x, y) >= 3 ? 2 : 0) | (this.isCrossingAt(x, y) ? (this.xingOf(x, y) === 1 ? 4 : 8) : 0);
       const ca = this.classAux(x, y);
       cc.base[i] = ca ? classDef(ca & 7).routeCost : 1; // the road's class: the hierarchy routers prefer (roadclass.ts)
+      if (this.w.streetAny & StreetRule.Zone20 && this.w.streetAt(x, y) & StreetRule.Zone20) cc.base[i] *= ZONE20_COST; // a 20 zone (R5): through traffic goes elsewhere
     }
     let c = cc.base[i] + TT.congestionWeight * g;
     if (f & 2) c += 0.6;
@@ -689,6 +697,19 @@ export class Traffic {
     const ax = p[k * 2], ay = p[k * 2 + 1], bx = p[k * 2 + 2], by = p[k * 2 + 3];
     const d = dirBetween(ax, ay, bx, by);
     if (edgeLanes(this.classAux(ax, ay), this.classAux(bx, by), d) < 2) return 0;
+    // a bus lane (R5) on either tile: the kerb lane (strand 0) for buses, bikes, taxis and emergencies, unless they turn
+    // left soon; everyone else the other lane, but for a right turn out of the tile ahead (turning off at the last tile)
+    if (this.w.streetAny & StreetRule.BusLane && (this.w.streetAt(ax, ay) | this.w.streetAt(bx, by)) & StreetRule.BusLane) {
+      if (this.busLaneUser(m)) {
+        for (let j = k + 1; j + 1 < n && j <= k + 6; j++) {
+          const dj = dirBetween(p[j * 2], p[j * 2 + 1], p[j * 2 + 2], p[j * 2 + 3]);
+          if (dj !== d) return dj === LEFT[d] ? 1 : 0;
+        }
+        return 0;
+      }
+      if (k + 2 < n && dirBetween(bx, by, p[k * 2 + 4], p[k * 2 + 5]) === RIGHT[d]) return 0;
+      return 1;
+    }
     // a big roundabout (R4): its inner lane for cars going past the second exit, the outer for the rest and before an exit
     const ring = this.ringStrand(m, k);
     if (ring >= 0) return ring;
@@ -797,7 +818,9 @@ export class Traffic {
     return this.isCrossingAt(mx, my) && this.barrierDownAt(mx, my) && !(x0 > mx + 0.02 && x0 < mx + 0.98 && y0 > my + 0.02 && y0 < my + 0.98);
   }
   /** No car is left at the kerb of a roundabout, a flyover, a level crossing or a bridge. */
-  kerbless(x: number, y: number): boolean { const ca = this.classAux(x, y); return !!this.junctionAux(x, y) || this.isCrossingAt(x, y) || isBridgeAux(this.w.auxAt(x, y)) || isMotorwayAux(ca) || isPedestrianAux(ca) || isRingClassAux(ca) || ((this.w.anyRoadClass || this.w.roadRules.size > 0) && this.pelicanAt(x, y)); }
+  kerbless(x: number, y: number): boolean { const ca = this.classAux(x, y); return !!this.junctionAux(x, y) || this.isCrossingAt(x, y) || isBridgeAux(this.w.auxAt(x, y)) || isMotorwayAux(ca) || isPedestrianAux(ca) || isRingClassAux(ca) || ((this.w.anyRoadClass || this.w.roadRules.size > 0) && this.pelicanAt(x, y)) || (!!(this.w.streetAny & NO_KERB) && !!(this.w.streetAt(x, y) & NO_KERB)); }
+  /** May m use a bus lane (R5)? Buses, two-wheelers, taxis and private hire, and emergencies on a call. */
+  busLaneUser(m: Mover): boolean { const vk = (m as { vkind?: number }).vkind; return m.cls === VehicleClass.Bus || isBike(m) || m.priority || vk === BUS_LANE_TAXI || vk === BUS_LANE_HIRE; }
   /** Speed factor for a turn through tile (x, y): 0.6 at a plain junction; on a roundabout 1 round a corner, TRAFFIC_TUNING.ringSlow on or off at an arm. */
   private turnSlow(x: number, y: number) {
     const a = this.junctionAux(x, y);
@@ -1446,6 +1469,30 @@ export class Traffic {
     return this.degreeOf(bx, by) >= 3 || this.isCrossingAt(bx, by) ? 'junction' : 'line';
   }
   /**
+   * Why m is held up (R5, the heat overlay's explanation and the Traffic panel), from the same tests the entry rules make:
+   * an index into JAM_CAUSES (0 following the car ahead, 1 held at a red light, 2 waiting for a gap, 3 the box ahead
+   * blocked, 4 getting into its destination, 5 slowed for a turn), or -1 when it is moving freely. Read-only: called
+   * only when a client asks (jamWhy), never by the tick.
+   */
+  whyHeld(m: Mover): number {
+    if (m.lane < 0 || m.pi < 1 || m.pi * 2 + 1 >= m.path.length) return -1;
+    const n = m.path.length / 2, bx = m.path[m.pi * 2], by = m.path[m.pi * 2 + 1];
+    const dir = dirBetween(m.path[(m.pi - 1) * 2], m.path[(m.pi - 1) * 2 + 1], bx, by), outD = this.nextDirOf(m);
+    const turning = (outD !== dir && m.prog > 0.3) || (m.inDir !== dir && m.prog < 0.3);
+    if (m.wait < 2) return turning && (m.v ?? 0) < DRIVE_SPEED * 0.4 ? 5 : -1;
+    const st = this.standing(m);
+    if (st === 'queue') return 0;
+    if (st === 'dest') return 4;
+    if (st === 'other') return turning ? 5 : 0;
+    if (m.pi + 1 >= n) return 4;
+    if (this.degreeOf(bx, by) >= 3 && this.lightHolds(m, m.pi, dir)) return 1;
+    if ((this.w.anyRoadClass || this.w.roadRules.size > 0) && this.pelicanAt(bx, by)) { const l = this.pelicanLamp(bx, by); if (l === 'amber' || l === 'red') return 1; }
+    const nq = this.laneQ(bx, by, outD);
+    if (nq && nq.length && !this.laneRoom(bx, by, Traffic.laneKey(bx, by, outD), m, null, m.s2 ?? 0)) return 3;
+    if (TT.boxClear && this.degreeOf(bx, by) >= 3 && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return 3;
+    return 2;
+  }
+  /**
    * Is anything queued behind m: following it in its own lane, or in the lane that leads into the tile its lane starts
    * from (a bus standing at a stop holds those up)?
    */
@@ -2006,6 +2053,8 @@ export class Traffic {
       if (m.s2 && !last && edgeLanes(this.classAux(bx, by), this.classAux(m.path[(m.pi + 1) * 2], m.path[(m.pi + 1) * 2 + 1]), nextDir) < 2) m.s2 = 0;
     }
     if (this.kerbAt(ax, ay)) base *= 0.6;
+    // a 20 zone (R5): every vehicle at ZONE20_SPEED on its tiles
+    if (this.w.streetAny & StreetRule.Zone20 && this.w.streetAt(m.prog < 0.5 ? ax : bx, m.prog < 0.5 ? ay : by) & StreetRule.Zone20) base *= ZONE20_SPEED;
     const free = base; // before the turns: what the turn ahead is slowed from
     // turns slow a car for each half; on a roundabout the ring's wide corners not at all, the turns on and off less
     if (nextDir !== dir && m.prog > 0.3) base *= this.turnSlow(bx, by);

@@ -4,7 +4,7 @@ import {
   terrainOf, isStructureAux, structureAt, eachTile, kindIdOf, familyOf, subFor, capacityOf, isGrowableId, CitizenState, type Placed,
   isJunctionAux, isRingAux, isIslandAux, isFlyoverAux, islandOf, isArmPos, RING_POS, Terrain, isBridgeAux, bridgeSpanAt,
   isClassAux, isDividedAux, divJunction, CLASS_JUNCTION, twinTileOf, auxDir, classByte, RoadCls, noFrontageAux, MOTORWAY_KIND, classDef, auxClass, ROAD_UPKEEP,
-  isMiniAux, isBigIslandAux, isRingClassAux, isDeckClassAux, bigRingAt, junctionGroup, linkedDegree, ruleEmpty, type RoadRule, type RoadRuleDTO, type JunctionGroup,
+  isMiniAux, isBigIslandAux, isRingClassAux, isDeckClassAux, bigRingAt, junctionGroup, linkedDegree, ruleEmpty, busLaneOk, streetRuleUpkeep, StreetRule, type RoadRule, type RoadRuleDTO, type JunctionGroup,
   type TransitLine, type ParcelDTO, type ParcelStats, type PlayerDTO, type Counter, TICKS_PER_DAY,
   type LedgerCat, type LedgerDTO, type FinanceDTO, ECONOMY_TUNING, spendableMoney, stopName, planCombine, planSplit, KIND_NAMES, isBuildable, type SeaGate, type EduFields, hasPolicy, type PolicyId,
 } from '@msimcity/shared';
@@ -153,6 +153,8 @@ export interface Vehicle extends Mover {
   legs: Leg[]; leg: Leg | null;
   /** what the buyer pays on delivery when it is not FREIGHT_FEE (harbour freight: fish by the box, sim/harbours.ts) */
   fee?: number;
+  /** a lorry held at its depot by the lorry curfew (R5, sim/control.ts) until this tick: it sets off then */
+  hold?: number;
   /** a fire engine on a call (Mover.call) held up in stopped traffic, driving on down the middle of the road out of the lanes (Simulation.weave) */
   weave?: boolean;
 }
@@ -683,11 +685,62 @@ export class World {
   /** Set (or with null clear) the record anchored at (x, y). */
   setRoadRule(x: number, y: number, r: RoadRule | null) {
     const k = tkey(x, y);
+    const had = this.roadRules.get(k)?.st ?? 0;
     if (!r || ruleEmpty(r)) { if (!this.roadRules.delete(k)) return; }
     else this.roadRules.set(k, r);
     this.rulesVersion++;
     this.indexRuleTiles();
+    if (had || r?.st) { this.indexStreetRules(); this.onStreetRules?.([[x, y]]); }
+    else if (r?.gw || this.gatewayLimits) this.indexStreetRules();
     this.onRoadRule?.(x, y);
+  }
+
+  // ---- street rules (R5, shared/src/roadrules.ts StreetRule: HGV bans, bus lanes, double yellows, 20 zones) ---------
+
+  /**
+   * The street rule bits by road tile (tkey), from the records' `st`: what the traffic model and the routers read. With
+   * `streetAny` (every bit set anywhere) 0, a world without street rules takes none of their code paths.
+   */
+  streetBits = new Map<number, number>();
+  streetAny = 0;
+  /** Street rule bits of road tile (x, y), 0 for none. */
+  streetAt(x: number, y: number): number { return this.streetAny ? this.streetBits.get(tkey(x, y)) ?? 0 : 0; }
+  /** Told which tiles' street rules changed (Traffic drops their route costs; the parcels' upkeep is recounted). */
+  onStreetRules: ((tiles: readonly (readonly [number, number])[]) => void) | null = null;
+  /**
+   * Put street rule `bit` on (or off) each of these road tiles; a bus lane only where busLaneOk. Returns the tiles that
+   * changed. One version bump and one notice for the lot.
+   */
+  setStreetRules(tiles: readonly (readonly [number, number])[], bit: number, on: boolean): [number, number][] {
+    const changed: [number, number][] = [];
+    for (const [x, y] of tiles) {
+      const t = this.peekTile(x, y);
+      if (t === undefined || !isRoad(t)) continue;
+      if (on && bit === StreetRule.BusLane && !busLaneOk(this.auxAt(x, y))) continue;
+      const k = tkey(x, y), r = this.roadRules.get(k), st = r?.st ?? 0, nst = on ? st | bit : st & ~bit;
+      if (nst === st) continue;
+      const nr: RoadRule = { ...(r ?? {}) };
+      if (nst) nr.st = nst; else delete nr.st;
+      if (ruleEmpty(nr)) this.roadRules.delete(k); else this.roadRules.set(k, nr);
+      changed.push([x, y]);
+    }
+    if (!changed.length) return changed;
+    this.rulesVersion++;
+    this.indexStreetRules();
+    const parcels = new Set<number>();
+    for (const [x, y] of changed) { const id = this.parcelIdAt(x, y); if (id) parcels.add(id); }
+    for (const id of parcels) this.recountRoads(id);
+    this.onStreetRules?.(changed);
+    this.onRoadRule?.(changed[0][0], changed[0][1]);
+    return changed;
+  }
+  /** gateways with the visitor limit on (records with `gw`): Simulation.dispatch looks only when there are some */
+  gatewayLimits = 0;
+  private indexStreetRules() {
+    this.streetBits.clear();
+    let any = 0, gw = 0;
+    for (const [k, r] of this.roadRules) { if (r.st) { this.streetBits.set(k, r.st); any |= r.st; } if (r.gw) gw++; }
+    this.streetAny = any; this.gatewayLimits = gw;
   }
   /** Told when a road rule changes (the simulation has drivers check their way: Simulation.recheckClasses). */
   onRoadRule: ((x: number, y: number) => void) | null = null;
@@ -706,7 +759,7 @@ export class World {
    * road goes.
    */
   private checkRoadRules(x: number, y: number) {
-    let changed = false;
+    let changed = false, streets = false;
     for (const [k, r] of [...this.roadRules]) {
       const [ax, ay] = untkey(k);
       if (Math.abs(ax - x) > 3 || Math.abs(ay - y) > 3) continue;
@@ -723,8 +776,15 @@ export class World {
           delete r.ban; delete r.noEntry; changed = true;
         }
       }
+      if (r.st) {
+        // a street rule goes with its road tile; a bus lane with the two lanes one way it needs
+        const t = this.peekTile(ax, ay);
+        if (t === undefined || !isRoad(t)) { delete r.st; changed = true; streets = true; }
+        else if (r.st & StreetRule.BusLane && !busLaneOk(this.auxAt(ax, ay))) { r.st &= ~StreetRule.BusLane; if (!r.st) delete r.st; changed = true; streets = true; }
+      }
       if (ruleEmpty(r)) this.roadRules.delete(k);
     }
+    if (streets) { this.indexStreetRules(); this.onStreetRules?.([[x, y]]); }
     // ruled junctions' tiles may have changed even where no record moved
     if (changed || this.ruleTiles.size) { if (changed) this.rulesVersion++; this.indexRuleTiles(); }
   }
@@ -737,10 +797,13 @@ export class World {
       if (Number.isInteger(e[2].ban) && e[2].ban! > 0) r.ban = e[2].ban! & 0xfff;
       if (Number.isInteger(e[2].noEntry) && e[2].noEntry! > 0) r.noEntry = e[2].noEntry! & 0xf;
       if (e[2].pelican) r.pelican = 1;
+      if (Number.isInteger(e[2].st) && e[2].st! > 0 && e[2].st! & 0xf) r.st = e[2].st! & 0xf; // R5 street rules (absent before R5)
+      if (e[2].gw) r.gw = 1;
       if (!ruleEmpty(r)) this.roadRules.set(tkey(e[0], e[1]), r);
     }
     this.rulesVersion++;
     this.indexRuleTiles();
+    this.indexStreetRules();
   }
 
   /**
@@ -1238,7 +1301,7 @@ export class World {
     if (!parcel) return;
     let n = 0, up = 0;
     for (let yy = parcel.y; yy < parcel.y + parcel.h; yy++)
-      for (let xx = parcel.x; xx < parcel.x + parcel.w; xx++) if (isRoad(this.getTile(xx, yy))) { n++; up += classDef(auxClass(this.auxAt(xx, yy))).upkeep; }
+      for (let xx = parcel.x; xx < parcel.x + parcel.w; xx++) if (isRoad(this.getTile(xx, yy))) { n++; up += classDef(auxClass(this.auxAt(xx, yy))).upkeep; if (this.streetAny) up += streetRuleUpkeep(this.streetAt(xx, yy)); }
     if (n !== parcel.stats.roads) { parcel.stats.roads = n; this.dirtyParcels.add(id); }
     // the day's road upkeep by class (roadclass.ts), kept only when a road of another class than the street is there
     const extra = Math.abs(up - n * ROAD_UPKEEP) > 1e-9 ? up : undefined;
