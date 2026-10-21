@@ -115,6 +115,8 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const fmt = (n: number) => '$' + Math.round(n).toLocaleString();
+/** build-list rows in the parcel panel before "show more" */
+const SITES_FOLDED = 8;
 
 export interface UICallbacks {
   onTool(t: ToolId): void;
@@ -359,7 +361,8 @@ export class UI {
     if (this.panelFor !== p.id) {
       this.panelFor = p.id;
       panel.innerHTML = `
-        <h2><span class="sw" style="background:#${(owner?.color ?? 0xffffff).toString(16).padStart(6, '0')}"></span><span id="pName"></span><button class="chip" id="pClose" title="close (Esc)" style="margin-left:auto">✕</button></h2>
+        <h2 class="phead"><span class="sw" style="background:#${(owner?.color ?? 0xffffff).toString(16).padStart(6, '0')}"></span><span id="pName"></span><button class="chip" id="pFold" title="fold the panel to its title">${this.parcelFolded ? '+' : '–'}</button><button class="chip" id="pClose" title="close (Esc)">✕</button></h2>
+        <div id="pBody"${this.parcelFolded ? ' class="hidden"' : ''}>
         <div class="sub" id="pSub"></div>
         <table>
           <tr><td>Population</td><td id="pPop"></td></tr>
@@ -377,8 +380,10 @@ export class UI {
           <input type="range" id="pRateInput" min="0" max="${MAX_TAX * 100}" step="1" />
           <label>Name<input type="text" id="pNameInput" maxlength="24" /></label>
           <div class="hint">Income tax is paid by everyone who works here, wherever they live; property tax by everyone who lives here; sales tax by everyone who drinks or eats here. Above ~20% people start leaving. Services and builders are paid from your treasury.</div>
-        ` : `<div class="hint">Citizens from anywhere can work here; their income tax goes to ${esc(owner?.name ?? 'the owner')}.</div>`}`;
+        ` : `<div class="hint">Citizens from anywhere can work here; their income tax goes to ${esc(owner?.name ?? 'the owner')}.</div>`}
+        </div>`;
       $('pClose').onclick = () => this.cb.onCloseParcel();
+      $('pFold').onclick = () => { this.parcelFolded = !this.parcelFolded; $('pBody').classList.toggle('hidden', this.parcelFolded); $('pFold').textContent = this.parcelFolded ? '+' : '–'; };
       if (mine) {
         const r = $<HTMLInputElement>('pRateInput');
         r.oninput = () => { $('pRate').textContent = r.value + '%'; };
@@ -408,13 +413,18 @@ export class UI {
   }
   hideParcel() { $('panel').classList.add('hidden'); this.panelFor = 0; }
 
+  /** the parcel panel folded to its title, and its build list shown in full (both kept from parcel to parcel) */
+  private parcelFolded = false;
+  private sitesAll = false;
   /** Build list for the selected parcel; controls only when it is the viewer's. */
   showSites(parcelId: number, sites: SiteDTO[], mine: boolean) {
     if (this.panelFor !== parcelId) return;
     const el = document.getElementById('pBuild');
     if (!el) return;
     if (!sites.length) { el.innerHTML = ''; return; }
-    const rows = sites.slice(0, 25).map((s) => {
+    // a long list keeps the panel short: the first few, and "all" on a click (playtest 8df08a47)
+    const shown = this.sitesAll ? 25 : SITES_FOLDED;
+    const rows = sites.slice(0, shown).map((s) => {
       const pct = Math.round((100 * s.done) / s.total);
       const what = isCivicId(s.kind) ? KIND_NAMES[s.kind] : `${KIND_NAMES[s.kind]} → L${s.target}`;
       const ctl = mine ? `
@@ -428,7 +438,9 @@ export class UI {
         <span class="n">${s.builders ? `${s.builders}👷` : ''}</span>
         <span class="ctl">${ctl}</span></div>`;
     }).join('');
-    el.innerHTML = `<div class="buildhead">Build list <span>${sites.length}${sites.length > 25 ? ', showing 25' : ''}</span></div>${rows}`;
+    const more = sites.length > SITES_FOLDED ? `<a class="sitesmore" href="#">${this.sitesAll ? 'show fewer' : `show ${Math.min(25, sites.length) - SITES_FOLDED} more`}</a>` : '';
+    el.innerHTML = `<div class="buildhead">Build list <span>${sites.length}${sites.length > shown ? `, showing ${shown}` : ''}</span></div>${rows}${more}`;
+    el.querySelector<HTMLElement>('.sitesmore')?.addEventListener('click', (e) => { e.preventDefault(); this.sitesAll = !this.sitesAll; this.showSites(parcelId, sites, mine); });
     el.querySelectorAll<HTMLButtonElement>('button[data-p]').forEach((b) => {
       b.onclick = (e) => {
         e.stopPropagation();

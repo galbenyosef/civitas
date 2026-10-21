@@ -238,6 +238,15 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
 
 /* building panel: summary rows (shared with the tooltip) and the people lists */
 #panel .chead { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+/* the close control never scrolls away (playtest 8df08a47): a panel's head sticks to its top edge while the body scrolls
+   under it, opaque so nothing shows through, and clear of an overlay scrollbar at the right edge */
+#panel > .chead:first-child, #panel > h2.phead, #cpanel > .chead:first-child { position: sticky; top: -12px; z-index: 3; margin: -12px -14px 4px; padding: 10px 14px 6px;
+  background: rgb(16, 20, 27); border-radius: 10px 10px 0 0; }
+#cpanel > .chead:first-child { top: -10px; margin: -10px -12px 6px; padding: 8px 12px 6px; }
+#panel > h2.phead { margin-bottom: 2px; }
+#panel h2.phead #pFold { margin-left: auto; }
+#panel #pBody.hidden { display: none; }
+#panel .sitesmore { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); text-align: right; }
 #panel .row { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; color: var(--muted); }
 #panel .row span:last-child { color: var(--fg); font-variant-numeric: tabular-nums; text-align: right; }
 #panel .bar { height: 6px; margin: 4px 0 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
