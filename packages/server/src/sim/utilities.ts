@@ -93,7 +93,7 @@ export class Utilities implements FleetService {
   /** net.ts sends `utilState` / `utilLinks` when these are set */
   stateChanged = false;
   linksChanged = false;
-  /** owners' notices (net.ts sends them as toasts; `hint`: as that advisor hint when the player has not just had it) */
+  /** owners' notices (net.ts sends them as toasts; `hint`: that advisor hint's general line too, when not resting) */
   notices: { owner: string; msg: string; hint?: HintId }[] = [];
   /** since start (loadtest/utilities.ts reads them) */
   /** each owner's power at the last solve (the charts); rebuilt every game hour */
@@ -257,7 +257,9 @@ export class Utilities implements FleetService {
       g.nodes.forEach((i, k) => { this.nodeState.set(nodes[i].key, { state: r.state[k], load: r.load[k] }); this.netOfNode.set(i, ni); });
       // fuel for what was generated, shared over the plants by output; grid import at its price
       const ph = hourOf(owner);
-      ph.demand += r.demand; ph.imported += r.imported; ph.supplied += r.generated + r.imported;
+      // wanted: every node's streets, a faulted one's too (the solve leaves those out: they draw nothing)
+      for (const i of g.nodes) ph.demand += demand[i];
+      ph.imported += r.imported; ph.supplied += r.generated + r.imported;
       for (const [p, out] of outs) {
         const share = gen > 0 ? out / gen : 0, used = r.generated * share;
         const av = UTIL_AVAIL_OF[p.id];

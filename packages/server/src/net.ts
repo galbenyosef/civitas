@@ -1192,9 +1192,11 @@ export class Net {
     if (ut?.stateChanged) { ut.stateChanged = false; this.broadcast(ut.stateMsg()); }
     if (ut?.linksChanged) { ut.linksChanged = false; this.broadcast(ut.linksMsg()); }
     if (ut?.notices.length) for (const n of ut.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) {
-      // a fault is an advisor line (what happened, who fixes it, what a depot would do); a toast when that hint is resting
-      const m = n.hint && this.onboarding ? this.onboarding.hint(c.player, n.hint, n.msg) : null;
-      if (m) this.send(c, m); else this.toast(c, n.msg, 'info');
+      // the notice itself is a toast at once (it names the fault and when it will be fixed, which an advisor line queued
+      // behind another could outlive); a fault also raises the advisor's general line, with "show me" for the depot
+      const m = n.hint && this.onboarding ? this.onboarding.hint(c.player, n.hint) : null;
+      if (m) this.send(c, m);
+      this.toast(c, n.msg, 'info');
     }
     if (this.adverts?.notices.length) for (const n of this.adverts.notices.splice(0)) for (const c of this.clients) if (c.player?.id === n.owner) this.toast(c, n.msg, 'info');
     // transit lines (checked every 10 ticks): the whole list when a line changed (routes, stops, colours), otherwise

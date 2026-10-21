@@ -226,11 +226,11 @@ so a first substation can import at once.
   fault is a door stop; the van works there for 2 game hours and the fault clears when it leaves. With no depot, or
   none that can reach it, a contractor clears it after 10 game hours.
 - **The player is told** (playtest 37299b96: a substation failed, came back, and nothing said how). When a fault opens
-  its owner gets an advisor line (hint `fault`, its "show me" the power depot; a toast while that hint is resting):
-  "Substation fault at (x, y): its streets are dark." and what happens next (shared `faultAdvice`): with a depot,
+  its owner gets a toast at once, "Substation fault at (x, y): its streets are dark." and what happens next (shared `faultAdvice`): with a depot,
   "Your power depot sends a repair van (about 2–3 hours); if none can come, a contractor fixes it in about 10 hours";
   with Power stations and no depot, the contractor's time and that a depot's van takes 2–3 hours; without Power
-  stations, that a depot needs it. The substation's panel (and a plant's or depot's on the same network) lists each
+  stations, that a depot needs it. A fault also raises the advisor's general `fault` line (what faults are, who fixes
+  them, "show me" the power depot; an alert, so it comes back only after a rest). The substation's panel (and a plant's or depot's on the same network) lists each
   fault with a **Repair** line, the contractor's hours counting down, or "a repair van is on its way" / "a repair crew
   is at work"; a building on its streets says the same under Power. When it is fixed: "Power restored at (x, y)
   after N hours: your repair van fixed it", or "a contractor fixed it" and what a depot would do.

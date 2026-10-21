@@ -185,7 +185,8 @@ let townA: ReturnType<typeof city>;
   const fx = g.utilities.openFault('node', utilKey(sub.x, sub.y), 'ada', sub.x, sub.y);
   steps(g, 2 * TPH);
   const dark = hist.playerSample('ada')[PLAYER_KEYS.indexOf('pwrDarkPct')], worldOut = hist.lastWorld[WORLD_KEYS.indexOf('pwrOutPct')];
-  ok(dark > 0 && worldOut > 0, `a fault: ${dark}% of your homes without power, ${worldOut}% of the world's homes in a cut or brownout`);
+  const fh = g.utilities.hourly.get('ada');
+  ok(dark > 0 && worldOut > 0 && !!fh && fh.demand > 0 && fh.supplied === 0, `a fault: ${dark}% of your homes without power, ${worldOut}% of the world's homes in a cut or brownout; wanted ${Math.round(fh?.demand ?? 0)}, supplied ${fh?.supplied}`);
   for (let i = 0; i < 12 * TPH && g.utilities.openFaults.some((q) => q.id === fx.id); i++) g.step(); // the contractor (no depot yet)
   steps(g, TPH);
 }
@@ -230,7 +231,7 @@ console.log('4. faults, vans and links');
   const f = u.openFault('node', utilKey(sub.x, sub.y), 'ada', sub.x, sub.y);
   // playtest 37299b96: the notice says what happened and who fixes it, the panels too
   const open1 = said.at(-1);
-  ok(!!open1 && open1.hint === 'fault' && open1.msg.startsWith(`Substation fault at (${sub.x}, ${sub.y}): its streets are dark.`) && /Your power depot sends a repair van \(about 2–3 hours\); if none can come, a contractor fixes it in about 10 hours/.test(open1.msg), `the fault's notice, an advisor line: "${open1?.msg}"`);
+  ok(!!open1 && open1.hint === 'fault' && open1.msg.startsWith(`Substation fault at (${sub.x}, ${sub.y}): its streets are dark.`) && /Your power depot sends a repair van \(about 2–3 hours\); if none can come, a contractor fixes it in about 10 hours/.test(open1.msg), `the fault's notice (a toast, and the advisor's fault line): "${open1?.msg}"`);
   const panel1 = u.info(sub)?.network;
   ok(!!panel1 && panel1.faults[0] === `Substation fault at (${sub.x}, ${sub.y})` && /contractor fixes it in about 10 hours/.test(panel1.repair?.[0] ?? ''), `the substation's panel: "${panel1?.faults[0]}" / "${panel1?.repair?.[0]}"`);
   const home1 = [...w.buildings.values()].find((b) => b.level > 0 && b.id !== SUB && b.id !== DEPOT && b.id !== GAS && u.field.serving('ada', b.x, b.y) === u.field.indexOf(utilKey(sub.x, sub.y)));
