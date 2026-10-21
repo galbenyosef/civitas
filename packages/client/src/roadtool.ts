@@ -1,4 +1,4 @@
-import { BufferGeometry, Color, Float32BufferAttribute, Group, InstancedMesh, LineBasicMaterial, LineSegments, Matrix4, MeshBasicMaterial, PlaneGeometry, Vector3, type PerspectiveCamera } from 'three';
+import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PlaneGeometry, Vector3, type PerspectiveCamera } from 'three';
 import {
   KIND_NAMES, BRIDGE_STYLE_NAMES, hasFeature, techFor, isRoad, spendableMoney, planRoad, parallelGap, describeDemolition, ROAD_DRAG_MAX,
   type RoadPlan, type RoadEnv, type RoadShape, type RoadTileState,
@@ -13,10 +13,10 @@ import type { ClientWorld } from './world';
  * question asked on release when buildings are in the way.
  */
 const COLOUR: Record<RoadTileState, number> = {
-  new: 0x9ec9ff, have: 0xffffff, upgrade: 0x62d2a2, bridge: 0x5fb4ff, demolish: 0xffb020, refused: 0xff3b30,
+  new: 0x6fb3ff, have: 0xffffff, upgrade: 0x62d2a2, bridge: 0x5fb4ff, demolish: 0xffb020, refused: 0xff3b30,
 };
 /** new road on unclaimed land (the public premium) */
-const UNCLAIMED = 0xc6b3ff;
+const UNCLAIMED = 0xb79cff;
 const GUIDE = 0xfff1b8;
 const money = (n: number) => `$${Math.round(n).toLocaleString('en-GB')}`;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -27,7 +27,8 @@ export type DemolishAnswer = 'demolish' | 'round' | 'cancel';
 export class RoadTool {
   readonly group = new Group();
   private quads: InstancedMesh;
-  private guide: LineSegments;
+  /** the spacing guide: thin strips on the ground where the next roads would make the same block */
+  private guide: Mesh;
   private chip: HTMLDivElement;
   private dialog: HTMLDivElement;
   private memo: { key: string; at: number; v: RoadPlan } | null = null;
@@ -37,12 +38,13 @@ export class RoadTool {
   private depth = 0;
 
   constructor(private world: ClientWorld, private dev: boolean) {
-    this.quads = new InstancedMesh(new PlaneGeometry(0.9, 0.9).rotateX(-Math.PI / 2), new MeshBasicMaterial({ transparent: true, opacity: 0.55, depthWrite: false }), ROAD_DRAG_MAX);
+    // drawn over everything (no depth test), so a building in the way shows its amber tile through the model
+    this.quads = new InstancedMesh(new PlaneGeometry(0.9, 0.9).rotateX(-Math.PI / 2), new MeshBasicMaterial({ transparent: true, opacity: 0.6, depthWrite: false, depthTest: false }), ROAD_DRAG_MAX);
     this.quads.count = 0;
     this.quads.frustumCulled = false;
     this.quads.renderOrder = 18;
     this.quads.setColorAt(0, new Color(0xffffff));
-    this.guide = new LineSegments(new BufferGeometry(), new LineBasicMaterial({ color: GUIDE, transparent: true, opacity: 0.55, depthWrite: false }));
+    this.guide = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ color: GUIDE, transparent: true, opacity: 0.45, depthWrite: false, side: DoubleSide }));
     this.guide.frustumCulled = false;
     this.guide.renderOrder = 19;
     this.group.add(this.quads, this.guide);
@@ -82,20 +84,26 @@ export class RoadTool {
     return v;
   }
 
-  /** The spacing guide for a drag: the block its straight stretch makes with the nearest road alongside, or null. */
+  /**
+   * The spacing guide for a drag: the block one of its straight stretches makes with the nearest road alongside it,
+   * the stretch being drawn now first, else the one before the corner; null when no road is alongside either.
+   */
   gap(path: [number, number][]) {
     const w = this.world;
-    // the stretch from the drag's corner (or start) to its end: the leg being drawn now
-    const n = path.length;
-    if (n < 2) return null;
-    const sx = path[n - 1][0] - path[n - 2][0], sy = path[n - 1][1] - path[n - 2][1];
-    let i = n - 2;
-    while (i > 0 && path[i][0] - path[i - 1][0] === sx && path[i][1] - path[i - 1][1] === sy) i--;
-    const leg = path.slice(i);
     const mine = new Set(path.map(([x, y]) => `${x},${y}`));
     const isRoadAt = (x: number, y: number) => { if (mine.has(`${x},${y}`)) return false; const t = w.getTile(x, y); return t !== undefined && isRoad(t); };
-    const g = parallelGap(leg, isRoadAt);
-    return g ? { ...g, leg } : null;
+    // the straight stretches, last first
+    const legs: [number, number][][] = [];
+    let end = path.length - 1;
+    while (end > 0) {
+      const sx = path[end][0] - path[end - 1][0], sy = path[end][1] - path[end - 1][1];
+      let i = end - 1;
+      while (i > 0 && path[i][0] - path[i - 1][0] === sx && path[i][1] - path[i - 1][1] === sy) i--;
+      legs.push(path.slice(i, end + 1));
+      end = i;
+    }
+    for (const leg of legs.slice(0, 2)) { const g = parallelGap(leg, isRoadAt); if (g) return { ...g, leg }; }
+    return null;
   }
 
   /** Once per frame: the ghost, guide and chip for the drag in progress (null when there is none). */
@@ -137,11 +145,14 @@ export class RoadTool {
     const a0 = Math.min(...leg.map((t) => (alongX ? t[0] : t[1]))), a1 = Math.max(...leg.map((t) => (alongX ? t[0] : t[1]))) + 1;
     const across = alongX ? leg[0][1] : leg[0][0];
     const pts: number[] = [];
-    // the next road the same distance on the far side, and the one after it (a hint, not a snap)
-    for (const k of [1, 2]) {
-      const c = across - side * offset * k + 0.5;
-      if (alongX) pts.push(a0 - 1, 0.07, c, a1 + 1, 0.07, c); else pts.push(c, 0.07, a0 - 1, c, 0.07, a1 + 1);
-    }
+    // the next road the same distance on the far side, and the one after it (a hint, not a snap): a strip down the
+    // middle of where each would run
+    const strip = (c: number) => {
+      const h = 0.07, u0 = a0 - 1, u1 = a1 + 1, v0 = c - h, v1 = c + h;
+      const q = alongX ? [[u0, v0], [u1, v0], [u1, v1], [u0, v1]] : [[v0, u0], [v0, u1], [v1, u1], [v1, u0]];
+      for (const k of [0, 1, 2, 0, 2, 3]) pts.push(q[k][0], 0.07, q[k][1]);
+    };
+    for (const k of [1, 2]) strip(across - side * offset * k + 0.5);
     this.guide.geometry.dispose();
     this.guide.geometry = new BufferGeometry().setAttribute('position', new Float32BufferAttribute(pts, 3));
     this.guide.visible = true;
@@ -166,7 +177,8 @@ export class RoadTool {
     for (const b of v.bridges) if (b.plan.ok && b.plan.tiles?.length) s += ` · a ${BRIDGE_STYLE_NAMES[b.plan.style!]} of ${plural(b.plan.tiles.length / 3, 'tile')}, ${money(b.plan.cost!)}`;
     if (v.demolish.n) s += ` · ${describeDemolition(v.demolish.kinds)} in the way`;
     if (v.refused) s += ` · ${plural(v.refused, 'tile')} refused: ${v.reason}`;
-    if (this.depth) s += ` · block ${this.depth} deep`;
+    const g = this.gap(path);
+    if (g) s += ` · block ${g.depth} deep`;
     return s + (shape === 'loop' ? ' · loop (let go of Shift for a line)' : '') + ' · release to lay it, Esc to cancel';
   }
 
