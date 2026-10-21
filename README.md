@@ -25,6 +25,7 @@ Buildings are data: `packages/shared/src/buildings/` holds one file per kind fam
 `npm run buildings:compile` (run automatically by dev and build) turns it into the tables the
 game reads. `/viewer.html` shows every kind, level and design on a turntable by day and night.
 Format and a worked example: `docs/buildings.md`. `npm run buildings:check` is its snapshot test.
+Landmarks (a famous building, a town hall, a monument): `docs/landmarks.md` is a brief a person or a model can follow on its own, with a template, a worked example and a draft path (`landmark-drafts.ts`, viewer tag `draft`); `npm run landmarks:check` checks them.
 
 Production: `npm run build` then `npm start`. The server then serves the built
 client and the WebSocket on one port (default 8080). A `Dockerfile` is included;
@@ -292,7 +293,7 @@ changing behaviour in game time.
   and the technology it needs. Bigger rungs cover homes further and more strongly, send more patrols and ambulances,
   bring more and faster builders or hold bigger crowds; the larger ones open late in the Civic, Construction and
   Culture tracks.
-- *Landmarks* (`shared/src/buildings/landmarks-london.ts`, docs/buildings.md "Landmarks"). Real London buildings (the
+- *Landmarks* (`shared/src/buildings/landmarks-london.ts`, docs/buildings.md "Landmarks"; docs/landmarks.md for contributors). Real London buildings (the
   Gherkin, the Shard, the Walkie Talkie, One Canada Square, the Royal Opera House, and five more to come), tagged
   `london`, each working as an office tower or a venue. The tool bar's Landmarks section has one London button whose
   picker lists them. Their tech node, London landmarks, is locked until its unlock rule is decided, so for now they are
@@ -597,6 +598,6 @@ version. It is distributed in the hope that it will be useful, but WITHOUT ANY W
 In short: you may use, change and host Civitas, but if you run a modified version as a network service, you must offer
 its source code to the players who use it. The official multiplayer servers are run by the project.
 
-Contributions, especially new buildings, are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for the ten-minute
-building workflow and the terms contributions are made under. "Civitas" is the project's name; please rename forks you
+Contributions, especially new buildings and landmarks, are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for the ten-minute
+building workflow, the one-hour landmark workflow and the terms contributions are made under. "Civitas" is the project's name; please rename forks you
 publish or host.

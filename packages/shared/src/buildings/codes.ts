@@ -28,3 +28,5 @@ export const LEVEL_SLOTS = 8;
 export const MAX_FOOTPRINT = 8;
 /** Behaviour flag bits in the compiled KIND_FLAGS_TABLE. */
 export const KIND_FLAG = { growable: 1, civic: 2, service: 4, workplace: 8, parking: 16, leisureReady: 32 } as const;
+/** Kind ids reserved for draft landmarks (landmark-drafts.ts, docs/landmarks.md): inclusive range, viewer only until a landmark is accepted and takes a permanent id. */
+export const LANDMARK_DRAFT_IDS: readonly [number, number] = [230, 249];

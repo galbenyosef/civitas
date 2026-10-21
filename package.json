@@ -16,6 +16,7 @@
     "typecheck": "tsc -p packages/shared && tsc -p packages/shared/scripts && tsc -p packages/server && tsc -p packages/client && npm run -s local:check",
     "buildings:compile": "tsx packages/shared/scripts/compile-buildings.ts",
     "buildings:check": "tsx packages/shared/scripts/check-buildings.ts",
+    "landmarks:check": "tsx packages/shared/scripts/check-landmarks.ts",
     "demo:check": "tsx packages/server/src/demo/check.ts",
     "local:check": "tsx packages/server/src/local/check.ts",
     "history:check": "tsx packages/server/src/history-check.ts",
