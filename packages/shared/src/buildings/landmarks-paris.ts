@@ -209,4 +209,53 @@ export const notreDame: KindDef = {
   }],
 };
 
-export const PARIS_LANDMARKS: KindDef[] = [eiffelTower, arcDeTriomphe, notreDame];
+// ================================================================= 136 the Louvre
+
+/**
+ * The palace of the kings turned museum: three wings closing the Cour Napoleon, their
+ * ground floors blank stone under the slate roofs, the great glass pyramid rising from
+ * the court between the two round fountain basins. The pyramid is a four-segment cone;
+ * the wings' windows sit on the upper storey only, with nothing stacked over them.
+ */
+const LSTONE = 0xd6cbb2, PYR = 0xbcd2c6;
+
+const louvreOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the three wings of the court, ground floor plain, windows on the upper storey
+  const wingF = { storeys: 2, bays: 3, sideBays: 6, margin: 0.05, ground: 'plain' as const, top: 0.05 };
+  ops.push(['box', 0.44, 0.5, 1.05, -0.72, 0.02, 0.025, LSTONE, 'civic', { name: 'west', facade: wingF }]);
+  ops.push(['box', 0.44, 0.5, 1.05, 0.72, 0.02, 0.025, LSTONE, 'civic', { name: 'east', facade: wingF }]);
+  ops.push(['box', 1.0, 0.5, 0.4, 0, 0.02, -0.72, LSTONE, 'civic', { name: 'back', facade: { storeys: 2, bays: 6, sideBays: 2, margin: 0.05, ground: 'plain', top: 0.05 } }]);
+  ops.push(['roof', 0.48, 0.12, 1.09, -0.72, 0.52, 0.025, 'slate', true], ['roof', 0.48, 0.12, 1.09, 0.72, 0.52, 0.025, 'slate', true]);
+  ops.push(['roof', 1.04, 0.12, 0.44, 0, 0.52, -0.72, 'slate', false]);
+  // the court: the glass pyramid between the two fountain basins
+  ops.push(['cone', 0.42, 0.44, 0, 0.02, 0, PYR, 4]);
+  ops.push(['cyl', 0.14, 0.15, 0.025, -0.3, 0.02, 0.28, 'pond', 14], ['cyl', 0.14, 0.15, 0.025, 0.3, 0.02, 0.28, 'pond', 14]);
+  // the street front: lamps and a pair of trees
+  ops.push(...lampPost(-0.4, 0.82, 0.32, 'marquee', 0.02), ...lampPost(0.4, 0.82, 0.32, 'marquee', 0.02));
+  ops.push(...tree(-0.82, 0.82, 0.6), ...tree(0.82, 0.82, 0.6));
+  return ops;
+};
+
+export const louvre: KindDef = {
+  id: 'louvre', name: 'the Louvre', code: library.code, kindId: 136, family: 'leisure', tier: 4,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'paris',
+  occupation: { ...library.occupation!, name: 'museum curator' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 260, ticket: 26, openHours: [9, 21], stay: [1.4, 2.6], leisureValue: 9, radius: 32,
+    dayAppeal: 1.7, eveningAppeal: 0.5, retireeAppeal: 1.8, childAppeal: 1.6, title: 'the Louvre',
+  },
+  lot: { wage: 19 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The palace of the kings turned museum: three wings closing the Cour Napoleon under their slate roofs, and the glass pyramid rising between the fountains to light the halls below.',
+  howTo: 'A 2×2 plot open to the street, lawns suit it; the grandest museum in the city, drawing visitors all day, so give it a metro or buses. World landmark: unlock rule to be decided.',
+  tool: { id: 'louvre', key: '', label: 'the Louvre', color: '#d6cbb2' },
+  levels: [{
+    capacity: 60, wage: 19, cost: 20000, upkeep: 85, work: 4200, parking: { surface: 0, underground: 0 },
+    designs: [
+      { name: 'the three wings of the Cour Napoleon under their slate roofs, the glass pyramid between the two fountains', height: 0.66, ops: louvreOps() },
+    ],
+  }],
+};
+
+export const PARIS_LANDMARKS: KindDef[] = [eiffelTower, arcDeTriomphe, notreDame, louvre];

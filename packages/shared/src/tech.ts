@@ -122,7 +122,7 @@ export const TECH: TechNode[] = [
     unlocks: ['empirestate', 'chrysler', 'liberty', 'onewtc', 'brooklyn', 'flatiron', 'rockefeller', 'radiocity',
       'greatpyramid', 'sphinx', 'khafre', 'cairotower', 'sultanhassan',
       'burjkhalifa', 'burjalarab', 'dubaiframe', 'motf', 'jumeirah',
-      'orientalpearl', 'shanghaitower', 'jinmao', 'swfc', 'yugarden', 'eiffeltower', 'arcdetriomphe', 'notredame'] },
+      'orientalpearl', 'shanghaitower', 'jinmao', 'swfc', 'yugarden', 'eiffeltower', 'arcdetriomphe', 'notredame', 'louvre'] },
 ];
 export const TECH_BY_ID = new Map(TECH.map((t) => [t.id, t]));
 export const ALL_TECH_IDS = TECH.map((t) => t.id);
