@@ -901,16 +901,17 @@ export function londonScenario(): LondonScenario {
 export const LONDON_TOUR: string[] = [
   'welcome',
   'area-westminster', 'parliament', 'london-eye', 'pier-embankment', 'line-ferry-rb1', 'pier-millbank', 'buckingham-palace', 'new-scotland-yard', 'st-thomas', 'lambeth-fire',
-  'area-west-end', 'piccadilly-circus', 'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'kings', 'lse', 'leicester-square', 'line-bus-25', 'line-bus-159',
+  'area-west-end', 'piccadilly-circus', 'carnaby-street', 'bus-oxford-street', 'turn-oxford-circus', 'marble-arch', 'hyde-park-corner', 'london-traffic',
+  'royal-opera-house', 'palladium', 'lyceum', 'donmar', 'kings', 'lse', 'leicester-square', 'line-bus-25', 'line-bus-159',
   'tube-central-tottenham-court-road', 'line-tube-central', 'line-tube-northern',
-  'area-city', 'gherkin', 'walkie-talkie', 'tower-of-london', 'tower-bridge', 'pool-of-london', 'st-katharine', 'pier-tower', 'barbican', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
-  'area-south-bank', 'shard', 'waterloo', 'tube-crossover', 'line-tube-jubilee', 'line-south-western', 'clapham-junction', 'area-clapham', 'primary-clapham', 'chelsea-jetty', 'victoria-garage', 'stockwell-garage', 'area-brixton', 'primary-brixton', 'secondary-brixton',
+  'area-city', 'yellow-city', 'gherkin', 'walkie-talkie', 'tower-of-london', 'tower-bridge', 'pool-of-london', 'st-katharine', 'pier-tower', 'barbican', 'barbican-walks', 'old-street', 'liverpool-street', 'track-great-eastern', 'line-great-eastern', 'stratford', 'london-stadium', 'copper-box',
+  'area-south-bank', 'shard', 'elephant-and-castle', 'waterloo', 'tube-crossover', 'line-tube-jubilee', 'line-south-western', 'clapham-junction', 'area-clapham', 'primary-clapham', 'chelsea-jetty', 'victoria-garage', 'stockwell-garage', 'area-brixton', 'primary-brixton', 'secondary-brixton',
   'area-canary-wharf', 'one-canada-square', 'tube-jubilee-canary-wharf', 'pier-canary-wharf', 'area-isle-of-dogs', 'line-bus-d3', 'poplar-garage', 'area-greenwich', 'pier-greenwich', 'maritime-museum', 'o2-arena',
-  'area-royal-docks', 'area-thames-gateway', 'london-port', 'thamesmead-quay', 'dagenham-yard', 'track-freight', 'barking-yard', 'line-freight',
-  'royal-london', 'area-hackney', 'primary-hackney', 'secondary-hackney', 'area-islington', 'primary-islington', 'secondary-islington', 'kings-cross', 'british-library', 'line-east-coast', 'finsbury-park', 'british-museum', 'ucl',
+  'area-royal-docks', 'area-thames-gateway', 'a13-interchange', 'london-port', 'thamesmead-quay', 'dagenham-yard', 'track-freight', 'barking-yard', 'line-freight',
+  'royal-london', 'area-hackney', 'primary-hackney', 'secondary-hackney', 'area-islington', 'primary-islington', 'zone20-islington', 'secondary-islington', 'kings-cross', 'british-library', 'line-east-coast', 'finsbury-park', 'british-museum', 'ucl',
   'highgate-cemetery', 'golders-green-crematorium', 'kensal-green-cemetery',
   'area-camden', 'primary-camden', 'regents-park-lake', 'lords', 'serpentine', 'area-kensington', 'primary-kensington', 'natural-history-museum', 'imperial', 'brompton-cemetery',
-  'paddington', 'line-heathrow', 'ealing-broadway', 'track-great-western', 'wembley', 'area-hammersmith', 'secondary-hammersmith', 'kew-gardens',
+  'paddington', 'line-heathrow', 'ealing-broadway', 'track-great-western', 'wembley', 'area-hammersmith', 'secondary-hammersmith', 'kew-gardens', 'm4-interchange',
   'heathrow', 'heathrow-runway', 'heathrow-station',
 ];
 /** The welcome stop: the whole river from high over the City. */

@@ -33,7 +33,7 @@ import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REF
 import { zoneOf, levelOf, Zone, isRoad } from '../tile';
 import { isMarkedJunction, mouthCrossing, MouthCrossing, boxJunction, sandboxSignalled, streetTreeAt, midZebraAt } from '../roadlook';
 import { signalArms } from '../signals';
-import { ROAD_CLASS_DEFS, RoadCls, auxClass, oneWayDir, isMotorwayAux, isPedestrianAux, auxJunction, isRingClassAux, isDeckClassAux } from '../roadclass';
+import { ROAD_CLASS_DEFS, RoadCls, CDIRS, auxClass, auxDir, oneWayDir, isMotorwayAux, isPedestrianAux, isDividedAux, auxJunction, isRingClassAux, isDeckClassAux } from '../roadclass';
 import { SCHOOL_SPECS, STAGES, Study, schoolTakes } from '../education';
 import { FIRE } from '../fires';
 import { DEATH } from '../remembrance';
@@ -1612,6 +1612,35 @@ function roadClasses(d: SeededDemo) {
   return out;
 }
 const classRoad = (cls: number) => (ss: readonly DemoSection[]) => ss.some((s) => s.classRoads?.some((r) => r.cls === cls));
+/**
+ * London's roads as seeded (docs/demo.md "London", "Roads"): the tiles of each class, the carriageway tiles (an avenue's
+ * or motorway's, not a junction tile) with no road ahead or behind (a dead end in the middle of a run: none may be),
+ * the interchanges' deck tiles, the big roundabouts' island tiles, and the street rule tiles by rule.
+ */
+const londonRoadsSeen = new WeakMap<SeededDemo, { n: number[]; dead: number; deck: number; island: number; rules: Record<string, number> }>();
+function londonRoads(d: SeededDemo) {
+  const had = londonRoadsSeen.get(d);
+  if (had) return had;
+  const tiles = new Map<string, number>();
+  d.scan((x, y, t) => tiles.set(`${x},${y}`, t));
+  const road = (x: number, y: number) => { const t = tiles.get(`${x},${y}`); return t !== undefined && isRoad(t); };
+  const out = { n: [0, 0, 0, 0, 0, 0, 0, 0], dead: 0, deck: 0, island: 0, rules: {} as Record<string, number> };
+  d.scan((x, y, t, a) => {
+    if (a === 0xfc) out.island++;
+    if (!isRoad(t)) return;
+    out.n[auxClass(a)]++;
+    if (isDeckClassAux(a)) out.deck++;
+    if (!isDividedAux(a) || isDeckClassAux(a) || auxJunction(a)) return;
+    const [dx, dy] = CDIRS[auxDir(a)];
+    if (!road(x + dx, y + dy) || !road(x - dx, y - dy)) out.dead++;
+  });
+  for (const [, , r] of d.roadRules ?? []) {
+    for (const def of STREET_RULE_DEFS) if ((r.st ?? 0) & def.bit) out.rules[def.id] = (out.rules[def.id] ?? 0) + 1;
+    if (r.ban) out.rules.ban = (out.rules.ban ?? 0) + 1;
+  }
+  londonRoadsSeen.set(d, out);
+  return out;
+}
 /** The junction tools' feature words, and the tiles that show one was built (R4). */
 const JUNCTION_WORDS: Record<DemoJunction['tool'], string> = { roundabout: 'roundabout', flyover: 'flyover', miniroundabout: 'mini-roundabout (a painted one on a street crossroads)', interchange: 'diamond interchange (a street over a motorway, with slip roads)', turnrule: 'turn ban (a no left turn sign on a junction\'s arm)', pelican: 'signal crossing for walkers (a pelican)' };
 const JUNCTION_SEEN: Partial<Record<DemoJunction['tool'], (d: SeededDemo) => boolean>> = {
@@ -1799,6 +1828,22 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   { id: 'tower-bridge-lift', caption: 'St Katharine Docks\' tall boats through Tower Bridge\'s lifts', tour: 'st-katharine', demo: 'london',
     rule: 'Tower Bridge and St Katharine Docks are London\'s; the showcase\'s own lifting bridge has its tall boat (boat-lift)',
     seeded: tallThroughLift },
+  // ---- London on the new roads (docs/demo.md "London", "Roads"): the showcase shows one of each; London uses them all
+  { id: 'london-avenues', caption: 'London\'s main roads as avenues, every carriageway tile with road ahead and behind', tour: 'bus-oxford-street', demo: 'london',
+    rule: 'the showcase has its own avenues (road-class-avenue); this is London\'s arterials laid as avenues',
+    scenario: (ss) => ss.some((s) => s.classRoads?.some((r) => r.cls === RoadCls.Avenue && !!r.path)), seeded: (d) => londonRoads(d).n[RoadCls.Avenue] >= 1000 && londonRoads(d).dead === 0 },
+  { id: 'london-motorways', caption: 'the M4 and the A13 as motorways from their connections, each with a diamond interchange', tour: 'm4-interchange', demo: 'london',
+    rule: 'the showcase has its own motorway and interchange; these are London\'s approaches',
+    scenario: (ss) => ss.some((s) => (s.junctions ?? []).filter((j) => j.tool === 'interchange').length >= 2), seeded: (d) => (d.kinds.get(MOTORWAY_KIND) ?? 0) >= 2 && londonRoads(d).deck >= 4 && londonRoads(d).n[RoadCls.Motorway] >= 40 },
+  { id: 'london-roundabouts', caption: 'two-lane roundabouts at Hyde Park Corner, Marble Arch, Elephant and Castle and Old Street', tour: 'hyde-park-corner', demo: 'london',
+    rule: 'the showcase has its own (big-roundabout); these are London\'s',
+    scenario: (ss) => ss.some((s) => (s.junctions ?? []).filter((j) => j.tool === 'roundabout' && j.big).length >= 4), seeded: (d) => londonRoads(d).island >= 36 },
+  { id: 'london-pedestrian', caption: 'pedestrian streets in London (Carnaby Street, the Barbican)', tour: 'carnaby-street', demo: 'london',
+    rule: 'the showcase has its own (road-class-pedestrian); these are London\'s',
+    scenario: classRoad(RoadCls.Pedestrian), seeded: (d) => londonRoads(d).n[RoadCls.Pedestrian] >= 4 },
+  { id: 'london-street-rules', caption: 'London\'s street rules: bus lanes on Oxford Street and the Euston Road, 20 zones round the schools, double yellows in the City, turn bans', tour: 'zone20-islington', demo: 'london',
+    rule: 'the showcase has one of each rule; these are London\'s',
+    scenario: (ss) => ss.some((s) => (s.streetRules ?? []).length >= 10), seeded: (d) => { const r = londonRoads(d).rules; return (r.bus ?? 0) >= 10 && (r.zone20 ?? 0) >= 50 && (r.yellow ?? 0) >= 30 && (r.ban ?? 0) >= 2; } },
 ];
 
 /** Problems with the feature registry that the scenario alone shows: a feature or its tour stop missing from its demo. */
