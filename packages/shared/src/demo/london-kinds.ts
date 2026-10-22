@@ -67,7 +67,7 @@ export const KIND_SPOTS: Spot[] = [
 export const KIND_VENUES: Spot[] = [
   // power: a substation by each station and the grid supply point, the Rainham marshes' wind row
   ['battersea-substation', 'substation', 51.4780, -0.1480, 'E'],
-  ['barrier-substation', 'substation', 51.4985, 0.0340, 'W'],
+  ['barrier-substation', 'substation', 51.5040, 0.0420, 'W'],
   ['beckton-substation', 'substation', 51.5110, 0.0600, 'N'],
   ['rainham-substation', 'substation', 51.5150, 0.1450, 'E'],
   ['rainham-wind-1', 'wind-turbine', 51.5190, 0.1400, 'N'],
