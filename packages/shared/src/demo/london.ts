@@ -131,15 +131,18 @@ const VENUES: Spot[] = [
   ['lords', 'sports', 51.5294, -0.1727, 'E'],
 ];
 /** Bus routes: each stop near a real one, beside a plain stretch of road on its `side` (never facing a junction). */
-const STOPS_25: [string, number, number][] = [
+const STOPS_25: [string, number, number][] = [ // the real stops' places (the loop's below take their longitudes)
   ['marble-arch', 51.5160, -0.1590], ['oxford-circus', 51.5160, -0.1410], ['tottenham-ct', 51.5160, -0.1320], ['holborn', 51.5160, -0.1098],
   ['st-pauls', 51.5160, -0.0950], ['aldgate', 51.5160, -0.0720], ['whitechapel', 51.5160, -0.0600],
 ];
 // a loop: east along Oxford Street's south kerb (stops on the side facing north, its eastbound carriageway) to
 // Whitechapel and back along the north kerb, so its buses use both bus lanes and never turn in the road
 const ROUTE_25: Spot[] = [
-  ...STOPS_25.map(([n, lat, lon]): Spot => [`stop-25-${n}`, 'bus-stop', lat, lon, 'N']),
-  ...STOPS_25.slice().reverse().map(([n, lat, lon]): Spot => [`stop-25-${n}-west`, 'bus-stop', lat, lon, 'S']),
+  // (each aimed at its own kerb: Oxford Street's carriageways are rows -5 and -6, so the kerbs are rows -4 and -7)
+  // (east from Oxford Circus: Hyde Park is Marble Arch's south kerb, and the bus turns at the roundabout there; the
+  // City's side streets meet the carriageway every few tiles, leaving no plain kerb for Holborn and St Paul's eastbound)
+  ...STOPS_25.filter(([n]) => !['marble-arch', 'holborn', 'st-pauls'].includes(n)).map(([n, , lon]): Spot => [`stop-25-${n}`, 'bus-stop', 51.5134, lon, 'N']),
+  ...STOPS_25.slice().reverse().map(([n, , lon]): Spot => [`stop-25-${n}-west`, 'bus-stop', 51.5179, lon, 'S']),
 ];
 // over Westminster Bridge, then south past the South Western line (over its level crossings) to Brixton
 const ROUTE_159: Spot[] = [
@@ -701,7 +704,7 @@ export function londonScenario(): LondonScenario {
       if (d === undefined || (want !== null && d !== want)) return false;
       const bx = x + FRONT[d][0], by = y + FRONT[d][1], b = lidx(bx, by);
       if (plan.t[b] !== LT.Road || !plan.loop[b] || (main && !plan.main[b]) || roadsSec.noBus.has(b)) return false;
-      if (plan.cls[b] === 4 || (plan.cls[b] === 3 && !avenue)) return false;
+      if (plan.cls[b] === 4 || (plan.cls[b] === 3 && !avenue) || (loopLine && plan.cls[b] !== 3)) return false; // a loop's stop is on its avenue's kerb
       if (plan.cls[b] === 3) {
         // a plain carriageway tile (no junction tile, divJunction): it and its twin straight, no side road at either
         const tw = plan.twin[b];
