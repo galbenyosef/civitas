@@ -56,6 +56,11 @@ export const GROUPS: GroupDef[] = [
   { id: 'power', label: 'Power stations', section: 'Services', color: '#8f9aa6', holds: 'staff' },
   // landmarks (docs/buildings.md "Landmarks"): real buildings, one picker per city; buildings/landmarks-london.ts
   { id: 'london', label: 'London', section: 'Landmarks', color: '#c8102e', holds: 'staff', collection: true },
+  // world landmarks (buildings/landmarks-world*.ts): the same, for cities around the world; one picker per city
+  { id: 'new-york', label: 'New York', section: 'Landmarks', color: '#1c2f5e', holds: 'staff', collection: true },
+  { id: 'cairo', label: 'Cairo', section: 'Landmarks', color: '#c8a44a', holds: 'staff', collection: true },
+  { id: 'dubai', label: 'Dubai', section: 'Landmarks', color: '#b0722e', holds: 'staff', collection: true },
+  { id: 'shanghai', label: 'Shanghai', section: 'Landmarks', color: '#c9372c', holds: 'staff', collection: true },
   // reserved for other cards
   { id: 'bus', label: 'Buses', section: 'Transport', color: '#e0a92e', holds: 'staff', reserved: true },
   { id: 'rail', label: 'Rail', section: 'Transport', color: '#b0563d', holds: 'staff', reserved: true },

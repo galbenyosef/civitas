@@ -23,6 +23,7 @@ import { INDUSTRIAL_MERGED } from './industrial-merged';
 import { BLOCK_INTERIOR } from './block-interior';
 import { LONDON_LANDMARKS } from './landmarks-london';
 import { LANDMARK_DRAFTS } from './landmark-drafts';
+import { WORLD_LANDMARKS } from './landmarks-world';
 import { bigScreens } from './bigscreens';
 import { EDUCATION } from './education';
 import { MEDIA } from './media';
@@ -57,6 +58,9 @@ const BASE: KindDef[] = [residential, commercial, industrial, office, police, fi
   ...POWER,
   // landmarks (docs/buildings.md "Landmarks"): real buildings in a city's collection, placed only where their locked tech is given
   ...LONDON_LANDMARKS,
+  // world landmarks (docs/buildings.md "Landmarks"): real buildings in cities around the world, one collection per city
+  // (landmarks-world.ts composes the per-city files, which document the kind-id blocks)
+  ...WORLD_LANDMARKS,
   // draft landmarks (docs/landmarks.md, landmark-drafts.ts): kind ids 230-249, viewer only, never in the city
   ...LANDMARK_DRAFTS];
 
