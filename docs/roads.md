@@ -384,6 +384,10 @@ limit on, and a stop that opens the Traffic panel with the congestion overlay; a
 (`street-hgv`, `street-bus`, `street-yellow`, `street-zone20`, `bus-lane-line`, `visitor-limit`, `traffic-panel`) that
 demo:check enforces.
 
+**London** uses all of R3-R5 in its scenario (docs/demo.md "London", "Roads"): its arterials as avenues, the M4 and the
+A13 as motorways with diamond interchanges, roundabouts at Hyde Park Corner, Marble Arch, Elephant and Castle and Old
+Street, pedestrian streets, bus lanes, 20 zones, double yellows and turn bans.
+
 ## Street names
 
 **What a street is.** The longest straight run of road tiles along one axis. A crossroads belongs to both streets

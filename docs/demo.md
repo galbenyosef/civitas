@@ -10,7 +10,7 @@ teaching it.
 | Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 36 |
 | Leisure demo | 8192 | Downtown, Leisure | 27 |
 | Civic demo | 8193 | Downtown, Civic services | 32 |
-| **London** | 8194 | Areas, Landmarks, Schools, Rail and Heathrow, Buses, The Thames, The Underground (its own map, below) | 106 |
+| **London** | 8194 | Areas, Landmarks, Schools, Rail and Heathrow, Buses, The Thames, Roads, The Underground (its own map, below) | 124 |
 
 Code:
 
@@ -114,10 +114,10 @@ tick average 100-170 ms under that load); the main server with the live world ab
 
 ## London
 
-**Road classes in London (R3).** London's main roads are painted as doubled streets (two street tiles side by side, as
-the test cities' edge roads are), not avenues: turning them into avenues needs each pair oriented into two one-way
-carriageways with junction flags at every side street and turn, through `londonPlan`'s street layer, which was not cheap
-for R3. A follow-up (the ARTERIALS as avenues, the M4 and A13 approaches as motorways from gateways).
+**Road classes in London (R3-R5, card 75a3ec60).** Done: London's main roads are avenues, the M4 and the A13 come in as
+motorways, and the junctions and street rules of R4 and R5 are laid as the tools lay them (section `london-roads`,
+"Roads" below). Until then the arterials were single street tiles (the R3 note here called them doubled streets; they
+never were), so the avenues' second rows are new land the street plan now keeps for them.
 
 London is a sample city rather than a teaching town: the Thames runs through it with its recognisable meander, and the
 land round it is zoned roughly as London is. It is a `DEMOS` entry like the others (slot 94, port 8194, `?demo=london`),
@@ -187,9 +187,13 @@ How the map is made:
 - **Streets** (`londonPlan`). Not a grid: in order, (1) the main roads, real arterials drawn from latitude and
   longitude waypoints as L-shaped legs or staircases of legs at least two tiles long (Uxbridge Road, Bayswater Road,
   Oxford Street and Holborn to Cheapside, Whitechapel and Mile End; Marylebone and Euston Road to City Road and Old
-  Street; the Highway and Commercial Road to the A13; the Edgware Road, Tottenham Court Road and Camden High Street,
-  Upper Street and the Holloway Road, Bishopsgate and the Kingsland Road; Coventry Street, Piccadilly, Knightsbridge and
-  Kensington High Street to Chiswick; Regent Street from Oxford Circus to Piccadilly Circus; the King's Road; Kennington and Brixton Road, Borough High Street and Walworth Road, the Old Kent
+  Street; the Highway and Commercial Road to the A13 at Dagenham Docks; Grosvenor Place, Park Lane and the Edgware Road
+  (one line up the east side of Hyde Park through Hyde Park Corner and Marble Arch), Tottenham Court Road and Camden High
+  Street, Upper Street and the Holloway Road, Bishopsgate up to Old Street, Shoreditch High Street and the Kingsland Road
+  from it; Coventry Street and Piccadilly, down to Hyde Park Corner and on as Knightsbridge and Kensington High Street to
+  Chiswick and the Great West Road; Regent Street from Oxford Circus to Piccadilly Circus; the King's Road; Kennington
+  Park Road and Brixton Road and the Old Kent Road from Elephant and Castle, Borough High Street and Walworth Road
+  through it, the Old Kent
   Road, Jamaica Road to Woolwich, Clapham Road, Lavender Hill to Richmond, the South Circular; the loop round the Isle
   of Dogs over the gaps between the docks); a road along every placed structure's front; a road round every park; each
   bridge's approach on to the nearest road. (2) Each cell of land left between them is split by through roads until it
@@ -235,6 +239,49 @@ How the map is made:
   left as commons) while shops, offices and works stay full size everywhere. A newcomer's job search is a bounded
   breadth-first search, and in a first draft with job-poor suburbs the searches that found nothing made fill ticks of
   several seconds. The town has about twice as many jobs as people.
+- **Roads** (section `london-roads`, R3-R5; docs/roads.md). The street plan lays London's main roads as avenues and the
+  section lays the rest through the players' tools (seed.ts: `classRoads` through `planRoad`, `junctions` through the
+  junction planners, `streetRules` as the Street rules tool sets them), so upkeep, signs, the lights and the Traffic
+  panel all read them as they would a player's:
+  - **Avenues.** `londonRoads` (londonMap.ts) turns each arterial (`ARTERIALS`) so its twin row, a step to the drag's
+    left (traffic keeps right: roadclass.ts `twinRow`), goes on the side with the most room (`side` forces it where two
+    arterials must agree), and the scenario keeps its landmarks off those rows and from facing the tile beyond each
+    pair's outer kerb (a road alongside would make every tile a junction). `londonPlan` lays the twin row wherever both
+    rows are free, a park giving up its edge row: a run of four tiles or more is an avenue, laid as one drag through
+    `planRoad` (`DemoClassRoad.path`, so the twin follows every corner of the staircase). The rule for a stretch that is
+    one tile wide: widened where the row beside it is land or park; a street where it meets water, a railway, a bridge's
+    landing, a station, Heathrow or another avenue running the same way, and on a level crossing (a divided road cannot
+    cross one). About 3,150 avenue tiles in 66 runs; Regent Street (two tiles) and Westferry and Manchester Road (the
+    D3's loop, two-lane roads in the real city) stay streets. Where two avenues cross, R4's junction groups give one set
+    of lights and protected left turns (Oxford Street at Tottenham Court Road, Marylebone Road at the Edgware Road).
+  - **Motorways** (`MOTORWAYS`): the M4 from a motorway connection at the west edge, south of Heathrow's runway end
+    (the airfield's reserve now ends at the runway, y 10), north through the gap between the airfield and the river at
+    Brentford and on into the Great West Road at Chiswick; the A13 from a connection at the east edge west to Dagenham
+    Docks, where Barking Road runs on as an avenue. Each runs on into its avenue at the end, has verges no building
+    stands on, and a diamond interchange where a street crosses it (Hayes Road, Goresbrook Road), the box and a frame
+    round it kept clear in the plan. Heathrow and the Thames leave the M4 no straight line to the Chiswick roundabout.
+    The visitor limit is off at both connections: London's gateways are meant to be busy.
+  - **Roundabouts**: 5×5 two-lane rings (`ROUNDABOUTS`) at the avenue junction nearest each place, its box clear and a
+    frame round it with no road but the arms: Hyde Park Corner (Park Lane, Grosvenor Place, Piccadilly, Knightsbridge),
+    Marble Arch (Oxford Street, the Bayswater Road, Park Lane, the Edgware Road), Elephant and Castle (redrawn south of
+    the line out of Waterloo: the Walworth Road through it, Kennington Park Road and the Old Kent Road from it) and Old
+    Street, on Shoreditch High Street four tiles east of the real one (City Road turns into Old Street at a corner, and
+    a corner can take no ring). Mini-roundabouts on about one side-street crossroads in twelve in the suburbs and the
+    outer ring, by hash (five).
+  - **Pedestrian streets**, the plan's side streets nearest each place: Carnaby Street is the two-tile shopping street
+    between Park Lane and Piccadilly (the Circus fills the block east of Regent Street), and the Barbican's two streets
+    stand for Covent Garden, which has no street of its own at this scale (the Opera House faces Oxford Street). The
+    plan lays no riverside street on the South Bank between Westminster and Waterloo Bridges. Both end at avenues, where
+    no signal crossing may go (walkers cross at the avenues' lights).
+  - **Street rules**: bus lanes on both carriageways of Oxford Street from Marble Arch to Tottenham Court Road and of
+    the Euston Road; 20 zones on the side streets within six tiles of the schools of Islington, Hackney, Camden, Brixton
+    and Clapham (humps by hash, `humpAt`); double yellows on every street of the City; Regent Street one way south with
+    no left turn into it from Oxford Street, no left turn out of it at Piccadilly Circus and no right turn from Oxford
+    Street into Tottenham Court Road.
+  - Bus line 25 is a loop, east along Oxford Street's south kerb to Whitechapel and back along the north, so its six
+    buses use both bus lanes; the 159 keeps to stops beside streets where it can (a there-and-back line beside an
+    avenue would turn in the road to call). Five registered features (`london-avenues`, `london-motorways`,
+    `london-roundabouts`, `london-pedestrian`, `london-street-rules`) hold demo:check to all this.
 - **Buses.** Each stop is on a frontage lot near the real one, beside a plain stretch of road (never facing a junction)
   on a loop of the network, preferably a main road, on the side the server boards it from (`boardDir`: south, east,
   west, north), three tiles or more from the route's other stops. The 25 and the 159 run out and back; the D3 runs one
@@ -298,6 +345,12 @@ the stations' fronts at both ends. Without the fast fill (`demo:check --run`) Lo
 newcomer arrives through a live gateway once there is one (sim/gateways.ts), and on the new map one station is staffed
 early, which ends the start-up arrivals sooner (1,400 citizens after 2.4 days against 7,800).
 
+The roads have stops of their own, each with London's words: in the West End Carnaby Street (by day), Oxford Street's
+bus lanes and its crossing at Tottenham Court Road, the Oxford Circus turn ban, Marble Arch, Hyde Park Corner and the
+Traffic panel with the congestion overlay; the City's double yellows, the Barbican and Old Street with the City;
+Elephant and Castle after the Shard; the Islington 20 zone after its primary school; the A13 in the Thames Gateway and
+the M4 before Heathrow.
+
 The tour runs west to east along the river and then round the rings: Westminster, the West End, the City and the
 Great Eastern line to Stratford, Waterloo and the line to Clapham Junction, Canary Wharf, the Isle of Dogs and Greenwich,
 the docks and the Thames Gateway freight line, Hackney, Islington and King's Cross, Camden, Kensington, Paddington and the
@@ -324,16 +377,16 @@ A section (`DemoSection`) lists:
 | `placements` | `{ kind, door, rot }`: the catalogue kind's string id, the tile a player would click, and the FRONT rotation (0 the door faces south, 1 east, 2 north, 3 west). `id` defaults to the kind and must be unique. Bus stops are placements too |
 | `water` | rectangles painted as open water: a scenario's river (no tool makes water) |
 | `roads` | straight road drags, laid as the road tool lays them on the owner's dry land. Track drawn later straight across one makes a level crossing |
-| `classRoads` | `{ cls, from, to }`: road drags of a class (docs/roads.md "Classes"), planned and laid as the road tool does (`planRoad`: an avenue's or motorway's twin row on the drag's left, a drag across a one-way or divided road keeping it), in order after `roads`. The Road classes and junctions section lays one of each |
+| `classRoads` | `{ cls, from, to }`: road drags of a class (docs/roads.md "Classes"), planned and laid as the road tool does (`planRoad`: an avenue's or motorway's twin row on the drag's left, a drag across a one-way or divided road keeping it), in order after `roads`; with `path`, every tile of a drag with corners (London's arterials: the twin row follows each corner as `twinRow` lays it). The Road classes and junctions section lays one of each |
 | `runways` | `{ from, to }`: a runway drag |
 | `tracks` | drags as a player makes them; each runs along its longer axis first and turns once |
-| `junctions` | a junction tool clicked at `at`, as the tools build them (R4, docs/roads.md "Junctions"): a roundabout (the 5×5 two-lane ring on an avenue's junction) or flyover on a junction (`deck` picks the road on top), a mini-roundabout, an interchange on a motorway, a turn rule on an arm tile (`rule`: noLeft, noRight, noStraight, noEntry), a signal crossing on a street tile |
-| `streetRules` | `{ id, rule, name, at, ns?, to?, rect, inspect }`: a street rule as the Street rules tool sets it (R5, docs/roads.md "Traffic control"): `rule` hgv, bus, yellow or zone20, on the whole street through `at` (east-west unless `ns`), or with `to` on the drag from `at` to `to`; laid after the junctions; each is a tour stop (its `rect` framed, `inspect` asked about) |
+| `junctions` | a junction tool clicked at `at`, as the tools build them (R4, docs/roads.md "Junctions"): a roundabout (the 5×5 two-lane ring on an avenue's junction) or flyover on a junction (`deck` picks the road on top), a mini-roundabout, an interchange on a motorway, a turn rule on an arm tile (`rule`: noLeft, noRight, noStraight, noEntry), a signal crossing on a street tile. A city demo's own stop takes `name`, `blurb`, `rect`, `inspect` (and `big` for a 5×5 ring) in place of the showcase's words and frames |
+| `streetRules` | `{ id, rule, name, at, ns?, to?, rect, inspect }`: a street rule as the Street rules tool sets it (R5, docs/roads.md "Traffic control"): `rule` hgv, bus, yellow or zone20, on the whole street through `at` (east-west unless `ns`), or with `to` on the drag from `at` to `to`; laid after the junctions; each is a tour stop (its `rect` framed, `inspect` asked about); `blurb` puts a city demo's own words in place of the rule's |
 | `visitorLimits` | gateway doors with the visitor limit on (R5: a motorway connection's, `RoadRule.gw`) |
 | `bridges` | a road bridge over water from `from` to `to`, laid through `planBridge`, with a forced `style` (the road tool's choice otherwise); `landmark` draws a bascule span as that landmark |
 | `lines` | bus, rail or metro lines: stops in calling order (bus stop tiles or station doors), loop or there and back, vehicles. `freight: true` for a line between yards; `name` for a line known by name (the Central) |
 | `blocks` | grown land the tour stops at: zones nobody places, and block middles (deep plots, a communal garden) |
-| `spots` | a tour stop on something that is neither a kind nor a drag, such as a level crossing, the river, the helipads or a Tube crossover. The caption is `SPOT_CAPTIONS[spot]`; `view: 'under'` turns the underground view on there |
+| `spots` | a tour stop on something that is neither a kind nor a drag, such as a level crossing, the river, the helipads or a Tube crossover. The caption is `SPOT_CAPTIONS[spot]`; `view: 'under'` turns the underground view on there; `blurb` replaces the caption with a city demo's own words |
 | `seaGates` | where the scenario's water leaves the playable world (docs/boats.md 2.3): `{ x, y, name, low? }`, written to `World.seaGates`; every harbour derives its sea, fishing and river lanes to them |
 
 A placement of a merged lot (a zone kind bigger than 1×1 that growth assembles, `GROW_FORMS` in shared/src/zones.ts) takes a `level`. Nobody places these. The seeder builds each on lots of its zone, as growth would: through `planStructure` with those lots seen as empty, before the block middles round it are settled.
