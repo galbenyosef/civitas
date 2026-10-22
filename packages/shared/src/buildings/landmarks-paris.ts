@@ -14,7 +14,9 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
  *       legs leaning together, the two floors, the antenna with its aircraft light
  *   134 the Arc de Triomphe: a library-family daytime attraction, the great arch on its
  *       roundabout, the vault with the eternal flame, the friezes of the attic above
- *   135-140 to follow, one building at a time.
+ *   135 Notre-Dame: a library-family attraction, the twin-towered west front, the spire
+ *       over the crossing, the flying buttresses along the apse
+ *   136-140 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'paris'];
@@ -142,4 +144,69 @@ export const arcDeTriomphe: KindDef = {
   }],
 };
 
-export const PARIS_LANDMARKS: KindDef[] = [eiffelTower, arcDeTriomphe];
+// ================================================================= 135 Notre-Dame
+
+/**
+ * The cathedral of Paris on its island: the twin-towered west front with the rose window,
+ * the long nave under its pitched roof, the apse rounded behind, and the lead spire rising
+ * from the crossing with the flying buttresses stepping in from both flanks. All plain
+ * limestone and lead, the lancets and doors inset dark, so no window rule is touched.
+ */
+const LIME_ST = 0xc9c0a8, LEAD = 0x5a6570;
+
+const notreDameOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the nave, its pitched roof, and the rounded apse behind
+  ops.push(['box', 1.04, 0.55, 1.3, 0, 0.02, -0.08, LIME_ST]);
+  ops.push(['roof', 1.04, 0.18, 1.3, 0, 0.57, -0.08, 'slate', true]);
+  ops.push(['cyl', 0.5, 0.54, 0.5, 0, 0.02, -0.46, LIME_ST, 14]);
+  // the west front and the two square towers, the rose window between them
+  ops.push(['box', 1.08, 0.52, 0.14, 0, 0.02, 0.62, LIME_ST]);
+  ops.push(['box', 0.22, 0.22, 0.02, 0, 0.26, 0.7, 'navy']);
+  ops.push(['box', 0.42, 0.85, 0.42, -0.33, 0.02, 0.55, LIME_ST], ['box', 0.42, 0.85, 0.42, 0.33, 0.02, 0.55, LIME_ST]);
+  ops.push(['cone', 0.035, 0.12, -0.51, 0.87, 0.36, LIME_ST, 6], ['cone', 0.035, 0.12, -0.15, 0.87, 0.36, LIME_ST, 6]);
+  ops.push(['cone', 0.035, 0.12, 0.15, 0.87, 0.36, LIME_ST, 6], ['cone', 0.035, 0.12, 0.51, 0.87, 0.36, LIME_ST, 6]);
+  // the three west doors, the lancets of towers and nave flanks
+  ops.push(['box', 0.13, 0.18, 0.015, 0, 0.02, 0.7, 0x3a3630], ['box', 0.08, 0.14, 0.015, -0.2, 0.02, 0.7, 0x3a3630], ['box', 0.08, 0.14, 0.015, 0.2, 0.02, 0.7, 0x3a3630]);
+  ops.push(['box', 0.015, 0.3, 0.1, -0.545, 0.3, 0.55, 0x3a3630], ['box', 0.015, 0.3, 0.1, 0.545, 0.3, 0.55, 0x3a3630]);
+  for (const z of [0.3, -0.1, -0.5]) {
+    ops.push(['box', 0.015, 0.24, 0.14, -0.525, 0.14, z, 0x3a3630], ['box', 0.015, 0.24, 0.14, 0.525, 0.14, z, 0x3a3630]);
+  }
+  // the lead spire over the crossing, its little stage partway up
+  ops.push(['lathe', 0, 0.57, -0.15, LEAD, [0.12, 0, 0.1, 0.08, 0.05, 0.3, 0.028, 0.55, 0.01, 0.72, 0, 0.78], { seg: 12 }]);
+  ops.push(['cone', 0.012, 0.05, 0, 1.35, -0.15, 'gold', 5]);
+  // the flying buttresses: outer piers and the bars stepping in to the nave top
+  for (const sx of [-1, 1]) {
+    for (const z of [0.3, -0.1, -0.5]) {
+      ops.push(['box', 0.07, 0.4, 0.07, sx * 0.62, 0.02, z, LIME_ST]);
+      ops.push(['taper', 0.05, 0.05, 0.03, 0.03, 0.3, sx * 0.58, 0.32, z, LIME_ST, { shift: [-sx * 0.08, 0] }]);
+    }
+  }
+  // the parvis: lamps and a pair of trees
+  ops.push(...lampPost(-0.5, 0.9, 0.32, 'marquee', 0.02), ...lampPost(0.5, 0.9, 0.32, 'marquee', 0.02));
+  ops.push(...tree(-0.82, 0.86, 0.6), ...tree(0.82, 0.86, 0.6));
+  return ops;
+};
+
+export const notreDame: KindDef = {
+  id: 'notre-dame', name: 'Notre-Dame', code: library.code, kindId: 135, family: 'leisure', tier: 3,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'paris',
+  occupation: { ...library.occupation!, name: 'verger' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 150, ticket: 0, openHours: [8, 19.5], stay: [0.6, 1.4], leisureValue: 8, radius: 28,
+    dayAppeal: 1.5, eveningAppeal: 0.4, retireeAppeal: 2.2, childAppeal: 1.3, title: 'Notre-Dame',
+  },
+  lot: { wage: 15 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The cathedral of Paris on its island: the twin west towers over the rose window, the lead spire flying from the crossing, buttresses stepping over the Seine-side apse.',
+  howTo: 'A 2×2 plot by the water suits it; a quiet day out for retirees and school trips, no ticket needed. World landmark: unlock rule to be decided.',
+  tool: { id: 'notredame', key: '', label: 'Notre-Dame', color: '#c9c0a8' },
+  levels: [{
+    capacity: 30, wage: 15, cost: 12000, upkeep: 50, work: 2600, parking: { surface: 0, underground: 0 },
+    designs: [
+      { name: 'the twin-towered west front with the rose window, the lead spire over the crossing, the flying buttresses of the apse', height: 1.4, ops: notreDameOps() },
+    ],
+  }],
+};
+
+export const PARIS_LANDMARKS: KindDef[] = [eiffelTower, arcDeTriomphe, notreDame];
