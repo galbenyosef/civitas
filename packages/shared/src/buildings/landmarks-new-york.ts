@@ -150,15 +150,23 @@ const statueOps = (): Op[] => {
   ops.push(...merlons(9, 1.0, 0, 0.22, 0.6, true, 0.08, FORT), ...merlons(9, 1.0, 0, 0.22, -0.6, true, 0.08, FORT));
   ops.push(...merlons(10, 1.12, 0.6, 0.22, 0, false, 0.08, FORT), ...merlons(10, 1.12, -0.6, 0.22, 0, false, 0.08, FORT));
   ops.push(['box', 1.04, 0.04, 1.04, 0, 0.22, 0, FORT_DK]);
-  // Liberty: pedestal, flaring robe, head and crown, the tablet and the raised torch
-  ops.push(['box', 0.22, 0.06, 0.22, 0, 0.26, -0.12, 'stone']);
-  ops.push(['cyl', 0.03, 0.062, 0.15, 0, 0.32, -0.12, COPPER, 10]);
-  ops.push(['cyl', 0.024, 0.03, 0.05, 0, 0.47, -0.12, COPPER, 8]);
-  ops.push(['cyl', 0.015, 0.015, 0.025, 0, 0.52, -0.12, COPPER_DK, 8], ['cone', 0.023, 0.03, 0, 0.545, -0.12, COPPER, 8]);
-  ops.push(['taper', 0.017, 0.017, 0.013, 0.013, 0.13, 0.02, 0.44, -0.12, COPPER, { shift: [0.11, 0] }]);
-  ops.push(['cyl', 0.012, 0.012, 0.03, 0.13, 0.57, -0.12, 'gold', 6], ['cone', 0.015, 0.04, 0.13, 0.6, -0.12, 'marquee', 6]);
-  ops.push(['taper', 0.014, 0.014, 0.011, 0.011, 0.07, -0.025, 0.45, -0.12, COPPER, { shift: [-0.05, 0] }]);
-  ops.push(['box', 0.045, 0.055, 0.012, -0.085, 0.44, -0.12, COPPER_DK]);
+  // Liberty on her plinth: the flaring robe, the crowned head with its seven rays, the tablet
+  // at her left hip and the right arm raised with the golden torch - as tall above the fort as
+  // the fort stands above the island, so she reads from across the harbour
+  ops.push(['box', 0.4, 0.12, 0.4, 0, 0.26, -0.12, 'stone']);
+  ops.push(['lathe', 0, 0.38, -0.12, COPPER, [0.19, 0, 0.2, 0.05, 0.17, 0.18, 0.135, 0.34, 0.125, 0.46, 0.1, 0.54, 0.07, 0.6, 0.045, 0.64, 0, 0.65], { seg: 16 }]);
+  ops.push(['cyl', 0.055, 0.06, 0.06, 0, 1.02, -0.12, COPPER, 10]);
+  ops.push(['lathe', 0, 1.06, -0.12, COPPER, [0.07, 0, 0.078, 0.04, 0.068, 0.09, 0.05, 0.13, 0.03, 0.15, 0, 0.17], { seg: 12 }]);
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2;
+    ops.push(['cone', 0.009, 0.05, Math.cos(a) * 0.075, 1.17, -0.12 + Math.sin(a) * 0.075, COPPER, 5]);
+  }
+  // the right arm raised with the torch, the left arm low with the tablet
+  ops.push(['taper', 0.055, 0.055, 0.04, 0.04, 0.42, 0.1, 0.98, -0.12, COPPER, { shift: [0.2, 0] }]);
+  ops.push(['cyl', 0.022, 0.026, 0.1, 0.3, 1.38, -0.12, 'gold', 8]);
+  ops.push(['cone', 0.035, 0.09, 0.3, 1.48, -0.12, 'marquee', 8]);
+  ops.push(['taper', 0.036, 0.036, 0.05, 0.05, 0.22, -0.2, 0.72, -0.12, COPPER, { shift: [0.12, 0] }]);
+  ops.push(['box', 0.13, 0.2, 0.03, -0.24, 0.62, -0.12, COPPER_DK]);
   // the museum pavilion at the quay: the ticket office, its door and awning towards the road
   ops.push(['box', 0.42, 0.15, 0.26, 0, 0.02, 0.79, 'stone', true, { name: 'museum', facade: { storeys: 1, bays: 3, sideBays: 0, ground: 'door', top: 0.04 } }]);
   ops.push(['awning', 'museum', 'front', 1, 1], ['cornice', 'museum', 1, FORT_DK]);
@@ -184,7 +192,7 @@ export const statueOfLiberty: KindDef = {
   levels: [{
     capacity: 30, wage: 17, cost: 13000, upkeep: 60, work: 3000, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'star-fort pedestal on the island under the green copper figure and her raised torch', height: 0.64, ops: statueOps() },
+      { name: 'star-fort pedestal on the island under the green copper figure and her raised torch', height: 1.6, ops: statueOps() },
     ],
   }],
 };
