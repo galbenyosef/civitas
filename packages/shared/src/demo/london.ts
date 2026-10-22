@@ -5,6 +5,7 @@ import { HARBOUR_OF } from '../harbours';
 import { TRANSIT } from '../transit';
 import { platformSpan } from '../metro';
 import { stopTile } from '../rail';
+import { KIND_SPOTS, fitKindVenues, kindsSection } from './london-kinds';
 import { LONDON_MAP, LT, DOCKS, arterialPaths, geoF, inLondon, lidx, londonBase, londonBridges, londonPlan, londonSeaGates, type LondonPlan } from './londonMap';
 
 /**
@@ -308,7 +309,7 @@ export function londonScenario(): LondonScenario {
     return true;
   };
   const structures: DemoPlacement[] = [];
-  for (const [id, kind, lat, lon, side, onBank] of STRUCTURES) {
+  for (const [id, kind, lat, lon, side, onBank] of [...STRUCTURES, ...KIND_SPOTS]) { // london-kinds.ts's multi-tile spots claim their land after the landmarks
     const k = K[kind], [px, py] = geoF(lat, lon), side0 = onBank ? (onBank === 'N' ? 1 : 2) : bankOf(px, py);
     let best: Placed | null = null, bd = Infinity;
     // as near the real place as fits, facing the given side if it can (another side costs as much as two tiles)
@@ -421,6 +422,7 @@ export function londonScenario(): LondonScenario {
     const door = nearLot(lat, lon, (x, y) => roadAt(x + fx, y + fy)) ?? nearLot(lat, lon, () => true);
     if (door) venues.push({ id, kind, door }); else problems.push(`${id}: no frontage lot near its place`);
   }
+  const kindVenues = fitKindVenues(nearLot, roadAt, problems); // london-kinds.ts's 1×1 spots, on frontage lots
   /** the side a bus boards a stop from (server sim/transit.ts boardDir: the first road of south, east, west, north) */
   const BOARD = [0, 1, 3, 2];
   /** stops of the same route keep three tiles apart */
@@ -552,6 +554,7 @@ export function londonScenario(): LondonScenario {
       blurb: 'Primary and secondary schools among the homes of Islington, Hackney, Camden, Brixton, Clapham, Kensington and Hammersmith: families live round them, so on a school day the children walk to class. The four universities in the Landmarks section take the sixth-form leavers.',
       placements: pick(...STRUCTURES.filter(([, kind]) => kind === 'primary-school' || kind === 'secondary-school').map(([id]) => id)),
     },
+    kindsSection(structures, kindVenues),
     {
       id: 'london-rail', name: 'Rail and Heathrow',
       blurb: 'Paddington, King\'s Cross, Liverpool Street and Waterloo with a line each, freight from Dagenham to Barking, and Heathrow at the western edge.',
