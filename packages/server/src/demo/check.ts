@@ -21,7 +21,7 @@
  *    London without its Underground section, for the tick cost without the metro.
  */
 import {
-  KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, isRoad, DEMOS, demoSections, showcaseProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
+  KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, isRoad, DEMOS, demoSections, showcaseProblems, londonProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
   isBridgeAux, bridgeStyle, BridgeStyle, basculeSeed, basculeLiftAt, isCrossing, isTunnel, isPlatform, underMask, boatTimetable, boatLifts, HARBOUR_OF,
   SCHOOL_SPECS, Study, LifeStage, STUDY_NAMES, EduLevel, AD_SIZES, AD_STRIDE, adHostAt, adSlotOpen, adWear, adAge, adSeed, type DemoId, type SeededDemo, type AdSize,
 } from '@msimcity/shared';
@@ -129,6 +129,11 @@ console.log('completeness (showcase)');
 const missing = showcaseProblems();
 for (const m of missing) fail(m);
 if (!missing.length) console.log('  ok: every placeable kind, ladder rung, surface and line mode is in the showcase');
+
+console.log('completeness (London)');
+const londonMissing = londonProblems();
+for (const m of londonMissing) fail(m);
+if (!londonMissing.length) console.log('  ok: every placeable kind stands in London or is exempt with a reason');
 
 for (const d of DEMOS) {
   console.log(`seeding ${d.id}`);

@@ -10,7 +10,7 @@ teaching it.
 | Transport demo | 8191 | Downtown, Buses and parking, Rail and freight, Airport, Industry | 36 |
 | Leisure demo | 8192 | Downtown, Leisure | 27 |
 | Civic demo | 8193 | Downtown, Civic services | 32 |
-| **London** | 8194 | Areas, Landmarks, Schools, Rail and Heathrow, Buses, The Thames, Roads, The Underground (its own map, below) | 124 |
+| **London** | 8194 | Areas, Landmarks, Schools, The rest of London, Rail and Heathrow, Buses, The Thames, Roads, The Underground (its own map, below) | 137 |
 
 Code:
 
@@ -279,7 +279,9 @@ How the map is made:
     no left turn into it from Oxford Street, no left turn out of it at Piccadilly Circus and no right turn from Oxford
     Street into Tottenham Court Road.
   - Bus line 25 is a loop, east along Oxford Street's south kerb to Whitechapel and back along the north, so its six
-    buses use both bus lanes; the 159 keeps to stops beside streets where it can (a there-and-back line beside an
+    buses use both bus lanes. Its stops stand only beside a plain carriageway tile on Oxford Street's own row, and a
+    stop with none near is left out (Oxford Street is lined with landmarks and the City's side streets meet it every
+    few tiles: two stops eastbound, four westbound). The 159 keeps to stops beside streets where it can (a there-and-back line beside an
     avenue would turn in the road to call). Five registered features (`london-avenues`, `london-motorways`,
     `london-roundabouts`, `london-pedestrian`, `london-street-rules`) hold demo:check to all this.
   - What it costs (2026-10-22, the fill and one game day run in-process as `check.ts --demo london --fill --run 1`
@@ -475,6 +477,7 @@ A school with no children is a still life. The families of E5 (children arriving
 - Every placed kind has a tour stop, and tour ids and placement ids are unique and resolve.
 - Each line's stops are placements of the right kind.
 - Every feature in the registry is in its demo, with a tour stop. See "The feature registry" below.
+- **London shows the whole catalogue too** (`londonProblems`, shared/src/demo/showcase.ts, run by `demo:check` after the Showcase check). Every placeable kind (the same rule, landmarks included) stands at least once across London's sections, each where its real counterpart does, or is named in `LONDON_EXEMPT` (shared/src/demo/london-kinds.ts) with a one-line reason: the pioneer camp (a frontier start, one per player). The motorway connections stand in the Roads section (the M4 and the A13). The section `london-kinds` ("The rest of London") holds them: `KIND_SPOTS` are the multi-tile kinds, fitted with the landmarks before the streets are laid (a road along each front, within a few tiles of the latitude and longitude asked for), and `KIND_VENUES` the 1×1 kinds, on frontage lots near their places once the streets are laid. A new kind therefore needs a line in one of those lists (a latitude and longitude, the side its door faces, a `name` in `EXTRA`) or an exemption; the check also fails for a duplicate id, an exemption that names no kind and a tour stop of the section (`KIND_TOUR`) that names nothing. Keep the 1×1 spots out of the West End and Westminster, where the Underground's entrances compete with them for frontage lots (a car park in Soho once stopped the Jubilee line's tunnel).
 
 The check then seeds every demo through the real planners. It fails on any refusal and on a rail line that does not run, and it seeds each demo twice to compare hashes. It then runs every feature's `seeded` test on what was built. With `--run <days>` it also runs the showcase, or `--demo <id>`, under the seeded random. `--fill` first grows the town with the live demo's fast fill (`fillDemo`, about 75 s for the showcase), so the run starts from the town a visitor finds. The run prints who uses what:
 

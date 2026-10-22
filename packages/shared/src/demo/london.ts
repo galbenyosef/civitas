@@ -6,6 +6,7 @@ import { HARBOUR_OF } from '../harbours';
 import { TRANSIT } from '../transit';
 import { platformSpan } from '../metro';
 import { stopTile } from '../rail';
+import { KIND_SPOTS, fitKindVenues, kindsSection } from './london-kinds';
 import { LONDON_MAP, LT, DOCKS, RM, ARTERIALS, BOROUGHS, arterialPaths, geoF, inLondon, lidx, londonBase, londonBridges, londonPlan, londonRoads, londonSeaGates, motorwayConnections, placeAt, type LondonPlan } from './londonMap';
 
 /**
@@ -268,6 +269,8 @@ const ZONE20_SCHOOLS = ['primary-islington', 'secondary-islington', 'primary-hac
 const ZONE20_REACH = 6;
 /** Share of the suburban and outer crossroads of side streets that are mini-roundabouts, by hash (the organic rule). */
 const MINI_SHARE = 1 / 12;
+/** Longest stretch of side street made pedestrian: a longer street keeps its cars beyond it (its mouth there a pelican). */
+const PEDESTRIAN_MAX = 4;
 /** The pedestrian streets: the plan's side streets nearest each place (London's West End keeps none of its own at this scale). */
 const PEDESTRIAN: { id: string; name: string; at: readonly [lat: number, lon: number]; reach: number; runs: number }[] = [
   // the shopping street between Park Lane and Piccadilly, a few tiles west of Regent Street: the side street nearest
@@ -275,7 +278,7 @@ const PEDESTRIAN: { id: string; name: string; at: readonly [lat: number, lon: nu
   { id: 'carnaby-street', name: 'Carnaby Street', at: [51.5133, -0.1389], reach: 6, runs: 1 },
   // no side street is left near the Covent Garden piazza (the Opera House faces Oxford Street at this scale): the
   // nearest are the two by the Barbican, which is a pedestrian estate in the real city
-  { id: 'barbican-walks', name: 'The Barbican', at: [51.5200, -0.0938], reach: 5, runs: 2 },
+  { id: 'barbican-walks', name: 'The Barbican', at: [51.5200, -0.0938], reach: 10, runs: 2 },
 ];
 
 /** Is (px, py) inside the polygon (ray casting)? */
@@ -354,9 +357,14 @@ function londonRoadsSection(plan: LondonPlan, byId: Map<string, DemoPlacement>):
       const dx = Math.sign(b[0] - a[0]), dy = Math.sign(b[1] - a[1]);
       let [x0, y0] = a, [x1, y1] = b;
       if (dx || dy) { while (side(x0 - dx, y0 - dy)) { x0 -= dx; y0 -= dy; } while (side(x1 + dx, y1 + dy)) { x1 += dx; y1 += dy; } }
-      const tiles: DemoXY[] = [];
-      for (let k = 0, x = x0, y = y0; k < 64; k++, x += dx, y += dy) { tiles.push([x, y]); if (x === x1 && y === y1) break; }
-      return { tiles, d: Math.min(...tiles.map(([x, y]) => Math.hypot(x + 0.5 - px, y + 0.5 - py))) };
+      const all: DemoXY[] = [];
+      for (let k = 0, x = x0, y = y0; k < 64; k++, x += dx, y += dy) { all.push([x, y]); if (x === x1 && y === y1) break; }
+      // a long street: only the PEDESTRIAN_MAX tiles of it nearest the place
+      const dist = ([x, y]: DemoXY) => Math.hypot(x + 0.5 - px, y + 0.5 - py);
+      let at = 0;
+      for (let k = 0; k + PEDESTRIAN_MAX <= all.length; k++) if (dist(all[k]) + dist(all[k + PEDESTRIAN_MAX - 1]) < dist(all[at]) + dist(all[at + PEDESTRIAN_MAX - 1])) at = k;
+      const tiles = all.length > PEDESTRIAN_MAX ? all.slice(at, at + PEDESTRIAN_MAX) : all;
+      return { tiles, d: Math.min(...tiles.map(dist)) };
     }).filter((r) => r.tiles.length >= 2).sort((a, b) => a.d - b.d || a.tiles[0][1] - b.tiles[0][1] || a.tiles[0][0] - b.tiles[0][0]);
     const chosen = whole.slice(0, p.runs);
     if (!chosen.length) { problems.push(`${p.name}: no side street near it`); continue; }
@@ -453,17 +461,19 @@ function londonRoadsSection(plan: LondonPlan, byId: Map<string, DemoPlacement>):
       if (c === 'inner' || c === 'outer' || c === 'suburb') zone.add(lidx(x, y));
     }
   }
-  const islington = byId.get('primary-islington');
-  let shown = false;
-  runsOf(zone).forEach(([a, b], n) => {
-    // the stop: the first run near the Islington primary school long enough for a hump
-    const show = !shown && !!islington && Math.abs(a[0] - islington.door[0]) + Math.abs(a[1] - islington.door[1]) <= 10 && Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]) >= 4;
-    if (show) shown = true;
+  // the stop: the longest run near an Islington school (its humps show), the first of equals
+  const zoneRuns = runsOf(zone), isl = ['primary-islington', 'secondary-islington'].map((id) => byId.get(id)).filter((p): p is DemoPlacement => !!p);
+  const len = ([a, b]: [DemoXY, DemoXY]) => Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+  let showAt = -1;
+  zoneRuns.forEach((r, n) => { if (isl.some((p) => Math.abs(r[0][0] - p.door[0]) + Math.abs(r[0][1] - p.door[1]) <= 12) && len(r) >= 2 && (showAt < 0 || len(r) > len(zoneRuns[showAt]))) showAt = n; });
+  const shown = showAt >= 0;
+  zoneRuns.forEach(([a, b], n) => {
+    const show = n === showAt;
     rule(show ? 'zone20-islington' : `zone20-${n + 1}`, 'zone20', show ? 'A 20 zone in Islington' : '20 zone', a, b, show ? {
       blurb: 'The side streets round the schools of Islington, Hackney, Camden, Brixton and Clapham are 20 zones: the roundel at each way in, painted on the road too, and speed humps every four to six tiles (where each run\'s hash puts them) slow every vehicle to 60%. Routes avoid them where there is another way, so the school run walks along quiet streets; the main roads round them carry the through traffic.',
     } : {});
   });
-  if (!shown) problems.push('20 zone: no run near the Islington primary school to show');
+  if (!shown) problems.push('20 zone: no run near an Islington school to show');
   // double yellows on every street of the City of London (the borough's outline)
   const cityPoly = BOROUGHS.find((b) => b.id === 'city')!.polys[0].map(([lat, lon]) => geoF(lat, lon));
   const { bank } = londonBase();
@@ -570,7 +580,7 @@ export function londonScenario(): LondonScenario {
     return true;
   };
   const structures: DemoPlacement[] = [];
-  for (const [id, kind, lat, lon, side, onBank] of STRUCTURES) {
+  for (const [id, kind, lat, lon, side, onBank] of [...STRUCTURES, ...KIND_SPOTS]) { // london-kinds.ts's multi-tile spots claim their land after the landmarks
     const k = K[kind], [px, py] = geoF(lat, lon), side0 = onBank ? (onBank === 'N' ? 1 : 2) : bankOf(px, py);
     let best: Placed | null = null, bd = Infinity;
     // as near the real place as fits, facing the given side if it can (another side costs as much as two tiles)
@@ -686,6 +696,7 @@ export function londonScenario(): LondonScenario {
     const door = nearLot(lat, lon, (x, y) => roadAt(x + fx, y + fy)) ?? nearLot(lat, lon, () => true);
     if (door) venues.push({ id, kind, door }); else problems.push(`${id}: no frontage lot near its place`);
   }
+  const kindVenues = fitKindVenues(nearLot, roadAt, problems); // london-kinds.ts's 1×1 spots, on frontage lots
   /** the side a bus boards a stop from (server sim/transit.ts boardDir: the first road of south, east, west, north) */
   const BOARD = [0, 1, 3, 2];
   /** stops of the same route keep three tiles apart */
@@ -694,17 +705,19 @@ export function londonScenario(): LondonScenario {
    * `avenue`: the stop may stand beside an avenue's carriageway (a loop line calling on the kerb its buses come along);
    * a line that runs there and back keeps to two-way streets, or half its buses would turn in the road to call
    */
-  const stopAt = ([id, , lat, lon, side]: Spot, loopLine: boolean): DemoPlacement => {
+  const stopAt = ([id, , lat, lon, side]: Spot, loopLine: boolean): DemoPlacement | null => {
     // a plain stretch (no junction at the board tile) on a loop of the network (a bus carries on and comes back round
     // rather than turning in the road), preferably a main road, on `side`
     let avenue = loopLine;
+    const tpy = geoF(lat, lon)[1];
     const plain = (x: number, y: number, want: number | null, main: boolean) => {
       if (route.some(([sx, sy]) => Math.abs(sx - x) + Math.abs(sy - y) < 3)) return false;
       const d = BOARD.find((r) => roadAt(x + FRONT[r][0], y + FRONT[r][1]));
       if (d === undefined || (want !== null && d !== want)) return false;
       const bx = x + FRONT[d][0], by = y + FRONT[d][1], b = lidx(bx, by);
       if (plan.t[b] !== LT.Road || !plan.loop[b] || (main && !plan.main[b]) || roadsSec.noBus.has(b)) return false;
-      if (plan.cls[b] === 4 || (plan.cls[b] === 3 && !avenue) || (loopLine && plan.cls[b] !== 3)) return false; // a loop's stop is on its avenue's kerb
+      // a loop's stop is on its avenue's kerb, and that road runs along its place's row (not the next avenue over)
+      if (plan.cls[b] === 4 || (plan.cls[b] === 3 && !avenue) || (loopLine && (plan.cls[b] !== 3 || Math.abs(by + 0.5 - tpy) > 2))) return false;
       if (plan.cls[b] === 3) {
         // a plain carriageway tile (no junction tile, divJunction): it and its twin straight, no side road at either
         const tw = plan.twin[b];
@@ -717,15 +730,16 @@ export function londonScenario(): LondonScenario {
     };
     // a loop's stop keeps to its side (the kerb its buses come along); the others may take either side further out
     const find = () => nearLot(lat, lon, (x, y) => plain(x, y, SIDES[side], true), 4) ?? nearLot(lat, lon, (x, y) => plain(x, y, loopLine ? SIDES[side] : null, true), 6)
-      ?? nearLot(lat, lon, (x, y) => plain(x, y, loopLine ? SIDES[side] : null, false));
+      ?? (loopLine ? null : nearLot(lat, lon, (x, y) => plain(x, y, null, false))); // a loop's stop stays on its own street
     // a there-and-back line's stop goes beside an avenue only where no street is near
     let door = find();
     if (!door && !loopLine) { avenue = true; door = find(); }
-    if (!door) problems.push(`${id}: no plain stretch of road near its place`);
-    else route.push(door);
-    return { id, kind: 'bus-stop', door: door ?? [0, 0] };
+    // a loop calls at the stops that fit (the City's side streets leave some kerbs with no plain stretch); a there-and-back line needs every one
+    if (!door) { if (!loopLine) problems.push(`${id}: no plain stretch of road near its place`); return null; }
+    route.push(door);
+    return { id, kind: 'bus-stop', door };
   };
-  const [route25, route159, routeD3] = ([[ROUTE_25, true], [ROUTE_159, false], [ROUTE_D3, false]] as const).map(([r, avenue]) => { route = []; return r.map((s) => stopAt(s, avenue)); });
+  const [route25, route159, routeD3] = ([[ROUTE_25, true], [ROUTE_159, false], [ROUTE_D3, false]] as const).map(([r, avenue]) => { route = []; return r.map((s) => stopAt(s, avenue)).filter((p): p is DemoPlacement => !!p); });
 
   // ---- the Underground: each entrance on a frontage lot as near its real place as fits (fitEntrance), the platform
   // along the line there (the way to its neighbours), clear of every other platform underneath
@@ -835,6 +849,7 @@ export function londonScenario(): LondonScenario {
       blurb: 'Primary and secondary schools among the homes of Islington, Hackney, Camden, Brixton, Clapham, Kensington and Hammersmith: families live round them, so on a school day the children walk to class. The four universities in the Landmarks section take the sixth-form leavers.',
       placements: pick(...STRUCTURES.filter(([, kind]) => kind === 'primary-school' || kind === 'secondary-school').map(([id]) => id)),
     },
+    kindsSection(structures, kindVenues),
     {
       id: 'london-rail', name: 'Rail and Heathrow',
       blurb: 'Paddington, King\'s Cross, Liverpool Street and Waterloo with a line each, freight from Dagenham to Barking, and Heathrow at the western edge.',

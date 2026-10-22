@@ -33,6 +33,7 @@ export * from './gateways';
 export * from './goals';
 export * from './demo/showcase';
 export * from './demo/london';
+export * from './demo/london-kinds';
 export * from './demo/londonMap';
 export * from './helicopters';
 export * from './metro';

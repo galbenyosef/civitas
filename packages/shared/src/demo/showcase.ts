@@ -29,6 +29,7 @@ import { FERRY } from '../ferry';
 import { HARBOUR_OF, type HarbourRole } from '../harbours';
 import type { SeaGate } from '../waterways';
 import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
+import { withKindsTour, KIND_TOUR_IDS, LONDON_EXEMPT } from './london-kinds';
 import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
 import { zoneOf, levelOf, Zone, isRoad } from '../tile';
 import { isMarkedJunction, mouthCrossing, MouthCrossing, boxJunction, sandboxSignalled, streetTreeAt, midZebraAt } from '../roadlook';
@@ -60,7 +61,7 @@ import { AD } from '../adverts';
  */
 
 export type SectionId = 'downtown' | 'roads' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media' | 'power' | 'remembrance'
-  | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-rail' | 'london-buses' | 'london-river' | 'london-roads' | 'london-tube';
+  | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-kinds' | 'london-rail' | 'london-buses' | 'london-river' | 'london-roads' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
 /** x, y, width, height in tiles */
@@ -836,7 +837,7 @@ export const DEMOS: DemoDef[] = [
     blurb: 'Parks, cinemas, theatres, sport and libraries, every size.' },
   { id: 'civic', name: 'Civic demo', slot: 93, sections: ['downtown', 'civic', 'remembrance'],
     blurb: 'Health, police, fire and builders, every size.' },
-  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-education', 'london-rail', 'london-buses', 'london-river', 'london-roads', 'london-tube'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
+  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-education', 'london-kinds', 'london-rail', 'london-buses', 'london-river', 'london-roads', 'london-tube'], town: 'london', tour: withKindsTour(LONDON_TOUR), view: LONDON_VIEW,
     blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, the Central, Northern and Jubilee lines underneath, and on the river the RB1 river buses, yachts through Tower Bridge and ships from the estuary.' },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
@@ -1944,6 +1945,38 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
       if (!p || !want.includes(p.kind)) out.push(`${l.id} stops at (${st[0]}, ${st[1]}), which is not a ${want.join(' or ')} placement`);
     }
   }
+  return out;
+}
+
+/**
+ * What London is missing, as messages (empty when complete; docs/demo.md "Keeping it complete"). London is a city demo
+ * that shows the whole catalogue at the size of a real city: every placeable kind (a tool, not a draft, not a growing
+ * zone; the landmarks too) stands at least once across its sections, or is in `LONDON_EXEMPT` with a reason (london-kinds.ts).
+ * Also: placement ids are unique across London's sections, the stops this section adds to the tour resolve, and an
+ * exemption names a kind that exists.
+ */
+export function londonProblems(manifest: readonly KindManifest[] = MANIFEST): string[] {
+  const out: string[] = [];
+  const sections = demoSections('london');
+  const placed = new Set<string>(), ids = new Set<string>();
+  for (const s of sections) {
+    for (const p of s.placements ?? []) {
+      placed.add(p.kind);
+      if (ids.has(p.id ?? p.kind)) out.push(`London places id ${p.id ?? p.kind} twice`);
+      ids.add(p.id ?? p.kind);
+    }
+    // a landmark drawn over a bridge (Tower Bridge) is placed by laying that bridge
+    for (const b of s.bridges ?? []) if (b.landmark) placed.add(b.landmark);
+  }
+  const known = new Set(manifest.map((k) => k.id));
+  for (const id of Object.keys(LONDON_EXEMPT)) if (!known.has(id)) out.push(`LONDON_EXEMPT names ${id}, which is not a catalogue kind`);
+  for (const k of manifest) {
+    if (k.draft || !k.tool || k.flags.growable || placed.has(k.id) || LONDON_EXEMPT[k.id]) continue;
+    const why = k.group ? `a rung of the ${k.group} ladder (tier ${k.tier})` : k.footprint && k.footprint.w * k.footprint.h > 1 ? `a ${k.footprint.w}×${k.footprint.h} structure` : 'a placeable kind';
+    out.push(`${k.id} (${why}) has no home in London: place it where its real counterpart stands (london-kinds.ts) or exempt it with a reason`);
+  }
+  const stops = new Set(demoTour('london').map((t) => t.id));
+  for (const id of KIND_TOUR_IDS) if (!stops.has(id)) out.push(`London's tour stop ${id} (london-kinds.ts) names nothing in the scenario`);
   return out;
 }
 
