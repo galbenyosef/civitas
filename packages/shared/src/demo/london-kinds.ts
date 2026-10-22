@@ -168,7 +168,7 @@ export function kindsSection(structures: readonly DemoPlacement[], venues: reado
   const ids = new Set(KIND_SPOTS.map(([id]) => id));
   return {
     id: 'london-kinds', name: 'The rest of London',
-    blurb: 'Everything else a player can build, where its real counterpart stands: Battersea\'s power station, the gas works at Beckton, the grid supply point by the Thames Barrier, a solar farm and wind row on the Rainham marshes; Broadcasting House, Television Centre and ITV; the City\'s churchyard, the City of London Cemetery and funeral directors; Guy\'s and St Mary\'s hospitals, surgeries and walk-in centres; police boxes to Brixton\'s divisional station, fire posts to Shoreditch\'s large station; the builders at Stratford; Imperial\'s research campus, halls, colleges and a university; the Royal Albert Hall, cinemas, libraries and parks; and the car parks, a halt and a park and ride.',
+    blurb: 'Everything else a player can build, each where its real counterpart stands. Battersea\'s power station, the gas works at Beckton, the grid supply point by the Thames Barrier, a solar farm and wind row on the Rainham marshes; Broadcasting House, Television Centre and ITV; the City\'s churchyard, the City of London Cemetery and funeral directors; Guy\'s and St Mary\'s hospitals, surgeries and walk-in centres; police boxes to Brixton\'s divisional station, fire posts to Shoreditch\'s large station; the builders at Stratford; Imperial\'s research campus, halls, colleges and a university; the Royal Albert Hall, cinemas, libraries and parks; and the car parks, a halt and a park and ride.',
     placements: [...structures.filter((p) => ids.has(p.id ?? p.kind)).map((p) => ({ ...p, ...EXTRA[p.id ?? p.kind] })), ...venues],
   };
 }
