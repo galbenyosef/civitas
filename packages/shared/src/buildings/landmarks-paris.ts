@@ -1,5 +1,5 @@
 import type { KindDef, Op } from './schema';
-import { library } from './leisure';
+import { library, theatre } from './leisure';
 import { slab, tree, lampPost, flags, PAVING } from './tierkit';
 
 /**
@@ -258,4 +258,59 @@ export const louvre: KindDef = {
   }],
 };
 
-export const PARIS_LANDMARKS: KindDef[] = [eiffelTower, arcDeTriomphe, notreDame, louvre];
+// ================================================================= 137 the Opéra Garnier
+
+/**
+ * The opera house Charles Garnier built for Napoleon the Third: the columned front on the
+ * street, its windows on the front wall only, the green copper dome over the grand staircase
+ * at the corner, and the tall plain stage tower rising behind where the scenery flies. The
+ * sides and back stay blank so the tower can stand against them, and the porch shades the
+ * door on the plain ground floor.
+ */
+const OPERA = 0xd9c9a8, OPERA_DK = 0xc4b28e, VERDIGRIS = 0x5f8f6f;
+
+const operaGarnierOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the auditorium front: windows on the street wall only, plain sides and back
+  ops.push(['box', 1.4, 0.55, 0.75, 0, 0.02, 0.28, OPERA, true, { name: 'hall', facade: { storeys: 2, bays: 5, sideBays: 0, margin: 0.06, ground: 'plain', top: 0.05 } }]);
+  ops.push(['roof', 1.44, 0.14, 0.79, 0, 0.57, 0.28, OPERA_DK, false]);
+  // the columned porch over the door, the frieze and the attic cornice
+  ops.push(['door', 'hall', 'front', 2], ['porch', 'hall', 'front', 1, 3, 'gold']);
+  ops.push(...[-1, 1].map((sx): Op => ['cyl', 0.028, 0.032, 0.24, sx * 0.42, 0.02, 0.72, OPERA, 8]));
+  ops.push(['box', 1.1, 0.045, 0.05, 0, 0.515, 0.7, 'gold']);
+  // the green dome over the grand staircase at the corner
+  ops.push(['cyl', 0.15, 0.16, 0.08, 0.42, 0.6, 0.42, OPERA, 10]);
+  ops.push(['lathe', 0.42, 0.66, 0.42, VERDIGRIS, [0.16, 0, 0.17, 0.03, 0.15, 0.07, 0.1, 0.11, 0.045, 0.13, 0, 0.15], { seg: 12 }]);
+  ops.push(['cyl', 0.008, 0.008, 0.06, 0.42, 0.81, 0.42, 'gold', 5]);
+  // the stage tower behind, standing clear of the hall's back wall
+  ops.push(['box', 1.2, 1.0, 0.6, 0, 0.02, -0.55, OPERA_DK]);
+  ops.push(['box', 1.26, 0.05, 0.66, 0, 1.02, -0.55, OPERA]);
+  // the square: lamps, flags and a pair of trees
+  ops.push(...lampPost(-0.55, 0.88, 0.32, 'marquee', 0.02), ...lampPost(0.55, 0.88, 0.32, 'marquee', 0.02));
+  ops.push(...flags(-0.4, 0.4, 3, 0.5, ['navy', 'white', 'red'], 0.4));
+  ops.push(...tree(-0.82, -0.82, 0.6), ...tree(0.82, -0.82, 0.6));
+  return ops;
+};
+
+export const operaGarnier: KindDef = {
+  id: 'opera-garnier', name: 'the Opéra Garnier', code: 12, kindId: 137, family: 'leisure', tier: 5,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'venue', landmark: true, tags: TAGS, group: 'paris',
+  occupation: { ...theatre.occupation!, name: 'opera house staff' },
+  attrs: {
+    ...theatre.attrs, visitorCapacity: 200, ticket: 30, openHours: [13, 24], stay: [2.2, 3.2], leisureValue: 10, radius: 30,
+    eventNights: [2, 4, 5, 6], eventStart: 19.5, eveningAppeal: 1.5, retireeAppeal: 1.4, title: 'the Opéra Garnier',
+  },
+  lot: { wage: 20 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The opera house Charles Garnier built for Napoleon the Third: the columned front under the green copper dome, and behind it the great stage where the chandelier fell.',
+  howTo: 'A 2×2 plot on a busy street near restaurants and bars for the pre-show crowd; it fills on show nights. World landmark: unlock rule to be decided.',
+  tool: { id: 'operagarnier', key: '', label: 'Opéra Garnier', color: '#5f8f6f' },
+  levels: [{
+    capacity: 40, wage: 20, cost: 14000, upkeep: 100, work: 3000, parking: { surface: 0, underground: 30 },
+    designs: [
+      { name: 'the columned opera house under its green dome, the stage tower rising behind', height: 1.1, ops: operaGarnierOps() },
+    ],
+  }],
+};
+
+export const PARIS_LANDMARKS: KindDef[] = [eiffelTower, arcDeTriomphe, notreDame, louvre, operaGarnier];
