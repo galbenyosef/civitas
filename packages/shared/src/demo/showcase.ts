@@ -60,7 +60,7 @@ import { AD } from '../adverts';
  */
 
 export type SectionId = 'downtown' | 'roads' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media' | 'power' | 'remembrance'
-  | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-rail' | 'london-buses' | 'london-river' | 'london-tube';
+  | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-rail' | 'london-buses' | 'london-river' | 'london-roads' | 'london-tube';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
 /** x, y, width, height in tiles */
@@ -113,19 +113,23 @@ export interface DemoBridge { id: string; name: string; from: DemoXY; to: DemoXY
  * avenue's junction) or flyover on the junction (a flyover's deck carries the `deck` road), a mini-roundabout, an
  * interchange on the motorway, a turn rule on the arm tile `at` (set to `rule`), a signal crossing on the street tile.
  */
-export interface DemoJunction { id: string; tool: 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican'; at: DemoXY; deck?: 'ew' | 'ns'; rule?: ArmState }
+export interface DemoJunction {
+  id: string; tool: 'roundabout' | 'flyover' | 'miniroundabout' | 'interchange' | 'turnrule' | 'pelican'; at: DemoXY; deck?: 'ew' | 'ns'; rule?: ArmState;
+  /** a tour stop of a city demo's own (London): its title and caption, the area framed and the tile asked about, and `big` for a 5×5 roundabout */
+  name?: string; blurb?: string; rect?: DemoRect; inspect?: DemoXY; big?: boolean;
+}
 /** A tour stop on something that is neither a kind nor a drag (a level crossing, the river): its caption is SPOT_CAPTIONS[spot]. */
 /** `view`: the tour turns the underground view ('under') or the world map ('map', docs/world-map.md) on at this stop */
 /** `view` 'ranks': the stop plays a rank-up celebration over the rect (client ranks.ts preview, docs/ranks.md) */
 /** `row`: a 'fire-spread' spot's homes, the lead first, which catch light one after another (server sim/fires.ts rows) */
 /** `funeral`: a 'funeral' spot's funeral director and the resting place its pretend funerals go to (server sim/death.ts drills) */
 /** `hour`: the tour shows the spot at this hour of the day (a blackout after dark, the TV stop in the evening, when sets are on) */
-export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks' | 'tv' | 'traffic'; row?: readonly DemoXY[]; hour?: number; funeral?: { from: DemoXY; to: DemoXY } }
+export interface DemoSpot { id: string; spot: SpotKind; name: string; rect: DemoRect; inspect?: DemoXY; view?: 'under' | 'map' | 'ranks' | 'tv' | 'traffic'; row?: readonly DemoXY[]; hour?: number; funeral?: { from: DemoXY; to: DemoXY }; /** the caption, in place of the spot kind's (a city demo's own words) */ blurb?: string }
 /**
  * A street rule the scenario sets (R5, shared/src/roadrules.ts StreetRule), as the Street rules tool does: on the whole
  * street through `at` (east-west unless `ns`), or with `to` on the drag from `at` to `to` (part of a street).
  */
-export interface DemoStreetRule { id: string; rule: StreetRuleId; name: string; at: DemoXY; ns?: boolean; to?: DemoXY; rect: DemoRect; inspect: DemoXY }
+export interface DemoStreetRule { id: string; rule: StreetRuleId; name: string; at: DemoXY; ns?: boolean; to?: DemoXY; rect: DemoRect; inspect: DemoXY; /** the caption, in place of the rule's (a city demo's own words) */ blurb?: string }
 /** Land parcels (by their `land` names, any section's) combined into one estate by the players' rule (parcelops.ts planCombine) */
 export interface DemoEstate { name: string; lands: readonly string[] }
 export interface DemoLine {
@@ -149,8 +153,12 @@ export interface DemoBlock {
   /** how it comes about, in place of the kind's howTo */
   how?: string;
 }
-/** A road of a class laid by a scenario (DemoSection.classRoads): `cls` a RoadCls id, the drag from `from` to `to`. */
-export interface DemoClassRoad { cls: number; from: DemoXY; to: DemoXY }
+/**
+ * A road of a class laid by a scenario (DemoSection.classRoads): `cls` a RoadCls id, the drag from `from` to `to`; or
+ * `path`, every tile of a drag with corners (London's arterials, laid as one drag so an avenue's twin row follows it round
+ * every corner, as the road tool lays a drag's twin: roadclass.ts twinRow), from `from` to `to`.
+ */
+export interface DemoClassRoad { cls: number; from: DemoXY; to: DemoXY; path?: readonly DemoXY[] }
 export interface DemoSection {
   id: SectionId; name: string; blurb: string;
   /** extra land outside the districts, owned by the town */
@@ -828,7 +836,7 @@ export const DEMOS: DemoDef[] = [
     blurb: 'Parks, cinemas, theatres, sport and libraries, every size.' },
   { id: 'civic', name: 'Civic demo', slot: 93, sections: ['downtown', 'civic', 'remembrance'],
     blurb: 'Health, police, fire and builders, every size.' },
-  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-education', 'london-rail', 'london-buses', 'london-river', 'london-tube'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
+  { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-education', 'london-rail', 'london-buses', 'london-river', 'london-roads', 'london-tube'], town: 'london', tour: LONDON_TOUR, view: LONDON_VIEW,
     blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, the Central, Northern and Jubilee lines underneath, and on the river the RB1 river buses, yachts through Tower Bridge and ships from the estuary.' },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
@@ -1313,11 +1321,12 @@ export function demoTour(id: DemoId): TourStop[] {
       const j = s.junctions?.find((q) => q.id === sid);
       if (j) {
         // R4: the 5×5 roundabout and the interchange have their own frames; a sign and a crossing show a little round them
-        const big = sid === 'roundabout-big', stop = big ? JUNCTION_STOPS.big : j.tool === 'interchange' ? JUNCTION_STOPS.interchange : null;
+        const big = sid === 'roundabout-big' || !!j.big;
+        const stop = j.rect ? { rect: j.rect, inspect: j.inspect ?? j.at } : big ? JUNCTION_STOPS.big : j.tool === 'interchange' ? JUNCTION_STOPS.interchange : null;
         const area = stop ? stop.rect : [j.at[0] - 2, j.at[1] - 2, 5, 5] as const;
         const cap = big ? BIG_ROUNDABOUT_CAPTION : j.tool === 'turnrule' && j.rule ? { ...SURFACE_CAPTIONS.turnrule, what: `${SURFACE_CAPTIONS.turnrule.what} Here: ${ARM_WORDS[j.rule]} for cars coming along Mill Road from the west, so they turn at the mini-roundabout instead.` } : SURFACE_CAPTIONS[j.tool];
         const rect: DemoRect = stop ? stop.rect : j.tool === 'roundabout' ? [j.at[0] - 1, j.at[1] - 1, 3, 3] : [j.at[0], j.at[1], 1, 1];
-        out.push({ id: sid, ...base, ...cap, ...framing(area[0], area[1], area[2], area[3], 0, 0.8), rect, inspect: stop ? stop.inspect : j.tool === 'roundabout' ? [j.at[0] + 1, j.at[1]] : j.at });
+        out.push({ id: sid, ...base, ...cap, ...(j.name ? { title: j.name } : {}), ...(j.blurb ? { what: j.blurb } : {}), ...framing(area[0], area[1], area[2], area[3], 0, 0.8), rect, inspect: stop ? stop.inspect : j.tool === 'roundabout' ? [j.at[0] + 1, j.at[1]] : j.at });
         continue;
       }
       const br = s.bridges?.find((q) => q.id === sid);
@@ -1335,7 +1344,7 @@ export function demoTour(id: DemoId): TourStop[] {
       const sr = s.streetRules?.find((q) => q.id === sid);
       if (sr) {
         const [x, y, w, h] = sr.rect;
-        out.push({ id: sid, ...base, ...STREET_RULE_CAPTIONS[sr.rule], title: sr.name, ...framing(x, y, w, h, 0, 0.55), rect: sr.rect, inspect: sr.inspect });
+        out.push({ id: sid, ...base, ...STREET_RULE_CAPTIONS[sr.rule], title: sr.name, ...(sr.blurb ? { what: sr.blurb } : {}), ...framing(x, y, w, h, 0, 0.55), rect: sr.rect, inspect: sr.inspect });
         continue;
       }
       const sp = s.spots?.find((q) => q.id === sid);
@@ -1343,7 +1352,7 @@ export function demoTour(id: DemoId): TourStop[] {
         const [x, y, w, h] = sp.rect;
         // the map looks straight down, north up, from far enough to take in the rect (camera.ts MAP_PITCH)
         const cam = sp.view === 'map' ? { focus: [x + w / 2, y + h / 2] as [number, number], dist: Math.max(w, h) * 1.9, yaw: 0, pitch: 1.565 } : framing(x, y, w, h, 0, w * h === 1 ? 0.8 : 0.5);
-        out.push({ id: sid, ...base, ...SPOT_CAPTIONS[sp.spot], title: sp.name, ...cam, rect: sp.view === 'map' ? undefined : sp.rect, inspect: sp.inspect, view: sp.view, ...(sp.hour !== undefined ? { hour: sp.hour } : {}) });
+        out.push({ id: sid, ...base, ...SPOT_CAPTIONS[sp.spot], title: sp.name, ...(sp.blurb ? { what: sp.blurb } : {}), ...cam, rect: sp.view === 'map' ? undefined : sp.rect, inspect: sp.inspect, view: sp.view, ...(sp.hour !== undefined ? { hour: sp.hour } : {}) });
         continue;
       }
       const l = s.lines?.find((q) => q.id === sid);
