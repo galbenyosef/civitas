@@ -3,6 +3,7 @@ import { NEW_YORK_LANDMARKS } from './landmarks-new-york';
 import { CAIRO_LANDMARKS } from './landmarks-cairo';
 import { DUBAI_LANDMARKS } from './landmarks-dubai';
 import { SHANGHAI_LANDMARKS } from './landmarks-shanghai';
+import { PARIS_LANDMARKS } from './landmarks-paris';
 
 /**
  * World landmarks (docs/buildings.md "Landmarks"): recognisable real buildings in cities around the world, each a placed
@@ -38,4 +39,5 @@ export const WORLD_LANDMARKS: KindDef[] = [
   ...CAIRO_LANDMARKS,
   ...DUBAI_LANDMARKS,
   ...SHANGHAI_LANDMARKS,
+  ...PARIS_LANDMARKS,
 ];

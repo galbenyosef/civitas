@@ -118,11 +118,11 @@ export const TECH: TechNode[] = [
     unlocks: ['ucl', 'imperial', 'kings', 'lse'] },
   // World landmarks (buildings/landmarks-world*.ts, docs/buildings.md "Landmarks"): real buildings in cities around the
   // world, one locked node like lnd1; `unlocks` lists every world landmark's tool id as its city lands.
-  { id: 'wld1', track: 'culture', tier: 6, name: 'World landmarks', blurb: 'New York\'s towers, Cairo\'s pyramids, Dubai\'s skyline and Shanghai\'s Pudong: real buildings from around the world that work as offices, venues and attractions, with more cities to follow.', cost: 10000, requires: ['cul5'], condition: { counter: 'jobs', min: 1000 }, locked: 'How these unlock is still to be decided: for now they stand only in test cities and demos.',
+  { id: 'wld1', track: 'culture', tier: 6, name: 'World landmarks', blurb: 'New York\'s towers, Paris\'s iron lace, Cairo\'s pyramids, Dubai\'s skyline and Shanghai\'s Pudong: real buildings from around the world that work as offices, venues and attractions, with more cities to follow.', cost: 10000, requires: ['cul5'], condition: { counter: 'jobs', min: 1000 }, locked: 'How these unlock is still to be decided: for now they stand only in test cities and demos.',
     unlocks: ['empirestate', 'chrysler', 'liberty', 'onewtc', 'brooklyn', 'flatiron', 'rockefeller', 'radiocity',
       'greatpyramid', 'sphinx', 'khafre', 'cairotower', 'sultanhassan',
       'burjkhalifa', 'burjalarab', 'dubaiframe', 'motf', 'jumeirah',
-      'orientalpearl', 'shanghaitower', 'jinmao', 'swfc', 'yugarden'] },
+      'orientalpearl', 'shanghaitower', 'jinmao', 'swfc', 'yugarden', 'eiffeltower', 'arcdetriomphe'] },
 ];
 export const TECH_BY_ID = new Map(TECH.map((t) => [t.id, t]));
 export const ALL_TECH_IDS = TECH.map((t) => t.id);
