@@ -285,12 +285,14 @@ How the map is made:
     avenue would turn in the road to call). Five registered features (`london-avenues`, `london-motorways`,
     `london-roundabouts`, `london-pedestrian`, `london-street-rules`) hold demo:check to all this.
   - What it costs (2026-10-22, the fill and one game day run in-process as `check.ts --demo london --fill --run 1`
-    does, main and this side by side three times, load 9-11): the fill took about as long (-0.3% over the three
-    pairs) and a tick about 3% less, with 13% fewer citizens (about 28,000 against 32,200: the second rows, verges and
-    junction boxes take land the blocks had), so per citizen a tick costs 9-20% more (one-way carriageways make longer
-    searches). Without the avenues classed (the pairs left as two streets) a tick was about 7% cheaper, without the
-    street rules about 3%; the motorway connections' cost is within the noise. Give-ups over the day: residents' down a
-    fifth, lorries' up 5%. Every line runs.
+    does, against main with the rest of London (london-kinds) side by side twice, load steady): the fill 7% longer
+    (122 s against 114 s) and a tick 4% dearer (28.4 ms against 27.3 ms), with 11% fewer citizens (about 29,200
+    against 32,700: the second rows, verges and junction boxes take land the blocks had), so per citizen a tick costs
+    about 17% more (one-way carriageways make longer searches). Before the rest of London, three pairs gave a fill and
+    a tick within 3% of main. Without the avenues classed (the pairs left as two streets) a tick was about 7% cheaper,
+    without the street rules about 3%; the motorway connections' cost is within the noise. Give-ups over the day:
+    residents' down a seventh, lorries' up a tenth. Every line runs. Rainham's wind and solar do not import from the
+    grid through the A13's connection: it stands on Havering's land, and import walks only the node owner's roads.
 - **Buses.** Each stop is on a frontage lot near the real one, beside a plain stretch of road (never facing a junction)
   on a loop of the network, preferably a main road, on the side the server boards it from (`boardDir`: south, east,
   west, north), three tiles or more from the route's other stops. The 25 and the 159 run out and back; the D3 runs one
