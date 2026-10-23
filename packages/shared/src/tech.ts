@@ -128,7 +128,7 @@ export const TECH: TechNode[] = [
       'christredeemer', 'sugarloaf', 'riocathedral', 'maracana', 'sambadrome',
       'operahouse', 'harbourbridge', 'sydneytower', 'stmarys',
       'goldengate', 'transamerica', 'coittower', 'ferrybuilding', 'alcatraz',
-      'sagradafamilia', 'casabatllol', 'campnou'] },
+      'sagradafamilia', 'casabatllol', 'campnou', 'torreglories'] },
 ];
 export const TECH_BY_ID = new Map(TECH.map((t) => [t.id, t]));
 export const ALL_TECH_IDS = TECH.map((t) => t.id);

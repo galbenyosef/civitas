@@ -1,5 +1,7 @@
 import type { KindDef, Op } from './schema';
+import { Zone } from './codes';
 import { library } from './leisure';
+import { office } from './office';
 import { slab, tree, lampPost, PAVING } from './tierkit';
 
 /**
@@ -16,11 +18,18 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       roof on the grand avenue
  *   199 Camp Nou: a library-family stadium attraction, the great blue bowl of the
  *       football club by the metro line
- *   200 to follow, one building at a time.
+ *   200 Torre Glories: an office tower, the blue bullet by the old waterfront with
+ *       its band of red
  */
 
 const TAGS = ['world', 'barcelona'];
 const SAGRADA_ST = 0xe3d5b8, SAGRADA_DK = 0xd0bf9c;
+
+// shared base for the office tower (Torre Glories), as in landmarks-beijing.ts
+const towerBase = {
+  code: Zone.Office, family: 'office' as const, flags: { civic: true, workplace: true }, windows: 'office' as const,
+  occupation: office.occupation, lot: { wage: 14 }, landmark: true, tags: TAGS, group: 'barcelona',
+};
 
 // ================================================================= 197 the Sagrada Familia
 
@@ -182,4 +191,42 @@ export const campNou: KindDef = {
   }],
 };
 
-export const BARCELONA_LANDMARKS: KindDef[] = [sagradaFamilia, casaBatllol, campNou];
+// ================================================================= 200 Torre Glories
+
+/**
+ * The blue bullet the architect dropped by the old waterfront, shining over the
+ * district that rebuilt itself around it: the glass body swelling out of the
+ * ground, the collar of red where it begins to climb, the dome of the crown that
+ * lights the whole city at night. Plain glass only, so no window rule is touched.
+ */
+const GLORIES_BLUE = 0x2c4f8a, GLORIES_RED = 0xc9372c;
+
+const torreGloriesOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the glass bullet, swelling out of the ground and narrowing to its dome
+  ops.push(['lathe', 0, 0.02, 0, GLORIES_BLUE, [0.3, 0, 0.38, 0.1, 0.42, 0.3, 0.4, 0.6, 0.34, 0.85, 0.24, 1.05, 0.1, 1.15, 0, 1.18], { seg: 20 }]);
+  // the collar of red where the tower begins to climb
+  ops.push(['lathe', 0, 0.72, 0, GLORIES_RED, [0.39, 0, 0.39, 0.06, 0, 0.06], { seg: 20 }]);
+  // the little entrance pod at its foot
+  ops.push(['box', 0.5, 0.12, 0.3, 0, 0.02, 0.42, 0x8a97a8]);
+  // the plaza: lamps and a pair of trees
+  ops.push(...lampPost(-0.7, 0.75, 0.3, 'marquee', 0.02), ...lampPost(0.7, 0.75, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.8, -0.6, 0.5), ...tree(0.8, -0.6, 0.5));
+  return ops;
+};
+
+export const torreGlories: KindDef = {
+  ...towerBase, id: 'torre-glories', name: 'Torre Glories', kindId: 200, tier: 4,
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The blue bullet by the old waterfront: the glass body swelling out of the ground, the collar of red where it begins to climb, and the dome of the crown that lights the whole district at night.',
+  howTo: 'A 2×2 plot among offices on an avenue; a big workplace, so give it buses or a station and leave the street clear. World landmark: unlock rule to be decided.',
+  tool: { id: 'torreglories', key: '', label: 'Torre Glories', color: '#2c4f8a' },
+  levels: [{
+    capacity: 260, wage: 42, cost: 21000, upkeep: 120, work: 4400, parking: { surface: 0, underground: 60 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the blue bullet with its collar of red over the new district', height: 1.22, ops: torreGloriesOps() },
+    ],
+  }],
+};
+
+export const BARCELONA_LANDMARKS: KindDef[] = [sagradaFamilia, casaBatllol, campNou, torreGlories];
