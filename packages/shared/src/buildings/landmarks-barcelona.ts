@@ -14,7 +14,9 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       unfinished basilica with their crane still on the job
  *   198 Casa Batllo: a library-family attraction, the house of bones with its dragon
  *       roof on the grand avenue
- *   199-200 to follow, one building at a time.
+ *   199 Camp Nou: a library-family stadium attraction, the great blue bowl of the
+ *       football club by the metro line
+ *   200 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'barcelona'];
@@ -129,4 +131,55 @@ export const casaBatllol: KindDef = {
   }],
 };
 
-export const BARCELONA_LANDMARKS: KindDef[] = [sagradaFamilia, casaBatllol];
+// ================================================================= 199 Camp Nou
+
+/**
+ * The great bowl of the football club, the biggest stadium in Europe for a hundred
+ * years: the two-tiered concrete stands, the ring of blue seats that gives the bowl
+ * its colour on match night, the green pitch sunk in the middle, and the four
+ * floodlight masts leaning over it all. Solid stone and plain insets only, so no
+ * window rule is touched.
+ */
+const NOU_BOWL = 0xb8b4a8, NOU_BLUE = 0x2c5f9e, NOU_PITCH = 0x3f8a3f;
+
+const campNouOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the two-tiered bowl of the stands
+  ops.push(['lathe', 0, 0.02, 0, NOU_BOWL, [0.9, 0, 0.9, 0.14, 0.8, 0.14, 0.8, 0.28, 0.66, 0.28, 0.66, 0.34, 0.44, 0.34, 0.44, 0.36, 0, 0.36], { seg: 24 }]);
+  // the ring of blue seats around the upper tier
+  ops.push(['lathe', 0, 0.24, 0, NOU_BLUE, [0.81, 0, 0.81, 0.06, 0, 0.06], { seg: 24 }]);
+  // the green pitch sunk in the middle
+  ops.push(['cyl', 0.42, 0.44, 0.015, 0, 0.37, 0, NOU_PITCH, 20]);
+  // the four floodlight masts leaning over the bowl
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    ops.push(['taper', 0.04, 0.04, 0.03, 0.03, 0.4, sx * 0.82, 0.02, sz * 0.82, 'dark', { shift: [-sx * 0.06, -sz * 0.06] }]);
+    ops.push(['box', 0.1, 0.06, 0.04, sx * 0.76, 0.43, sz * 0.76, 'marquee']);
+  }
+  // the plaza: lamps and a pair of palms
+  ops.push(...lampPost(-0.6, 0.92, 0.3, 'marquee', 0.02), ...lampPost(0.6, 0.92, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.78, 0.7, 0.5, 'green'), ...tree(0.78, 0.7, 0.5, 'green'));
+  return ops;
+};
+
+export const campNou: KindDef = {
+  id: 'camp-nou', name: 'Camp Nou', code: library.code, kindId: 199, family: 'leisure', tier: 3,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'barcelona',
+  occupation: { ...library.occupation!, name: 'stadium steward' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 400, ticket: 24, openHours: [10, 22.5], stay: [1.6, 2.6], leisureValue: 9, radius: 32,
+    dayAppeal: 1.3, eveningAppeal: 1.0, retireeAppeal: 1.1, childAppeal: 2.0, title: 'Camp Nou',
+  },
+  lot: { wage: 17 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The great bowl of the football club, the biggest stadium in Europe for a hundred years: the two tiers of concrete, the ring of blue seats, the green pitch sunk in the middle, and the floodlights leaning over it all.',
+  howTo: 'A 2×2 plot near transit; it fills on match nights and pays for itself, so give it a metro and leave the streets clear after the whistle. World landmark: unlock rule to be decided.',
+  tool: { id: 'campnou', key: '', label: 'Camp Nou', color: '#2c5f9e' },
+  levels: [{
+    capacity: 65, wage: 17, cost: 19000, upkeep: 85, work: 4000, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the great blue bowl with its green pitch and floodlight masts', height: 0.52, ops: campNouOps() },
+    ],
+  }],
+};
+
+export const BARCELONA_LANDMARKS: KindDef[] = [sagradaFamilia, casaBatllol, campNou];
