@@ -14,7 +14,9 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       emperors, the arena and the receding rings of arches
  *   142 St Peter's Basilica: a library-family attraction, the great church of the popes,
  *       the dome over the crossing, the colonnaded square with the obelisk
- *   143-146 to follow, one building at a time.
+ *   143 the Pantheon: a library-family attraction, the columns and pediment before the
+ *       great dome with its rings
+ *   144-146 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'rome'];
@@ -129,4 +131,56 @@ export const stPeters: KindDef = {
   }],
 };
 
-export const ROME_LANDMARKS: KindDef[] = [colosseum, stPeters];
+// ================================================================= 143 the Pantheon
+
+/**
+ * The temple of all the gods, two thousand years a church: the columned portico with its
+ * pediment on the street, the great brick rotunda behind it, and the dome rising in its
+ * rings to the eye of the oculus. Plain brick and stone, the doors and the one window
+ * inset dark, so no window rule is touched.
+ */
+const ROMAN_BRICK = 0xa5765a, ROMAN_BRICK_DK = 0x96685a;
+
+const pantheonOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the rotunda and the dome in its rings
+  ops.push(['cyl', 0.42, 0.44, 0.28, 0, 0.02, -0.1, ROMAN_BRICK, 20]);
+  ops.push(['lathe', 0, 0.3, -0.1, ROMAN_BRICK_DK, [0.44, 0, 0.44, 0.03, 0.4, 0.03, 0.4, 0.08, 0.34, 0.08, 0.34, 0.13, 0.26, 0.13, 0.26, 0.17, 0.16, 0.17, 0.16, 0.2, 0.05, 0.2, 0, 0.22], { seg: 20 }]);
+  // the one true window of the drum, inset dark
+  ops.push(['box', 0.09, 0.11, 0.02, 0.36, 0.16, 0.22, 0x3a3630], ['box', 0.09, 0.11, 0.02, -0.36, 0.16, 0.22, 0x3a3630]);
+  // the portico: six columns across, three deep each side, the entablature and pediment
+  for (let i = 0; i < 6; i++) ops.push(['cyl', 0.022, 0.026, 0.22, -0.3 + i * 0.12, 0.02, 0.52, TRAVERTINE, 8]);
+  for (const sx of [-1, 1]) for (const z of [0.4, 0.52]) ops.push(['cyl', 0.022, 0.026, 0.22, sx * 0.36, 0.02, z, TRAVERTINE, 8]);
+  ops.push(['box', 0.78, 0.05, 0.3, 0, 0.24, 0.46, TRAVERTINE]);
+  ops.push(['roof', 0.8, 0.12, 0.3, 0, 0.29, 0.46, TRAVERTINE_DK, false]);
+  // the bronze doors under the portico
+  ops.push(['box', 0.14, 0.2, 0.02, 0, 0.02, 0.31, 0x4a3b28]);
+  // the piazza fountain, a lamp and a tree
+  ops.push(['cyl', 0.12, 0.13, 0.03, -0.62, 0.02, 0.62, 'pond', 12]);
+  ops.push(...lampPost(0.62, 0.62, 0.3, 'marquee', 0.02));
+  ops.push(...tree(0.75, -0.72, 0.55));
+  return ops;
+};
+
+export const pantheon: KindDef = {
+  id: 'pantheon', name: 'the Pantheon', code: library.code, kindId: 143, family: 'leisure', tier: 3,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rome',
+  occupation: { ...library.occupation!, name: 'temple keeper' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 90, ticket: 0, openHours: [9, 19], stay: [0.4, 1.0], leisureValue: 7, radius: 22,
+    dayAppeal: 1.4, eveningAppeal: 0.3, retireeAppeal: 1.8, childAppeal: 1.2, title: 'the Pantheon',
+  },
+  lot: { wage: 14 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The temple of all the gods, two thousand years a church: the columns and pediment on the piazza, and behind them the brick rotunda whose dome, a perfect hemisphere, still has no equal.',
+  howTo: 'A 2×2 plot in the old town among shops and cafes; a short quiet visit between the grander sights, no ticket needed. World landmark: unlock rule to be decided.',
+  tool: { id: 'pantheon', key: '', label: 'Pantheon', color: '#a5765a' },
+  levels: [{
+    capacity: 18, wage: 14, cost: 9000, upkeep: 40, work: 2000, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the temple of all the gods, the columns and pediment before the great dome with its rings', height: 0.54, ops: pantheonOps() },
+    ],
+  }],
+};
+
+export const ROME_LANDMARKS: KindDef[] = [colosseum, stPeters, pantheon];
