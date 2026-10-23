@@ -81,7 +81,7 @@ export const burjKhalifa: KindDef = {
   levels: [{
     capacity: 450, wage: 48, cost: 30000, upkeep: 160, work: 5400, parking: { surface: 0, underground: 90 },
     designs: [
-      { name: 'eight silver setbacks spiralling under the needle', height: 11.63, ops: burjKhalifaOps() },
+      { author: 'kimi-2.8-preview', name: 'eight silver setbacks spiralling under the needle', height: 11.63, ops: burjKhalifaOps() },
     ],
   }],
 };
@@ -133,7 +133,7 @@ export const burjAlArab: KindDef = {
   levels: [{
     capacity: 340, wage: 45, cost: 24000, upkeep: 130, work: 4400, parking: { surface: 0, underground: 65 },
     designs: [
-      { name: 'the sail: curving glass shells on an island, the helipad off the flank', height: 3.98, ops: burjAlArabOps() },
+      { author: 'kimi-2.8-preview', name: 'the sail: curving glass shells on an island, the helipad off the flank', height: 3.98, ops: burjAlArabOps() },
     ],
   }],
 };
@@ -181,7 +181,7 @@ export const dubaiFrame: KindDef = {
   levels: [{
     capacity: 24, wage: 16, cost: 10000, upkeep: 60, work: 2800, parking: { surface: 0, underground: 15 },
     designs: [
-      { name: 'two gold towers holding the sky bridge over the frame', height: 2.86, ops: dubaiFrameOps() },
+      { author: 'kimi-2.8-preview', name: 'two gold towers holding the sky bridge over the frame', height: 2.86, ops: dubaiFrameOps() },
     ],
   }],
 };
@@ -233,7 +233,7 @@ export const museumOfTheFuture: KindDef = {
   levels: [{
     capacity: 30, wage: 17, cost: 18000, upkeep: 90, work: 3200, parking: { surface: 0, underground: 25 },
     designs: [
-      { name: 'the glass torus on its side, steel ribs round the ring', height: 2.58, ops: museumOfTheFutureOps() },
+      { author: 'kimi-2.8-preview', name: 'the glass torus on its side, steel ribs round the ring', height: 2.58, ops: museumOfTheFutureOps() },
     ],
   }],
 };
@@ -292,7 +292,7 @@ export const jumeirahMosque: KindDef = {
   levels: [{
     capacity: 12, wage: 16, cost: 8000, upkeep: 50, work: 2600, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'the white mosque: dome and twin minarets round the courtyard', height: 1.52, ops: jumeirahMosqueOps() },
+      { author: 'kimi-2.8-preview', name: 'the white mosque: dome and twin minarets round the courtyard', height: 1.52, ops: jumeirahMosqueOps() },
     ],
   }],
 };

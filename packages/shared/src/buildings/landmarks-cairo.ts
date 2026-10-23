@@ -68,7 +68,7 @@ export const greatPyramid: KindDef = {
   levels: [{
     capacity: 24, wage: 16, cost: 9000, upkeep: 60, work: 2800, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'the smooth golden pyramid to a point, the entrance passage on the north face', height: 2.32, ops: pyramidOps() },
+      { author: 'kimi-2.8-preview', name: 'the smooth golden pyramid to a point, the entrance passage on the north face', height: 2.32, ops: pyramidOps() },
     ],
   }],
 };
@@ -112,7 +112,7 @@ export const sphinx: KindDef = {
   levels: [{
     capacity: 16, wage: 16, cost: 8000, upkeep: 55, work: 2600, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'the reclining lion body and the head with its nemes headdress, on the sand plateau', height: 0.9, ops: sphinxOps() },
+      { author: 'kimi-2.8-preview', name: 'the reclining lion body and the head with its nemes headdress, on the sand plateau', height: 0.9, ops: sphinxOps() },
     ],
   }],
 };
@@ -149,7 +149,7 @@ export const khafre: KindDef = {
   levels: [{
     capacity: 16, wage: 16, cost: 9500, upkeep: 60, work: 2800, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'the smaller golden slope with its flat capstone of polished stone', height: 1.67, ops: khafreOps() },
+      { author: 'kimi-2.8-preview', name: 'the smaller golden slope with its flat capstone of polished stone', height: 1.67, ops: khafreOps() },
     ],
   }],
 };
@@ -191,7 +191,7 @@ export const cairoTower: KindDef = {
   levels: [{
     capacity: 300, wage: 45, cost: 18000, upkeep: 120, work: 4200, parking: { surface: 0, underground: 65 },
     designs: [
-      { name: 'the lattice concrete cylinder on its podium, the restaurant ring under the mast', height: 4.57, ops: cairoTowerOps() },
+      { author: 'kimi-2.8-preview', name: 'the lattice concrete cylinder on its podium, the restaurant ring under the mast', height: 4.57, ops: cairoTowerOps() },
     ],
   }],
 };
@@ -248,7 +248,7 @@ export const sultanHassan: KindDef = {
   levels: [{
     capacity: 30, wage: 17, cost: 13000, upkeep: 80, work: 3200, parking: { surface: 0, underground: 20 },
     designs: [
-      { name: 'the prayer hall with its dome behind the tall portal, courtyard and two pencil minarets', height: 2.01, ops: mosqueOps() },
+      { author: 'kimi-2.8-preview', name: 'the prayer hall with its dome behind the tall portal, courtyard and two pencil minarets', height: 2.01, ops: mosqueOps() },
     ],
   }],
 };

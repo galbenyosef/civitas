@@ -79,7 +79,7 @@ export const empireState: KindDef = {
   levels: [{
     capacity: 400, wage: 46, cost: 28000, upkeep: 140, work: 5000, parking: { surface: 0, underground: 80 },
     designs: [
-      { name: 'five limestone setbacks under a silver mooring-mast spire', height: 7.3, ops: empireStateOps() },
+      { author: 'kimi-2.8-preview', name: 'five limestone setbacks under a silver mooring-mast spire', height: 7.3, ops: empireStateOps() },
     ],
   }],
 };
@@ -122,7 +122,7 @@ export const chrysler: KindDef = {
   levels: [{
     capacity: 320, wage: 44, cost: 22000, upkeep: 120, work: 4200, parking: { surface: 0, underground: 70 },
     designs: [
-      { name: 'dark shaft under four shrinking chrome crown terraces, a dome and a needle', height: 5.14, ops: chryslerOps() },
+      { author: 'kimi-2.8-preview', name: 'dark shaft under four shrinking chrome crown terraces, a dome and a needle', height: 5.14, ops: chryslerOps() },
     ],
   }],
 };
@@ -192,7 +192,7 @@ export const statueOfLiberty: KindDef = {
   levels: [{
     capacity: 30, wage: 17, cost: 13000, upkeep: 60, work: 3000, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'star-fort pedestal on the island under the green copper figure and her raised torch', height: 1.6, ops: statueOps() },
+      { author: 'kimi-2.8-preview', name: 'star-fort pedestal on the island under the green copper figure and her raised torch', height: 1.6, ops: statueOps() },
     ],
   }],
 };
@@ -233,7 +233,7 @@ export const oneWorldTradeCenter: KindDef = {
   levels: [{
     capacity: 380, wage: 46, cost: 26000, upkeep: 140, work: 4800, parking: { surface: 0, underground: 75 },
     designs: [
-      { name: 'glass podium under the gently tapering square shaft, the flat crown and the spire', height: 4.88, ops: oneWorldOps() },
+      { author: 'kimi-2.8-preview', name: 'glass podium under the gently tapering square shaft, the flat crown and the spire', height: 4.88, ops: oneWorldOps() },
     ],
   }],
 };
@@ -307,7 +307,7 @@ export const brooklynBridge: KindDef = {
   levels: [{
     capacity: 16, wage: 16, cost: 15000, upkeep: 65, work: 3200, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'two stone towers with arched openings and diagonal cable fans over the road deck', height: 1.86, ops: brooklynOps() },
+      { author: 'kimi-2.8-preview', name: 'two stone towers with arched openings and diagonal cable fans over the road deck', height: 1.86, ops: brooklynOps() },
     ],
   }],
 };
@@ -347,7 +347,7 @@ export const flatiron: KindDef = {
   levels: [{
     capacity: 240, wage: 44, cost: 15000, upkeep: 95, work: 3000, parking: { surface: 0, underground: 50 },
     designs: [
-      { name: 'rusticated base under the limestone wedge that tapers along one axis to the knife edge', height: 2.25, ops: flatironOps() },
+      { author: 'kimi-2.8-preview', name: 'rusticated base under the limestone wedge that tapers along one axis to the knife edge', height: 2.25, ops: flatironOps() },
     ],
   }],
 };
@@ -389,7 +389,7 @@ export const rockefellerCenter: KindDef = {
   levels: [{
     capacity: 320, wage: 46, cost: 24000, upkeep: 150, work: 4200, parking: { surface: 0, underground: 80 },
     designs: [
-      { name: 'limestone setbacks behind the sunken plaza, the pale rink with its flags and gilded Prometheus', height: 2.66, ops: rockefellerOps() },
+      { author: 'kimi-2.8-preview', name: 'limestone setbacks behind the sunken plaza, the pale rink with its flags and gilded Prometheus', height: 2.66, ops: rockefellerOps() },
     ],
   }],
 };
@@ -442,7 +442,7 @@ export const radioCity: KindDef = {
   levels: [{
     capacity: 35, wage: 19, cost: 12000, upkeep: 95, work: 2600, parking: { surface: 0, underground: 40 },
     designs: [
-      { name: 'long limestone facade under an even longer lit marquee, the stage house rising behind', height: 1.02, ops: radioCityOps() },
+      { author: 'kimi-2.8-preview', name: 'long limestone facade under an even longer lit marquee, the stage house rising behind', height: 1.02, ops: radioCityOps() },
     ],
   }],
 };

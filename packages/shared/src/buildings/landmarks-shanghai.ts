@@ -86,7 +86,7 @@ export const orientalPearl: KindDef = {
   levels: [{
     capacity: 32, wage: 16, cost: 15000, upkeep: 80, work: 3200, parking: { surface: 0, underground: 40 },
     designs: [
-      { name: 'three pink pearls on a tapering shaft over slanted columns, the mast and beacon above', height: 6.1, ops: pearlOps() },
+      { author: 'kimi-2.8-preview', name: 'three pink pearls on a tapering shaft over slanted columns, the mast and beacon above', height: 6.1, ops: pearlOps() },
     ],
   }],
 };
@@ -136,7 +136,7 @@ export const shanghaiTower: KindDef = {
   levels: [{
     capacity: 450, wage: 48, cost: 30000, upkeep: 160, work: 5400, parking: { surface: 0, underground: 90 },
     designs: [
-      { name: 'six shrinking glass tiers stepped round so the shaft twists, a crown, mast and beacon', height: 8.53, ops: shanghaiTowerOps() },
+      { author: 'kimi-2.8-preview', name: 'six shrinking glass tiers stepped round so the shaft twists, a crown, mast and beacon', height: 8.53, ops: shanghaiTowerOps() },
     ],
   }],
 };
@@ -180,7 +180,7 @@ export const jinmao: KindDef = {
   levels: [{
     capacity: 360, wage: 46, cost: 24000, upkeep: 130, work: 4600, parking: { surface: 0, underground: 70 },
     designs: [
-      { name: 'five stainless setback tiers under a flaring pagoda crown of eaves, mast and beacon', height: 6.8, ops: jinmaoOps() },
+      { author: 'kimi-2.8-preview', name: 'five stainless setback tiers under a flaring pagoda crown of eaves, mast and beacon', height: 6.8, ops: jinmaoOps() },
     ],
   }],
 };
@@ -226,7 +226,7 @@ export const swfc: KindDef = {
   levels: [{
     capacity: 320, wage: 45, cost: 22000, upkeep: 120, work: 4200, parking: { surface: 0, underground: 60 },
     designs: [
-      { name: 'trapezoid glass shaft split into two piers at the top, the slot between, the bridge over it', height: 6.46, ops: swfcOps() },
+      { author: 'kimi-2.8-preview', name: 'trapezoid glass shaft split into two piers at the top, the slot between, the bridge over it', height: 6.46, ops: swfcOps() },
     ],
   }],
 };
@@ -304,7 +304,7 @@ export const yuGarden: KindDef = {
   levels: [{
     capacity: 24, wage: 16, cost: 14000, upkeep: 80, work: 3200, parking: { surface: 0, underground: 20 },
     designs: [
-      { name: 'walled garden of pavilions, the pond under its zigzag bridge and the craggy rockery', height: 0.7, ops: yuGardenOps() },
+      { author: 'kimi-2.8-preview', name: 'walled garden of pavilions, the pond under its zigzag bridge and the craggy rockery', height: 0.7, ops: yuGardenOps() },
     ],
   }],
 };
