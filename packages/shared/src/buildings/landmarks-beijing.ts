@@ -16,7 +16,9 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
  *       prayer on its round marble terrace among the pines
  *   179 the Great Wall: a library-family attraction, the wall climbing over the ridge with
  *       its watchtower and beacon
- *   180-182 to follow, one building at a time.
+ *   180 Tiananmen Gate: a library-family attraction, the rostrum and double-eaved tower
+ *       over the gate of heavenly peace, the golden-water bridges before it
+ *   181-182 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'beijing'];
@@ -171,4 +173,55 @@ export const greatWall: KindDef = {
   }],
 };
 
-export const BEIJING_LANDMARKS: KindDef[] = [forbiddenCity, templeOfHeaven, greatWall];
+// ================================================================= 180 Tiananmen Gate
+
+/**
+ * The gate of heavenly peace at the head of the imperial way: the red rostrum with its
+ * dark arch, the gilded portrait frame on the wall, the double-eaved tower of yellow tile
+ * rising above, and before it the golden-water stream with its five marble bridges. Plain
+ * walls and dark insets only, so no window rule is touched.
+ */
+const tiananmenOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the golden-water stream and its five marble bridges
+  ops.push(['box', 1.6, 0.01, 0.3, 0, 0.02, 0.5, 'pond']);
+  for (let i = 0; i < 5; i++) ops.push(['box', 0.14, 0.03, 0.34, -0.6 + i * 0.3, 0.02, 0.5, MARBLE_W]);
+  // the red rostrum, the gate arch, the portrait frame
+  ops.push(['box', 1.5, 0.3, 0.7, 0, 0.02, -0.2, IMPERIAL_RED]);
+  ops.push(['box', 0.3, 0.22, 0.02, 0, 0.04, 0.16, 0x3a2a20]);
+  ops.push(['box', 0.12, 0.16, 0.012, 0, 0.12, 0.16, GLAZED_GOLD]);
+  // the double-eaved tower of yellow tile
+  ops.push(['box', 0.95, 0.22, 0.5, 0, 0.32, -0.2, IMPERIAL_RED]);
+  ops.push(['box', 0.7, 0.1, 0.02, 0, 0.36, 0.06, 0x3a2a20]);
+  ops.push(['taper', 1.15, 0.6, 0.95, 0.42, 0.08, 0, 0.54, -0.2, GLAZED_GOLD]);
+  ops.push(['taper', 0.8, 0.4, 0.6, 0.24, 0.07, 0, 0.62, -0.2, GLAZED_GOLD]);
+  ops.push(['box', 0.55, 0.035, 0.1, 0, 0.69, -0.2, GLAZED_GOLD]);
+  ops.push(['cone', 0.02, 0.05, -0.24, 0.72, -0.2, GLAZED_GOLD, 6], ['cone', 0.02, 0.05, 0.24, 0.72, -0.2, GLAZED_GOLD, 6]);
+  // the red flags and lamps of the square
+  ops.push(...flags(-0.55, 0.55, 2, 0.55, ['red', 'yellow'], 1.1));
+  ops.push(...lampPost(-0.75, 0.85, 0.3, 'marquee', 0.02), ...lampPost(0.75, 0.85, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
+export const tiananmenGate: KindDef = {
+  id: 'tiananmen-gate', name: 'Tiananmen Gate', code: library.code, kindId: 180, family: 'leisure', tier: 4,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'beijing',
+  occupation: { ...library.occupation!, name: 'gate keeper' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 90, ticket: 0, openHours: [8.5, 17.5], stay: [0.4, 0.9], leisureValue: 6, radius: 20,
+    dayAppeal: 1.2, eveningAppeal: 0.3, retireeAppeal: 1.6, childAppeal: 1.0, title: 'Tiananmen Gate',
+  },
+  lot: { wage: 14 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The gate of heavenly peace at the head of the imperial way: the red rostrum with its arch, the tower of yellow tile above, and the golden-water stream with its five marble bridges before it.',
+  howTo: 'A 2×2 plot at the head of an axis, open to the square; a short free visit that anchors a ceremonial district. World landmark: unlock rule to be decided.',
+  tool: { id: 'tiananmen', key: '', label: 'Tiananmen Gate', color: '#d8a83c' },
+  levels: [{
+    capacity: 14, wage: 14, cost: 8000, upkeep: 35, work: 1600, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the rostrum and double-eaved tower over the gate of heavenly peace, the golden-water bridges before it', height: 0.77, ops: tiananmenOps() },
+    ],
+  }],
+};
+
+export const BEIJING_LANDMARKS: KindDef[] = [forbiddenCity, templeOfHeaven, greatWall, tiananmenGate];
