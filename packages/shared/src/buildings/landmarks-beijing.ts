@@ -14,7 +14,9 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
  *       harmony on its triple white terrace under the golden double eaves
  *   178 the Temple of Heaven: a library-family attraction, the blue triple-eaved hall of
  *       prayer on its round marble terrace among the pines
- *   179-182 to follow, one building at a time.
+ *   179 the Great Wall: a library-family attraction, the wall climbing over the ridge with
+ *       its watchtower and beacon
+ *   180-182 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'beijing'];
@@ -120,4 +122,53 @@ export const templeOfHeaven: KindDef = {
   }],
 };
 
-export const BEIJING_LANDMARKS: KindDef[] = [forbiddenCity, templeOfHeaven];
+// ================================================================= 179 the Great Wall
+
+/**
+ * The wall over the mountains north of the capital, drawn along z with the door at the
+ * south end: the battlements climbing the ridge in their grey stone, cresting at the
+ * watchtower with its hipped roof and beacon, and dropping to the pass below. Plain stone,
+ * so no window rule is touched.
+ */
+const WALL_STONE = 0x8a8578, WALL_DK = 0x7a7568;
+
+const greatWallOps = (): Op[] => {
+  const ops: Op[] = [slab(1, 4, 'lawn')];
+  // the ridge profile the wall climbs, south to north
+  const H = [0.06, 0.38, 0.22, 0.05];
+  for (let i = 0; i < 4; i++) {
+    const z = -1.5 + i;
+    ops.push(['box', 0.5, H[i] + 0.12, 0.98, 0, 0.02, z, WALL_STONE]);
+    ops.push(['box', 0.06, 0.06, 0.98, -0.22, H[i] + 0.14, z, WALL_DK], ['box', 0.06, 0.06, 0.98, 0.22, H[i] + 0.14, z, WALL_DK]);
+  }
+  // the watchtower on the crest with its hipped roof and beacon
+  ops.push(['box', 0.7, 0.3, 0.7, 0, 0.52, -0.5, WALL_STONE]);
+  ops.push(['roof', 0.8, 0.16, 0.8, 0, 0.82, -0.5, WALL_DK, true]);
+  ops.push(['cone', 0.03, 0.07, 0, 0.98, -0.5, 'gold', 6]);
+  // pines on the slopes below
+  ops.push(...tree(-0.36, 0.9, 0.45), ...tree(0.36, -1.6, 0.45));
+  return ops;
+};
+
+export const greatWall: KindDef = {
+  id: 'great-wall', name: 'the Great Wall', code: library.code, kindId: 179, family: 'leisure', tier: 3,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'beijing',
+  occupation: { ...library.occupation!, name: 'wall warden' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 120, ticket: 16, openHours: [8.5, 18], stay: [0.8, 1.6], leisureValue: 7, radius: 26,
+    dayAppeal: 1.5, eveningAppeal: 0.2, retireeAppeal: 1.8, childAppeal: 1.6, title: 'the Great Wall',
+  },
+  lot: { wage: 16 },
+  footprint: { w: 1, h: 4, door: [0, 3] },
+  blurb: 'The wall over the mountains north of the capital, twenty thousand li of stone and watchfire: the battlements climbing the ridge, the tower cresting the pass, the beacon that once called the alarm.',
+  howTo: 'Placed with its tool it is a 1×4 landmark on dry land, its door at one end; in a real city it would run the ridge it defends. World landmark: unlock rule to be decided.',
+  tool: { id: 'greatwall', key: '', label: 'Great Wall', color: '#8a8578' },
+  levels: [{
+    capacity: 24, wage: 16, cost: 11000, upkeep: 50, work: 2400, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the wall climbing over the ridge, the watchtower at the crest with its beacon', height: 1.05, ops: greatWallOps() },
+    ],
+  }],
+};
+
+export const BEIJING_LANDMARKS: KindDef[] = [forbiddenCity, templeOfHeaven, greatWall];
