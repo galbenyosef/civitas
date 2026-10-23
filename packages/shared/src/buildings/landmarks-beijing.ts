@@ -22,7 +22,8 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
  *       over the gate of heavenly peace, the golden-water bridges before it
  *   181 the CCTV Headquarters: an office, the two leaning towers joined head to heel in a
  *       loop of glass over the avenue
- *   182 to follow, one building at a time.
+ *   182 the Summer Palace: a library-family attraction, the tower of Buddhist incense on
+ *       its hill above the lake, the marble causeway over the water
  */
 
 const TAGS = ['world', 'beijing'];
@@ -270,4 +271,58 @@ export const cctvTower: KindDef = {
   }],
 };
 
-export const BEIJING_LANDMARKS: KindDef[] = [forbiddenCity, templeOfHeaven, greatWall, tiananmenGate, cctvTower];
+// ================================================================= 182 the Summer Palace
+
+/**
+ * The garden of the empress by the western lake: the water of Kunming in front, the
+ * marble causeway crossing it, the hill of longevity behind with the tower of Buddhist
+ * incense on its top, four storeys of red drums under the golden eaves. Plain walls and
+ * dark insets only, so no window rule is touched.
+ */
+const summerOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  // the lake and the marble causeway crossing it
+  ops.push(['cyl', 0.7, 0.74, 0.015, 0, 0.02, 0.3, 'pond', 24]);
+  ops.push(['box', 0.22, 0.03, 0.24, 0.1, 0.02, 0.08, MARBLE_W], ['box', 0.22, 0.045, 0.2, 0.22, 0.02, 0.3, MARBLE_W], ['box', 0.22, 0.03, 0.24, 0.32, 0.02, 0.5, MARBLE_W]);
+  // the hill of longevity, three stone steps up
+  ops.push(['box', 1.2, 0.14, 0.7, 0, 0.02, -0.42, 'stone']);
+  ops.push(['box', 1.0, 0.12, 0.55, 0, 0.16, -0.48, 'stone']);
+  ops.push(['box', 0.8, 0.1, 0.45, 0, 0.28, -0.5, 'stone']);
+  // the tower of Buddhist incense: four storeys of red drums under golden eaves
+  ops.push(['cyl', 0.26, 0.28, 0.08, 0, 0.38, -0.5, IMPERIAL_RED, 12]);
+  ops.push(['cone', 0.4, 0.05, 0, 0.46, -0.5, GLAZED_GOLD, 16]);
+  ops.push(['cyl', 0.2, 0.22, 0.07, 0, 0.51, -0.5, IMPERIAL_RED, 12]);
+  ops.push(['cone', 0.33, 0.05, 0, 0.58, -0.5, GLAZED_GOLD, 16]);
+  ops.push(['cyl', 0.15, 0.17, 0.07, 0, 0.63, -0.5, IMPERIAL_RED, 10]);
+  ops.push(['cone', 0.26, 0.05, 0, 0.7, -0.5, GLAZED_GOLD, 16]);
+  ops.push(['cyl', 0.11, 0.13, 0.06, 0, 0.75, -0.5, IMPERIAL_RED, 10]);
+  ops.push(['cone', 0.19, 0.05, 0, 0.81, -0.5, GLAZED_GOLD, 14]);
+  ops.push(['cyl', 0.02, 0.025, 0.08, 0, 0.86, -0.5, GLAZED_GOLD, 6]);
+  // the willows and lamps of the shore
+  ops.push(...tree(-0.62, 0.75, 0.6), ...tree(0.68, 0.72, 0.6));
+  ops.push(...lampPost(-0.35, 0.62, 0.3, 'marquee', 0.02), ...lampPost(0.5, 0.6, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
+export const summerPalace: KindDef = {
+  id: 'summer-palace', name: 'the Summer Palace', code: library.code, kindId: 182, family: 'leisure', tier: 6,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'beijing',
+  occupation: { ...library.occupation!, name: 'garden keeper' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 130, ticket: 16, openHours: [8.5, 18], stay: [1.0, 2.0], leisureValue: 8, radius: 26,
+    dayAppeal: 1.5, eveningAppeal: 0.2, retireeAppeal: 2.2, childAppeal: 1.4, title: 'the Summer Palace',
+  },
+  lot: { wage: 16 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The garden of the empress by the western lake: the water of Kunming, the marble causeway, and the hill of longevity with the tower of Buddhist incense rising over it all, four storeys under the golden eaves.',
+  howTo: 'A 2×2 plot with lawns and water, a park setting suits it; a calm daytime visit for retirees and school trips. World landmark: unlock rule to be decided.',
+  tool: { id: 'summerpalace', key: '', label: 'Summer Palace', color: '#3f6fb5' },
+  levels: [{
+    capacity: 28, wage: 16, cost: 12000, upkeep: 55, work: 2600, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the tower of buddhist incense on its hill above the lake, the marble causeway over the water', height: 0.94, ops: summerOps() },
+    ],
+  }],
+};
+
+export const BEIJING_LANDMARKS: KindDef[] = [forbiddenCity, templeOfHeaven, greatWall, tiananmenGate, cctvTower, summerPalace];
