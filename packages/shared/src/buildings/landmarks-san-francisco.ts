@@ -2,7 +2,7 @@ import type { KindDef, Op, Color } from './schema';
 import { Zone } from './codes';
 import { office } from './office';
 import { library } from './leisure';
-import { slab, tree, lampPost, ASPHALT } from './tierkit';
+import { slab, tree, lampPost, PAVING, ASPHALT } from './tierkit';
 
 /**
  * San Francisco landmarks (docs/buildings.md "Landmarks"): the monuments of the bay city
@@ -17,7 +17,9 @@ import { slab, tree, lampPost, ASPHALT } from './tierkit';
  *   193 the Transamerica Pyramid: an office, the white pyramid with its wings and spire
  *   194 Coit Tower: a library-family attraction, the white tower on its hill above the
  *       bay, the dark observation band under its cap
- *   195-196 to follow, one building at a time.
+ *   195 the Ferry Building: a library-family attraction, the arched hall on the pier with
+ *       its clock tower over the embarkation front
+ *   196 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'san-francisco'];
@@ -176,4 +178,55 @@ export const coitTower: KindDef = {
   }],
 };
 
-export const SAN_FRANCISCO_LANDMARKS: KindDef[] = [goldenGate, transamerica, coitTower];
+// ================================================================= 195 the Ferry Building
+
+/**
+ * The great hall of the ferries at the foot of the market street, where the whole city
+ * once changed trams: the long arched hall on the pier, its three great arches on the
+ * embarkation front, the row of little windows above, and the clock tower with its gold
+ * faces rising over all. Plain stone and dark insets only, so no window rule is touched.
+ */
+const FERRY = 0xd9c9a8, FERRY_DK = 0xc4b28e, CLOCK_GOLD = 0xd8a83c;
+
+const ferryOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the little basin at the pier head
+  ops.push(['cyl', 0.25, 0.28, 0.012, 0, 0.02, 0.72, 'pond', 16]);
+  // the long hall with its three great arches and the windows above and along the flanks
+  ops.push(['box', 1.7, 0.35, 0.7, 0, 0.02, -0.2, FERRY]);
+  for (const x of [-0.5, 0, 0.5]) ops.push(['box', 0.16, 0.2, 0.02, x, 0.04, 0.16, 0x3a3630]);
+  for (const x of [-0.62, -0.37, -0.12, 0.12, 0.37, 0.62]) ops.push(['box', 0.09, 0.1, 0.015, x, 0.25, 0.155, FERRY_DK]);
+  for (const sx of [-1, 1]) for (const z of [-0.4, -0.15, 0.05]) ops.push(['box', 0.015, 0.12, 0.09, sx * 0.855, 0.14, z, FERRY_DK]);
+  ops.push(['box', 1.74, 0.04, 0.74, 0, 0.37, -0.2, FERRY_DK]);
+  // the clock tower with its gold faces and pyramidal cap
+  ops.push(['box', 0.28, 0.8, 0.28, 0, 0.02, 0.32, FERRY]);
+  ops.push(['box', 0.13, 0.13, 0.012, 0, 0.6, 0.47, CLOCK_GOLD]);
+  ops.push(['box', 0.13, 0.13, 0.012, 0, 0.6, 0.17, CLOCK_GOLD]);
+  ops.push(['cone', 0.14, 0.1, 0, 0.82, 0.32, 'slate', 8]);
+  // the lamps of the pier
+  ops.push(...lampPost(-0.72, 0.6, 0.3, 'marquee', 0.02), ...lampPost(0.72, 0.6, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
+export const ferryBuilding: KindDef = {
+  id: 'ferry-building', name: 'the Ferry Building', code: library.code, kindId: 195, family: 'leisure', tier: 4,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'san-francisco',
+  occupation: { ...library.occupation!, name: 'pier master' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 90, ticket: 0, openHours: [9, 19], stay: [0.5, 1.1], leisureValue: 6, radius: 22,
+    dayAppeal: 1.3, eveningAppeal: 0.3, retireeAppeal: 1.6, childAppeal: 1.1, title: 'the Ferry Building',
+  },
+  lot: { wage: 15 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The great hall of the ferries at the foot of the market street: the three arches on the embarkation front, the row of little windows above, and the clock tower whose gold faces greeted every boat from the bay.',
+  howTo: 'A 2×2 plot at the water\'s edge with the pier towards it; a free visit that anchors the market district, best near shops. World landmark: unlock rule to be decided.',
+  tool: { id: 'ferrybuilding', key: '', label: 'Ferry Building', color: '#d9c9a8' },
+  levels: [{
+    capacity: 16, wage: 15, cost: 9000, upkeep: 40, work: 1800, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the arched hall on the pier with its clock tower over the embarkation front', height: 0.92, ops: ferryOps() },
+    ],
+  }],
+};
+
+export const SAN_FRANCISCO_LANDMARKS: KindDef[] = [goldenGate, transamerica, coitTower, ferryBuilding];
