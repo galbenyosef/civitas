@@ -20,7 +20,8 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       Oceanus above the cascade into the great basin
  *   145 the Altare della Patria: a library-family daytime attraction, the white terraces
  *       and colonnades of the Vittoriano, the unknown soldier with his flame
- *   146 to follow, one building at a time.
+ *   146 Castel Sant'Angelo: a library-family attraction, the round keep on the river,
+ *       the archangel on his tower
  */
 
 const TAGS = ['world', 'rome'];
@@ -293,4 +294,60 @@ export const altareDellaPatria: KindDef = {
   }],
 };
 
-export const ROME_LANDMARKS: KindDef[] = [colosseum, stPeters, pantheon, treviFountain, altareDellaPatria];
+// ================================================================= 146 Castel Sant'Angelo
+
+/**
+ * The mausoleum of Hadrian on the Tiber, a castle for a thousand years: the great round
+ * drum of the Roman tomb, the smaller ring of the keep on its top with its crenellations,
+ * and the archangel on his pedestal between the battlements, his sword sheathed. Plain
+ * stone and dark insets only, so no window rule is touched.
+ */
+const CASTLE = 0xcbbfa5, CASTLE_DK = 0xbcae92;
+
+const castelOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the drum of the mausoleum and the keep ring on its top
+  ops.push(['cyl', 0.5, 0.54, 0.42, 0, 0.02, -0.1, CASTLE, 20]);
+  ops.push(['cyl', 0.36, 0.4, 0.16, 0, 0.44, -0.1, CASTLE_DK, 16]);
+  // the windows of the drum, inset dark
+  ops.push(['box', 0.08, 0.12, 0.02, 0, 0.18, 0.42, 0x3a3630], ['box', 0.08, 0.12, 0.02, 0.38, 0.18, -0.06, 0x3a3630]);
+  ops.push(['box', 0.08, 0.12, 0.02, -0.38, 0.18, -0.06, 0x3a3630]);
+  // the crenellations around the keep
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    ops.push(['box', 0.07, 0.05, 0.07, Math.cos(a) * 0.36, 0.6, -0.1 + Math.sin(a) * 0.36, CASTLE]);
+  }
+  // the archangel on his pedestal, wings and sheathed sword
+  ops.push(['cyl', 0.05, 0.055, 0.05, 0, 0.6, -0.1, CASTLE_DK, 8]);
+  ops.push(['lathe', 0, 0.65, -0.1, 'white', [0.04, 0, 0.045, 0.02, 0.032, 0.07, 0.026, 0.1, 0.012, 0.115, 0, 0.13], { seg: 8 }]);
+  ops.push(['box', 0.12, 0.055, 0.012, -0.05, 0.72, -0.12, 'white'], ['box', 0.12, 0.055, 0.012, 0.05, 0.72, -0.12, 'white']);
+  ops.push(['box', 0.012, 0.07, 0.012, 0.045, 0.64, -0.08, 'gold']);
+  // the approach from the bridge and the lamps of the bank
+  ops.push(['box', 0.5, 0.012, 0.5, 0, 0.02, 0.62, 'stone']);
+  ops.push(...lampPost(-0.55, 0.75, 0.3, 'marquee', 0.02), ...lampPost(0.55, 0.75, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.78, -0.72, 0.55), ...tree(0.78, -0.72, 0.55));
+  return ops;
+};
+
+export const castelSantAngelo: KindDef = {
+  id: 'castel-sant-angelo', name: 'Castel Sant\'Angelo', code: library.code, kindId: 146, family: 'leisure', tier: 6,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rome',
+  occupation: { ...library.occupation!, name: 'castle warder' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 70, ticket: 12, openHours: [9, 19.5], stay: [0.6, 1.2], leisureValue: 6, radius: 22,
+    dayAppeal: 1.2, eveningAppeal: 0.5, retireeAppeal: 1.6, childAppeal: 1.2, title: 'Castel Sant\'Angelo',
+  },
+  lot: { wage: 15 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The mausoleum of Hadrian on the Tiber, a castle for a thousand years: the great round drum, the keep with its battlements, and the archangel on his tower whose sheathed sword marks the end of the plague.',
+  howTo: 'A 2×2 plot by the water suits the old fortress; a modest ticketed visit, prettiest from across the river. World landmark: unlock rule to be decided.',
+  tool: { id: 'castelsangelo', key: '', label: 'Castel Sant\'Angelo', color: '#cbbfa5' },
+  levels: [{
+    capacity: 12, wage: 15, cost: 8000, upkeep: 35, work: 1600, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the mausoleum of Hadrian, the round keep with the archangel on his tower', height: 0.8, ops: castelOps() },
+    ],
+  }],
+};
+
+export const ROME_LANDMARKS: KindDef[] = [colosseum, stPeters, pantheon, treviFountain, altareDellaPatria, castelSantAngelo];
