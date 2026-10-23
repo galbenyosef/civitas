@@ -14,7 +14,9 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       with his outstretched arms on the peak of Corcovado
  *   184 Sugarloaf Mountain: a library-family attraction, the granite dome from the sea,
  *       the cable car climbing to its station on the summit
- *   185-187 to follow, one building at a time.
+ *   185 the Metropolitan Cathedral: a library-family attraction, the great cone of the
+ *       crown of thorns with its ring of concrete ribs
+ *   186-187 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'rio'];
@@ -112,4 +114,53 @@ export const sugarloaf: KindDef = {
   }],
 };
 
-export const RIO_LANDMARKS: KindDef[] = [christRedeemer, sugarloaf];
+// ================================================================= 185 the Metropolitan Cathedral
+
+/**
+ * The crown of thorns the archbishop built in the new centre: the dark glass cone of the
+ * nave rising between the ring of concrete ribs, the cross over the skylight at its top.
+ * Plain concrete, glass and dark insets only, so no window rule is touched.
+ */
+const CONCRETE = 0xb8b4ac, CATH_GLASS = 0x3a4a52;
+
+const cathedralOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the dark glass cone of the nave
+  ops.push(['cone', 0.5, 0.5, 0, 0.02, 0, CATH_GLASS, 16]);
+  ops.push(['cyl', 0.1, 0.12, 0.04, 0, 0.52, 0, CONCRETE, 10]);
+  ops.push(['box', 0.03, 0.12, 0.03, 0, 0.56, 0, CONCRETE]);
+  // the ring of concrete ribs round it, with the doors between
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const rx = Math.cos(a) * 0.56, rz = Math.sin(a) * 0.56;
+    ops.push(['box', 0.06, 0.3, 0.06, rx, 0.02, rz, CONCRETE]);
+  }
+  ops.push(['box', 0.14, 0.2, 0.03, 0, 0.02, 0.58, 0x2b3630], ['box', 0.14, 0.2, 0.03, 0, 0.02, -0.58, 0x2b3630]);
+  // the lamps of the square
+  ops.push(...lampPost(-0.62, 0.62, 0.3, 'marquee', 0.02), ...lampPost(0.62, 0.62, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.75, -0.72, 0.55), ...tree(0.75, -0.72, 0.55));
+  return ops;
+};
+
+export const rioCathedral: KindDef = {
+  id: 'rio-cathedral', name: 'the Metropolitan Cathedral', code: library.code, kindId: 185, family: 'leisure', tier: 3,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rio',
+  occupation: { ...library.occupation!, name: 'verger' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 70, ticket: 0, openHours: [8, 18], stay: [0.3, 0.8], leisureValue: 6, radius: 18,
+    dayAppeal: 1.1, eveningAppeal: 0.3, retireeAppeal: 1.6, childAppeal: 0.9, title: 'the Metropolitan Cathedral',
+  },
+  lot: { wage: 14 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The crown of thorns the archbishop built in the new centre: the dark glass cone of the nave between its ring of concrete ribs, four thousand souls under the skylight at Mass.',
+  howTo: 'A 2×2 plot in the middle of the modern city among offices; a short free visit that adds quiet to a busy district. World landmark: unlock rule to be decided.',
+  tool: { id: 'riocathedral', key: '', label: 'Rio Cathedral', color: '#b8b4ac' },
+  levels: [{
+    capacity: 12, wage: 14, cost: 7000, upkeep: 30, work: 1400, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the great cone of the crown of thorns with its ring of concrete ribs', height: 0.68, ops: cathedralOps() },
+    ],
+  }],
+};
+
+export const RIO_LANDMARKS: KindDef[] = [christRedeemer, sugarloaf, rioCathedral];
