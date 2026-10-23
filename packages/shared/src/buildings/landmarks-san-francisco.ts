@@ -15,7 +15,9 @@ import { slab, tree, lampPost, ASPHALT } from './tierkit';
  *   192 the Golden Gate Bridge: a library-family attraction, the orange towers and the
  *       great cables over the strait
  *   193 the Transamerica Pyramid: an office, the white pyramid with its wings and spire
- *   194-196 to follow, one building at a time.
+ *   194 Coit Tower: a library-family attraction, the white tower on its hill above the
+ *       bay, the dark observation band under its cap
+ *   195-196 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'san-francisco'];
@@ -128,4 +130,50 @@ export const transamerica: KindDef = {
   }],
 };
 
-export const SAN_FRANCISCO_LANDMARKS: KindDef[] = [goldenGate, transamerica];
+// ================================================================= 194 Coit Tower
+
+/**
+ * The plain white column the firemen\'s benefactor left on Telegraph Hill: the green hill
+ * over the bay, and on its top the fluted shaft, the dark band of the observation windows
+ * under the cap, and the little lobby at its foot. Plain concrete only, so no window rule
+ * is touched.
+ */
+const COIT_WHITE = 0xf0ece2;
+
+const coitOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  // the hill of telegraph hill
+  ops.push(['lathe', 0, 0.02, 0, 0x5f7a4a, [0.85, 0, 0.7, 0.12, 0.5, 0.22, 0.3, 0.28, 0, 0.3], { seg: 20 }]);
+  // the white shaft with its dark observation band and cap
+  ops.push(['cyl', 0.14, 0.15, 0.4, 0, 0.32, 0, COIT_WHITE, 12]);
+  ops.push(['cyl', 0.152, 0.152, 0.06, 0, 0.64, 0, 0x3a3630, 12]);
+  ops.push(['cyl', 0.155, 0.165, 0.04, 0, 0.7, 0, COIT_WHITE, 12]);
+  ops.push(['cyl', 0.05, 0.06, 0.1, 0, 0.32, 0.16, COIT_WHITE, 8]);
+  // the parrots\' trees and the lamps of the hill
+  ops.push(...tree(-0.52, 0.42, 0.55), ...tree(0.5, -0.5, 0.55));
+  ops.push(...lampPost(-0.3, 0.55, 0.3, 'marquee', 0.02), ...lampPost(0.3, 0.55, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
+export const coitTower: KindDef = {
+  id: 'coit-tower', name: 'Coit Tower', code: library.code, kindId: 194, family: 'leisure', tier: 3,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'san-francisco',
+  occupation: { ...library.occupation!, name: 'lookout host' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 70, ticket: 10, openHours: [10, 18.5], stay: [0.4, 0.9], leisureValue: 6, radius: 20,
+    dayAppeal: 1.3, eveningAppeal: 0.4, retireeAppeal: 1.6, childAppeal: 1.1, title: 'Coit Tower',
+  },
+  lot: { wage: 14 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The plain white column on Telegraph Hill, the gift of a firemen\'s friend who loved the city\'s heroes: the shaft over the bay, the dark band of the observation windows, the wild parrots in the trees below.',
+  howTo: 'A 2×2 plot high over the water, lawns below; a short cheap visit for the view, prettiest at dusk. World landmark: unlock rule to be decided.',
+  tool: { id: 'coittower', key: '', label: 'Coit Tower', color: '#f0ece2' },
+  levels: [{
+    capacity: 12, wage: 14, cost: 7000, upkeep: 30, work: 1400, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the white tower on its hill above the bay, the dark observation band under its cap', height: 0.76, ops: coitOps() },
+    ],
+  }],
+};
+
+export const SAN_FRANCISCO_LANDMARKS: KindDef[] = [goldenGate, transamerica, coitTower];
