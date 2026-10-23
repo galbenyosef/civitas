@@ -18,7 +18,9 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       great dome with its rings
  *   144 the Trevi Fountain: a library-family attraction day and night, the arch and
  *       Oceanus above the cascade into the great basin
- *   145-146 to follow, one building at a time.
+ *   145 the Altare della Patria: a library-family daytime attraction, the white terraces
+ *       and colonnades of the Vittoriano, the unknown soldier with his flame
+ *   146 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'rome'];
@@ -238,4 +240,57 @@ export const treviFountain: KindDef = {
   }],
 };
 
-export const ROME_LANDMARKS: KindDef[] = [colosseum, stPeters, pantheon, treviFountain];
+// ================================================================= 145 the Altare della Patria
+
+/**
+ * The Vittoriano at Piazza Venezia, the wedding cake of white marble: the great terraces,
+ * the grand staircase down to the square, the colonnade across the top with its wings,
+ * and between the columns the unknown soldier with his flame, guarded day and night.
+ * Plain marble and dark insets only, so no window rule is touched.
+ */
+const MARBLE = 0xf0ece2, MARBLE_DK = 0xdcd6c8;
+
+const altareOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the terraces and the grand staircase down to the square
+  ops.push(['box', 1.8, 0.14, 1.5, 0, 0.02, -0.1, MARBLE]);
+  ops.push(['box', 1.6, 0.12, 1.3, 0, 0.16, -0.15, MARBLE_DK]);
+  ops.push(['box', 1.0, 0.03, 0.12, 0, 0.02, 0.66, MARBLE], ['box', 1.2, 0.03, 0.12, 0, 0.05, 0.75, MARBLE]);
+  ops.push(['box', 1.4, 0.03, 0.12, 0, 0.08, 0.84, MARBLE], ['box', 1.6, 0.03, 0.12, 0, 0.11, 0.93, MARBLE]);
+  // the colonnade across the top, the hall behind it, the wings at the ends
+  for (let i = 0; i < 9; i++) ops.push(['cyl', 0.028, 0.032, 0.16, -0.64 + i * 0.16, 0.28, 0.18, MARBLE, 8]);
+  ops.push(['box', 1.5, 0.05, 0.14, 0, 0.44, 0.18, MARBLE_DK]);
+  ops.push(['box', 1.3, 0.2, 0.3, 0, 0.28, -0.05, MARBLE_DK]);
+  ops.push(['box', 0.3, 0.26, 0.4, -0.72, 0.28, -0.02, MARBLE], ['box', 0.3, 0.26, 0.4, 0.72, 0.28, -0.02, MARBLE]);
+  // the unknown soldier on his bier between the columns, the two flames
+  ops.push(['box', 0.16, 0.06, 0.1, 0, 0.28, 0.24, MARBLE_DK]);
+  ops.push(['lathe', 0, 0.34, 0.24, 'white', [0.05, 0, 0.055, 0.02, 0.04, 0.08, 0.032, 0.12, 0.014, 0.15, 0, 0.17], { seg: 8 }]);
+  ops.push(['cyl', 0.03, 0.035, 0.03, -0.3, 0.28, 0.24, MARBLE_DK, 8], ['cyl', 0.03, 0.035, 0.03, 0.3, 0.28, 0.24, MARBLE_DK, 8]);
+  ops.push(['cone', 0.018, 0.04, -0.3, 0.31, 0.24, 'marquee', 6], ['cone', 0.018, 0.04, 0.3, 0.31, 0.24, 'marquee', 6]);
+  // the lamps of the square
+  ops.push(...lampPost(-0.7, 0.6, 0.3, 'marquee', 0.02), ...lampPost(0.7, 0.6, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
+export const altareDellaPatria: KindDef = {
+  id: 'altare-della-patria', name: 'the Altare della Patria', code: library.code, kindId: 145, family: 'leisure', tier: 5,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rome',
+  occupation: { ...library.occupation!, name: 'memorial guard' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 80, ticket: 0, openHours: [9, 20], stay: [0.4, 0.9], leisureValue: 6, radius: 22,
+    dayAppeal: 1.2, eveningAppeal: 0.4, retireeAppeal: 2.0, childAppeal: 1.0, title: 'the Altare della Patria',
+  },
+  lot: { wage: 15 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The wedding cake of white marble at Piazza Venezia: the terraces, the grand staircase, the colonnade across the top, and between its columns the unknown soldier, his flame never out.',
+  howTo: 'A 2×2 plot on a grand avenue; a short free visit that suits a ceremonial part of town. World landmark: unlock rule to be decided.',
+  tool: { id: 'altare', key: '', label: 'Altare della Patria', color: '#f0ece2' },
+  levels: [{
+    capacity: 14, wage: 15, cost: 9000, upkeep: 40, work: 1800, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the white terraces and colonnades of the Vittoriano, the unknown soldier with his flame', height: 0.51, ops: altareOps() },
+    ],
+  }],
+};
+
+export const ROME_LANDMARKS: KindDef[] = [colosseum, stPeters, pantheon, treviFountain, altareDellaPatria];
