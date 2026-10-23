@@ -81,7 +81,7 @@ export const eiffelTower: KindDef = {
   levels: [{
     capacity: 45, wage: 18, cost: 16000, upkeep: 70, work: 3400, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'the iron lace of four legs leaning together over the Champ de Mars, the two floors and the antenna above the city', height: 5.13, ops: eiffelOps() },
+      { author: 'kimi-2.8-preview', name: 'the iron lace of four legs leaning together over the Champ de Mars, the two floors and the antenna above the city', height: 5.13, ops: eiffelOps() },
     ],
   }],
 };
@@ -139,7 +139,7 @@ export const arcDeTriomphe: KindDef = {
   levels: [{
     capacity: 26, wage: 16, cost: 11000, upkeep: 55, work: 2800, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'the great arch on its roundabout, the vault over the unknown soldier, the friezes of the attic above', height: 1.66, ops: arcOps() },
+      { author: 'kimi-2.8-preview', name: 'the great arch on its roundabout, the vault over the unknown soldier, the friezes of the attic above', height: 1.66, ops: arcOps() },
     ],
   }],
 };
@@ -204,7 +204,7 @@ export const notreDame: KindDef = {
   levels: [{
     capacity: 30, wage: 15, cost: 12000, upkeep: 50, work: 2600, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'the twin-towered west front with the rose window, the lead spire over the crossing, the flying buttresses of the apse', height: 1.4, ops: notreDameOps() },
+      { author: 'kimi-2.8-preview', name: 'the twin-towered west front with the rose window, the lead spire over the crossing, the flying buttresses of the apse', height: 1.4, ops: notreDameOps() },
     ],
   }],
 };
@@ -253,7 +253,7 @@ export const louvre: KindDef = {
   levels: [{
     capacity: 60, wage: 19, cost: 20000, upkeep: 85, work: 4200, parking: { surface: 0, underground: 0 },
     designs: [
-      { name: 'the three wings of the Cour Napoleon under their slate roofs, the glass pyramid between the two fountains', height: 0.66, ops: louvreOps() },
+      { author: 'kimi-2.8-preview', name: 'the three wings of the Cour Napoleon under their slate roofs, the glass pyramid between the two fountains', height: 0.66, ops: louvreOps() },
     ],
   }],
 };
@@ -308,9 +308,68 @@ export const operaGarnier: KindDef = {
   levels: [{
     capacity: 40, wage: 20, cost: 14000, upkeep: 100, work: 3000, parking: { surface: 0, underground: 30 },
     designs: [
-      { name: 'the columned opera house under its green dome, the stage tower rising behind', height: 1.1, ops: operaGarnierOps() },
+      { author: 'kimi-2.8-preview', name: 'the columned opera house under its green dome, the stage tower rising behind', height: 1.1, ops: operaGarnierOps() },
     ],
   }],
 };
 
-export const PARIS_LANDMARKS: KindDef[] = [eiffelTower, arcDeTriomphe, notreDame, louvre, operaGarnier];
+// ================================================================= 138 the Sacré-Cœur
+
+/**
+ * The white basilica on the hill of Montmartre, its travertine bright over the city: the
+ * church on its high terrace above the front steps, the great white dome over the crossing
+ * with its lantern, the square bell tower to one side, and the row of small domes along the
+ * choir. Plain white stone and dark insets only, so no window rule is touched.
+ */
+const CHALK = 0xf2ede4, CHALK_DK = 0xe0d8c8;
+
+const sacreCoeurOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  // the terrace of the hill and the steps down to the street
+  ops.push(['box', 1.7, 0.16, 1.7, 0, 0.02, -0.1, 'stone']);
+  ops.push(['box', 1.0, 0.05, 0.24, 0, 0.02, 0.86, 'stone'], ['box', 1.2, 0.05, 0.18, 0, 0.07, 0.76, 'stone'], ['box', 1.4, 0.05, 0.14, 0, 0.12, 0.68, 'stone']);
+  // the basilica front: the portico arches and the gable
+  ops.push(['box', 1.0, 0.42, 0.8, 0, 0.18, -0.15, CHALK]);
+  ops.push(['box', 0.16, 0.26, 0.02, -0.24, 0.2, 0.26, 0x3a3630], ['box', 0.16, 0.26, 0.02, 0, 0.2, 0.26, 0x3a3630], ['box', 0.16, 0.26, 0.02, 0.24, 0.2, 0.26, 0x3a3630]);
+  ops.push(['roof', 1.04, 0.12, 0.2, 0, 0.6, 0.2, CHALK_DK, false]);
+  // the great dome on its drum over the crossing, the lantern and gold finial
+  ops.push(['cyl', 0.2, 0.22, 0.1, 0, 0.6, -0.15, CHALK, 12]);
+  ops.push(['lathe', 0, 0.68, -0.15, CHALK, [0.23, 0, 0.24, 0.05, 0.2, 0.14, 0.12, 0.24, 0.05, 0.3, 0, 0.34], { seg: 14 }]);
+  ops.push(['cyl', 0.03, 0.035, 0.06, 0, 1.02, -0.15, CHALK, 8], ['cone', 0.02, 0.05, 0, 1.08, -0.15, 'gold', 6]);
+  // the square bell tower with its own small dome
+  ops.push(['box', 0.18, 0.5, 0.18, 0.42, 0.18, 0.1, CHALK]);
+  ops.push(['box', 0.1, 0.16, 0.02, 0.42, 0.44, 0.2, 0x3a3630]);
+  ops.push(['lathe', 0.42, 0.68, 0.1, CHALK, [0.11, 0, 0.12, 0.03, 0.09, 0.08, 0.04, 0.12, 0, 0.15], { seg: 10 }]);
+  ops.push(['cyl', 0.006, 0.006, 0.05, 0.42, 0.83, 0.1, 'gold', 5]);
+  // the row of small domes over the choir
+  for (const dx of [-0.28, 0, 0.28]) {
+    ops.push(['lathe', dx, 0.6, -0.48, CHALK, [0.09, 0, 0.1, 0.02, 0.07, 0.06, 0.03, 0.09, 0, 0.11], { seg: 8 }]);
+  }
+  // the hilltop square: lamps and a pair of trees
+  ops.push(...lampPost(-0.5, 0.55, 0.3, 'marquee', 0.02), ...lampPost(0.5, 0.55, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.85, 0.85, 0.6), ...tree(0.85, 0.85, 0.6));
+  return ops;
+};
+
+export const sacreCoeur: KindDef = {
+  id: 'sacre-coeur', name: 'the Sacré-Cœur', code: library.code, kindId: 138, family: 'leisure', tier: 6,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'paris',
+  occupation: { ...library.occupation!, name: 'sacristan' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 130, ticket: 0, openHours: [8, 20], stay: [0.5, 1.2], leisureValue: 7, radius: 26,
+    dayAppeal: 1.3, eveningAppeal: 0.5, retireeAppeal: 2.4, childAppeal: 1.2, title: 'Sacré-Cœur',
+  },
+  lot: { wage: 15 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The white basilica on the hill of Montmartre, its travertine bright over the rooftops: the great dome over the crossing, the bell tower, and the steps where the city lies below.',
+  howTo: 'A 2×2 plot, lawns below the terrace; a quiet free visit for retirees and evening strollers, best with a metro nearby. World landmark: unlock rule to be decided.',
+  tool: { id: 'sacrecoeur', key: '', label: 'Sacré-Cœur', color: '#f2ede4' },
+  levels: [{
+    capacity: 24, wage: 15, cost: 10000, upkeep: 45, work: 2200, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the white basilica on its terrace above the steps, the great dome and the bell tower over the city', height: 1.13, ops: sacreCoeurOps() },
+    ],
+  }],
+};
+
+export const PARIS_LANDMARKS: KindDef[] = [eiffelTower, arcDeTriomphe, notreDame, louvre, operaGarnier, sacreCoeur];
