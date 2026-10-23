@@ -16,7 +16,9 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       the dome over the crossing, the colonnaded square with the obelisk
  *   143 the Pantheon: a library-family attraction, the columns and pediment before the
  *       great dome with its rings
- *   144-146 to follow, one building at a time.
+ *   144 the Trevi Fountain: a library-family attraction day and night, the arch and
+ *       Oceanus above the cascade into the great basin
+ *   145-146 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'rome'];
@@ -183,4 +185,57 @@ export const pantheon: KindDef = {
   }],
 };
 
-export const ROME_LANDMARKS: KindDef[] = [colosseum, stPeters, pantheon];
+// ================================================================= 144 the Trevi Fountain
+
+/**
+ * The fountain of the waters against the palace wall: the triumphal arch with its niche,
+ * the little figure of Oceanus white in the shadow, the columns and attic above, and the
+ * rocky cascade stepping down into the great basin where the coins fly. Plain stone and
+ * dark insets only, so no window rule is touched.
+ */
+const TREVI_ST = 0xd0bf9c;
+
+const treviOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the palace front behind the fountain
+  ops.push(['box', 1.7, 0.5, 0.35, 0, 0.02, -0.55, TREVI_ST]);
+  ops.push(['box', 0.1, 0.14, 0.015, -0.55, 0.2, -0.37, 0x3a3630], ['box', 0.1, 0.14, 0.015, 0.55, 0.2, -0.37, 0x3a3630]);
+  ops.push(['box', 0.1, 0.12, 0.015, -0.55, 0.36, -0.37, 0x3a3630], ['box', 0.1, 0.12, 0.015, 0.55, 0.36, -0.37, 0x3a3630]);
+  // the fountain against it: the arch, Oceanus in his niche, the flanking columns and attic
+  ops.push(['box', 0.34, 0.32, 0.06, 0, 0.06, -0.34, TREVI_ST]);
+  ops.push(['box', 0.24, 0.26, 0.02, 0, 0.08, -0.31, 0x2b3a42]);
+  ops.push(['lathe', 0, 0.09, -0.3, 'white', [0.045, 0, 0.05, 0.02, 0.035, 0.06, 0.028, 0.09, 0.012, 0.11, 0, 0.12], { seg: 8 }]);
+  ops.push(['cyl', 0.012, 0.014, 0.07, -0.24, 0.06, -0.34, TREVI_ST, 8], ['cyl', 0.012, 0.014, 0.07, 0.24, 0.06, -0.34, TREVI_ST, 8]);
+  ops.push(['box', 0.62, 0.05, 0.08, 0, 0.4, -0.34, TREVI_ST]);
+  // the cascade stepping down to the basin
+  ops.push(['box', 0.9, 0.1, 0.2, 0, 0.02, -0.2, TREVI_ST]);
+  ops.push(['box', 0.7, 0.08, 0.18, 0, 0.02, -0.04, TREVI_ST]);
+  ops.push(['box', 1.5, 0.05, 0.56, 0, 0.02, 0.32, 'pond']);
+  ops.push(['box', 1.58, 0.06, 0.64, 0, 0.02, 0.32, TREVI_ST]);
+  // the lamps of the little square
+  ops.push(...lampPost(-0.72, 0.72, 0.3, 'marquee', 0.02), ...lampPost(0.72, 0.72, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
+export const treviFountain: KindDef = {
+  id: 'trevi-fountain', name: 'the Trevi Fountain', code: library.code, kindId: 144, family: 'leisure', tier: 4,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rome',
+  occupation: { ...library.occupation!, name: 'fountain keeper' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 100, ticket: 0, openHours: [8, 21.5], stay: [0.3, 0.8], leisureValue: 7, radius: 20,
+    dayAppeal: 1.3, eveningAppeal: 0.8, retireeAppeal: 1.6, childAppeal: 1.6, title: 'the Trevi Fountain',
+  },
+  lot: { wage: 14 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The fountain of the waters against the palace wall: the arch and its niche, the little figure of Oceanus white above the cascade, and the basin where a coin promises a return to Rome.',
+  howTo: 'A 2×2 plot tucked into the old town among shops and cafes; a short free visit that glows at night, best near restaurants. World landmark: unlock rule to be decided.',
+  tool: { id: 'trevi', key: '', label: 'Trevi Fountain', color: '#d0bf9c' },
+  levels: [{
+    capacity: 16, wage: 14, cost: 8000, upkeep: 35, work: 1600, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the fountain of the waters, the arch and Oceanus above the cascade into the great basin', height: 0.52, ops: treviOps() },
+    ],
+  }],
+};
+
+export const ROME_LANDMARKS: KindDef[] = [colosseum, stPeters, pantheon, treviFountain];
