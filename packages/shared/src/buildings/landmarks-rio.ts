@@ -1,6 +1,6 @@
 import type { KindDef, Op } from './schema';
-import { library } from './leisure';
-import { slab, tree, lampPost, PAVING } from './tierkit';
+import { library, theatre } from './leisure';
+import { slab, tree, lampPost, PAVING, ASPHALT } from './tierkit';
 
 /**
  * Rio de Janeiro landmarks (docs/buildings.md "Landmarks"): the monuments of the marvell-
@@ -18,7 +18,8 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       crown of thorns with its ring of concrete ribs
  *   186 the Maracana: a library-family sports venue, the great bowl with its green pitch
  *       and floodlight towers
- *   187 to follow, one building at a time.
+ *   187 the Sambadrome: a theatre-family carnival venue, the parade avenue between the
+ *       coloured grandstands to the square of the apotheosis
  */
 
 const TAGS = ['world', 'rio'];
@@ -212,4 +213,54 @@ export const maracana: KindDef = {
   }],
 };
 
-export const RIO_LANDMARKS: KindDef[] = [christRedeemer, sugarloaf, rioCathedral, maracana];
+// ================================================================= 187 the Sambadrome
+
+/**
+ * The avenue Oscar Niemeyer built for the carnival: the parade street running the length
+ * of the plot, the grandstands in their carnival colours on both sides, and at the far
+ * end the square of the apotheosis with its little arch. The schools dance here one night
+ * a year; the rest of the year it is the city strangest empty street.
+ */
+const CARNAVAL = [0xc9372c, 0xe8c53c, 0x2c5f9e, 0x3f9e4d];
+
+const sambadromeOps = (): Op[] => {
+  const ops: Op[] = [slab(1, 4, ASPHALT)];
+  // the parade avenue
+  ops.push(['box', 0.34, 0.006, 3.9, 0, 0.02, 0, ASPHALT]);
+  // the grandstands in their carnival colours, four to a side
+  for (let i = 0; i < 4; i++) {
+    const z = -1.5 + i;
+    ops.push(['box', 0.28, 0.14, 0.95, -0.31, 0.02, z, CARNAVAL[i]]);
+    ops.push(['box', 0.28, 0.14, 0.95, 0.31, 0.02, z, CARNAVAL[(i + 2) % 4]]);
+  }
+  // the square of the apotheosis at the far end, with its arch
+  ops.push(['box', 0.9, 0.16, 0.4, 0, 0.02, -1.75, 0xc9372c]);
+  ops.push(['box', 0.06, 0.2, 0.06, -0.18, 0.18, -1.75, 'marquee'], ['box', 0.06, 0.2, 0.06, 0.18, 0.18, -1.75, 'marquee']);
+  ops.push(['box', 0.44, 0.06, 0.08, 0, 0.38, -1.75, 'marquee']);
+  // the entrance lamps
+  ops.push(...lampPost(-0.35, 1.85, 0.3, 'marquee', 0.02), ...lampPost(0.35, 1.85, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
+export const sambadrome: KindDef = {
+  id: 'sambadrome', name: 'the Sambadrome', code: 12, kindId: 187, family: 'leisure', tier: 5,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'venue', landmark: true, tags: TAGS, group: 'rio',
+  occupation: { ...theatre.occupation!, name: 'carnival steward' },
+  attrs: {
+    ...theatre.attrs, visitorCapacity: 260, ticket: 28, openHours: [18, 24], stay: [2.5, 3.5], leisureValue: 10, radius: 30,
+    eventNights: [5, 6], eventStart: 20, eveningAppeal: 1.8, retireeAppeal: 0.8, childAppeal: 1.8, title: 'the Sambadrome',
+  },
+  lot: { wage: 18 },
+  footprint: { w: 1, h: 4, door: [0, 3] },
+  blurb: 'The avenue Oscar Niemeyer built for the carnival: the parade street between the coloured grandstands, and at the far end the square of the apotheosis where the schools of samba make their last turn.',
+  howTo: 'Placed with its tool it is a 1×4 landmark on dry land, its door at one end; it fills on carnival nights, so give it a metro and leave the avenue clear for the parade. World landmark: unlock rule to be decided.',
+  tool: { id: 'sambadrome', key: '', label: 'Sambadrome', color: '#e8c53c' },
+  levels: [{
+    capacity: 45, wage: 18, cost: 14000, upkeep: 90, work: 2800, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the parade avenue between the coloured grandstands to the square of the apotheosis', height: 0.44, ops: sambadromeOps() },
+    ],
+  }],
+};
+
+export const RIO_LANDMARKS: KindDef[] = [christRedeemer, sugarloaf, rioCathedral, maracana, sambadrome];

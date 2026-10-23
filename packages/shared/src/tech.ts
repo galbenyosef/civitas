@@ -125,7 +125,7 @@ export const TECH: TechNode[] = [
       'orientalpearl', 'shanghaitower', 'jinmao', 'swfc', 'yugarden', 'eiffeltower', 'arcdetriomphe', 'notredame', 'louvre', 'operagarnier', 'sacrecoeur',
       'colosseum', 'stpeters', 'pantheon', 'trevi', 'altare', 'castelsangelo',
       'forbiddencity', 'templeofheaven', 'greatwall', 'tiananmen', 'cctv', 'summerpalace',
-      'christredeemer', 'sugarloaf', 'riocathedral', 'maracana'] },
+      'christredeemer', 'sugarloaf', 'riocathedral', 'maracana', 'sambadrome'] },
 ];
 export const TECH_BY_ID = new Map(TECH.map((t) => [t.id, t]));
 export const ALL_TECH_IDS = TECH.map((t) => t.id);
