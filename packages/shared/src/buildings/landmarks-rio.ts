@@ -16,7 +16,9 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       the cable car climbing to its station on the summit
  *   185 the Metropolitan Cathedral: a library-family attraction, the great cone of the
  *       crown of thorns with its ring of concrete ribs
- *   186-187 to follow, one building at a time.
+ *   186 the Maracana: a library-family sports venue, the great bowl with its green pitch
+ *       and floodlight towers
+ *   187 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'rio'];
@@ -163,4 +165,51 @@ export const rioCathedral: KindDef = {
   }],
 };
 
-export const RIO_LANDMARKS: KindDef[] = [christRedeemer, sugarloaf, rioCathedral];
+// ================================================================= 186 the Maracana
+
+/**
+ * The house of football where two hundred thousand once roared: the great bowl turned as
+ * one lathe, the green pitch on the flat top, and the four floodlight towers at the
+ * corners. Plain concrete only, so no window rule is touched.
+ */
+const BOWL = 0xc9c2b4, PITCH = 0x4a8a4a;
+
+const maracanaOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the bowl of the stands
+  ops.push(['lathe', 0, 0.02, 0, BOWL, [0.88, 0, 0.88, 0.16, 0.82, 0.16, 0.82, 0.26, 0.6, 0.26, 0.6, 0.28, 0, 0.28], { seg: 24 }]);
+  // the green pitch on the flat top, with the rim of the upper tier showing round it
+  ops.push(['cyl', 0.55, 0.57, 0.015, 0, 0.3, 0, PITCH, 20]);
+  // the four floodlight towers at the corners
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    ops.push(['taper', 0.04, 0.04, 0.03, 0.03, 0.34, sx * 0.8, 0.02, sz * 0.8, 'dark', { shift: [-sx * 0.06, -sz * 0.06] }]);
+    ops.push(['box', 0.1, 0.06, 0.04, sx * 0.74, 0.36, sz * 0.74, 'marquee']);
+  }
+  // the plaza: lamps and a pair of palms
+  ops.push(...lampPost(-0.6, 0.92, 0.3, 'marquee', 0.02), ...lampPost(0.6, 0.92, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.78, 0.7, 0.5, 'green'), ...tree(0.78, 0.7, 0.5, 'green'));
+  return ops;
+};
+
+export const maracana: KindDef = {
+  id: 'maracana', name: 'the Maracana', code: library.code, kindId: 186, family: 'leisure', tier: 4,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rio',
+  occupation: { ...library.occupation!, name: 'stadium steward' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 300, ticket: 22, openHours: [10, 22], stay: [1.6, 2.6], leisureValue: 9, radius: 30,
+    dayAppeal: 1.4, eveningAppeal: 0.9, retireeAppeal: 1.2, childAppeal: 2.0, title: 'the Maracana',
+  },
+  lot: { wage: 17 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The house of football where two hundred thousand once roared at the World Cup final: the great bowl, the green pitch, the floodlight towers, and the noise that never quite dies.',
+  howTo: 'A 2×2 plot near transit; it fills on match nights and pays for itself, so give it a metro or buses and leave the streets clear after the whistle. World landmark: unlock rule to be decided.',
+  tool: { id: 'maracana', key: '', label: 'Maracana', color: '#4a8a4a' },
+  levels: [{
+    capacity: 60, wage: 17, cost: 17000, upkeep: 80, work: 3800, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the great bowl with its green pitch and floodlight towers', height: 0.44, ops: maracanaOps() },
+    ],
+  }],
+};
+
+export const RIO_LANDMARKS: KindDef[] = [christRedeemer, sugarloaf, rioCathedral, maracana];
