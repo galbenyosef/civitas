@@ -14,7 +14,9 @@ import { slab, tree, lampPost, PAVING, ASPHALT } from './tierkit';
  *       grand podium
  *   189 the Harbour Bridge: a library-family attraction, the great arch in its granite
  *       pylons over the harbour crossing
- *   190-191 to follow, one building at a time.
+ *   190 Sydney Tower: a library-family attraction, the golden turret on its slender shaft
+ *       over the shopping centre
+ *   191 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'sydney'];
@@ -127,4 +129,51 @@ export const harbourBridge: KindDef = {
   }],
 };
 
-export const SYDNEY_LANDMARKS: KindDef[] = [operaHouse, harbourBridge];
+// ================================================================= 190 Sydney Tower
+
+/**
+ * The tallest watchtower of the southern sky, rising from the shopping centre in the middle
+ * of the city: the podium block below, the slender shaft climbing out of it, the golden
+ * turret of the observation deck, and the spire with its aircraft light over all. Plain
+ * concrete and gold only, so no window rule is touched.
+ */
+const sydneyTowerOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the shopping centre podium below
+  ops.push(['box', 0.8, 0.25, 0.8, 0, 0.02, 0, PODIUM]);
+  // the slender shaft out of the podium
+  ops.push(['taper', 0.1, 0.1, 0.06, 0.06, 1.05, 0, 0.27, 0, STEEL]);
+  // the golden turret of the observation deck
+  ops.push(['cyl', 0.16, 0.17, 0.13, 0, 1.32, 0, 'gold', 12]);
+  ops.push(['cyl', 0.17, 0.17, 0.03, 0, 1.45, 0, STEEL, 12]);
+  // the spire and its aircraft light
+  ops.push(['cyl', 0.012, 0.018, 0.3, 0, 1.48, 0, 'steel', 6]);
+  ops.push(['cyl', 0.03, 0.03, 0.05, 0, 1.78, 0, 'red', 6]);
+  // the plaza: lamps and a pair of trees
+  ops.push(...lampPost(-0.55, 0.55, 0.3, 'marquee', 0.02), ...lampPost(0.55, 0.55, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.72, -0.72, 0.55), ...tree(0.72, -0.72, 0.55));
+  return ops;
+};
+
+export const sydneyTower: KindDef = {
+  id: 'sydney-tower', name: 'Sydney Tower', code: library.code, kindId: 190, family: 'leisure', tier: 3,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'sydney',
+  occupation: { ...library.occupation!, name: 'lookout host' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 110, ticket: 20, openHours: [10, 21], stay: [0.8, 1.4], leisureValue: 8, radius: 26,
+    dayAppeal: 1.4, eveningAppeal: 0.9, retireeAppeal: 1.5, childAppeal: 1.7, title: 'Sydney Tower',
+  },
+  lot: { wage: 16 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The golden turret over the shopping centre in the middle of the city: the slender shaft, the observation deck three hundred metres up, and the harbour and the bridge in one glance.',
+  howTo: 'A 2×2 plot in the retail heart; a day-and-night lookout that draws the young, best with a station under it. World landmark: unlock rule to be decided.',
+  tool: { id: 'sydneytower', key: '', label: 'Sydney Tower', color: '#d8a83c' },
+  levels: [{
+    capacity: 26, wage: 16, cost: 12000, upkeep: 60, work: 2800, parking: { surface: 0, underground: 40 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the golden turret on its slender shaft over the shopping centre', height: 1.83, ops: sydneyTowerOps() },
+    ],
+  }],
+};
+
+export const SYDNEY_LANDMARKS: KindDef[] = [operaHouse, harbourBridge, sydneyTower];
