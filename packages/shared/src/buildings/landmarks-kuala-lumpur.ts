@@ -17,7 +17,9 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
  *       their double-decker skybridge
  *   202 the KL Tower: an office tower, the observatory needle above the forest
  *       hill in the middle of the city
- *   203-204 to follow, one building at a time.
+ *   203 Merdeka 118: an office tower, the faceted glass megatall with its spire
+ *       over the old stadium
+ *   204 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'kuala-lumpur'];
@@ -112,4 +114,41 @@ export const klTower: KindDef = {
   }],
 };
 
-export const KUALA_LUMPUR_LANDMARKS: KindDef[] = [petronasTowers, klTower];
+// ================================================================= 203 Merdeka 118
+
+/**
+ * The megatall the country raised beside the old stadium: a shaft of faceted
+ * glass, diamond-cut from plinth to crown, a hundred and eighteen storeys to the
+ * tip of its spire — the second tallest thing on Earth. Plain glass only, so no
+ * window rule is touched.
+ */
+const MERDEKA_GLASS = 0x8fa8b8;
+
+const merdekaOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the faceted glass shaft, diamond-cut from plinth to crown
+  ops.push(['lathe', 0, 0.02, 0, MERDEKA_GLASS, [0.42, 0, 0.4, 1.8, 0.34, 3.6, 0.26, 5.4, 0.16, 6.6, 0.06, 7.3, 0, 7.5], { seg: 12, win: 'office' }]);
+  // the spire and the aircraft beacon
+  ops.push(['cyl', 0.01, 0.03, 0.9, 0, 7.52, 0, 'steel', 6]);
+  ops.push(['cyl', 0.02, 0.02, 0.05, 0, 8.42, 0, 'red', 6]);
+  // the pavement: lamps and a pair of trees
+  ops.push(...lampPost(-0.7, 0.75, 0.3, 'marquee', 0.02), ...lampPost(0.7, 0.75, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.8, -0.7, 0.5), ...tree(0.8, -0.7, 0.5));
+  return ops;
+};
+
+export const merdeka118: KindDef = {
+  ...towerBase, id: 'merdeka-118', name: 'Merdeka 118', kindId: 203, tier: 3,
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The megatall beside the old stadium: a shaft of faceted glass, diamond-cut from plinth to crown, a hundred and eighteen storeys to the tip of its spire — the second tallest thing on Earth.',
+  howTo: 'A 2×2 plot among offices on an avenue; a very big workplace, so give it buses or a station and leave the street clear. World landmark: unlock rule to be decided.',
+  tool: { id: 'merdeka118', key: '', label: 'Merdeka 118', color: '#8fa8b8' },
+  levels: [{
+    capacity: 560, wage: 48, cost: 28000, upkeep: 160, work: 5000, parking: { surface: 0, underground: 100 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the diamond-cut glass megatall with its spire over the old stadium', height: 8.5, ops: merdekaOps() },
+    ],
+  }],
+};
+
+export const KUALA_LUMPUR_LANDMARKS: KindDef[] = [petronasTowers, klTower, merdeka118];
