@@ -1,5 +1,6 @@
 import type { DemoPlacement, DemoSection, DemoXY } from './showcase';
 import { FRONT } from '../structures';
+import { WORLD_LANDMARKS } from '../buildings/landmarks-world';
 
 /**
  * The rest of London (docs/demo.md "London", "Keeping it complete"): every kind a player can place stands in London,
@@ -210,4 +211,8 @@ export function withKindsTour(tour: readonly string[]): string[] {
 export const LONDON_EXEMPT: Record<string, string> = {
   camp: 'the pioneer camp is a new player\'s first settlers, one per player, on a frontier start; London is a built city',
   motorway: 'the motorway connections are the road work\'s (docs/roads.md): London\'s M4 and A13 approaches',
+  // world landmarks (docs/buildings.md "Landmarks", landmarks-world.ts): their own cities have no demos yet, so none
+  // can stand in one; each places only in sandboxes and ?dev clients behind the locked tech node wld1
+  ...Object.fromEntries(WORLD_LANDMARKS.map((k) => [k.id,
+    'a world landmark behind the locked wld1 node: its own city has no demo yet, so it cannot stand in one'])),
 };

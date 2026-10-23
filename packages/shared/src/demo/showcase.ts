@@ -1845,14 +1845,15 @@ export function showcaseProblems(manifest: readonly KindManifest[] = MANIFEST): 
     for (const sp of s.spots ?? []) dup(sp.id);
   }
   // landmarks (docs/buildings.md "Landmarks") stand in their own city's demo (the London ones in London), not the showcase;
-  // a landmark drawn over a bridge (Tower Bridge) is placed by laying that bridge
+  // a landmark drawn over a bridge (Tower Bridge) is placed by laying that bridge; LONDON_EXEMPT doubles as the
+  // city-demo exemption — a world landmark whose city has no demo yet cannot stand in one (london-kinds.ts)
   const inCity = new Set(DEMOS.filter((d) => d.id !== 'showcase').flatMap((d) => demoSections(d.id).flatMap((s) => [
     ...(s.placements ?? []).map((p) => p.kind), ...(s.bridges ?? []).flatMap((b) => (b.landmark ? [b.landmark] : [])),
   ])));
   for (const k of manifest) {
     if (k.draft || !k.tool) continue;
     if (k.landmark) {
-      if (!inCity.has(k.id)) out.push(`${k.id} (a ${(k.tags ?? []).join(', ')} landmark) is not placed in its city's demo`);
+      if (!inCity.has(k.id) && !LONDON_EXEMPT[k.id]) out.push(`${k.id} (a ${(k.tags ?? []).join(', ')} landmark) is not placed in its city's demo`);
       continue;
     }
     if (k.flags.growable) {
