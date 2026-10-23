@@ -1,4 +1,6 @@
 import type { KindDef, Op } from './schema';
+import { Zone } from './codes';
+import { office } from './office';
 import { library } from './leisure';
 import { slab, tree, lampPost, flags, PAVING } from './tierkit';
 
@@ -18,11 +20,17 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
  *       its watchtower and beacon
  *   180 Tiananmen Gate: a library-family attraction, the rostrum and double-eaved tower
  *       over the gate of heavenly peace, the golden-water bridges before it
- *   181-182 to follow, one building at a time.
+ *   181 the CCTV Headquarters: an office, the two leaning towers joined head to heel in a
+ *       loop of glass over the avenue
+ *   182 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'beijing'];
 const IMPERIAL_RED = 0x9e2b22, GLAZED_GOLD = 0xd8a83c, MARBLE_W = 0xe8e2d4, GLAZED_BLUE = 0x3f6fb5;
+const towerBase = {
+  code: Zone.Office, family: 'office' as const, flags: { civic: true, workplace: true }, windows: 'office' as const,
+  occupation: office.occupation, lot: { wage: 14 }, landmark: true, tags: TAGS, group: 'beijing',
+};
 
 // ================================================================= 177 the Forbidden City
 
@@ -224,4 +232,42 @@ export const tiananmenGate: KindDef = {
   }],
 };
 
-export const BEIJING_LANDMARKS: KindDef[] = [forbiddenCity, templeOfHeaven, greatWall, tiananmenGate];
+// ================================================================= 181 the CCTV Headquarters
+
+/**
+ * The great loop of glass the broadcasters built in the new CBD: two leaning towers, each
+ * rising and tipping toward the other until they cross, joined by the horizontal bars at
+ * the waist and the crown, an Escher figure forty-four storeys tall. Each tower is one
+ * leaning taper, so there are no stacked walls to half-hide a window.
+ */
+const CCTV_GLASS = 0x5a6b7a, CCTV_DK = 0x46545f;
+
+const cctvOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the two leaning towers, each tipping toward the other until they cross
+  ops.push(['taper', 0.38, 0.38, 0.34, 0.34, 2.1, -0.42, 0.02, 0, CCTV_GLASS, { win: 'office', shift: [0.55, 0] }]);
+  ops.push(['taper', 0.38, 0.38, 0.34, 0.34, 2.1, 0.42, 0.02, 0, CCTV_GLASS, { win: 'office', shift: [-0.55, 0] }]);
+  // the horizontal bars at the waist and the crown
+  ops.push(['box', 0.62, 0.14, 0.32, 0, 0.82, 0, CCTV_DK]);
+  ops.push(['box', 0.62, 0.14, 0.32, 0, 1.62, 0, CCTV_DK]);
+  // the pavement: lamps and a pair of trees
+  ops.push(...lampPost(-0.8, 0.8, 0.32, 'marquee', 0.02), ...lampPost(0.8, 0.8, 0.32, 'marquee', 0.02));
+  ops.push(...tree(-0.85, -0.75, 0.55), ...tree(0.85, -0.75, 0.55));
+  return ops;
+};
+
+export const cctvTower: KindDef = {
+  ...towerBase, id: 'cctv-tower', name: 'the CCTV Headquarters', kindId: 181, tier: 5,
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The great loop of glass in the new CBD: two leaning towers tipping toward each other until they cross, joined at the waist and the crown, an Escher figure on the skyline.',
+  howTo: 'A 2×2 plot among offices on an avenue; a big workplace, so give it buses or a station and leave the street clear. World landmark: unlock rule to be decided.',
+  tool: { id: 'cctv', key: '', label: 'CCTV Tower', color: '#5a6b7a' },
+  levels: [{
+    capacity: 340, wage: 44, cost: 24000, upkeep: 130, work: 4600, parking: { surface: 0, underground: 65 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the leaning towers joined head to heel, the loop of glass over the avenue', height: 2.12, ops: cctvOps() },
+    ],
+  }],
+};
+
+export const BEIJING_LANDMARKS: KindDef[] = [forbiddenCity, templeOfHeaven, greatWall, tiananmenGate, cctvTower];
