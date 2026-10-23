@@ -16,7 +16,8 @@ import { slab, tree, lampPost, PAVING, ASPHALT } from './tierkit';
  *       pylons over the harbour crossing
  *   190 Sydney Tower: a library-family attraction, the golden turret on its slender shaft
  *       over the shopping centre
- *   191 to follow, one building at a time.
+ *   191 St Mary's Cathedral: a library-family attraction, the sandstone nave and its twin
+ *       spires over the square
  */
 
 const TAGS = ['world', 'sydney'];
@@ -176,4 +177,57 @@ export const sydneyTower: KindDef = {
   }],
 };
 
-export const SYDNEY_LANDMARKS: KindDef[] = [operaHouse, harbourBridge, sydneyTower];
+// ================================================================= 191 St Mary's Cathedral
+
+/**
+ * The sandstone cathedral across the square from the cathedral's own green: the long nave
+ * under its pitched roof, the rounded apse behind, the twin towers at the front, and above
+ * them the two tall spires that were only finished in our century. Plain sandstone and
+ * dark insets only, so no window rule is touched.
+ */
+const SANDSTONE = 0xcfc0a0, SANDSTONE_DK = 0xbcac8a;
+
+const stMarysOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the nave, its roof, and the rounded apse
+  ops.push(['box', 0.9, 0.42, 1.3, 0, 0.02, -0.1, SANDSTONE]);
+  ops.push(['roof', 0.94, 0.14, 1.34, 0, 0.44, -0.1, 'slate', true]);
+  ops.push(['cyl', 0.28, 0.3, 0.34, 0, 0.02, -0.7, SANDSTONE, 12]);
+  // the front, the rose window, the twin towers with their tall spires
+  ops.push(['box', 0.16, 0.16, 0.02, 0, 0.28, 0.56, 'navy']);
+  ops.push(['box', 0.12, 0.2, 0.015, 0, 0.02, 0.56, 0x3a3630]);
+  ops.push(['box', 0.26, 0.42, 0.26, -0.29, 0.02, 0.5, SANDSTONE_DK], ['box', 0.26, 0.42, 0.26, 0.29, 0.02, 0.5, SANDSTONE_DK]);
+  ops.push(['taper', 0.16, 0.16, 0.03, 0.03, 0.5, -0.29, 0.44, 0.5, SANDSTONE]);
+  ops.push(['taper', 0.16, 0.16, 0.03, 0.03, 0.5, 0.29, 0.44, 0.5, SANDSTONE]);
+  ops.push(['cyl', 0.008, 0.008, 0.06, -0.29, 0.94, 0.5, 'gold', 5], ['cyl', 0.008, 0.008, 0.06, 0.29, 0.94, 0.5, 'gold', 5]);
+  // the buttresses along the flanks and the lamps of the square
+  for (const z of [0.2, -0.4]) {
+    ops.push(['box', 0.08, 0.3, 0.08, -0.5, 0.02, z, SANDSTONE_DK], ['box', 0.08, 0.3, 0.08, 0.5, 0.02, z, SANDSTONE_DK]);
+  }
+  ops.push(...lampPost(-0.55, 0.82, 0.3, 'marquee', 0.02), ...lampPost(0.55, 0.82, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.78, -0.82, 0.55), ...tree(0.78, -0.82, 0.55));
+  return ops;
+};
+
+export const stMarys: KindDef = {
+  id: 'st-marys-cathedral', name: 'St Mary\'s Cathedral', code: library.code, kindId: 191, family: 'leisure', tier: 4,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'sydney',
+  occupation: { ...library.occupation!, name: 'verger' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 80, ticket: 0, openHours: [8, 19], stay: [0.4, 0.9], leisureValue: 6, radius: 20,
+    dayAppeal: 1.2, eveningAppeal: 0.3, retireeAppeal: 1.8, childAppeal: 1.0, title: 'St Mary\'s Cathedral',
+  },
+  lot: { wage: 14 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The sandstone cathedral across the square from the green: the long nave, the rose window, and the twin spires that watched the city for a hundred years before they were finished.',
+  howTo: 'A 2×2 plot facing a park or square; a short free visit that adds quiet to the civic heart. World landmark: unlock rule to be decided.',
+  tool: { id: 'stmarys', key: '', label: 'St Mary\'s', color: '#cfc0a0' },
+  levels: [{
+    capacity: 14, wage: 14, cost: 8000, upkeep: 35, work: 1600, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the sandstone cathedral with its twin spires over the square', height: 1.0, ops: stMarysOps() },
+    ],
+  }],
+};
+
+export const SYDNEY_LANDMARKS: KindDef[] = [operaHouse, harbourBridge, sydneyTower, stMarys];
