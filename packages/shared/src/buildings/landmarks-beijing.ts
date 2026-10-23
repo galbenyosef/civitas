@@ -282,7 +282,7 @@ export const cctvTower: KindDef = {
 const summerOps = (): Op[] => {
   const ops: Op[] = [slab(2, 2, 'lawn')];
   // the lake and the marble causeway crossing it
-  ops.push(['cyl', 0.7, 0.74, 0.015, 0, 0.02, 0.3, 'pond', 24]);
+  ops.push(['cyl', 0.66, 0.68, 0.015, 0, 0.02, 0.3, 'pond', 24]);
   ops.push(['box', 0.22, 0.03, 0.24, 0.1, 0.02, 0.08, MARBLE_W], ['box', 0.22, 0.045, 0.2, 0.22, 0.02, 0.3, MARBLE_W], ['box', 0.22, 0.03, 0.24, 0.32, 0.02, 0.5, MARBLE_W]);
   // the hill of longevity, three stone steps up
   ops.push(['box', 1.2, 0.14, 0.7, 0, 0.02, -0.42, 'stone']);
