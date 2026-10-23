@@ -19,7 +19,8 @@ import { slab, tree, lampPost, PAVING, ASPHALT } from './tierkit';
  *       bay, the dark observation band under its cap
  *   195 the Ferry Building: a library-family attraction, the arched hall on the pier with
  *       its clock tower over the embarkation front
- *   196 to follow, one building at a time.
+ *   196 Alcatraz: a library-family attraction, the rock in the bay with its cellhouse and
+ *       lighthouse
  */
 
 const TAGS = ['world', 'san-francisco'];
@@ -229,4 +230,53 @@ export const ferryBuilding: KindDef = {
   }],
 };
 
-export const SAN_FRANCISCO_LANDMARKS: KindDef[] = [goldenGate, transamerica, coitTower, ferryBuilding];
+// ================================================================= 196 Alcatraz
+
+/**
+ * The rock in the bay, the prison they said no one escaped: the island rising sheer from
+ * the water, the long cellhouse with its rows of window slits, the lighthouse at its end,
+ * and the cell blocks where the birdman kept his birds. Plain stone and dark insets only,
+ * so no window rule is touched.
+ */
+const ROCK = 0x8a8578, CELLHOUSE = 0xd9d4cc;
+
+const alcatrazOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'pond')];
+  // the island rising from the water
+  ops.push(['lathe', 0, 0.02, 0, ROCK, [0.6, 0, 0.56, 0.05, 0.42, 0.11, 0.34, 0.11, 0.3, 0.14, 0, 0.14], { seg: 20 }]);
+  // the parade ground on the flat top
+  ops.push(['box', 0.34, 0.012, 0.2, 0.12, 0.15, 0.12, 0xb9b4a8]);
+  // the long cellhouse with its window slits
+  ops.push(['box', 0.55, 0.14, 0.24, 0, 0.16, -0.05, CELLHOUSE]);
+  for (const sx of [-1, 1]) for (const x of [-0.18, -0.06, 0.06, 0.18]) {
+    ops.push(['box', 0.05, 0.05, 0.012, x, 0.21, -0.05 + sx * 0.125, 0x3a3630]);
+  }
+  // the lighthouse at the end of the rock
+  ops.push(['cyl', 0.03, 0.035, 0.16, 0.32, 0.16, -0.05, CELLHOUSE, 8]);
+  ops.push(['cyl', 0.02, 0.025, 0.04, 0.32, 0.32, -0.05, 'marquee', 6]);
+  ops.push(['cone', 0.025, 0.03, 0.32, 0.36, -0.05, 'slate', 6]);
+  return ops;
+};
+
+export const alcatraz: KindDef = {
+  id: 'alcatraz', name: 'Alcatraz', code: library.code, kindId: 196, family: 'leisure', tier: 5,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'san-francisco',
+  occupation: { ...library.occupation!, name: 'island warden' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 80, ticket: 18, openHours: [9, 18.5], stay: [1.0, 1.8], leisureValue: 7, radius: 26,
+    dayAppeal: 1.4, eveningAppeal: 0.3, retireeAppeal: 1.4, childAppeal: 1.6, title: 'Alcatraz',
+  },
+  lot: { wage: 16 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The rock in the bay, the prison they said no one escaped: the ferry out past the island, the cellhouse with its rows of window slits, the lighthouse still sweeping the gate of the bay.',
+  howTo: 'A 2×2 plot on the water suits the island; a ticketed day trip for the curious, best with a ferry pier or buses. World landmark: unlock rule to be decided.',
+  tool: { id: 'alcatraz', key: '', label: 'Alcatraz', color: '#8a8578' },
+  levels: [{
+    capacity: 20, wage: 16, cost: 10000, upkeep: 45, work: 2000, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the rock in the bay, the cellhouse and the lighthouse on their island', height: 0.4, ops: alcatrazOps() },
+    ],
+  }],
+};
+
+export const SAN_FRANCISCO_LANDMARKS: KindDef[] = [goldenGate, transamerica, coitTower, ferryBuilding, alcatraz];
