@@ -62,6 +62,25 @@
     .mx td.none { color: rgba(255,255,255,0.22); text-align: center; font-size: 18px; background: transparent; }
     .pill { display: inline-block; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line2); color: var(--muted); font-size: 10px; margin: 0 2px 2px 0; }
     .empty { color: var(--muted); padding: 24px 16px; line-height: 1.5; }
+
+    #modal { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; }
+    #modal[hidden] { display: none; }
+    #modalBack { position: absolute; inset: 0; background: rgba(8,10,14,0.72); backdrop-filter: blur(3px); }
+    #modalBox { position: relative; width: min(92vw, 880px); height: min(86vh, 720px); background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; display: grid; grid-template-rows: auto 1fr; overflow: hidden; box-shadow: 0 18px 60px rgba(0,0,0,0.5); }
+    #modalHead { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    #modalHead .k { color: var(--muted); font-size: 12px; }
+    #modalHead .n { font: 600 16px/1.2 "IBM Plex Sans Condensed", "IBM Plex Sans", sans-serif; }
+    #modalHead .spacer { flex: 1; }
+    #modalHead .acts { display: flex; gap: 12px; align-items: center; }
+    #modalClose { border: 1px solid var(--line2); background: transparent; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; color: var(--muted); }
+    #modalClose:hover { color: var(--fg); background: rgba(255,255,255,0.06); }
+    #modalStage { position: relative; min-height: 0; background: var(--mat); }
+    #modalView { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+    #modalView:active { cursor: grabbing; }
+    #modalNone { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+    #modalNone[hidden] { display: none; }
+    #modalStage .hint { position: absolute; left: 12px; bottom: 10px; color: rgba(230,233,239,0.65); font-size: 11px; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+    a.pill { text-decoration: none; font-size: 11px; padding: 2px 9px; }
   </style>
 </head>
 <body>
@@ -83,9 +102,28 @@
     </select></span>
     <span><span class="lbl">Tag</span> <select id="tag" class="sel"></select></span>
     <label class="check"><input type="checkbox" id="drafts" checked /> Include drafts</label>
-    <span class="note">Across: the model (design author). Down: the building. A cell opens that design in the viewer.</span>
+    <span class="note">Across: the model (design author). Down: the building. Click a cell for a rotatable preview; the modal links to the full viewer.</span>
   </div>
   <div id="wrap"><table class="mx" id="mx" aria-label="Model comparison matrix"></table></div>
+  <div id="modal" hidden>
+    <div id="modalBack"></div>
+    <div id="modalBox" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div id="modalHead">
+        <div><div class="k" id="modalKind"></div><div class="n" id="modalTitle"></div></div>
+        <span class="spacer"></span>
+        <div class="acts">
+          <label class="check"><input type="checkbox" id="modalSpin" checked /> Turn</label>
+          <a class="pill" id="modalViewer" href="#" target="_blank" rel="noopener">Open in viewer ↗</a>
+          <button id="modalClose" aria-label="Close">✕</button>
+        </div>
+      </div>
+      <div id="modalStage">
+        <canvas id="modalView"></canvas>
+        <div id="modalNone" hidden>This browser has no WebGL, so the rotatable preview cannot start. The link above still opens the building viewer.</div>
+        <span class="hint">drag to rotate · wheel to zoom</span>
+      </div>
+    </div>
+  </div>
   <script type="module" src="/src/compare.ts"></script>
 </body>
 </html>

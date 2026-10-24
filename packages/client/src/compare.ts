@@ -8,8 +8,8 @@
  * catalogue plugin recompiles on change and HMR reloads this page.
  */
 import {
-  WebGLRenderer, Scene, PerspectiveCamera, Mesh, Vector3, PlaneGeometry, GridHelper, MeshLambertMaterial,
-  ACESFilmicToneMapping,
+  WebGLRenderer, Scene, PerspectiveCamera, Mesh, Vector3, PlaneGeometry, GridHelper, MeshLambertMaterial, Group,
+  ACESFilmicToneMapping, type Object3D, type MeshLambertMaterial as LambertT,
 } from 'three';
 import { MANIFEST, CATALOGUE_HASH, type KindManifest, type LevelManifest, type DesignManifest } from '@msimcity/shared';
 import { buildModels, allDesigns, type Design } from './render/models';
@@ -33,7 +33,7 @@ const MODEL_ROW = (r: Row) => r.designs.some((e) => authorOf(e) !== 'original');
 
 // ---------------------------------------------------------------- state (kept in the hash)
 
-const state = { hour: 11, tag: 'all', scope: 'models' as 'models' | 'all', drafts: true };
+const state = { hour: 11, tag: 'all', scope: 'models' as 'models' | 'all', drafts: true, open: '' };
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
   const q = new URLSearchParams(location.search); // ?tag=… also works, for shareable links
@@ -41,6 +41,7 @@ function readHash() {
   if (p.get('scope') === 'all') state.scope = 'all';
   if (p.get('drafts') === '0') state.drafts = false;
   if (p.get('tag') || q.get('tag')) state.tag = (p.get('tag') || q.get('tag'))!;
+  if (p.get('open') || q.get('open')) state.open = (p.get('open') || q.get('open'))!; // ?open=<design key>: start with the modal up
 }
 function writeHash() {
   const p = new URLSearchParams({ h: String(state.hour), scope: state.scope });
@@ -198,7 +199,7 @@ function renderMatrix() {
           const list = byAuthor.get(a);
           if (!list || (!state.drafts && list.every((e) => e.design.draft))) return '<td class="none">—</td>';
           const e = list[0];
-          return `<td class="cell"><a href="/viewer.html?d=${encodeURIComponent(e.design.key)}" title="${esc(cap(r.kind.name))} — ${esc(e.design.name)} (${e.design.height} tiles, ${e.built.geometry.attributes.position.count} vertices)">
+          return `<td class="cell"><a data-cell="${e.design.key}" href="/viewer.html?d=${encodeURIComponent(e.design.key)}" title="${esc(cap(r.kind.name))} — ${esc(e.design.name)} (${e.design.height} tiles, ${e.built.geometry.attributes.position.count} vertices)">
             <img data-key="${e.design.key}" alt="${esc(e.design.name)}" src="" />
             <span class="dname">${esc(e.design.name)}</span>
             ${list.length > 1 ? `<span class="multi">×${list.length}</span>` : ''}${e.design.draft ? '<span class="dr">draft</span>' : ''}
@@ -230,14 +231,140 @@ $('dayBtn').onclick = () => setHour(11);
 $('nightBtn').onclick = () => setHour(20.5);
 $<HTMLInputElement>('hour').oninput = (ev) => setHour(Number((ev.target as HTMLInputElement).value));
 
+// ---------------------------------------------------------------- modal preview (click a cell)
+
+const modal = $<HTMLDivElement>('modal');
+const modalCanvas = $<HTMLCanvasElement>('modalView');
+const entriesByKey = new Map(entries.map((e) => [e.design.key, e]));
+let modalRenderer: WebGLRenderer | null = null;
+let modalScene: Scene | null = null;
+let modalLight: Lighting | null = null;
+let modalTurntable: Group | null = null;
+let modalCam: PerspectiveCamera | null = null;
+let modalMaterial: LambertT | null = null;
+let modalBenchMat: MeshLambertMaterial | null = null;
+let modalMoving: ReturnType<typeof landmarkPreview> = null;
+let modalTrees: Object3D | null = null;
+let modalRaf = 0, mLast = performance.now();
+let mYaw = -0.6, mPitch = 0.42, mDist = 3, mFrameY = 0.4, mDragging = false, mLastX = 0, mLastY = 0, mIdleSince = 0;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function ensureModalGL(): boolean {
+  if (modalRenderer) return true;
+  try {
+    modalRenderer = new WebGLRenderer({ canvas: modalCanvas, antialias: true });
+    modalRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    modalRenderer.toneMapping = ACESFilmicToneMapping;
+    modalRenderer.toneMappingExposure = 1.05;
+    modalScene = new Scene();
+    const benchMat = new MeshLambertMaterial({ color: MAT_DAY });
+    const mat = new Mesh(new PlaneGeometry(40, 40).rotateX(-Math.PI / 2), benchMat);
+    mat.receiveShadow = true;
+    const grid = new GridHelper(40, 40, 0x4d8371, 0x3a6858);
+    grid.position.y = 0.001;
+    modalScene.add(mat, grid);
+    modalBenchMat = benchMat;
+    modalLight = new Lighting(modalScene);
+    modalLight.mode = 'fixed';
+    modalTurntable = new Group();
+    modalScene.add(modalTurntable);
+    modalCam = new PerspectiveCamera(35, 1, 0.05, 200);
+    modalMaterial = buildingMaterial() as LambertT;
+    return true;
+  } catch {
+    modalRenderer = null;
+    return false;
+  }
+}
+
+function openModal(key: string) {
+  const e = entriesByKey.get(key);
+  if (!e) return;
+  $('modalKind').textContent = `${cap(e.kind.name)}${e.kind.levels.length > 1 || e.level.level > 1 ? `, level ${e.level.level}` : ''} · designed by ${authorOf(e)} · ${e.design.height} tiles`;
+  $('modalTitle').textContent = cap(e.design.name);
+  $<HTMLAnchorElement>('modalViewer').href = `/viewer.html?d=${encodeURIComponent(key)}`;
+  if (!ensureModalGL()) {
+    $('modalNone').hidden = false;
+  } else {
+    $('modalNone').hidden = true;
+    modalTurntable!.clear();
+    modalMoving = landmarkPreview(e.kind.kindId);
+    modalTrees = parkScatterGroup(e.design.attrs);
+    const m = new Mesh(e.built.geometry, modalMaterial!);
+    m.castShadow = m.receiveShadow = true;
+    modalTurntable!.add(m);
+    if (modalTrees) modalTurntable!.add(modalTrees);
+    if (modalMoving) modalTurntable!.add(modalMoving.object);
+    mFrameY = Math.min(e.design.height * 0.42, 1.6);
+    mDist = 1.65 * Math.max(2.1, e.design.height * 1.2 + 1.0, spanOf(e.kind) * 1.15 + 0.8);
+  }
+  modal.hidden = false;
+  $('modalClose').focus();
+  cancelAnimationFrame(modalRaf);
+  mLast = performance.now();
+  modalRaf = requestAnimationFrame(modalTick);
+}
+function closeModal() {
+  modal.hidden = true;
+  cancelAnimationFrame(modalRaf);
+  modalMoving = null;
+  modalTrees?.traverse((o) => (o as Mesh).geometry?.dispose()); // the trees own their geometry; the model mesh shares the registry's
+  modalTrees = null;
+  modalTurntable?.clear();
+}
+function modalTick(now: number) {
+  if (modal.hidden || !modalRenderer) return;
+  const dt = Math.min(0.1, (now - mLast) / 1000); mLast = now;
+  if ($<HTMLInputElement>('modalSpin').checked && !mDragging && !reduceMotion && now - mIdleSince > 1500) mYaw += dt * 0.35;
+  const w = modalCanvas.clientWidth, h = modalCanvas.clientHeight;
+  if (modalCanvas.width !== Math.floor(w * modalRenderer.getPixelRatio()) || modalCanvas.height !== Math.floor(h * modalRenderer.getPixelRatio())) {
+    modalRenderer.setSize(w, h, false);
+    modalCam!.aspect = w / Math.max(1, h);
+    modalCam!.updateProjectionMatrix();
+  }
+  target.set(0, mFrameY, 0);
+  modalCam!.position.set(Math.sin(mYaw) * Math.cos(mPitch) * mDist, mFrameY + Math.sin(mPitch) * mDist, Math.cos(mYaw) * Math.cos(mPitch) * mDist);
+  modalCam!.lookAt(target);
+  const l = modalLight!;
+  l.fixedHour = state.hour;
+  l.update(state.hour, target, mDist);
+  modalScene!.background = l.sky;
+  const night = state.hour < 6.5 || state.hour > 18.5;
+  modalBenchMat!.color.set(night ? MAT_NIGHT : MAT_DAY);
+  modalMoving?.update(state.hour + now / 20000, nightUniform.value); // a game hour is 20 s, as in the city
+  modalRenderer.render(modalScene!, modalCam!);
+  modalRaf = requestAnimationFrame(modalTick);
+}
+$('modalClose').onclick = closeModal;
+$('modalBack').onclick = closeModal;
+window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !modal.hidden) closeModal(); });
+modalCanvas.addEventListener('pointerdown', (ev) => { mDragging = true; mLastX = ev.clientX; mLastY = ev.clientY; modalCanvas.setPointerCapture(ev.pointerId); });
+modalCanvas.addEventListener('pointermove', (ev) => {
+  if (!mDragging) return;
+  mYaw -= (ev.clientX - mLastX) * 0.01;
+  mPitch = Math.max(0.08, Math.min(1.3, mPitch + (ev.clientY - mLastY) * 0.006));
+  mLastX = ev.clientX; mLastY = ev.clientY; mIdleSince = performance.now();
+});
+modalCanvas.addEventListener('pointerup', () => { mDragging = false; });
+modalCanvas.addEventListener('wheel', (ev) => { ev.preventDefault(); mDist = Math.max(1.2, Math.min(30, mDist * (ev.deltaY > 0 ? 1.1 : 0.9))); }, { passive: false });
+// a cell opens the modal; the anchor keeps its href so middle-click still opens the viewer
+$('mx').addEventListener('click', (ev) => {
+  const a = (ev.target as HTMLElement).closest<HTMLElement>('a[data-cell]');
+  if (!a) return;
+  ev.preventDefault();
+  openModal(a.dataset.cell!);
+});
+
 renderToolbar();
 setHour(state.hour);
 renderMatrix();
+if (state.open) openModal(state.open); // ?open=<design key>: start with the modal up
 
 /** For headless checks and the console. */
 (window as unknown as { compare: object }).compare = {
   rows: () => visibleRows().map((r) => `${r.kind.kindId}:${r.level.level}`),
   authors: () => authors,
   setHour,
+  openModal,
   thumbsReady: () => pending === 0,
 };
