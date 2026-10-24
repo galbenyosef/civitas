@@ -20,6 +20,8 @@ export interface EngineOpts {
   storage?: Store | null;
   create?: () => AudioContext;
   fetch?: (url: string) => Promise<{ ok: boolean; arrayBuffer(): Promise<ArrayBuffer> }>;
+  /** the URL of a recording file named in the manifest (files/<name>.opus); the client passes the bundler's resolver (urls.ts) */
+  url?: (file: string) => string | undefined;
 }
 
 export const clampVolume = (v: number, fallback = DEFAULT_VOLUME) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback);
@@ -42,7 +44,7 @@ export class AudioEngine {
   master: GainNode | null = null;
   buses = {} as Record<BusId, GainNode>;
   volume: number; muted: boolean; chipSeen: boolean;
-  /** true once the context exists and any recordings have been tried */
+  /** true once the context exists (recordings load lazily, the first time a voice is wanted) */
   ready = false;
   /** how many voices are sounding now (beds, events, the ridden vehicle) */
   active = 0;
@@ -52,13 +54,19 @@ export class AudioEngine {
   private listeners = new Set<() => void>();
   private onStart = new Set<() => void>();
   private noises = new Map<string, AudioBuffer>();
-  private samples = new Map<string, AudioBuffer>();
+  /** decoded takes of each voice, filled as they arrive */
+  private takes = new Map<string, AudioBuffer[]>();
+  /** voices whose files have been asked for (once; a failed file is not asked again) */
+  private asked = new Set<string>();
+  private waiting = new Map<string, ((b: AudioBuffer) => void)[]>();
+  private resolveUrl: (file: string) => string | undefined;
   private armed = false;
 
   constructor(opts: EngineOpts = {}) {
     this.store = opts.storage === undefined ? safeLocal() : opts.storage;
     this.make = opts.create ?? (() => new (window.AudioContext ?? (window as any).webkitAudioContext)({ latencyHint: 'playback' }));
     this.fetcher = opts.fetch ?? (typeof fetch === 'function' ? (u) => fetch(u) : undefined);
+    this.resolveUrl = opts.url ?? ((f) => `audio/${f}`);
     const p = readPrefs(this.store);
     this.volume = p.volume; this.muted = p.muted; this.chipSeen = p.chipSeen;
   }
@@ -94,7 +102,8 @@ export class AudioEngine {
       const levels: Record<BusId, number> = { ambience: 0.9, vehicles: 0.8, ui: 0.7 };
       for (const id of Object.keys(levels) as BusId[]) { const b = c.createGain(); b.gain.value = levels[id]; b.connect(master); this.buses[id] = b; }
       this.applyGain(true);
-      void this.loadSamples().then(() => { this.ready = true; for (const f of this.onStart) f(); });
+      this.ready = true; // recordings are fetched and decoded in the background when a voice first wants one; synthesis plays until then
+      for (const f of this.onStart) f();
     }
     if (this.ctx.state !== 'running' && !this.muted) void this.ctx.resume();
   }
@@ -103,7 +112,7 @@ export class AudioEngine {
   /** the context's clock, 0 before it exists */
   get now() { return this.ctx?.currentTime ?? 0; }
 
-  /** called once the context and any recordings are ready */
+  /** called once the context is ready */
   whenReady(f: () => void) { if (this.ready) f(); else this.onStart.add(f); }
   onChange(f: () => void) { this.listeners.add(f); return () => void this.listeners.delete(f); }
 
@@ -179,19 +188,47 @@ export class AudioEngine {
     this.noises.set(kind, buf);
     return buf;
   }
-  /** The decoded recording for a voice, or null when it has none (or it did not load). */
-  sample(id: string): AudioBuffer | null { return this.samples.get(id) ?? null; }
+  /**
+   * A decoded recording for a voice (one of its takes, chosen by `pick` 0..1), or null while none has loaded or the voice has no
+   * file. The first call for a voice starts fetching and decoding its takes in the background (decodeAudioData runs off the main
+   * thread); the caller plays synthesis, or nothing, until they arrive.
+   */
+  sample(id: string, pick = 0): AudioBuffer | null {
+    const def = VOICES[id];
+    if (!def?.takes?.length) return null;
+    if (!this.asked.has(id)) this.ask(id);
+    const have = this.takes.get(id);
+    return have?.length ? have[Math.min(have.length - 1, Math.floor(pick * have.length))] : null;
+  }
+  /** call `f` with a take as soon as the voice has one (now, if it already does); never when the files are missing */
+  whenSample(id: string, f: (b: AudioBuffer) => void) {
+    const b = this.sample(id, 0.5);
+    if (b) { f(b); return; }
+    if (!VOICES[id]?.takes?.length) return;
+    (this.waiting.get(id) ?? this.waiting.set(id, []).get(id)!).push(f);
+  }
+  /** how many takes of a voice are decoded now */
+  loaded(id: string) { return this.takes.get(id)?.length ?? 0; }
 
-  private async loadSamples() {
-    const c = this.ctx, f = this.fetcher;
+  private ask(id: string) {
+    this.asked.add(id);
+    const c = this.ctx, f = this.fetcher, files = VOICES[id].takes ?? [];
     if (!c || !f) return;
-    await Promise.all(Object.values(VOICES).filter((v) => v.file).map(async (v) => {
-      try {
-        const res = await f(v.file!);
-        if (!res.ok) return;
-        this.samples.set(v.id, await c.decodeAudioData(await res.arrayBuffer()));
-      } catch { /* not there, or not decodable: the voice is synthesised */ }
-    }));
+    for (const file of files) {
+      void (async () => {
+        try {
+          const url = this.resolveUrl(file);
+          if (!url) return;
+          const res = await f(url);
+          if (!res.ok) return;
+          const buf = await c.decodeAudioData(await res.arrayBuffer());
+          const have = this.takes.get(id) ?? this.takes.set(id, []).get(id)!;
+          have.push(buf);
+          const w = this.waiting.get(id);
+          if (w) { this.waiting.delete(id); for (const cb of w) cb(buf); }
+        } catch { /* not there, or not decodable: the voice stays synthesised (or silent, if it has no synthesis) */ }
+      })();
+    }
   }
 }
 

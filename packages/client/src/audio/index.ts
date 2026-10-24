@@ -3,6 +3,7 @@ import { Ambience, type AmbSources } from './ambience';
 import { FpvSound, type FpvSources } from './fpv';
 import { fire } from './voices';
 import { bindControls, bindMuteKey } from './controls';
+import { clipUrl } from './urls';
 
 export { AudioEngine } from './engine';
 export type { AmbSources } from './ambience';
@@ -19,7 +20,7 @@ export interface AudioHooks {
 
 /** Everything audio, wired for the client (main.ts makes one). Nothing here runs a sound before the first gesture. */
 export class Audio {
-  readonly engine = new AudioEngine();
+  readonly engine = new AudioEngine({ url: clipUrl });
   readonly ambience: Ambience;
   readonly fpv: FpvSound;
   private uiAt: Record<string, number> = {};
@@ -46,6 +47,9 @@ export class Audio {
     this.uiAt[id] = t;
     fire(this.engine, `ui-${id}`, { seed: (this.n++ * 7919 + this.salt) | 0 });
   }
+
+  /** a firework shell (render/fireworks.ts), `at` seconds before it launches */
+  firework(x: number, z: number, at: number, size: number) { this.ambience.firework(x, z, at, size); }
 
   /** once a frame, after the camera and the vehicles have moved */
   frame(now: number) {

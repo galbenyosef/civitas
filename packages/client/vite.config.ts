@@ -73,7 +73,7 @@ function offlinePwa(outDir: string): Plugin {
     },
     closeBundle() {
       const dir = resolve(here, outDir);
-      const files = walk(dir).map((f) => relative(dir, f).split('\\').join('/')).filter((f) => f !== 'sw.js' && !f.endsWith('.map')).sort();
+      const files = walk(dir).map((f) => relative(dir, f).split('\\').join('/')).filter((f) => f !== 'sw.js' && !f.endsWith('.map') && !f.endsWith('.opus')).sort(); // the recordings (src/audio/files, up to 8 MB) are cached when first played, by the worker's fetch handler, not at install
       const hash = createHash('sha1');
       for (const f of files) hash.update(f).update(readFileSync(join(dir, f)));
       const list = ['./', ...files.map((f) => `./${f}`)];

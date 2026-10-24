@@ -40,6 +40,8 @@ export class Fireworks {
   readonly group = new Group();
   private shells: Shell[] = [];
   private shows = 0;
+  /** called for every shell of a show as it is scheduled: (tile x, tile z, seconds from now until it launches, size); the sound (audio/) listens */
+  onShell: ((x: number, z: number, at: number, size: number) => void) | null = null;
 
   constructor() { this.group.renderOrder = 30; }
 
@@ -58,6 +60,7 @@ export class Fireworks {
       const apex = APEX_MIN + h(6) * (APEX_MAX - APEX_MIN) + size;
       const shape: Shape = h(7) < 0.42 ? 'peony' : h(7) < 0.64 ? 'willow' : h(7) < 0.82 ? 'ring' : 'crackle';
       const n = Math.round((shape === 'ring' ? 46 : shape === 'willow' ? 90 : 70) * (0.75 + h(8) * 0.6));
+      this.onShell?.(x0, z0, at, size);
       this.shells.push(this.shell(h, at, x0, z0, x0 + (h(9) - 0.5) * 2, apex, z0 + (h(10) - 0.5) * 2, shape, n));
     }
   }

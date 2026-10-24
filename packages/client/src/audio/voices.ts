@@ -69,21 +69,51 @@ function finish(eng: AudioEngine, rack: Rack, out: GainNode, fade = 1.2) {
 
 /** A recording as a bed: looped from a random point at a slightly different rate, through the same level and a tone filter. */
 function sampleBed(eng: AudioEngine, id: string, buf: AudioBuffer, seed: number, dest: AudioNode): Bed {
-  const c = eng.ctx!, rack = new Rack();
+  const c = eng.ctx!, rack = new Rack(), level = VOICES[id]?.level ?? 1;
   const s = c.createBufferSource(); s.buffer = buf; s.loop = true; s.playbackRate.value = vary(1, 0.03, r(seed, 3));
   s.start(0, r(seed, 4) * buf.duration); rack.nodes.push(s);
   const out = gainNode(c, 0), f = filt(c, 'lowpass', 18000, 0.5);
   s.connect(f); f.connect(out); out.connect(dest);
-  void id;
-  return { out, tune: (lv, tone, tc) => { out.gain.setTargetAtTime(lv, c.currentTime, tc); f.frequency.setTargetAtTime(lerp(2500, 18000, tone), c.currentTime, tc); }, stop: () => finish(eng, rack, out) };
+  return { out, tune: (lv, tone, tc) => { out.gain.setTargetAtTime(lv * level, c.currentTime, tc); f.frequency.setTargetAtTime(lerp(2500, 18000, tone), c.currentTime, tc); }, stop: () => finish(eng, rack, out) };
 }
 
-/** Make the bed for a manifest id; null when the voice budget is spent. */
-export function makeBed(eng: AudioEngine, id: 'traffic' | 'wind' | 'crowd' | 'industry' | 'water', seed: number): Bed | null {
+/** every voice that is a bed: the five with a synthesised recipe, and the second pass's recordings */
+export type BedId = 'traffic' | 'wind' | 'crowd' | 'industry' | 'water' | 'rain-light' | 'rain-heavy' | 'market' | 'pub' | 'playground' | 'stadium' | 'fountain';
+export const BEDS: readonly BedId[] = ['traffic', 'wind', 'crowd', 'industry', 'water', 'rain-light', 'rain-heavy', 'market', 'pub', 'playground', 'stadium', 'fountain'];
+
+/**
+ * Make the bed for a manifest id; null when the voice budget is spent (or a recording-only voice has no file). A voice with a
+ * recording plays it; one whose recording has not decoded yet plays its synthesis (a recording-only one stays silent) and
+ * cross-fades to the recording over about two seconds when it arrives. Never decodes on the tick: that is the engine's job.
+ */
+export function makeBed(eng: AudioEngine, id: BedId, seed: number): Bed | null {
+  const def = VOICES[id], dest = eng.buses[def.bus];
+  const hasTakes = !!def.takes?.length;
+  if (def.synth === false && !hasTakes) return null;
   if (!eng.take()) return null;
-  const c = eng.ctx!, dest = eng.buses[VOICES[id].bus], p = P(id), rack = new Rack();
-  const rec = eng.sample(id);
+  const rec = eng.sample(id, r(seed, 6));
   if (rec) return sampleBed(eng, id, rec, seed, dest);
+  let cur: Bed | null = def.synth === false ? null : synthBed(eng, id, seed, dest);
+  if (!hasTakes) return cur;
+  let last = { lv: 0, tone: 0.5, tc: 1 }, stopped = false;
+  eng.whenSample(id, (buf) => {
+    if (stopped || !eng.ctx) return;
+    if (cur && !eng.take()) return; // no voice to spare for the recording: keep the synthesis
+    const next = sampleBed(eng, id, buf, seed, dest);
+    next.tune(last.lv, last.tone, 0.7);
+    const old = cur; cur = next;
+    old?.stop(); // fades out over 1.2 s and gives its voice back; the recording has taken another (or the one reserved above)
+  });
+  return {
+    get out() { return cur?.out ?? (null as unknown as GainNode); },
+    tune: (lv, tone, tc) => { last = { lv, tone, tc }; cur?.tune(lv, tone, tc); },
+    stop: () => { stopped = true; if (cur) cur.stop(); else eng.give(); },
+  } as Bed;
+}
+
+/** The synthesised bed for the five voices that have a recipe (its voice is taken by makeBed). */
+function synthBed(eng: AudioEngine, id: BedId, seed: number, dest: AudioNode): Bed {
+  const c = eng.ctx!, p = P(id), rack = new Rack();
   const out = gainNode(c, 0);
   out.connect(dest);
   let f: BiquadFilterNode, lo: number, hi: number;
@@ -159,13 +189,13 @@ function sink(eng: AudioEngine, bus: BusId, pan = 0): AudioNode {
 }
 
 function playSample(eng: AudioEngine, id: string, o: Shot): boolean {
-  const buf = eng.sample(id);
+  const buf = eng.sample(id, r(o.seed, 5));
   if (!buf) return false;
   const c = eng.ctx!, def = VOICES[id];
   if (!eng.take(buf.duration)) return true;
   const s = c.createBufferSource(); s.buffer = buf; s.playbackRate.value = vary(1, 0.05, r(o.seed, 3));
-  const g = gainNode(c, (o.gain ?? 1) * vary(1, 0.1, r(o.seed, 4)));
-  s.connect(g); g.connect(sink(eng, def.bus, o.pan));
+  const g = gainNode(c, (o.gain ?? 1) * (def.level ?? 1) * vary(1, 0.1, r(o.seed, 4)));
+  s.connect(g); g.connect(sink(eng, def.bus, o.pan ?? (def.bus === 'ui' ? 0 : r(o.seed, 21) * 1.2 - 0.6)));
   s.start(c.currentTime + (o.delay ?? 0));
   return true;
 }
@@ -192,13 +222,15 @@ function burst(eng: AudioEngine, dest: AudioNode, type: BiquadFilterType, freq: 
   s.start(t0, r(seed, 9) * 5); s.stop(t0 + len + 0.05);
 }
 
-export type EventId = 'bird' | 'owl' | 'bell' | 'bell-deep' | 'horn' | 'beep' | 'ui-click' | 'ui-place' | 'ui-refuse' | 'ui-undo' | 'fx-hiss' | 'fx-stopbell' | 'fx-chime' | 'fx-joint';
+export type EventId = 'bird' | 'owl' | 'bell' | 'bell-deep' | 'horn' | 'beep' | 'ui-click' | 'ui-place' | 'ui-refuse' | 'ui-undo' | 'fx-hiss' | 'fx-stopbell' | 'fx-chime' | 'fx-joint'
+  | 'gust' | 'thunder' | 'footsteps' | 'siren' | 'siren-fire' | 'seagulls' | 'pigeons' | 'dog' | 'bell-peal' | 'bike-bell' | 'bin-lorry' | 'station-chime' | 'heli-over' | 'plane-over' | 'boat-horn' | 'fireworks' | 'hammer' | 'drill' | 'lawnmower';
 
 /** Fire an event voice. Skipped (silently) when the budget is spent or the context is not running. */
 export function fire(eng: AudioEngine, id: EventId, o: Shot): void {
   const c = eng.ctx;
   if (!c || !eng.ready || eng.muted || c.state !== 'running') return;
   if (playSample(eng, id, o)) return;
+  if (VOICES[id].synth === false) return; // a recording-only voice, and the recording has not arrived (or is missing): silence
   const def = VOICES[id], p = def.params, k = o.gain ?? 1, sd = o.seed;
   const t = c.currentTime + (o.delay ?? 0);
   const gain = p.gain * k * vary(1, 0.15, r(sd, 4));
@@ -336,6 +368,17 @@ export function ringBell(eng: AudioEngine, deep: boolean, seed: number, strikes:
   const n = clamp(Math.round(strikes), 1, 6), every = deep ? 3.6 : 2.4;
   if (!eng.take(n * every + p.decay * 1.4)) return;
   const dest = sink(eng, def.bus, pan);
+  if (eng.sample(id, 0.5)) { // recorded strikes: a take for each, at its own pitch and strength, spaced as the synthesis spaces them
+    for (let i = 0; i < n; i++) {
+      const sd = seed * 31 + i, buf = eng.sample(id, r(sd, 5));
+      if (!buf) break;
+      const src = c.createBufferSource(); src.buffer = buf; src.playbackRate.value = vary(1, 0.04, r(sd, 3));
+      const g = gainNode(c, k * (def.level ?? 1) * vary(1, 0.18, r(sd, 4)) * (i === 0 ? 1 : 0.9));
+      src.connect(g); g.connect(dest);
+      src.start(c.currentTime + 0.05 + i * every * vary(1, 0.06, r(sd, 1)));
+    }
+    return;
+  }
   const ratios = [0.5, 1, 1.183, 1.506, 2, 2.514], amps = [0.7, 1, 0.6, 0.5, 0.35, 0.2], decays = [1.4, 1, 0.7, 0.5, 0.35, 0.25];
   const t0 = c.currentTime + 0.05;
   for (let i = 0; i < n; i++) {
@@ -355,16 +398,52 @@ export type RideKind = 'car' | 'truck' | 'bus' | 'train' | 'metro' | 'boat' | 'p
 
 /** The sound of the vehicle the player is riding in: a bed on the vehicles bus whose pitch, cutoff and tremor follow its speed (0..1). */
 export function makeRide(eng: AudioEngine, kind: RideKind, seed: number): Ride | null {
+  const id = `veh-${kind}`, takes = VOICES[id].takes;
+  const rec = eng.sample(id, r(seed, 6));
+  if (rec) { // a recording is ready: the engine sound is the file, pitched and loudened with the speed
+    if (!eng.take()) return null;
+    const c = eng.ctx!, out = gainNode(c, 0);
+    out.connect(eng.buses.vehicles);
+    return recRide(eng, rec, seed, out, VOICES[id].level ?? 1);
+  }
+  const synth = synthRide(eng, kind, seed);
+  if (!synth || !takes?.length) return synth;
+  // not decoded yet: the synthesis runs, and when the recording arrives the two cross-fade over about two seconds
+  const c = eng.ctx!, mix = gainNode(c, 1), sf = gainNode(c, 1), rf = gainNode(c, 0);
+  mix.connect(eng.buses.vehicles); synth.out.disconnect(); synth.out.connect(sf); sf.connect(mix); rf.connect(mix);
+  let speed = 0, inner: Ride | null = null, stopped = false, synthDone = false;
+  eng.whenSample(id, (buf) => {
+    if (stopped || !eng.ctx || !eng.take()) return; // no voice to spare for the recording: keep the synthesis
+    const t = c.currentTime;
+    inner = recRide(eng, buf, seed, rf, VOICES[id].level ?? 1);
+    inner.set(speed);
+    sf.gain.setTargetAtTime(0, t, 0.5);
+    setTimeout(() => { if (!synthDone) { synthDone = true; synth.stop(); } }, 2500); // the synthesis lets go of its voice
+  });
+  return {
+    out: mix,
+    set: (v) => { speed = v; if (!synthDone) synth.set(v); inner?.set(v); },
+    stop: () => { stopped = true; inner?.stop(); if (!synthDone) { synthDone = true; synth.stop(); } setTimeout(() => { try { mix.disconnect(); } catch { /* gone */ } }, 2500); },
+  };
+}
+
+/** A recording as the ridden vehicle: looped from its own point, its pitch and level following the speed. The caller has taken its voice. */
+function recRide(eng: AudioEngine, buf: AudioBuffer, seed: number, out: GainNode, level: number): Ride {
+  const c = eng.ctx!, rack = new Rack(), now = () => c.currentTime;
+  const s = c.createBufferSource(); s.buffer = buf; s.loop = true; s.start(0, r(seed, 4) * buf.duration); rack.nodes.push(s);
+  s.connect(out);
+  return {
+    out,
+    set: (v) => { s.playbackRate.setTargetAtTime(0.8 + 0.5 * v, now(), 0.2); out.gain.setTargetAtTime(level * (0.5 + 0.5 * v), now(), 0.2); },
+    stop: () => finish(eng, rack, out, 0.8),
+  };
+}
+
+function synthRide(eng: AudioEngine, kind: RideKind, seed: number): Ride | null {
   if (!eng.take()) return null;
   const c = eng.ctx!, dest = eng.buses.vehicles, rack = new Rack();
   const out = gainNode(c, 0); out.connect(dest);
   const now = () => c.currentTime;
-  const rec = eng.sample(`veh-${kind}`);
-  if (rec) {
-    const s = c.createBufferSource(); s.buffer = rec; s.loop = true; s.start(0, r(seed, 4) * rec.duration); rack.nodes.push(s);
-    s.connect(out);
-    return { out, set: (v) => { s.playbackRate.setTargetAtTime((0.8 + 0.5 * v), now(), 0.2); out.gain.setTargetAtTime(0.5 + 0.5 * v, now(), 0.2); }, stop: () => finish(eng, rack, out, 0.8) };
-  }
   if (kind === 'car' || kind === 'truck' || kind === 'bus') {
     const p = P(`veh-${kind}`);
     const saw = osc(c, rack, 'sawtooth', p.f0), sub = osc(c, rack, 'triangle', p.f0 / 2);

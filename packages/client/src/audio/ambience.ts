@@ -1,6 +1,7 @@
 import { hash2, Terrain, terrainOf, isRoad, zoneOf, familyOf, Zone } from '@msimcity/shared';
 import type { AudioEngine } from './engine';
-import { fire, makeBed, ringBell, type Bed } from './voices';
+import { fire, makeBed, ringBell, type Bed, type BedId } from './voices';
+import { VOICES } from './manifest';
 
 /**
  * The ambient mix (docs/audio.md). Every 250 ms (never per frame) it reads what the client already knows: the vehicles
@@ -23,8 +24,18 @@ export interface AmbSources {
 }
 
 /** what the tile scan found round the camera, as shares of the tiles sampled (0..1) */
-export interface Scan { res: number; com: number; ind: number; park: number; water: number; road: number; bell: number; bellDeep: number; cars: number; walkers: number }
-export const newScan = (): Scan => ({ res: 0, com: 0, ind: 0, park: 0, water: 0, road: 0, bell: 0, bellDeep: 0, cars: 0, walkers: 0 });
+export interface Scan {
+  res: number; com: number; ind: number; park: number; water: number; road: number; bell: number; bellDeep: number; cars: number; walkers: number;
+  /** counts of the sampled tiles that are a school or nursery, a stadium, a fire station, a police station, a builders' depot, a fountain */
+  school: number; stadium: number; fire: number; police: number; builders: number; fountain: number;
+}
+export const newScan = (): Scan => ({ res: 0, com: 0, ind: 0, park: 0, water: 0, road: 0, bell: 0, bellDeep: 0, cars: 0, walkers: 0, school: 0, stadium: 0, fire: 0, police: 0, builders: 0, fountain: 0 });
+
+/** kind ids that give a place its own sound (the second pass): which Scan count each raises */
+const SPOT_KIND = new Map<number, 'school' | 'stadium' | 'fire' | 'police' | 'builders' | 'fountain'>([
+  [101, 'school'], [102, 'school'], [103, 'school'], [67, 'stadium'], [186, 'stadium'], [199, 'stadium'],
+  [50, 'fire'], [51, 'fire'], [52, 'fire'], [46, 'police'], [47, 'police'], [48, 'police'], [49, 'police'], [54, 'builders'], [55, 'builders'], [144, 'fountain'],
+]);
 
 /** kind ids that ring the hour: the churchyard (151) and the Houses of Parliament (96) */
 const BELL_KIND = 151, BELL_DEEP_KIND = 96;
@@ -43,6 +54,7 @@ export function scanAround(src: AmbSources, cx: number, cz: number, dist: number
   const rad = Math.max(6, Math.min(24, dist * 0.5)), step = Math.max(1, Math.floor(rad / 7));
   let n = 0, res = 0, com = 0, ind = 0, park = 0, water = 0, road = 0, bell = 0, deep = 0;
   const x0 = Math.floor(cx), z0 = Math.floor(cz);
+  out.school = out.stadium = out.fire = out.police = out.builders = out.fountain = 0;
   for (let dz = -rad; dz <= rad; dz += step) {
     for (let dx = -rad; dx <= rad; dx += step) {
       const x = x0 + Math.round(dx), z = z0 + Math.round(dz), t = src.tileAt(x, z);
@@ -54,6 +66,8 @@ export function scanAround(src: AmbSources, cx: number, cz: number, dist: number
       if (z4 === 0) continue;
       const id = src.kindIdAt(x, z), fam = familyOf(id);
       if (id === BELL_KIND) bell++; else if (id === BELL_DEEP_KIND) deep++;
+      const spot = SPOT_KIND.get(id);
+      if (spot) out[spot]++;
       if (fam === Zone.Residential) res++;
       else if (fam === Zone.Commercial || fam === Zone.Office) com++;
       else if (fam === Zone.Industrial || (id >= POWER_FIRST && id <= POWER_LAST)) ind++;
@@ -76,11 +90,19 @@ export function scanAround(src: AmbSources, cx: number, cz: number, dist: number
 }
 
 export interface Target { level: number; tone: number }
-export interface Mix { traffic: Target; wind: Target; crowd: Target; industry: Target; water: Target }
-export const newMix = (): Mix => ({ traffic: { level: 0, tone: 0 }, wind: { level: 0, tone: 0 }, crowd: { level: 0, tone: 0 }, industry: { level: 0, tone: 0 }, water: { level: 0, tone: 0 } });
+export type Mix = Record<BedId, Target>;
+/** the five beds that always run (they have a synthesised recipe); the rest start when their level is wanted and stop after a while at zero */
+const ALWAYS: readonly BedId[] = ['traffic', 'wind', 'crowd', 'industry', 'water'];
+export const newMix = (): Mix => {
+  const m = {} as Mix;
+  for (const id of ['traffic', 'wind', 'crowd', 'industry', 'water', 'rain-light', 'rain-heavy', 'market', 'pub', 'playground', 'stadium', 'fountain'] as BedId[]) m[id] = { level: 0, tone: 0.5 };
+  return m;
+};
+/** a window of the day: 1 between `a` and `b` o'clock, easing over an hour at each end (a > b wraps midnight) */
+const during = (h: number, a: number, b: number) => (a <= b ? smooth(a - 0.5, a + 0.5, h) * (1 - smooth(b - 0.5, b + 0.5, h)) : Math.max(smooth(a - 0.5, a + 0.5, h), 1 - smooth(b - 0.5, b + 0.5, h)));
 
 /** The target level and tone of every bed for a scan, a camera distance and an hour. Pure, so a test can read it. */
-export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: Mix = newMix()): Mix {
+export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: Mix = newMix(), rain = 0): Mix {
   const act = activityAt(hour);
   const near = (full: number, gone: number) => 1 - smooth(full, gone, dist); // 1 close in, 0 zoomed out
   const density = clamp01(s.cars / 45);
@@ -95,8 +117,19 @@ export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: M
   out.industry.tone = 0.3 + 0.5 * Math.min(1, s.ind * 2.5);
   out.water.level = 0.4 * Math.min(1, s.water * 3) * near(100, 330);
   out.water.tone = 0.3 + 0.5 * near(40, 200);
+  // the second pass: places with a bed of their own (recordings only; a bed with no file is never started)
+  out.market.level = 0.35 * smooth(0.1, 0.35, s.com) * Math.sqrt(clamp01(s.walkers / 15)) * during(hour, 8, 17) * near(45, 130);
+  out.pub.level = 0.3 * smooth(0.08, 0.3, s.com) * during(hour, 16.5, 24) * near(40, 110);
+  out.playground.level = 0.4 * Math.min(1, s.school) * during(hour, 8.75, 15.5) * near(30, 100);
+  out.stadium.level = 0.5 * Math.min(1, s.stadium) * during(hour, 13, 22) * near(60, 180);
+  out.fountain.level = 0.35 * Math.min(1, s.fountain) * near(25, 90);
+  // rain comes from the weather hook (Ambience.setWeather): light under 0.6, heavy over 0.4, the two cross-fading between
+  const wet = clamp01(rain) * lerp(1, 0.55, smooth(60, 300, dist));
+  out['rain-light'].level = 0.45 * wet * (1 - smooth(0.4, 0.8, rain));
+  out['rain-heavy'].level = 0.55 * wet * smooth(0.4, 0.8, rain);
   if (map) { // zoomed out to the map: only the wind, thin
     out.traffic.level *= 0.1; out.crowd.level = 0; out.industry.level *= 0.1; out.water.level *= 0.2; out.wind.level = 0.2;
+    out.market.level = out.pub.level = out.playground.level = out.stadium.level = out.fountain.level = 0;
   }
   return out;
 }
@@ -130,7 +163,11 @@ export class Ambience {
   }
   readonly scan = newScan();
   readonly mix = newMix();
-  private beds: Partial<Record<keyof Mix, Bed>> = {};
+  private beds: Partial<Record<BedId, Bed>> = {};
+  /** seconds each optional bed has been wanted at nothing: it is stopped after a while, freeing its voice */
+  private quiet: Partial<Record<BedId, number>> = {};
+  /** the weather hook: rain 0..1. Nothing in the game sets it yet (there is no weather); a future weather system calls setWeather */
+  private rain = 0;
   private made = false;
   private at = 0;
   private n = 0;
@@ -139,6 +176,20 @@ export class Ambience {
   private beepAt = 0;
 
   constructor(private eng: AudioEngine, private src: AmbSources, private salt = (Math.random() * 1e9) | 0) {}
+
+  /** The weather hook: rain 0 (dry) to 1 (a downpour). Starts the rain beds and, over 0.6, the thunder. Not called by anything yet. */
+  setWeather(rain: number) { this.rain = clamp01(rain); }
+
+  /**
+   * A firework shell from the fireworks system (render/fireworks.ts calls this for each shell as a show is scheduled): `at` seconds from now
+   * it launches, and its bang is heard a second or so later, a little later still the further off it is, softer, and to the side it is on.
+   */
+  firework(x: number, z: number, at: number, size: number) {
+    const cam = this.src.camera(), dx = x - cam.x, dz = z - cam.z, d = Math.hypot(dx, dz);
+    const far = 1 - smooth(25, 260 + cam.dist, d);
+    if (far < 0.03) return;
+    fire(this.eng, 'fireworks', { seed: (this.rand() * 1e9) | 0, gain: far * Math.min(1, 0.5 + 0.2 * size), delay: Math.max(0, at) + 1.1 + Math.min(2, d / 150), pan: Math.max(-1, Math.min(1, (dx * cam.rightX + dz * cam.rightZ) / (12 + d * 0.3))) });
+  }
 
   private rand() { return hash2(this.n++, this.salt); }
   private rate(lambda: number, dt: number) { return lambda > 0 && this.rand() < 1 - Math.exp(-lambda * dt); }
@@ -163,15 +214,21 @@ export class Ambience {
     const src = this.src, cam = src.camera(), hour = src.hour(), eng = this.eng;
     if (!this.made) {
       this.made = true;
-      for (const id of ['traffic', 'wind', 'crowd', 'industry', 'water'] as const) {
+      for (const id of ALWAYS) {
         const b = makeBed(eng, id, hash2(this.n++, this.salt));
         if (b) this.beds[id] = b;
       }
     }
     const sc = scanAround(src, cam.x, cam.z, cam.dist, this.scan);
-    const mix = mixFor(sc, cam.dist, hour, cam.map, this.mix);
+    const mix = mixFor(sc, cam.dist, hour, cam.map, this.mix, this.rain);
+    for (const id of Object.keys(mix) as BedId[]) { // the optional beds (recordings only) start when wanted and stop after eight quiet seconds
+      if (ALWAYS.includes(id)) continue;
+      const lv = mix[id].level;
+      if (lv > 0.02 && !this.beds[id] && VOICES[id].takes?.length) { const b = makeBed(eng, id, hash2(this.n++, this.salt)); if (b) this.beds[id] = b; }
+      if (lv < 0.004 && this.beds[id]) { const q = (this.quiet[id] ?? 0) + dt; this.quiet[id] = q; if (q > 8) { this.beds[id]!.stop(); delete this.beds[id]; this.quiet[id] = 0; } } else this.quiet[id] = 0;
+    }
     for (const id in this.beds) {
-      const k = id as keyof Mix, tg = mix[k];
+      const k = id as BedId, tg = mix[k];
       this.beds[k]!.tune(tg.level, tg.tone, 0.5 + 0.7 * hash2(k.length, this.salt)); // each bed glides at its own pace: 1.5 to 3.6 s
     }
     if (cam.map) return;
@@ -184,10 +241,14 @@ export class Ambience {
     if (sc.cars > 5 && cam.dist < 90 && this.rate(0.006 * Math.min(1, sc.cars / 30) * lerp(0.4, 1, activityAt(hour)), dt)) {
       fire(eng, 'horn', { seed: (this.rand() * 1e9) | 0, gain: 0.4 + 0.6 * this.rand() * (1 - smooth(20, 90, cam.dist)) });
     }
+    this.places(sc, cam, hour, dt);
     // the hour: a bell, if one is in the view and it is a striking hour (every third, by day) and has not just rung
     const hf = Math.floor(hour);
     if (this.lastHour >= 0 && hf !== this.lastHour && hf >= 6 && hf <= 21 && hf % 3 === 0 && cam.dist < 140 && (sc.bell > 0 || sc.bellDeep > 0) && now - this.lastBell > 40000) {
       this.lastBell = now;
+      if (hf === 10 || (hf === 18 && sc.bell > 0)) { // a peal at ten and six (in place of the strikes at six) when there is a recording
+        if (VOICES['bell-peal'].takes?.length && sc.bellDeep === 0) { fire(eng, 'bell-peal', { seed: (this.rand() * 1e9) | 0, gain: 1 - smooth(40, 140, cam.dist), pan: this.rand() * 1.2 - 0.6 }); this.lastHour = hf; return; }
+      }
       ringBell(eng, sc.bellDeep > 0, (this.rand() * 1e9) | 0, Math.min(6, hf % 12 || 12), 1 - smooth(40, 140, cam.dist), this.rand() * 1.2 - 0.6);
     }
     this.lastHour = hf;
@@ -202,6 +263,32 @@ export class Ambience {
     }
   }
 
+  /** the second pass's events: each a Poisson clock from the scan and the hour; no file, no sound (fire skips a recording-only voice that has none) */
+  private places(sc: Scan, cam: ReturnType<AmbSources['camera']>, hour: number, dt: number) {
+    const eng = this.eng, d = cam.dist, day = during(hour, 6.5, 20), act = activityAt(hour);
+    const go = (id: Parameters<typeof fire>[1], lambda: number, gain: number, pan?: number) => {
+      if (lambda > 0 && gain > 0.02 && VOICES[id].takes?.length && this.rate(lambda, dt)) fire(eng, id, { seed: (this.rand() * 1e9) | 0, gain, pan: pan ?? this.rand() * 1.6 - 0.8 });
+    };
+    go('gust', 0.045 * smooth(40, 260, d), 0.35 + 0.6 * smooth(60, 300, d));
+    go('footsteps', 0.3 * clamp01(sc.walkers / 12) * act * (1 - smooth(25, 50, d)), 0.35 + 0.65 * this.rand());
+    go('siren', 0.004 * Math.min(1, sc.police) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d))); // a call from a station in the view: the hook for a real response vehicle
+    go('siren-fire', 0.003 * Math.min(1, sc.fire) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d)));
+    go('seagulls', 0.05 * Math.min(1, sc.water * 3) * day * (1 - smooth(100, 170, d)), 0.3 + 0.7 * this.rand());
+    go('pigeons', 0.04 * clamp01(sc.park * 4 + sc.com) * day * (1 - smooth(60, 120, d)), 0.3 + 0.7 * this.rand());
+    go('dog', 0.02 * clamp01(sc.res * 2) * during(hour, 7, 21) * (1 - smooth(40, 100, d)), 0.3 + 0.7 * this.rand());
+    go('bike-bell', 0.012 * clamp01(sc.walkers / 8) * clamp01(sc.road * 4) * day * (1 - smooth(25, 55, d)), 0.4 + 0.6 * this.rand());
+    go('bin-lorry', 0.006 * clamp01(sc.res * 2) * during(hour, 6, 10) * (1 - smooth(40, 100, d)), 0.4 + 0.5 * this.rand());
+    go('station-chime', 0.008 * smooth(0.12, 0.4, sc.com) * day * (1 - smooth(30, 70, d)), 0.4 + 0.5 * this.rand());
+    go('heli-over', 0.004 * during(hour, 7, 20) * smooth(50, 120, d), 0.4 + 0.5 * this.rand());
+    go('plane-over', 0.006 * during(hour, 6, 23) * smooth(70, 160, d), 0.4 + 0.5 * this.rand());
+    go('boat-horn', 0.008 * clamp01(sc.water * 4) * (1 - smooth(80, 150, d)), 0.4 + 0.6 * this.rand());
+    const works = Math.min(1, sc.builders) * during(hour, 7.5, 17) * (1 - smooth(25, 80, d));
+    go('hammer', 0.12 * works, 0.4 + 0.6 * this.rand());
+    go('drill', 0.05 * works, 0.4 + 0.6 * this.rand());
+    go('lawnmower', 0.004 * clamp01(sc.res * 3) * during(hour, 10, 17) * (1 - smooth(30, 80, d)), 0.4 + 0.5 * this.rand());
+    go('thunder', 0.02 * smooth(0.6, 0.9, this.rain), 0.5 + 0.5 * this.rand());
+  }
+
   /** drop every bed (the context is going away, or the player left the world) */
-  dispose() { for (const id in this.beds) this.beds[id as keyof Mix]!.stop(); this.beds = {}; this.made = false; }
+  dispose() { for (const id in this.beds) this.beds[id as BedId]!.stop(); this.beds = {}; this.quiet = {}; this.made = false; }
 }
