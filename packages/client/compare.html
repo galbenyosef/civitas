@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Civitas model compare</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%2362d2a2%27/%3E%3Crect x=%273%27 y=%276%27 width=%274%27 height=%277%27 fill=%27%230e1116%27/%3E%3Crect x=%279%27 y=%273%27 width=%274%27 height=%2710%27 fill=%27%230e1116%27/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
+  <style>
+    :root {
+      --bg: #0e1116; --panel: #151a22; --panel2: #1b212b; --line: rgba(255,255,255,0.08); --line2: rgba(255,255,255,0.14);
+      --fg: #e6e9ef; --muted: #8a93a3; --accent: #62d2a2; --draft: #f0b54a;
+      --mat: #23453b; --matline: #3a6858;
+      font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 13px; color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
+    body { display: grid; grid-template-rows: 44px auto 1fr; overflow: hidden; }
+    a { color: var(--accent); }
+    button, select { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    header { display: flex; align-items: center; gap: 16px; padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+    header .brand { font-weight: 600; color: var(--accent); letter-spacing: 0.02em; white-space: nowrap; }
+    header .count { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    header .spacer { flex: 1; }
+    .seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 999px; overflow: hidden; flex: none; }
+    .seg button { border: 0; background: transparent; padding: 5px 12px; cursor: pointer; }
+    .seg button[aria-pressed="true"] { background: rgba(98,210,162,0.18); color: var(--fg); }
+    .seg button[aria-pressed="false"] { color: var(--muted); }
+    header a.back { white-space: nowrap; text-decoration: none; }
+    #hour { width: 110px; accent-color: var(--accent); }
+    #hourVal { font-variant-numeric: tabular-nums; width: 40px; color: var(--muted); }
+
+    #toolbar { display: flex; align-items: center; gap: 16px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+    #toolbar .lbl { color: var(--muted); }
+    .sel { background: transparent; color: inherit; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 2px 6px; font: inherit; }
+    label.check { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); cursor: pointer; font-size: 12px; }
+    #toolbar .note { color: var(--muted); font-size: 12px; }
+
+    #wrap { overflow: auto; min-height: 0; }
+    table.mx { border-collapse: separate; border-spacing: 0; }
+    .mx th, .mx td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: 6px; vertical-align: top; }
+    .mx thead th { position: sticky; top: 0; z-index: 2; background: var(--panel); text-align: center; font-weight: 600; padding: 10px 8px; min-width: 128px; }
+    .mx thead th .n { display: block; font-size: 13px; }
+    .mx thead th .c { display: block; color: var(--muted); font-weight: 400; font-size: 11px; margin-top: 2px; }
+    .mx thead th.rowhead, .mx tbody th.rowhead { left: 0; position: sticky; z-index: 1; background: var(--panel); text-align: left; min-width: 220px; max-width: 220px; border-right: 1px solid var(--line2); }
+    .mx thead th.rowhead { z-index: 3; }
+    .mx tbody th.rowhead { font-weight: 500; padding: 8px; }
+    .mx tbody th.rowhead .kind { display: block; font-weight: 600; }
+    .mx tbody th.rowhead .meta { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; line-height: 1.4; }
+    .mx tbody th.rowhead .tags { display: block; margin-top: 3px; }
+    .mx td.cell { width: 140px; min-width: 140px; background: var(--mat); padding: 0; }
+    .mx td.cell a { display: block; position: relative; aspect-ratio: 1; overflow: hidden; border-radius: 4px; margin: 6px; }
+    .mx td.cell img { width: 100%; height: 100%; display: block; }
+    .mx td.cell .dname { position: absolute; left: 4px; bottom: 3px; right: 4px; font-size: 10px; color: rgba(255,255,255,0.85); text-shadow: 0 1px 2px rgba(0,0,0,0.8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mx td.cell .multi { position: absolute; right: 4px; top: 3px; font-size: 10px; color: #dfe9ff; background: rgba(60, 90, 160, 0.85); border-radius: 3px; padding: 0 4px; }
+    .mx td.cell .dr { position: absolute; left: 4px; top: 3px; font-size: 10px; color: #1b1405; background: var(--draft); border-radius: 3px; padding: 0 4px; }
+    .mx td.none { color: rgba(255,255,255,0.22); text-align: center; font-size: 18px; background: transparent; }
+    .pill { display: inline-block; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line2); color: var(--muted); font-size: 10px; margin: 0 2px 2px 0; }
+    .empty { color: var(--muted); padding: 24px 16px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">civitas model compare</span>
+    <span class="count" id="count"></span>
+    <span class="spacer"></span>
+    <div class="seg" role="group" aria-label="Lighting">
+      <button id="dayBtn" aria-pressed="true">Day</button><button id="nightBtn" aria-pressed="false">Night</button>
+    </div>
+    <input type="range" id="hour" min="0" max="24" step="0.25" value="11" aria-label="Hour of day" /><span id="hourVal"></span>
+    <a class="back" href="/viewer.html">Building viewer</a>
+    <a class="back" href="/">Back to the city</a>
+  </header>
+  <div id="toolbar">
+    <span><span class="lbl">Rows</span> <select id="scope" class="sel">
+      <option value="models">Buildings with model designs</option>
+      <option value="all">Every building</option>
+    </select></span>
+    <span><span class="lbl">Tag</span> <select id="tag" class="sel"></select></span>
+    <label class="check"><input type="checkbox" id="drafts" checked /> Include drafts</label>
+    <span class="note">Across: the model (design author). Down: the building. A cell opens that design in the viewer.</span>
+  </div>
+  <div id="wrap"><table class="mx" id="mx" aria-label="Model comparison matrix"></table></div>
+  <script type="module" src="/src/compare.ts"></script>
+</body>
+</html>

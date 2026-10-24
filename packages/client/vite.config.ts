@@ -101,6 +101,6 @@ export default defineConfig(({ mode }) => ({
   build: {
     target: 'es2022', sourcemap: true,
     outDir: mode === 'offline' ? 'dist-local' : 'dist',
-    rollupOptions: { input: { main: resolve(here, 'index.html'), viewer: resolve(here, 'viewer.html') } },
+    rollupOptions: { input: { main: resolve(here, 'index.html'), viewer: resolve(here, 'viewer.html'), compare: resolve(here, 'compare.html') } },
   },
 }));
