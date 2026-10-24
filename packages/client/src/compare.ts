@@ -74,6 +74,12 @@ const visibleRows = () => rowsAll.filter((r) =>
   r.designs.some((e) => state.drafts || !e.design.draft) &&
   (state.scope === 'all' || MODEL_ROW(r)) &&
   (state.tag === 'all' || !!r.kind.tags?.includes(state.tag)));
+/** columns for the current filter: only authors with at least one design in the visible rows, in the global column order */
+const visibleAuthors = (rows: Row[]) => {
+  const set = new Set<string>();
+  for (const r of rows) for (const e of r.designs) if (state.drafts || !e.design.draft) set.add(authorOf(e));
+  return authors.filter((a) => set.has(a));
+};
 
 // ---------------------------------------------------------------- thumbnails (one small offscreen renderer, re-shot when the light changes)
 
@@ -167,10 +173,11 @@ function renderToolbar() {
 
 function updateCount() {
   const rows = visibleRows();
+  const cols = visibleAuthors(rows);
   const cells = rows.reduce((a, r) => a + r.designs.length, 0);
   $('count').textContent = pending
     ? `shooting ${pending} thumbnails…`
-    : `${rows.length} buildings × ${authors.length} authors · ${cells} designs · catalogue ${CATALOGUE_HASH}${thumbRenderer ? '' : ' · no WebGL: pictures off'}`;
+    : `${rows.length} buildings × ${cols.length} authors · ${cells} designs · catalogue ${CATALOGUE_HASH}${thumbRenderer ? '' : ' · no WebGL: pictures off'}`;
 }
 
 function renderMatrix() {
@@ -181,10 +188,11 @@ function renderMatrix() {
     updateCount();
     return;
   }
+  const cols = visibleAuthors(rows);
   table.innerHTML = `
     <thead><tr>
       <th class="rowhead" scope="col">Building</th>
-      ${authors.map((a) => `<th scope="col"><span class="n">${esc(a === 'original' ? 'original catalogue' : a)}</span><span class="c">${entries.filter((e) => authorOf(e) === a).length} designs</span></th>`).join('')}
+      ${cols.map((a) => `<th scope="col"><span class="n">${esc(a === 'original' ? 'original catalogue' : a)}</span><span class="c">${entries.filter((e) => authorOf(e) === a).length} designs</span></th>`).join('')}
     </tr></thead>
     <tbody>${rows.map((r) => {
       const multi = r.kind.levels.length > 1 || r.level.level > 1;
@@ -195,7 +203,7 @@ function renderMatrix() {
           <span class="meta">${multi ? `level ${r.level.level} · ` : ''}${r.designs.length} design${r.designs.length === 1 ? '' : 's'}</span>
           <span class="tags">${(r.kind.tags ?? []).map((t) => `<span class="pill">${esc(t)}</span>`).join('')}${r.kind.landmark ? '<span class="pill">landmark</span>' : ''}</span>
         </th>
-        ${authors.map((a) => {
+        ${cols.map((a) => {
           const list = byAuthor.get(a);
           if (!list || (!state.drafts && list.every((e) => e.design.draft))) return '<td class="none">—</td>';
           const e = list[0];
