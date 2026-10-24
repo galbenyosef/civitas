@@ -23,6 +23,8 @@ export const demoWsUrl = (id: DemoId) => `${apiBase().replace(/^http/, 'ws')}/de
 
 export interface DemoInfo {
   id: DemoId; name: string; blurb: string; port: number; status: 'stopped' | 'starting' | 'running' | 'stopping' | 'resetting';
+  /** `town`: a sample city on its own map (London), not the 3×3 showcase town; `hero`: its card picture on the home page (DemoDef.hero) */
+  town?: string; hero?: string;
   saved: boolean; snapshot: boolean; citizens?: number; clients?: number; fill?: number; fillPopulation?: number; startHash?: string; error?: string;
 }
 export async function demoList(): Promise<DemoInfo[] | null> {

@@ -306,7 +306,7 @@ export class TestCities {
     const h = e.health, d = DEMO_BY_ID.get(e.demo!)!;
     const fill = h?.fill && !h.ready ? Math.min(1, h.fill.tick / h.fill.of) : undefined;
     return {
-      id: d.id, name: d.name, blurb: d.blurb, sections: d.sections, port: TEST_CITY_BASE_PORT + e.n, status: e.resetting ? 'resetting' : e.status,
+      id: d.id, name: d.name, blurb: d.blurb, sections: d.sections, town: d.town, hero: d.hero, port: TEST_CITY_BASE_PORT + e.n, status: e.resetting ? 'resetting' : e.status,
       saved: existsSync(this.worldFile(e.n)), snapshot: existsSync(this.snapshotFile(d.id)),
       citizens: h?.citizens, clients: h?.clients, dayFrac: h?.dayFrac, fill, fillPopulation: h?.fill?.pop, startHash: h?.startHash,
       startedAt: e.startedAt || undefined, error: e.status === 'stopped' ? e.failed : undefined,

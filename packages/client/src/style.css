@@ -12,7 +12,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); o
 
 #top { position: absolute; top: 0; left: 0; right: 0; height: 40px; display: flex; align-items: center; gap: 18px; padding: 0 14px;
   background: var(--panel); border-bottom: 1px solid var(--line); backdrop-filter: blur(8px); }
-#brand { font-weight: 700; letter-spacing: 0.04em; color: var(--accent); }
+#brand { font-weight: 700; letter-spacing: 0.04em; color: var(--accent); text-decoration: none; }
+/* the home page (landing.ts) is its own plain page: nothing of the game shows, and nothing of it has been loaded */
+body.landing #c, body.landing #ui, body.landing #login { display: none; }
 .stat { color: var(--muted); font-variant-numeric: tabular-nums; }
 .stat b { color: var(--fg); font-weight: 600; }
 #heat { margin-left: auto; }

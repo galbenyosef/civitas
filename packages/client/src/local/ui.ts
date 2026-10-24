@@ -338,6 +338,17 @@ export async function localLogin(game: LocalGame, form: HTMLElement, dialog: Sav
     submit.textContent = 'Play';
   }
   submit.disabled = false;
+  // the home page's "New game from zero" and "Sandbox" (?new=zero, ?new=sandbox): the saves dialog opens on its New game fold, sandbox ticked for the second. The query goes, so a reload is the plain join form.
+  const want = new URLSearchParams(location.search).get('new');
+  if (want !== null) {
+    const q = new URLSearchParams(location.search); q.delete('new');
+    history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`);
+    void dialog.open().then(() => {
+      const fresh = document.querySelector<HTMLDetailsElement>('#savesDlg details.fresh');
+      fresh?.setAttribute('open', '');
+      if (want === 'sandbox') { const box = fresh?.querySelector<HTMLInputElement>('input[type=checkbox]'); if (box) box.checked = true; }
+    });
+  }
 }
 
 // ---- the service worker (phase F) ---------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-# Single image: Node serves the built client and the WebSocket world on one port.
+# Single image: Node serves the built client (/), the offline build (/play/) and the WebSocket world on one port.
 FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -7,7 +7,11 @@ COPY packages/server/package.json packages/server/
 COPY packages/client/package.json packages/client/
 RUN npm ci --no-audit --no-fund
 COPY . .
-RUN npm run build
+# GIT_SHA (a build arg) is the build id on the home page's footer: the image has no .git
+ARG GIT_SHA=
+ENV GIT_SHA=$GIT_SHA
+# the online client (dist/) and the offline build (dist-local/, served under /play/ so the home page can offer the in-browser game)
+RUN npm run build && npm run build:local
 
 FROM node:20-alpine
 WORKDIR /app
@@ -19,6 +23,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages/shared ./packages/shared
 COPY --from=build /app/packages/server ./packages/server
 COPY --from=build /app/packages/client/dist ./packages/client/dist
+COPY --from=build /app/packages/client/dist-local ./packages/client/dist-local
 VOLUME /data
 EXPOSE 8080
 CMD ["npm", "start"]
