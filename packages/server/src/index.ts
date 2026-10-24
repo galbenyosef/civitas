@@ -149,7 +149,7 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
     }));
   }
   if (req.url?.split('?')[0] === '/api/config') {
-    const cfg: ServerConfig = { ...(playAvailable() ? { play: true } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(DEFAULT_DEMO && !CHILD ? { defaultDemo: DEFAULT_DEMO } : {}), ...(DEFAULT_VIEW && !CHILD ? { defaultView: DEFAULT_VIEW } : {}) };
+    const cfg: ServerConfig = { ...(playAvailable() ? { play: true } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(DEFAULT_DEMO && !CHILD ? { defaultDemo: DEFAULT_DEMO, ...(SPECTATE ? { demos: WARM_DEMOS } : {}) } : {}), ...(DEFAULT_VIEW && !CHILD ? { defaultView: DEFAULT_VIEW } : {}) };
     res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
     return res.end(JSON.stringify(cfg));
   }

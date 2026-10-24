@@ -150,8 +150,9 @@ function adaptQuality(dt: number) {
 // page opens (DEFAULT_DEMO); asked before anything connects. A local game or a ?ws= server elsewhere has no such answer.
 const showcase = __LOCAL_ONLY__ || params.has('local') || params.get('ws') ? {} : await serverConfig();
 if (showcase.spectate) document.body.classList.add('spectate'); // no tool bar flashing up before the welcome confirms it
-// a showcase with a default demo shows only that one (the server refuses to start the others): ?demo=<other> opens it like a bare page
-if (showcase.spectate && isDemoId(showcase.defaultDemo) && params.get('demo') && demoOf(params) !== showcase.defaultDemo) {
+// a showcase with a default demo shows only its allowed demos (the default and the warmed and kept cities: the server refuses to start the others):
+// ?demo=<other> opens the default like a bare page
+if (showcase.spectate && isDemoId(showcase.defaultDemo) && params.get('demo') && demoOf(params) !== showcase.defaultDemo && !(showcase.demos ?? []).includes(demoOf(params) ?? '')) {
   params.delete('demo');
   history.replaceState(null, '', `${location.pathname}?${params.size ? params : 'go'}${location.hash}`); // never an empty query: that is the home page
 }
