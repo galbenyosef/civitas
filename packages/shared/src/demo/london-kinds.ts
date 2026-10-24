@@ -210,7 +210,6 @@ export function withKindsTour(tour: readonly string[]): string[] {
  */
 export const LONDON_EXEMPT: Record<string, string> = {
   camp: 'the pioneer camp is a new player\'s first settlers, one per player, on a frontier start; London is a built city',
-  motorway: 'the motorway connections are the road work\'s (docs/roads.md): London\'s M4 and A13 approaches',
   // world landmarks (docs/buildings.md "Landmarks", landmarks-world.ts): their own cities have no demos yet, so none
   // can stand in one; each places only in sandboxes and ?dev clients behind the locked tech node wld1
   ...Object.fromEntries(WORLD_LANDMARKS.map((k) => [k.id,

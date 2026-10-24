@@ -1,7 +1,9 @@
 import type { DemoRect, DemoXY } from './showcase';
-import type { Placed } from '../structures';
+import { placedFromDoor, type Placed } from '../structures';
+import { MOTORWAY_KIND } from '../gateways';
 import { hash2 } from '../noise';
 import { BRIDGE_MAX_SPAN } from '../bridges';
+import { twinRow } from '../roadclass';
 import type { SeaGate } from '../waterways';
 
 /**
@@ -202,7 +204,7 @@ export interface LondonPark { name: string; box: GeoBox; heath?: boolean }
 export const PARKS: LondonPark[] = [
   { name: 'Hyde Park', box: [51.5130, -0.1890, 51.5025, -0.1520] },
   { name: "Regent's Park", box: [51.5350, -0.1650, 51.5230, -0.1450] },
-  { name: "St James's Park", box: [51.5060, -0.1450, 51.5010, -0.1300] },
+  { name: "St James's Park", box: [51.5060, -0.1400, 51.5010, -0.1300] }, // its west edge a tile in from the real one: Piccadilly runs down past it to Hyde Park Corner
   { name: 'Hampstead Heath', box: [51.5720, -0.1800, 51.5550, -0.1500], heath: true },
   { name: 'Battersea Park', box: [51.4825, -0.1650, 51.4755, -0.1490] },
   { name: 'Clapham Common', box: [51.4640, -0.1580, 51.4560, -0.1380], heath: true },
@@ -224,7 +226,8 @@ export const PARKS: LondonPark[] = [
 
 /** Land kept clear of roads and zones: the airfield and the railway corridors (track rows and columns). */
 export const RESERVED: { name: string; rect: DemoRect; airfield?: boolean }[] = [
-  { name: 'Heathrow', rect: [-112, -6, 17, 20], airfield: true },
+  // the runway ends at y 10 (london.ts): the rows south of it are the M4's (MOTORWAYS)
+  { name: 'Heathrow', rect: [-112, -6, 17, 17], airfield: true },
   { name: 'Great Western main line', rect: [-95, -9, 57, 1] },
   { name: 'East Coast main line', rect: [-20, -19, 7, 1] },
   { name: 'East Coast main line', rect: [-14, -41, 1, 23] },
@@ -239,67 +242,82 @@ export const RESERVED: { name: string; rect: DemoRect; airfield?: boolean }[] = 
 /**
  * The main roads, laid first: real arterials as latitude and longitude waypoints, each leg drawn on the tile grid as
  * an L or, when long and slanting, a staircase of legs at least two tiles long. They cross a railway corridor at
- * right angles as a level crossing, stop at water (the bridges carry them over) and run round the parks.
+ * right angles as a level crossing, stop at water (the bridges carry them over) and run round the parks. Each is an
+ * avenue where it has room (londonRoads): `side` 1 lays its twin row on the left of the waypoints' order (traffic keeps
+ * right), -1 on the right; left out, the side with less in the way.
  */
-export interface Arterial { name: string; pts: readonly (readonly [lat: number, lon: number])[] }
+export interface Arterial { name: string; pts: readonly (readonly [lat: number, lon: number])[]; side?: 1 | -1; /** too short to be an avenue: it stays one row */ street?: true }
 export const ARTERIALS: Arterial[] = [
   // north of the river, east-west
-  { name: 'Uxbridge Road, Bayswater Road, Oxford Street, Holborn and Cheapside to Aldgate, Whitechapel and Mile End', pts: [
+  { name: 'Uxbridge Road, Bayswater Road, Oxford Street, Holborn and Cheapside to Aldgate, Whitechapel and Mile End', side: 1, pts: [
     [51.5150, -0.3500], [51.5150, -0.3000], [51.5075, -0.2700], [51.5050, -0.2250], [51.5090, -0.2000], [51.5150, -0.1900],
     [51.5150, -0.0600], [51.5250, -0.0600], [51.5250, -0.0150], [51.5350, -0.0150], [51.5350, 0.0050],
   ] },
   // round the Isle of Dogs, over the West India Docks at the gaps between the basins
-  { name: 'Westferry Road and Manchester Road', pts: [[51.5104, -0.0197], [51.4849, -0.0197], [51.4849, -0.0077], [51.5104, -0.0077]] },
+  // two-lane roads in the real city, and bus line D3's loop: they stay streets
+  { name: 'Westferry Road and Manchester Road', street: true, pts: [[51.5104, -0.0197], [51.4849, -0.0197], [51.4849, -0.0077], [51.5104, -0.0077]] },
   // over the gap between the Royal Victoria and Royal Albert Docks, and along the river south of them
   { name: 'Connaught Bridge', pts: [[51.5149, 0.0523], [51.5059, 0.0523]] },
   { name: 'North Woolwich Road', pts: [[51.5074, 0.0230], [51.5074, 0.0890]] },
   { name: 'Romford Road', pts: [[51.5350, 0.0050], [51.5470, 0.0400], [51.5590, 0.0700], [51.5650, 0.1900]] },
-  { name: 'Marylebone Road, Euston Road, Pentonville Road, City Road, Old Street and Bethnal Green Road', pts: [
+  { name: 'Marylebone Road, Euston Road, Pentonville Road, City Road, Old Street and Bethnal Green Road', side: 1, pts: [
     [51.5225, -0.1750], [51.5225, -0.1330], [51.5300, -0.1330], [51.5300, -0.1060], [51.5250, -0.0900], [51.5250, -0.0600],
   ] },
-  { name: 'The Highway, Commercial Road, East India Dock Road, Barking Road and the A13', pts: [
+  // the A13 runs on east of Dagenham Docks as a motorway (MOTORWAYS), so the avenue ends at the docks' east end
+  { name: 'The Highway, Commercial Road, East India Dock Road, Barking Road and the A13', side: 1, pts: [
     [51.5100, -0.0700], [51.5120, -0.0400], [51.5100, -0.0150], [51.5120, 0.0060], [51.5300, 0.0550], [51.5300, 0.0900],
-    [51.5250, 0.1500], [51.5200, 0.1900],
+    [51.5300, 0.1436],
   ] },
   { name: 'Harrow Road', pts: [[51.5225, -0.1750], [51.5300, -0.2250], [51.5370, -0.2500], [51.5520, -0.2900], [51.5560, -0.3500]] },
   // north of the river, north-south
-  { name: 'Edgware Road', pts: [[51.5150, -0.1600], [51.5225, -0.1700], [51.5300, -0.1850], [51.5470, -0.1940], [51.5580, -0.2130], [51.5920, -0.2300]] },
+  // from the King's Road by Victoria up the east side of Hyde Park through Hyde Park Corner and Marble Arch (each a
+  // roundabout), then north-west as the Edgware Road
+  { name: 'Grosvenor Place, Park Lane and the Edgware Road', side: 1, pts: [
+    [51.4985, -0.1515], [51.5224, -0.1515], [51.5300, -0.1850], [51.5470, -0.1940], [51.5580, -0.2130], [51.5920, -0.2300],
+  ] },
   { name: 'Charing Cross Road, Tottenham Court Road, Camden High Street and Highgate Road', pts: [
     [51.5075, -0.1290], [51.5300, -0.1310], [51.5390, -0.1420], [51.5500, -0.1410], [51.5920, -0.1450],
   ] },
   { name: 'St John Street, Upper Street and Holloway Road', pts: [
     [51.5150, -0.1040], [51.5320, -0.1060], [51.5460, -0.1040], [51.5650, -0.1350], [51.5920, -0.1500],
   ] },
-  { name: 'Bishopsgate, Kingsland Road and Stoke Newington High Street', pts: [
-    [51.5090, -0.0890], [51.5260, -0.0890], [51.5260, -0.0780], [51.5480, -0.0750], [51.5620, -0.0730], [51.5920, -0.0710],
+  // Bishopsgate up to City Road's corner at Old Street; Shoreditch High Street north from Old Street a little east,
+  // where the Old Street roundabout is (londonRoads: City Road's corner leaves no straight arm at the real one)
+  { name: 'Bishopsgate', pts: [[51.5090, -0.0890], [51.5250, -0.0890]] },
+  { name: 'Shoreditch High Street, Kingsland Road and Stoke Newington High Street', side: -1, pts: [
+    [51.5256, -0.0772], [51.5480, -0.0772], [51.5620, -0.0730], [51.5920, -0.0710],
   ] },
   { name: 'Cambridge Heath Road and Mare Street', pts: [[51.5250, -0.0600], [51.5450, -0.0560], [51.5620, -0.0560], [51.5920, -0.0600]] },
   { name: 'The North Circular', pts: [
-    [51.4890, -0.2870], [51.5100, -0.2880], [51.5300, -0.2930], [51.5550, -0.2500], [51.5760, -0.2230], [51.5920, -0.2100],
+    [51.4925, -0.2870], [51.5100, -0.2880], [51.5300, -0.2930], [51.5550, -0.2500], [51.5760, -0.2230], [51.5920, -0.2100],
   ] },
   // west and south-west
-  // from the Charing Cross Road along Coventry Street, past Piccadilly Circus (london.ts), then Piccadilly proper
-  { name: 'Coventry Street, Piccadilly, Knightsbridge, Kensington High Street, Hammersmith Road and Chiswick High Road', pts: [
-    [51.5100, -0.1290], [51.5100, -0.1340], [51.5100, -0.1515], [51.5030, -0.1515], [51.5030, -0.1890], [51.5010, -0.1930], [51.4925, -0.2235],
-    [51.4925, -0.2570], [51.4890, -0.2870], [51.4870, -0.3050],
+  // from the Charing Cross Road along Coventry Street, past Piccadilly Circus (london.ts), then Piccadilly proper, down
+  // to Hyde Park Corner (a tile row south of the real line, so the Circus fits between it and Oxford Street) and west as
+  // Knightsbridge; at Chiswick the Great West Road runs on west to the M4 (MOTORWAYS)
+  { name: 'Coventry Street, Piccadilly, Knightsbridge, Kensington High Street, Hammersmith Road, Chiswick High Road and the Great West Road', side: -1, pts: [
+    [51.5089, -0.1290], [51.5089, -0.1340], [51.5089, -0.1422], [51.5029, -0.1422], [51.5029, -0.1890], [51.5010, -0.1930], [51.4925, -0.2235],
+    [51.4925, -0.2570], [51.4925, -0.2870], [51.4925, -0.3010],
   ] },
   // Piccadilly Circus (london.ts places the Lights there, its front on Piccadilly): Regent Street comes down from Oxford
   // Circus to its west corner. Piccadilly runs on east past its front as Coventry Street to the Charing Cross Road, a
   // tile from its east corner, which stands for Shaftesbury Avenue too at this scale; Haymarket is a side street south
-  { name: 'Regent Street', pts: [[51.5150, -0.1422], [51.5104, -0.1422]] },
+  { name: 'Regent Street', street: true, pts: [[51.5150, -0.1422], [51.5104, -0.1422]] },
   { name: "Shepherd's Bush Road and Fulham Palace Road", pts: [[51.5050, -0.2250], [51.4925, -0.2235], [51.4680, -0.2120]] },
-  { name: "Victoria Street, Sloane Square, the King's Road and Fulham Road", pts: [
+  { name: "Victoria Street, Sloane Square, the King's Road and Fulham Road", side: 1, pts: [
     [51.4985, -0.1395], [51.4965, -0.1440], [51.4925, -0.1565], [51.4860, -0.1750], [51.4800, -0.1950], [51.4700, -0.2100],
   ] },
   // south of the river
-  { name: 'Kennington Park Road, Brixton Road and Streatham High Road', pts: [
-    [51.4985, -0.1050], [51.4920, -0.1080], [51.4820, -0.1130], [51.4620, -0.1140], [51.4400, -0.1250], [51.4200, -0.1310],
+  // Elephant and Castle (a roundabout, londonRoads) is south of the South Western line's corridor, where Kennington
+  // Park Road and the Old Kent Road leave the Walworth Road west and east
+  { name: 'Kennington Park Road, Brixton Road and Streatham High Road', side: -1, pts: [
+    [51.4864, -0.0870], [51.4864, -0.1130], [51.4620, -0.1140], [51.4400, -0.1250], [51.4200, -0.1310],
   ] },
   { name: 'Borough High Street, Walworth Road, Camberwell and Denmark Hill to Norwood', pts: [
-    [51.5040, -0.0890], [51.5000, -0.0920], [51.4920, -0.0960], [51.4740, -0.0930], [51.4680, -0.0890], [51.4530, -0.1020], [51.4200, -0.0950],
+    [51.5040, -0.0870], [51.4740, -0.0870], [51.4680, -0.0890], [51.4530, -0.1020], [51.4200, -0.0950],
   ] },
-  { name: 'Old Kent Road, New Cross Road and Shooters Hill', pts: [
-    [51.4940, -0.0850], [51.4760, -0.0400], [51.4680, 0.0050], [51.4700, 0.0500], [51.4680, 0.1100], [51.4620, 0.1900],
+  { name: 'Old Kent Road, New Cross Road and Shooters Hill', side: 1, pts: [
+    [51.4864, -0.0870], [51.4760, -0.0400], [51.4680, 0.0050], [51.4700, 0.0500], [51.4680, 0.1100], [51.4620, 0.1900],
   ] },
   { name: 'Jamaica Road, Lower Road, Evelyn Street and Woolwich Road', pts: [
     [51.4990, -0.0650], [51.4950, -0.0500], [51.4900, -0.0450], [51.4800, -0.0300], [51.4800, -0.0100], [51.4850, 0.0300],
@@ -310,7 +328,7 @@ export const ARTERIALS: Arterial[] = [
     [51.4860, -0.1230], [51.4720, -0.1400], [51.4625, -0.1600], [51.4625, -0.1700], [51.4570, -0.1920], [51.4610, -0.2160],
     [51.4650, -0.2650], [51.4610, -0.3030], [51.4610, -0.3500],
   ] },
-  { name: 'Peckham Road and Queens Road', pts: [[51.4740, -0.0930], [51.4740, -0.0690], [51.4760, -0.0400]] },
+  { name: 'Peckham Road and Queens Road', pts: [[51.4740, -0.0870], [51.4740, -0.0690], [51.4760, -0.0400]] },
   { name: 'The South Circular', pts: [
     [51.4620, -0.1380], [51.4530, -0.1170], [51.4450, -0.0850], [51.4450, -0.0200], [51.4500, 0.0500], [51.4500, 0.1200],
   ] },
@@ -519,6 +537,234 @@ export function placeAt(x: number, y: number) {
   return best;
 }
 
+// ---------------------------------------------------------------- the road classes (R3) and junctions (R4)
+
+/** The shortest stretch of an arterial laid as an avenue (both rows clear): a shorter one between obstacles stays a street. */
+export const AVENUE_MIN = 4;
+
+/**
+ * The motorway approaches (docs/roads.md "Classes", class 4): each from a motorway connection at the map's edge (`door`,
+ * facing `rot`, its front the drag's first tile) along `pts` (tile waypoints of the drag's row, straight legs; its twin
+ * on the left), running on into its arterial's avenue at the last tile. `interchange` is the motorway tile the
+ * Interchange tool is clicked on: a street (`street`) is carried over both carriageways on a deck, with slips a tile out
+ * from each, and runs on to the nearest road either side.
+ */
+export interface LondonMotorway { id: string; name: string; door: DemoXY; rot: 1 | 3; pts: readonly DemoXY[]; interchange: DemoXY; street: string }
+export const MOTORWAYS: LondonMotorway[] = [
+  // south of Heathrow's runway end, then north through the gap between the airfield and the river at Brentford and east
+  // into the Great West Road at Chiswick: Heathrow and the Thames leave no straight line in
+  { id: 'm4', name: 'M4', door: [-110, 14], rot: 1, pts: [[-109, 14], [-94, 14], [-94, 10], [-93, 10]], interchange: [-103, 14], street: 'Hayes Road' },
+  // from the estuary end of the map west to Dagenham Docks, where the A13 runs on as an avenue
+  { id: 'a13', name: 'A13', door: [109, -16], rot: 3, pts: [[108, -16], [94, -16]], interchange: [101, -16], street: 'Goresbrook Road' },
+];
+
+/** The 5×5 two-lane roundabouts (R4): each on the avenue crossing nearest the real junction. */
+export const ROUNDABOUTS: { id: string; name: string; at: readonly [lat: number, lon: number] }[] = [
+  { id: 'hyde-park-corner', name: 'Hyde Park Corner', at: [51.5027, -0.1527] },
+  { id: 'marble-arch', name: 'Marble Arch', at: [51.5131, -0.1589] },
+  { id: 'elephant-and-castle', name: 'Elephant and Castle', at: [51.4946, -0.1003] },
+  { id: 'old-street', name: 'Old Street', at: [51.5256, -0.0875] },
+];
+
+/** What londonRoads marks on a tile (LondonRoads.mark). */
+export const RM = {
+  /** an avenue's twin row: a structure may face it, never stand on it */
+  Twin: 1,
+  /** kept clear: a motorway's verge, an interchange's or a roundabout's box (no road but the junction's own, no zone, no structure) */
+  Clear: 2,
+  /** beside an avenue's outer kerb: no structure faces it (a road there would run alongside, making every tile a junction) */
+  NoFront: 3,
+  /** a roundabout's frame, the ring of tiles round its box: no road but its arms, no structure facing it */
+  Frame: 4,
+  /** a motorway carriageway, or the street through an interchange's box */
+  Motorway: 5,
+} as const;
+
+export interface LondonMotorwayPlan {
+  spec: LondonMotorway;
+  /** the drag's row and its twin, each tile with its direction (DIRS order E, W, S, N) */
+  path: [number, number][];
+  twins: { x: number; y: number; dir: number; from: number }[];
+  /** the interchange's 9×6 box, and the street's tiles through it (the slips' junctions and the ramps) */
+  box: DemoRect;
+  street: [number, number][];
+  /** the motorway connection where it starts */
+  conn: Placed;
+}
+export interface LondonRoundabout { id: string; name: string; /** the junction group's anchor (min corner) */ group: DemoXY; /** the 5×5 box */ box: DemoRect }
+/**
+ * The road classes' skeleton, worked out from the river, the reserved land and the fixed placements (stations, Heathrow,
+ * the motorway connections) before any landmark is fitted, so the scenario keeps its structures off it: each arterial's
+ * drag (oriented so its twin row has the most room), the motorways and their interchanges, and the roundabouts' boxes.
+ */
+export interface LondonRoads {
+  /** each arterial's tiles in drag order (its twin row on the drag's left, twinRow), ARTERIALS order */
+  drags: [number, number][][];
+  motorways: LondonMotorwayPlan[];
+  roundabouts: LondonRoundabout[];
+  /** RM per tile, 0 for nothing */
+  mark: Uint8Array;
+  problems: string[];
+}
+
+/** Tiles along straight legs between tile waypoints (each leg along one axis). */
+const legs = (pts: readonly DemoXY[]): [number, number][] => {
+  const out: [number, number][] = [[pts[0][0], pts[0][1]]];
+  for (let k = 1; k < pts.length; k++) {
+    let [x, y] = out[out.length - 1];
+    const [ex, ey] = pts[k];
+    while (x !== ex || y !== ey) { if (x !== ex) x += Math.sign(ex - x); else y += Math.sign(ey - y); out.push([x, y]); }
+  }
+  return out;
+};
+
+/** The motorway connections' footprints (fixed placements, like the stations). */
+export function motorwayConnections(): Placed[] {
+  return MOTORWAYS.map((m) => placedFromDoor(MOTORWAY_KIND, m.door[0], m.door[1], m.rot));
+}
+
+let ROADS: LondonRoads | null = null;
+/** The skeleton (LondonRoads) for these fixed placements; built once (the scenario's fixed placements never change). */
+export function londonRoads(fixed: readonly Placed[]): LondonRoads {
+  if (ROADS) return ROADS;
+  const { water, park, reserved } = londonBase();
+  const problems: string[] = [];
+  const mark = new Uint8Array(N);
+  /** land no road may take: water, railways, the airfield, the fixed placements, beside or on a bridge */
+  const hard = new Uint8Array(N);
+  for (let i = 0; i < N; i++) if (water[i] || reserved[i] >= 0) hard[i] = 1;
+  for (const k of fixed) for (let y = k.ay; y < k.ay + k.h; y++) for (let x = k.ax; x < k.ax + k.w; x++) if (inLondon(x, y)) hard[lidx(x, y)] = 1;
+  for (const b of londonBridges()) {
+    const dx = b.ns ? 0 : 1, dy = b.ns ? 1 : 0;
+    for (let k = -1; k <= b.len; k++) for (let s = -1; s <= 1; s++) {
+      const x = b.x + dx * k + dy * s, y = b.y + dy * k + dx * s;
+      if (inLondon(x, y) && (s !== 0 || (k >= 0 && k < b.len))) hard[lidx(x, y)] = 1;
+    }
+  }
+  const free = (x: number, y: number) => inLondon(x, y) && !hard[lidx(x, y)];
+
+  // the arterials, each turned so its twin row has the most room (a park tile counts half: the park gives up a row)
+  const drags = arterialPaths().map((path, n) => {
+    if (ARTERIALS[n].street) return path;
+    const cost = (p: [number, number][]) => twinRow(p).reduce((s, t) => s + (!free(t.x, t.y) ? 1 : park[lidx(t.x, t.y)] >= 0 ? 0.5 : 0), 0);
+    const side = ARTERIALS[n].side ?? (cost([...path].reverse()) < cost(path) ? -1 : 1);
+    return side === 1 ? path : [...path].reverse();
+  });
+
+  // the motorways: carriageways, verges kept clear, the interchange's box and street
+  const conns = motorwayConnections();
+  const motorways: LondonMotorwayPlan[] = MOTORWAYS.map((spec, n) => {
+    const path = legs(spec.pts), twins = twinRow(path), conn = conns[n];
+    const on = new Set([...path.map(([x, y]) => lidx(x, y)), ...twins.map((t) => lidx(t.x, t.y))]);
+    for (const i of on) { if (hard[i]) problems.push(`${spec.name}: its carriageway at (${MX + (i % MW)}, ${MY + Math.floor(i / MW)}) is on water, a railway, a bridge or a fixed placement`); mark[i] = RM.Motorway; }
+    // the interchange (shared/src/junctions.ts planInterchange): east-west here, carriageway A (westbound) at v0 with its
+    // slips north, B (eastbound) at v0 + 1 with its slips south, 9 along × 6 across
+    // `interchange` is on the drag's row: the westbound row is the M4's twin (north of its eastbound drag), the A13's drag
+    const [us, vm] = spec.interchange, v0 = spec.rot === 1 ? vm - 1 : vm;
+    const box: DemoRect = [us - 4, v0 - 2, 9, 6];
+    const street: [number, number][] = [[us, v0 - 2], [us, v0 - 1], [us, v0 + 2], [us, v0 + 3]];
+    for (let y = box[1]; y < box[1] + box[3]; y++) for (let x = box[0]; x < box[0] + box[2]; x++) {
+      if (!inLondon(x, y)) continue;
+      const i = lidx(x, y);
+      if (on.has(i)) continue;
+      if (hard[i]) problems.push(`${spec.name}: its interchange at (${x}, ${y}) meets water, a railway or a fixed placement`);
+      mark[i] = street.some(([sx, sy]) => sx === x && sy === y) ? RM.Motorway : RM.Clear;
+    }
+    // verges: nothing stands beside a motorway (it has no frontage) but its connection and the avenue it runs into
+    const footprint = (x: number, y: number) => x >= conn.ax && y >= conn.ay && x < conn.ax + conn.w && y < conn.ay + conn.h;
+    for (const i of on) {
+      const x = MX + (i % MW), y = MY + Math.floor(i / MW);
+      for (const [dx, dy] of DIRS) {
+        const qx = x + dx, qy = y + dy;
+        if (!inLondon(qx, qy) || footprint(qx, qy)) continue;
+        const j = lidx(qx, qy);
+        if (on.has(j) || mark[j]) continue;
+        mark[j] = RM.Clear;
+      }
+    }
+    // round the box (after the verges, which stay clear): no road meets the slips from outside but the street running on (planInterchange)
+    for (let y = box[1] - 1; y <= box[1] + box[3]; y++) for (let x = box[0] - 1; x <= box[0] + box[2]; x++) {
+      if (!inLondon(x, y) || (x >= box[0] && y >= box[1] && x < box[0] + box[2] && y < box[1] + box[3])) continue;
+      const i = lidx(x, y);
+      if (on.has(i) || x === us || mark[i]) continue;
+      mark[i] = RM.Frame;
+    }
+    return { spec, path, twins, box, street, conn };
+  });
+  // the avenue tiles the motorways run into stay road: unmark a verge where an arterial passes
+  const arterialTiles = new Set<number>();
+  /** an arterial's twin row (none for one that stays a street) */
+  const twinsOf = (n: number) => (ARTERIALS[n].street ? [] : twinRow(drags[n]));
+  drags.forEach((d, n) => { for (const [x, y] of d) if (inLondon(x, y)) arterialTiles.add(lidx(x, y)); for (const t of twinsOf(n)) if (inLondon(t.x, t.y)) arterialTiles.add(lidx(t.x, t.y)); });
+  for (const i of arterialTiles) if (mark[i] === RM.Clear) mark[i] = 0;
+
+  // the twin rows, and the outer kerbs of the pairs (no structure faces those)
+  drags.forEach((d, n) => { for (const t of twinsOf(n)) {
+    if (!free(t.x, t.y)) continue;
+    const i = lidx(t.x, t.y);
+    if (!mark[i]) mark[i] = RM.Twin;
+    const [px, py] = d[t.from];
+    for (const [ox, oy] of [[2 * t.x - px, 2 * t.y - py], [2 * px - t.x, 2 * py - t.y]]) {
+      if (!inLondon(ox, oy) || arterialTiles.has(lidx(ox, oy))) continue;
+      if (!mark[lidx(ox, oy)]) mark[lidx(ox, oy)] = RM.NoFront;
+    }
+  } });
+
+  // the roundabouts: on the avenue junction nearest each place (a 2×2 of avenue tiles with avenues leaving it on three
+  // or four sides: a crossing or a T), its 5×5 box clear but for the avenues through it and a frame round it with no
+  // road but their arms
+  const dragsAt = new Map<number, Set<number>>();
+  drags.forEach((d, n) => {
+    for (const [x, y] of [...d, ...twinsOf(n).map((q): [number, number] => [q.x, q.y])]) {
+      if (!inLondon(x, y)) continue;
+      const i = lidx(x, y);
+      if (!dragsAt.has(i)) dragsAt.set(i, new Set());
+      dragsAt.get(i)!.add(n);
+    }
+  });
+  const av = (x: number, y: number) => inLondon(x, y) && dragsAt.has(lidx(x, y));
+  /** where an arterial turns a corner: an arm must run straight through the frame into the box */
+  const bend = new Uint8Array(N);
+  for (const d of drags) for (let k = 1; k + 1 < d.length; k++) {
+    const [ax, ay] = d[k - 1], [bx, by] = d[k], [cx, cy] = d[k + 1];
+    if ((bx - ax !== cx - bx || by - ay !== cy - by) && inLondon(bx, by)) bend[lidx(bx, by)] = 1;
+  }
+  const junction = (x: number, y: number) => {
+    if (!av(x, y) || !av(x + 1, y) || !av(x, y + 1) || !av(x + 1, y + 1)) return false;
+    const arms = [[[x, y - 1], [x + 1, y - 1]], [[x, y + 2], [x + 1, y + 2]], [[x - 1, y], [x - 1, y + 1]], [[x + 2, y], [x + 2, y + 1]]];
+    return arms.filter((a) => a.every(([qx, qy]) => av(qx, qy))).length >= 3;
+  };
+  const roundabouts: LondonRoundabout[] = [];
+  for (const r of ROUNDABOUTS) {
+    const [px, py] = geoF(r.at[0], r.at[1]);
+    let best: DemoXY | null = null, bd = Infinity;
+    for (let y = Math.floor(py) - 12; y <= Math.floor(py) + 12; y++) for (let x = Math.floor(px) - 12; x <= Math.floor(px) + 12; x++) {
+      if (!junction(x, y)) continue;
+      // the box and its frame clear of water, railways, bridges, fixed placements, the other boxes and every arterial
+      // but the two crossing there
+      const mine = new Set<number>();
+      for (const [qx, qy] of [[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]]) for (const n of dragsAt.get(lidx(qx, qy)) ?? []) mine.add(n);
+      let ok = true;
+      for (let qy = y - 3; qy <= y + 3 && ok; qy++) for (let qx = x - 3; qx <= x + 3 && ok; qx++) {
+        const i = lidx(qx, qy);
+        ok = free(qx, qy) && !bend[i] && mark[i] !== RM.Clear && mark[i] !== RM.Frame && mark[i] !== RM.Motorway && [...(dragsAt.get(i) ?? [])].every((n) => mine.has(n));
+      }
+      if (!ok) continue;
+      const d = Math.hypot(x + 1 - px, y + 1 - py);
+      if (d < bd) { bd = d; best = [x, y]; }
+    }
+    if (!best) { problems.push(`${r.name}: no avenue crossing near it with room for a 5×5 roundabout`); continue; }
+    const box: DemoRect = [best[0] - 2, best[1] - 2, 5, 5];
+    for (let qy = box[1] - 1; qy <= box[1] + 5; qy++) for (let qx = box[0] - 1; qx <= box[0] + 5; qx++) {
+      const i = lidx(qx, qy), inBox = qx >= box[0] && qy >= box[1] && qx < box[0] + 5 && qy < box[1] + 5;
+      if (arterialTiles.has(i)) continue;
+      mark[i] = inBox ? RM.Clear : RM.Frame;
+    }
+    roundabouts.push({ id: r.id, name: r.name, group: best, box });
+  }
+  return (ROADS = { drags, motorways, roundabouts, mark, problems });
+}
+
 // ---------------------------------------------------------------- the streets
 
 /** What a tile of the plan is. */
@@ -559,6 +805,15 @@ export interface LondonPlan {
   loop: Uint8Array;
   /** level crossings laid */
   crossings: number;
+  /** R3: the arterials' runs laid as avenues (each a drag: its row going the drag's way, the twin on its left) */
+  avenues: { name: string; path: [number, number][] }[];
+  /** R3: the motorways, their interchanges and connections, and R4's roundabout boxes (londonRoads) */
+  motorways: LondonMotorwayPlan[];
+  roundabouts: LondonRoundabout[];
+  /** per road tile: 3 an avenue's, 4 a motorway's (the class the scenario lays there), 0 a street */
+  cls: Uint8Array;
+  /** per divided road tile on a straight: the tile across the reservation (lidx), -1 elsewhere */
+  twin: Int32Array;
   problems: string[];
 }
 
@@ -622,9 +877,9 @@ export function londonBridges(): LondonBridge[] {
  * 4. Pockets no road reaches get a cul-de-sac in the dense characters; every road joins the network (a link over land,
  *    through a park or over a railway on a level crossing; a road that cannot be joined is dropped).
  */
-export function londonPlan(keeps: readonly Placed[]): LondonPlan {
+export function londonPlan(keeps: readonly Placed[], roads?: LondonRoads): LondonPlan {
   const { water, park: basePark, reserved } = londonBase();
-  const problems: string[] = [];
+  const problems: string[] = [...(roads?.problems ?? [])];
   const t = new Uint8Array(N), park = new Int16Array(basePark);
   for (let i = 0; i < N; i++) {
     t[i] = water[i] ? LT.Water : reserved[i] >= 0 ? (RESERVED[reserved[i]].airfield ? LT.Airfield : LT.Rail) : park[i] >= 0 ? LT.Park : LT.Land;
@@ -635,8 +890,13 @@ export function londonPlan(keeps: readonly Placed[]): LondonPlan {
     if (t[i] !== LT.Land && t[i] !== LT.Park && t[i] !== LT.Airfield) problems.push(`a placement at (${k.ax}, ${k.ay}) covers ${t[i] === LT.Water ? 'water' : 'reserved land'} at (${x}, ${y})`);
     t[i] = LT.Keep; park[i] = -1;
   }
-  /** land beside a bridge deck: no road may join a deck from the side */
+  /** land beside a bridge deck: no road may join a deck from the side; a motorway's verge, a junction's box and frame */
   const noRoad = new Uint8Array(N);
+  if (roads) for (let i = 0; i < N; i++) {
+    const m = roads.mark[i];
+    if (m === RM.Clear) { noRoad[i] = 1; if (t[i] === LT.Land || t[i] === LT.Park) { t[i] = LT.Keep; park[i] = -1; } }
+    else if (m === RM.Frame) noRoad[i] = 1;
+  }
   const free = (i: number) => (t[i] === LT.Land || t[i] === LT.Park) && !noRoad[i];
   /** main roads (arterials, fronts, park rings, approaches, links): never pruned */
   const major = new Uint8Array(N);
@@ -725,6 +985,85 @@ export function londonPlan(keeps: readonly Placed[]): LondonPlan {
     }
   };
   for (const path of arterialPaths()) paintPath(path);
+  // R3: the motorways (their carriageways, and the street through each interchange out to the nearest road), then the
+  // avenues: each arterial's twin row where both rows have room, in runs of AVENUE_MIN tiles or more
+  const cls = new Uint8Array(N), twin = new Int32Array(N).fill(-1), axes = new Uint8Array(N);
+  const avenues: { name: string; path: [number, number][] }[] = [];
+  const pave = (i: number) => { if (t[i] === LT.Park) { t[i] = LT.Land; park[i] = -1; } if (t[i] === LT.Land || t[i] === LT.Keep) t[i] = LT.Road; major[i] = 1; };
+  const pairUp = (path: readonly (readonly [number, number])[], tw: { x: number; y: number; from: number }[]) => {
+    const n = new Map<number, number>();
+    for (const q of tw) n.set(q.from, (n.get(q.from) ?? 0) + 1);
+    for (const q of tw) if (n.get(q.from) === 1) { const a = lidx(path[q.from][0], path[q.from][1]), b = lidx(q.x, q.y); twin[a] = b; twin[b] = a; }
+  };
+  for (const m of roads?.motorways ?? []) {
+    for (const [x, y] of m.path) { const i = lidx(x, y); pave(i); cls[i] = 4; axes[i] = 3; }
+    for (const q of m.twins) { const i = lidx(q.x, q.y); pave(i); cls[i] = 4; axes[i] = 3; }
+    pairUp(m.path, m.twins);
+    for (const [x, y] of m.street) pave(lidx(x, y));
+    const [sx0, sy0] = m.street[0], [sx1, sy1] = m.street[m.street.length - 1];
+    for (const [x0, y0, dy] of [[sx0, sy0, -1], [sx1, sy1, 1]] as const) {
+      for (let k = 1, y = y0 + dy; k <= 16 && inLondon(x0, y) && !roadAt(x0, y) && t[lidx(x0, y)] === LT.Land && !noRoad[lidx(x0, y)]; k++, y += dy) put(lidx(x0, y));
+    }
+  }
+  if (roads) roads.drags.forEach((d, n) => {
+    if (ARTERIALS[n].street) return;
+    const axisAt = (k: number) => {
+      const [x, y] = d[k], p = d[k - 1], q = d[k + 1];
+      let a = 0;
+      for (const o of [p, q]) if (o) a |= o[1] === y ? 1 : o[0] === x ? 2 : 0;
+      return a;
+    };
+    const twinOk = (x: number, y: number, dir: number) => {
+      if (!inLondon(x, y)) return false;
+      const i = lidx(x, y);
+      if (cls[i] === 4 || axes[i] & (dir < 2 ? 1 : 2)) return false;
+      return t[i] === LT.Road || ((t[i] === LT.Land || t[i] === LT.Park) && !noRoad[i]);
+    };
+    const pathOk = (k: number) => {
+      const [x, y] = d[k];
+      if (!inLondon(x, y)) return false;
+      const i = lidx(x, y);
+      return t[i] === LT.Road && cls[i] !== 4 && !(axes[i] & axisAt(k)); // another avenue's tile across this one is a crossing
+    };
+    // runs of good tiles, split again wherever the twin row of a run (twinRow of the run alone) meets an obstacle
+    const bad = new Uint8Array(d.length);
+    for (let k = 0; k < d.length; k++) if (!pathOk(k)) bad[k] = 1;
+    for (const q of twinRow(d)) if (!twinOk(q.x, q.y, q.dir)) bad[q.from] = 1;
+    for (let again = true; again;) {
+      again = false;
+      for (let a = 0; a < d.length; a++) {
+        if (bad[a]) continue;
+        let b = a;
+        while (b + 1 < d.length && !bad[b + 1]) b++;
+        if (b - a + 1 >= AVENUE_MIN) for (const q of twinRow(d.slice(a, b + 1))) if (!twinOk(q.x, q.y, q.dir)) { bad[a + q.from] = 1; again = true; }
+        a = b;
+      }
+    }
+    for (let a = 0; a < d.length; a++) {
+      if (bad[a]) continue;
+      let b = a;
+      while (b + 1 < d.length && !bad[b + 1]) b++;
+      if (b - a + 1 >= AVENUE_MIN) {
+        const run = d.slice(a, b + 1), tw = twinRow(run);
+        run.forEach(([x, y], k) => { const i = lidx(x, y); cls[i] = 3; axes[i] |= axisAt(a + k); });
+        for (const q of tw) { const i = lidx(q.x, q.y); pave(i); cls[i] = 3; axes[i] |= q.dir < 2 ? 1 : 2; }
+        pairUp(run, tw);
+        avenues.push({ name: ARTERIALS[n].name, path: run });
+      }
+      a = b;
+    }
+  });
+  // a roundabout's box: what is not road now (a twin row left unlaid) stays clear for the ring and island; its frame
+  // takes no new road
+  for (const r of roads?.roundabouts ?? []) {
+    const [bx, by] = r.box;
+    for (let y = by - 1; y <= by + 5; y++) for (let x = bx - 1; x <= bx + 5; x++) {
+      const i = lidx(x, y), inBox = x >= bx && y >= by && x < bx + 5 && y < by + 5;
+      if (t[i] === LT.Road) continue;
+      noRoad[i] = 1;
+      if (inBox && (t[i] === LT.Land || t[i] === LT.Park)) { t[i] = LT.Keep; park[i] = -1; }
+    }
+  }
   for (let i = 0; i < N; i++) {
     if (t[i] !== LT.Park) continue;
     const x = tx(i), y = ty(i);
@@ -1054,7 +1393,12 @@ export function londonPlan(keeps: readonly Placed[]): LondonPlan {
     }
     blocks.push({ x0, y0, x1, y1, n: q.length, cx: sx / q.length + 0.5, cy: sy / q.length + 0.5 });
   }
-  return { t, park, bridges, reach, block, blocks, main: major, loop: loops(t, isRoadT), crossings, problems };
+  // every avenue and motorway tile is still road (nothing after the main roads takes one away)
+  for (const a of avenues) for (const [x, y] of [...a.path, ...twinRow(a.path).map((q): [number, number] => [q.x, q.y])]) if (t[lidx(x, y)] !== LT.Road) problems.push(`${a.name}: its avenue at (${x}, ${y}) is not a plain road`);
+  return {
+    t, park, bridges, reach, block, blocks, main: major, loop: loops(t, isRoadT), crossings,
+    avenues, motorways: roads?.motorways ?? [], roundabouts: roads?.roundabouts ?? [], cls, twin, problems,
+  };
 }
 
 /**

@@ -117,7 +117,7 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
     }
     // roads of a class (shared/src/roadclass.ts), as the road tool plans and lays them, twins and all
     for (const r of s.classRoads ?? []) {
-      const plan = planRoad(roadDragPath(r.from, r.to), {
+      const plan = planRoad(r.path ?? roadDragPath(r.from, r.to), {
         tile: (x, y) => w.getTile(x, y), aux: (x, y) => w.auxAt(x, y), kindId: (x, y) => w.kindIdAt(x, y),
         land: env.land, claimed: () => true, structure: (x, y) => { const q = w.structureAt(x, y); return q ? KIND_NAMES[q.kind] : undefined; }, bridgeLock: null,
       }, { cls: r.cls, demolish: true });
