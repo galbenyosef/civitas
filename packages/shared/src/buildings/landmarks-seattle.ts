@@ -1,0 +1,125 @@
+import type { KindDef, Op } from './schema';
+import { Zone } from './codes';
+import { library } from './leisure';
+import { office } from './office';
+import { slab, tree, lampPost, PAVING } from './tierkit';
+
+/**
+ * Seattle landmarks (docs/buildings.md "Landmarks"): the buildings of the city
+ * between the sound and the lakes, tagged 'world' and 'seattle', rungs of the
+ * 'seattle' collection (groups.ts), tiers 1-4, their tools unlocked only by
+ * the locked tech node 'wld1' (tech.ts) like the other world cities. Kind ids
+ * 209-212 (see landmarks-world.ts for the world allocation). Scale: about
+ * 33 m to a tile, as for London.
+ *
+ * The set, in tier order:
+ *   209 the Space Needle: an office tower, the flying saucer on its tripod
+ *       legs over the fairground
+ *   210 Pike Place Market: a library-family attraction, the market sheds
+ *       sloping to the harbour with their neon sign
+ *   211-212 to follow, one building at a time.
+ */
+
+const TAGS = ['world', 'seattle'];
+
+// shared base for the office towers, as in landmarks-beijing.ts
+const towerBase = {
+  code: Zone.Office, family: 'office' as const, flags: { civic: true, workplace: true }, windows: 'office' as const,
+  occupation: office.occupation, lot: { wage: 14 }, landmark: true, tags: TAGS, group: 'seattle',
+};
+
+// ================================================================= 209 the Space Needle
+
+/**
+ * The saucer the fairground built and the city refused to give back: three
+ * tripod legs leaning together, the flying-saucer top with its ring of
+ * windows, the orange roof disc, and the mast. Plain painted steel and
+ * glass only, so no window rule is touched.
+ */
+const NEEDLE_WHITE = 0xe8e6e0, NEEDLE_ORANGE = 0xd97c2c;
+
+const spaceNeedleOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the three tripod legs leaning together
+  for (const [sx, sz] of [[-1, -1], [1, -1], [0, 1]] as const) {
+    ops.push(['taper', 0.1, 0.1, 0.05, 0.05, 2.2, sx * 0.45, 0.02, sz * 0.45, NEEDLE_WHITE, { shift: [-sx * 0.38, -sz * 0.38] }]);
+  }
+  // the flying-saucer top with its ring of windows
+  ops.push(['lathe', 0, 2.24, 0, NEEDLE_WHITE, [0.1, 0, 0.42, 0.05, 0.48, 0.12, 0.44, 0.2, 0.3, 0.26], { seg: 16, win: 'office' }]);
+  // the orange roof disc and the mast
+  ops.push(['lathe', 0, 2.5, 0, NEEDLE_ORANGE, [0.34, 0, 0.34, 0.05, 0, 0.05], { seg: 16 }]);
+  ops.push(['cyl', 0.01, 0.01, 0.5, 0, 2.55, 0, 'steel', 6]);
+  // the fairground: lamps and a pair of trees
+  ops.push(...lampPost(-0.7, 0.75, 0.3, 'marquee', 0.02), ...lampPost(0.7, 0.75, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.8, -0.72, 0.5), ...tree(0.8, -0.72, 0.5));
+  return ops;
+};
+
+export const spaceNeedle: KindDef = {
+  ...towerBase, id: 'space-needle', name: 'the Space Needle', kindId: 209, tier: 1,
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The saucer the fairground built and the city refused to give back: three tripod legs leaning together, the flying-saucer top with its ring of windows a hundred and sixty metres up, and the orange roof disc over it all.',
+  howTo: 'A 2×2 plot among offices on an avenue; a big workplace, so give it buses or a station and leave the street clear. World landmark: unlock rule to be decided.',
+  tool: { id: 'spaceneedle', key: '', label: 'Space Needle', color: '#d97c2c' },
+  levels: [{
+    capacity: 280, wage: 44, cost: 19000, upkeep: 120, work: 4200, parking: { surface: 0, underground: 60 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the flying saucer on its tripod legs over the fairground', height: 3.1, ops: spaceNeedleOps() },
+    ],
+  }],
+};
+
+// ================================================================= 210 Pike Place Market
+
+/**
+ * The market the city kept when the bulldozers came for the waterfront: the
+ * long sheds with their stepped gable roofs sloping to the harbour, the neon
+ * sign over the door, and the stalls out front where they throw the fish.
+ * Plain timber and paint only, so no window rule is touched.
+ */
+const MARKET_RED = 0xa83a2c, MARKET_CREAM = 0xe8dcc0, MARKET_DK = 0x3a3630;
+
+const pikePlaceOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the long market shed with its rows of windows
+  ops.push(['box', 1.5, 0.3, 0.6, -0.1, 0.02, -0.15, MARKET_CREAM]);
+  for (const x of [-0.6, -0.35, -0.1, 0.15, 0.4]) ops.push(['box', 0.12, 0.12, 0.02, x, 0.12, 0.155, MARKET_DK]);
+  // the stepped gable roof
+  ops.push(['box', 1.54, 0.08, 0.4, -0.1, 0.32, -0.15, MARKET_RED]);
+  ops.push(['box', 1.54, 0.08, 0.22, -0.1, 0.4, -0.15, MARKET_RED]);
+  // the neon sign over the door
+  ops.push(['box', 0.06, 0.3, 0.04, -0.72, 0.02, 0.14, MARKET_DK]);
+  ops.push(['box', 0.5, 0.12, 0.03, -0.45, 0.32, 0.16, 'marquee']);
+  // the stalls out front where they throw the fish
+  for (const [i, x] of [-0.5, -0.15, 0.2].entries()) {
+    ops.push(['box', 0.2, 0.1, 0.14, x, 0.02, 0.5, MARKET_CREAM]);
+    ops.push(['box', 0.24, 0.03, 0.18, x, 0.12, 0.5, i % 2 ? MARKET_RED : 'white']);
+  }
+  // the forecourt: lamps and a tree
+  ops.push(...lampPost(-0.7, 0.85, 0.3, 'marquee', 0.02), ...lampPost(0.55, 0.85, 0.3, 'marquee', 0.02));
+  ops.push(...tree(0.78, -0.7, 0.5, 'green'));
+  return ops;
+};
+
+export const pikePlace: KindDef = {
+  id: 'pike-place', name: 'Pike Place Market', code: library.code, kindId: 210, family: 'leisure', tier: 2,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'seattle',
+  occupation: { ...library.occupation!, name: 'market keeper' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 160, ticket: 0, openHours: [9, 18], stay: [0.6, 1.4], leisureValue: 8, radius: 24,
+    dayAppeal: 1.5, eveningAppeal: 0.5, retireeAppeal: 1.6, childAppeal: 1.5, title: 'Pike Place Market',
+  },
+  lot: { wage: 15 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The market the city kept when the bulldozers came for the waterfront: the long sheds with their stepped gable roofs, the neon sign over the door, and the stalls out front where they throw the fish.',
+  howTo: 'A 2×2 plot on a shopping avenue near the water; a free-to-wander daytime draw, best near cafes and a bus stop. World landmark: unlock rule to be decided.',
+  tool: { id: 'pikeplace', key: '', label: 'Pike Place', color: '#a83a2c' },
+  levels: [{
+    capacity: 28, wage: 15, cost: 12000, upkeep: 50, work: 2600, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the market sheds sloping to the harbour with their neon sign', height: 0.5, ops: pikePlaceOps() },
+    ],
+  }],
+};
+
+export const SEATTLE_LANDMARKS: KindDef[] = [spaceNeedle, pikePlace];
