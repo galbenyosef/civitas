@@ -106,8 +106,9 @@ function main() {
       } catch (err) { console.log(`${file}: ${(err as Error).message.split('\n')[0]}`); }
     });
   }
+  const take = (f: string) => Number(/-(\d+)\.opus$/.exec(f)?.[1] ?? 1);
   const order = new Map(VOICE_QUERIES.map((v, i) => [v.id, i] as const));
-  outs.sort((a, b) => (order.get(a.voice)! - order.get(b.voice)!) || a.file.localeCompare(b.file));
+  outs.sort((a, b) => (order.get(a.voice)! - order.get(b.voice)!) || take(a.file) - take(b.file));
   writeFileSync(join(AUDIO, 'credits.json'), JSON.stringify(outs, null, 1));
   // credits.ts: what the manifest and audio-check read
   const rows = outs.map((o) => `  { voice: '${o.voice}', file: '${o.file}', freesound: ${o.c.id}, title: ${JSON.stringify(o.c.name)}, author: ${JSON.stringify(o.c.username)}, licence: 'CC0', seconds: ${o.shipped}, bytes: ${o.bytes}, level: ${o.level}, query: ${JSON.stringify(o.c.query)} },`);
