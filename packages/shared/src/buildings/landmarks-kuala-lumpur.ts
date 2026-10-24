@@ -19,7 +19,8 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
  *       hill in the middle of the city
  *   203 Merdeka 118: an office tower, the faceted glass megatall with its spire
  *       over the old stadium
- *   204 to follow, one building at a time.
+ *   204 the Batu Caves: a library-family daytime attraction, the limestone hill
+ *       with its gold statue and the rainbow staircase
  */
 
 const TAGS = ['world', 'kuala-lumpur'];
@@ -151,4 +152,59 @@ export const merdeka118: KindDef = {
   }],
 };
 
-export const KUALA_LUMPUR_LANDMARKS: KindDef[] = [petronasTowers, klTower, merdeka118];
+// ================================================================= 204 the Batu Caves
+
+/**
+ * The limestone hill at the edge of the city where the great cave temple keeps
+ * its silence: the jungle round it, the gold statue of the god standing forty
+ * metres high at the foot of the steps, and the two hundred and seventy-two
+ * steps the pilgrims climb, painted in bands of the rainbow. Plain stone and
+ * gold only, so no window rule is touched.
+ */
+const LIMESTONE = 0x8f948c, CAVE_DARK = 0x3a3630;
+const RAINBOW = ['red', 0xe8943c, 'yellow', 'green', 0x2c5f9e, 0x7a4a9e];
+
+const batuCavesOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  // the limestone hill with its crown of jungle
+  ops.push(['lathe', 0, 0.02, 0, LIMESTONE, [0.7, 0, 0.72, 0.2, 0.6, 0.45, 0.38, 0.62, 0.12, 0.7, 0, 0.72], { seg: 16 }]);
+  ops.push(...tree(-0.78, -0.5, 0.5, 'green'), ...tree(0.78, -0.55, 0.5, 'green'));
+  // the dark mouth of the great cave at the stairhead
+  ops.push(['box', 0.28, 0.3, 0.02, 0, 0.3, 0.44, CAVE_DARK]);
+  // the two hundred and seventy-two steps, painted in bands of the rainbow
+  for (let i = 0; i < 14; i++) {
+    ops.push(['box', 0.24, 0.022, 0.035, 0, 0.02 + i * 0.021, 0.85 - i * 0.03, RAINBOW[Math.floor(i / 14 * 6)]]);
+  }
+  // the gold statue of the god at the foot of the steps
+  ops.push(['box', 0.14, 0.06, 0.14, 0.42, 0.02, 0.55, 0xb8a88a]);
+  ops.push(['taper', 0.1, 0.1, 0.06, 0.06, 0.3, 0.42, 0.08, 0.55, 'gold']);
+  ops.push(['box', 0.16, 0.05, 0.06, 0.42, 0.34, 0.55, 'gold']);
+  ops.push(['cyl', 0.035, 0.035, 0.06, 0.42, 0.39, 0.55, 'gold', 8]);
+  ops.push(['cone', 0.045, 0.09, 0.42, 0.45, 0.55, 'gold', 8]);
+  // the forecourt: lamps
+  ops.push(...lampPost(-0.55, 0.85, 0.3, 'marquee', 0.02), ...lampPost(0.7, 0.88, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
+export const batuCaves: KindDef = {
+  id: 'batu-caves', name: 'the Batu Caves', code: library.code, kindId: 204, family: 'leisure', tier: 4,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'kuala-lumpur',
+  occupation: { ...library.occupation!, name: 'cave temple keeper' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 260, ticket: 12, openHours: [8, 19], stay: [1.2, 2.2], leisureValue: 8, radius: 28,
+    dayAppeal: 1.6, eveningAppeal: 0.2, retireeAppeal: 1.7, childAppeal: 1.5, title: 'the Batu Caves',
+  },
+  lot: { wage: 15 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The limestone hill where the great cave temple keeps its silence: the jungle round it, the gold statue of the god standing forty metres high, and the two hundred and seventy-two steps the pilgrims climb, painted in bands of the rainbow.',
+  howTo: 'A 2×2 plot at the city\'s green edge; a heavy daytime draw, so give it a bus stop and leave the forecourt walkable. World landmark: unlock rule to be decided.',
+  tool: { id: 'batucaves', key: '', label: 'Batu Caves', color: '#c9a227' },
+  levels: [{
+    capacity: 40, wage: 15, cost: 13000, upkeep: 55, work: 2800, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the limestone hill with its gold statue and the rainbow staircase', height: 0.78, ops: batuCavesOps() },
+    ],
+  }],
+};
+
+export const KUALA_LUMPUR_LANDMARKS: KindDef[] = [petronasTowers, klTower, merdeka118, batuCaves];
