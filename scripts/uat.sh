@@ -76,7 +76,7 @@ promote() {
   npm run -s typecheck || { echo "typecheck failed; UAT not restarted"; exit 1; }
   npm run -s buildings:check >/dev/null || { echo "buildings:check failed; UAT not restarted"; exit 1; }
   echo "== building client"
-  npm run -s build >/dev/null
+  npm run -s build >/dev/null && npm run -s build:local >/dev/null
   echo "promoted $sha $(date '+%Y-%m-%d %H:%M')" >"$UAT_DIR/UAT_VERSION"
   stop
   start
