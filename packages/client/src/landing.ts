@@ -55,21 +55,23 @@ function placeholder(id: string): SVGSVGElement {
   return svg;
 }
 
-const statusOf = (d: DemoInfo): { text: string; cls: string; pct?: number } => {
+const statusOf = (d: DemoInfo, all: DemoInfo[]): { text: string; cls: string; pct?: number } => {
   if (d.status === 'running') return { text: `Open · ${(d.citizens ?? 0).toLocaleString()} people${d.clients ? ` · ${d.clients} here now` : ''}`, cls: 'ok' };
-  if (d.status === 'starting') return d.fill !== undefined ? { text: `Building ${d.name}… ${Math.round(d.fill * 100)}%`, cls: 'busy', pct: d.fill } : { text: `Starting ${d.name}…`, cls: 'busy' };
+  if (d.status === 'starting') return d.fill !== undefined ? { text: `Building ${d.name}… ${Math.round(d.fill * 100)}%`, cls: 'busy', pct: d.fill } : { text: `${d.saved && d.saveCurrent !== false ? 'Starting' : 'Building'} ${d.name}…`, cls: 'busy' };
   if (d.status === 'resetting') return { text: 'Resetting…', cls: 'busy' };
   if (d.status === 'stopping') return { text: 'Stopping…', cls: 'busy' };
-  return { text: d.error ? 'Could not start' : d.saved ? 'Asleep · wakes in a few seconds' : 'Not built yet · about a minute to build', cls: d.error ? 'bad' : '' };
+  if (d.error) return { text: 'Could not start', cls: 'bad' };
+  if ((d.queue ?? -1) > 0) return { text: `Queued after ${all.find((o) => o.queue === d.queue! - 1)?.name ?? 'the others'}`, cls: 'busy' }; // the server is building its cities one at a time
+  return { text: d.saved && d.saveCurrent !== false ? 'Open · wakes in a few seconds' : 'Not built yet · about a minute to build', cls: '' };
 };
 
 interface Card { root: HTMLElement; status: HTMLElement; bar: HTMLElement; fill: HTMLElement }
 const cards = new Map<string, Card>();
 
-function paint(d: DemoInfo) {
+function paint(d: DemoInfo, all: DemoInfo[]) {
   const c = cards.get(d.id);
   if (!c) return;
-  const s = statusOf(d);
+  const s = statusOf(d, all);
   c.status.textContent = s.text;
   c.status.className = `status ${s.cls}`;
   c.bar.hidden = s.pct === undefined;
@@ -126,7 +128,7 @@ async function explore(root: HTMLElement, cfg: ServerConfig) {
         else if (d.id === 'showcase') grid.append(demoCard(d, !!cfg.spectate, 'guided tour'));
         else { more.append(demoRow(d)); moreBox.hidden = false; }
       }
-      paint(d);
+      paint(d, list);
     }
     // cities first, then the showcase: the grid keeps the server's order within each
     [...grid.children].sort((a, b) => Number(!(a as HTMLElement).querySelector('.tag')?.textContent?.startsWith('sample')) - Number(!(b as HTMLElement).querySelector('.tag')?.textContent?.startsWith('sample'))).forEach((c) => grid.append(c));

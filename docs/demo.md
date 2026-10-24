@@ -42,7 +42,7 @@ Each demo runs as its own process on `8100 + slot`, where the slot is 90 for the
 | `POST /api/demos/<id>/start` | starts the demo; a no-op when it is running |
 | `POST /api/demos/<id>/stop` | stops it; it saves on the way out |
 | `POST /api/demos/<id>/reset` | **Reset demo**, below |
-| `GET /api/config` | how the deployment is run: `{ play?, spectate?, defaultDemo?, defaultView? }` (`play`: the server also serves the offline build at `/play/`; below, "A public showcase") |
+| `GET /api/config` | how the deployment is run: `{ play?, spectate?, defaultDemo?, demos?, defaultView? }` (`demos`: on a showcase, the allowed demos; `play`: the server also serves the offline build at `/play/`; below, "A public showcase") |
 | `GET /api/servers` | the public servers the home page lists under Multiplayer: `{ servers: [{ name, url, region, status, note }] }`, read from `packages/server/servers.json` (`SERVERS_FILE`) on every request; empty if the file is missing |
 
 With `SPECTATE=1` stop and reset answer 403 with the reason; start still works.
@@ -76,7 +76,7 @@ is London at civitas.reneo.app, from the Dockerfile's image):
   closes, so the save does not collect everyone who ever looked. On the HTTP API, demo stop and reset and test-city
   start and stop answer 403; starting a demo is allowed, since that is how a visitor gets in.
 - `DEFAULT_DEMO=<id>` sends the game opened without `?demo=`, `?ws=` or `?city=` (`/?go`; a bare `/` is the home page, below) to that demo
-  instead of the live world, and the main server starts that demo as it starts, so the town is filled before the first visitor arrives.
+  instead of the live world, and the main server starts that demo as it starts, so the town is filled before the first visitor arrives (the other sample cities are built behind it: "Warming and rebuilding" below).
 - `DEFAULT_VIEW="x,y,dist,yaw,pitch[,hour]"` is the camera's opening shot on such a bare page: the tile looked at,
   the distance, the orbit angle and the tilt in degrees (yaw 0 looks north from the south, 90 looks west from the east;
   pitch 90 is straight down, 10 is near the horizon) and, optionally, an hour that freezes the lighting (the light chip
@@ -96,10 +96,46 @@ menu's changes (demolish, buy, build sooner, later, pause) are hidden, tool keys
 tax slider or name field and the lines panel lists every line without edit buttons. The camera, hover tooltips, the
 building, person and vehicle panels, follow, first-person view, the congestion and perf overlays, the underground view,
 the charts and the guided tour all work. The banner reads "London: a read-only showcase" and, with `DEFAULT_DEMO`
-set, offers no way back to the live world. With `DEFAULT_DEMO` set the showcase shows only that demo: `/api/demos` lists
-just it, starting another answers 403 ("This showcase only shows its own demo"), `/demo-ws/<other>` is refused, and a
+set, offers no way back to the live world. With `DEFAULT_DEMO` set the showcase shows only its allowed demos, the default
+plus `WARM_DEMOS` plus `KEEP_DEMOS` (by default every sample city, below): `/api/demos` lists just those, starting another answers 403 ("This showcase only shows its own demo"), `/demo-ws/<other>` is refused, and a
 `?demo=<other>` link opens the default like a bare page (each demo is a child process of about a gigabyte). Without
 `DEFAULT_DEMO` every demo stays reachable. Test cities stay dev-only (`NODE_ENV=production` has none).
+
+#### Warming and rebuilding
+
+A showcase builds its cities itself, so a visitor to the home page never meets "Building London… 17%" on a deployment that has been up for a few minutes, and a city whose scenario changed since its save is built again with no one touching it. All of it is the world launcher's (`TestCities.warm` in `testcities.ts`); no sim or protocol code is involved.
+
+Environment of the main server:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `WARM_DEMOS` | `all` with `SPECTATE`, none otherwise | the demos to build at start: `all` (every demo with a `town`, the sample cities, in `DEMOS` order) or ids, `london,showcase` |
+| `KEEP_DEMOS` | `DEFAULT_DEMO` only | the demos left running afterwards; ids or `all`. `DEFAULT_DEMO` is always kept and warmed first, and the kept demos are warmed even if `WARM_DEMOS` does not list them |
+| `SCENARIO_VERSION` | the constant in `shared/src/demo/scenario.ts` | a test override (the warm probe sets it); bump the constant by hand instead to force every demo to seed again |
+
+Warming is **sequential**: one child is started, the run waits until it reports `ready`, then starts the next. A warming child runs at low priority (`os.setPriority`, nice 10) so the main server and any kept city stay responsive while another builds; it keeps that priority for its life. A warmed demo that is not kept is saved and stopped as soon as it is ready and nobody is in it, so it resumes from its save in about ten seconds when someone presses Open. A kept demo is never stopped for want of visitors (the child is started with `DEMO_KEEP=1`, which turns off its idle timer, and the parent skips it in the idle rule); the others keep the ten-minute idle stop. A demo whose save is current is only started when it is kept; otherwise it is left asleep. With `SPECTATE` and a `DEFAULT_DEMO`, the allowed demos (the ones `/api/demos` lists and `?demo=` may open) are the default, the warmed and the kept ones.
+
+**The scenario hash.** A demo's save says what it was built from. `scenarioHash(id)` (`shared/src/demo/scenario.ts`) is an FNV-1a hash of `SCENARIO_VERSION`, the catalogue hash (`CATALOGUE_HASH`, the compiled catalogue, so a changed kind a scenario places counts), the town's constants and the demo's sections as data (`demoSections(id)`, serialised with sorted keys). It is a pure function of that data: no clock, no paths. When a demo's fill completes, the child writes `data/demos/demo-<id>.meta.json` (`scenarioHash`, `scenarioVersion`, `catalogue`, citizens, time), after the world and the snapshot, so a crash before it reads as "no record". Before any start of a demo (the warm run, `POST /api/demos/<id>/start`, Open on the home page):
+
+- a save whose meta hash is the current one **resumes** (log: `demo london: resumed`);
+- a save with a different hash, or none, is **set aside**: `demo-<id>.json` becomes `demo-<id>.json.stale-<old hash>` (`nometa` for a save that predates this), the snapshot `demo-<id>.seed.json` likewise, the meta is removed and the demo seeds again (log: `demo london: re-seeding (<reason>)`, the reason being SCENARIO_VERSION, the catalogue hash, the scenario, or a missing record). Only the newest set-aside save of a demo is kept; delete the `.stale-*` files freely.
+- a child of an out-of-date save that is still running (adopted after a dev reload) is stopped first during the warm run.
+
+The first start after this feature lands finds saves with no meta, so every existing demo seeds once more. Changes to the seeder, the fill or the simulation do not show in the scenario data: bump `SCENARIO_VERSION` for those.
+
+`GET /api/demos` gains, per demo: `scenarioHash` (the current one), `saveCurrent` (a save exists and carries it), `warming` (the run is building it now), `queue` (0 building now, 1 next, and so on, -1 when it is not waiting for the run) and `kept`. The home page's cards read them: "Building Paris… 40%" while a child fills, "Queued after London" while `queue` is above 0, "Open · 31,200 people" when ready and "Open · wakes in a few seconds" for a stopped city with a current save.
+
+**Memory.** The server logs each child's resident memory when it reports ready (from `/healthz`'s `rss`), with the highest seen on its two-second polls: `demo london: ready after 162 s, 27728 citizens, RSS 741 MB (peak seen 741 MB)`. Sequential warming keeps the peak at one child plus the kept ones, so the stack's limit must cover the main server (about 150 MB), every kept city and the largest city being built. Measured 2026-10-25 on the dev Mac (cold fill, nothing else asked of it):
+
+| Child | Citizens | RSS when ready |
+|---|---|---|
+| Showcase | 17,642 | 554 MB (a re-seed read 696 MB; a resume from its save 335 MB) |
+| Civic demo | 12,088 | 420 MB |
+| London | 27,728 | 741 MB after a 162 s cold fill (466 MB resumed from its save, 3 s; about 1.1-1.2 GB after hours with a visitor, measured above) |
+
+The numbers are at the moment of `ready`, so they understate a long-running child; size for London's 1.2 GB. A showcase that keeps only London needs about 150 MB plus London plus the one city being built (under 1 GB each so far), which the 3 GB stack limit holds. Keeping all four cities running at once (`KEEP_DEMOS=all`) adds one resident child per city on top of that, and the limit must rise to match (about 1.2 GB for each London-sized city: four kept cities are about 5 GB with the main server); a city that is not kept costs nothing while asleep. UAT runs `WARM_DEMOS=london` (`scripts/uat.sh`), so London is ready after every promote.
+
+`npm run warm:check` (`packages/server/src/loadtest/warm.ts`, about four minutes) runs the real server three times against a temp data dir: warm showcase then civic keeping the showcase (order, queue numbers, one child at a time, civic stopped, `/api/demos` fields, meta files), again with `SCENARIO_VERSION=2` (the save is set aside and the showcase seeds again under a new hash), and once more unchanged (it resumes, no stale file).
 
 ### The home page
 
