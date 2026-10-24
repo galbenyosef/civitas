@@ -17,7 +17,9 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       legs over the fairground
  *   210 Pike Place Market: a library-family attraction, the market sheds
  *       sloping to the harbour with their neon sign
- *   211-212 to follow, one building at a time.
+ *   211 the Columbia Center: an office tower, the black glass monolith with
+ *       its three white fins
+ *   212 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'seattle'];
@@ -122,4 +124,43 @@ export const pikePlace: KindDef = {
   }],
 };
 
-export const SEATTLE_LANDMARKS: KindDef[] = [spaceNeedle, pikePlace];
+// ================================================================= 211 the Columbia Center
+
+/**
+ * The black monolith the bank raised over the downtown: seventy-six storeys
+ * of smoked glass, the tallest thing on the coast, its crown stepping back
+ * under the three white fins that run up the front. Plain glass and steel
+ * only, so no window rule is touched.
+ */
+const COLUMBIA_GLASS = 0x2c3038, COLUMBIA_FIN = 0x8a97a8;
+
+const columbiaOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the black glass shaft with its stepped crown
+  ops.push(['box', 0.85, 3.4, 0.55, 0, 0.02, -0.05, COLUMBIA_GLASS]);
+  ops.push(['box', 0.6, 0.4, 0.45, 0, 3.42, -0.05, COLUMBIA_GLASS]);
+  // the three white fins up the front
+  for (const x of [-0.25, 0, 0.25]) ops.push(['box', 0.02, 3.4, 0.02, x, 0.02, 0.24, COLUMBIA_FIN]);
+  // the entry canopy
+  ops.push(['box', 0.4, 0.04, 0.2, 0, 0.16, 0.28, 'marquee']);
+  // the pavement: lamps and a pair of trees
+  ops.push(...lampPost(-0.72, 0.75, 0.3, 'marquee', 0.02), ...lampPost(0.72, 0.75, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.8, -0.72, 0.5), ...tree(0.8, -0.72, 0.5));
+  return ops;
+};
+
+export const columbiaCenter: KindDef = {
+  ...towerBase, id: 'columbia-center', name: 'the Columbia Center', kindId: 211, tier: 3,
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The black monolith the bank raised over the downtown: seventy-six storeys of smoked glass, the tallest thing on the coast, its crown stepping back under the three white fins that run up the front.',
+  howTo: 'A 2×2 plot among offices on an avenue; a very big workplace, so give it buses or a station and leave the street clear. World landmark: unlock rule to be decided.',
+  tool: { id: 'columbiacenter', key: '', label: 'Columbia Center', color: '#2c3038' },
+  levels: [{
+    capacity: 460, wage: 47, cost: 25000, upkeep: 140, work: 4700, parking: { surface: 0, underground: 90 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the black glass monolith with its three white fins', height: 3.85, ops: columbiaOps() },
+    ],
+  }],
+};
+
+export const SEATTLE_LANDMARKS: KindDef[] = [spaceNeedle, pikePlace, columbiaCenter];
