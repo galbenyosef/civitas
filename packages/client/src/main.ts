@@ -1523,6 +1523,7 @@ const audio = new Audio({
   notice: (t) => ui.notice(t),
 });
 ui.onSound = (id) => audio.ui(id);
+fireworks.onShell = (x, z, at, size) => audio.firework(x, z, at, size);
 Object.assign((window as any).msc, { perf, lines, audio });
 const localUi = local ? mountLocalUi(local, (kind, msg) => ui.toast(kind, msg), () => world.myPlayer?.name ?? localStorage.getItem('msimcity.name') ?? 'Mayor') : null;
 if (local) {

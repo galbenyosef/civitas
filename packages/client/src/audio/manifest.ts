@@ -1,9 +1,12 @@
+import { CLIPS } from './credits';
+
 /**
  * The voice manifest (docs/audio.md): every sound the game makes, by id, with the numbers it is synthesised from.
- * voices.ts reads its ranges from here, so a voice is tuned by editing a row. A row with `file` set is replaced by a
- * recording: the engine fetches the Opus file when the sound starts, and plays it (looped for a bed, once for an event,
- * with the same per-instance variation) in place of the synthesis. No file ships; a missing or undecodable file falls
- * back to the synthesised voice, so a recording can be added one voice at a time.
+ * voices.ts reads its ranges from here, so a voice is tuned by editing a row. A row with recordings (`takes`, wired at the foot of this
+ * file from credits.ts, the table scripts/audio-build.ts writes) plays one of them instead of the synthesis: the engine fetches the
+ * Opus files the first time the voice is wanted (looped for a bed, once for an event, with the same per-instance variation: pitch,
+ * gain, start point, a choice among the takes), and the synthesis plays until they have decoded. A missing or undecodable file leaves
+ * the synthesis. A voice with `synth: false` (the second pass) has only its recording and is silent without it.
  */
 export type BusId = 'ambience' | 'vehicles' | 'ui';
 
@@ -18,14 +21,25 @@ export interface VoiceDef {
   driven: string;
   /** synthesis numbers: frequencies in Hz, times in seconds, depths 0..1 */
   params: Record<string, number>;
-  /** a recording to use instead, relative to the page: see voiceFile(id). Unset for every voice that ships */
+  /** false: there is no synthesis, only a recording (the second-pass voices) */
+  synth?: false;
+  /** the first recording, a file name under audio/files/ (see voiceFile): set from credits.ts */
   file?: string;
+  /** every take of the recording (events vary between them), set from credits.ts */
+  takes?: string[];
+  /** the playback level of the recordings (they are normalised per class; this is the per-voice trim), set from credits.ts */
+  level?: number;
+  /** who recorded each take: { freesound id, title, author } per file, set from credits.ts */
+  source?: Record<string, { freesound: number; title: string; author: string }>;
 }
 
-/** The conventional path of a recording for a voice: set `file: voiceFile('traffic')` and put the Opus file in packages/client/public/audio/. */
-export const voiceFile = (id: string) => `audio/${id}.opus`;
+/** The conventional file name of a voice's first recording: put the Opus file in packages/client/src/audio/files/ (urls.ts serves it in every build). */
+export const voiceFile = (id: string, take = 1) => `${id}${take > 1 ? `-${take}` : ''}.opus`;
 
 const def = (d: VoiceDef): [string, VoiceDef] => [d.id, d];
+/** a second-pass voice: a recording and nothing else, so its row only says what it is and when it plays */
+const clip = (id: string, bus: BusId, kind: 'bed' | 'event', made: string, driven: string, gain = 1): [string, VoiceDef] =>
+  def({ id, bus, kind, made: `a Freesound CC0 recording: ${made}`, driven, params: { gain }, synth: false });
 
 export const VOICES: Record<string, VoiceDef> = Object.fromEntries([
   // ---- ambience beds
@@ -78,4 +92,41 @@ export const VOICES: Record<string, VoiceDef> = Object.fromEntries([
   def({ id: 'fx-stopbell', bus: 'vehicles', kind: 'event', made: 'one short bell-like ding (two partials)', driven: 'a bus pulling away from a stop', params: { f: 1180, len: 0.5, gain: 0.08 } }),
   def({ id: 'fx-chime', bus: 'vehicles', kind: 'event', made: 'two sine notes, a fourth apart', driven: 'a train closing its doors', params: { f: 740, len: 0.45, gain: 0.07 } }),
   def({ id: 'fx-joint', bus: 'vehicles', kind: 'event', made: 'two band-passed noise clacks a bogie apart', driven: 'a train\'s speed (joints per second)', params: { f: 900, gap: 0.09, gain: 0.1 } }),
+  // ---- the second pass: recordings only (no synthesis). Weather has no source in the game yet: Ambience.setWeather() is its hook
+  clip('rain-light', 'ambience', 'bed', 'light rain on pavement', 'the weather hook (Ambience.setWeather), rain under 0.6; nothing sets it yet'),
+  clip('rain-heavy', 'ambience', 'bed', 'a downpour', 'the weather hook, rain over 0.4 (the two cross-fade); nothing sets it yet'),
+  clip('market', 'ambience', 'bed', 'a street market', 'shops and offices round the camera, by day, close in'),
+  clip('pub', 'ambience', 'bed', 'pub murmur', 'shops round the camera, from late afternoon to closing, close in'),
+  clip('playground', 'ambience', 'bed', 'children playing', 'a nursery or school in the view, in school hours, close in'),
+  clip('stadium', 'ambience', 'bed', 'a stadium crowd', 'a stadium (or Camp Nou, the Maracana) in the view, afternoon and evening, close in'),
+  clip('fountain', 'ambience', 'bed', 'splashing water', 'the Trevi Fountain in the view, close in'),
+  clip('gust', 'ambience', 'event', 'a gust of wind', 'a Poisson clock that grows as the camera rises'),
+  clip('thunder', 'ambience', 'event', 'distant thunder', 'the weather hook, heavy rain; nothing sets it yet'),
+  clip('footsteps', 'ambience', 'event', 'shoes on pavement', 'walkers drawn near the camera, close in'),
+  clip('siren', 'ambience', 'event', 'a UK two-tone police siren', 'a police station in the view: a rare call, scaled by distance (the hook for a real response vehicle)'),
+  clip('siren-fire', 'ambience', 'event', 'a fire engine siren', 'a fire station in the view: a rare call, scaled by distance'),
+  clip('seagulls', 'ambience', 'event', 'gulls calling', 'a Poisson clock: water round the camera, by day'),
+  clip('pigeons', 'ambience', 'event', 'pigeons cooing', 'a Poisson clock: parks and shops round the camera, by day'),
+  clip('dog', 'ambience', 'event', 'a dog barking', 'a Poisson clock: homes round the camera, morning to evening'),
+  clip('bell-peal', 'ambience', 'event', 'a peal of church bells', 'the 10:00 and 18:00 hours, when a churchyard is in the view (instead of the strikes)'),
+  clip('bike-bell', 'ambience', 'event', 'a bicycle bell', 'a Poisson clock: walkers on the streets near the camera, by day'),
+  clip('bin-lorry', 'ambience', 'event', 'a bin lorry', 'a Poisson clock: homes round the camera, 06:00 to 10:00'),
+  clip('station-chime', 'ambience', 'event', 'an announcement chime', 'a Poisson clock: shops close in, or a train station in the view (hook)'),
+  clip('heli-over', 'ambience', 'event', 'a helicopter passing overhead', 'a rare Poisson clock when the camera is high and it is day'),
+  clip('plane-over', 'ambience', 'event', 'a jet passing overhead', 'a rare Poisson clock when the camera is high'),
+  clip('boat-horn', 'ambience', 'event', 'a ship horn', 'a Poisson clock: water round the camera'),
+  clip('fireworks', 'ambience', 'event', 'a firework bang and crackle', 'Audio.firework(): the fireworks system (render/fireworks.ts) calls it for every shell, with its distance'),
+  clip('hammer', 'ambience', 'event', 'hammering', 'builders\' depots and construction companies in the view, by day'),
+  clip('drill', 'ambience', 'event', 'a power drill', 'builders\' depots and construction companies in the view, by day'),
+  clip('lawnmower', 'ambience', 'event', 'a lawnmower', 'a rare Poisson clock: homes round the camera, mid-morning to late afternoon'),
 ]);
+
+// ---- the recordings, from credits.ts (written by scripts/audio-build.ts): wired onto the rows here, once
+for (const c of CLIPS) {
+  const v = VOICES[c.voice];
+  if (!v) continue;
+  (v.takes ??= []).push(c.file);
+  v.file ??= c.file;
+  v.level = c.level;
+  (v.source ??= {})[c.file] = { freesound: c.freesound, title: c.title, author: c.author };
+}

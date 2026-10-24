@@ -1,9 +1,11 @@
 // Sound: the engine, its controls and its voices against a fake AudioContext (client/src/audio). Run: npx tsx packages/client/scripts/audio-check.ts
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { AudioEngine, AUDIO_KEY, MAX_VOICES, HELD_RESERVE, DEFAULT_VOLUME, clampVolume } from '../src/audio/engine';
 import { bindMuteKey } from '../src/audio/controls';
 import { VOICES, voiceFile } from '../src/audio/manifest';
-import { fire, makeBed, makeRide, ringBell, type EventId, type RideKind } from '../src/audio/voices';
-import { Ambience, mixFor, newScan, birdRate, owlRate, scanAround, type AmbSources } from '../src/audio/ambience';
+import { CLIPS } from '../src/audio/credits';
+import { fire, makeBed, makeRide, ringBell, BEDS, type EventId, type RideKind } from '../src/audio/voices';
+import { Ambience, mixFor, newMix, newScan, birdRate, owlRate, scanAround, type AmbSources } from '../src/audio/ambience';
 import { FpvSound, type RideNow } from '../src/audio/fpv';
 
 let fails = 0;
@@ -115,24 +117,77 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 5));
 }
 
 // ---- the manifest, and a recording replacing a voice ----------------------------------------------------------------
+const okFetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
 {
   const defs = Object.values(VOICES);
   ok(defs.every((d) => d.id in VOICES && ['ambience', 'vehicles', 'ui'].includes(d.bus) && Object.keys(d.params).length > 0 && d.made && d.driven), `all ${defs.length} manifest rows have an id, bus, recipe, driver and numbers`);
-  ok(defs.every((d) => d.file === undefined), 'no recording ships: every voice is synthesised');
-  ok(voiceFile('traffic') === 'audio/traffic.opus', 'the conventional recording path');
-  VOICES.traffic.file = voiceFile('traffic'); VOICES.wind.file = voiceFile('wind');
+  ok(voiceFile('traffic') === 'traffic.opus' && voiceFile('bird', 2) === 'bird-2.opus', 'the conventional recording file names');
+  ok(['ui-click', 'ui-place', 'ui-refuse', 'ui-undo'].every((id) => !VOICES[id].takes), 'the interface clicks stay synthesised');
+  ok(defs.filter((d) => d.synth === false).every((d) => d.takes?.length), 'every recording-only voice has its recording');
+  // a recording is fetched the first time its voice is wanted, decoded off the tick, and a 404 leaves the synthesis
+  const saved = { t: VOICES.traffic.takes, w: VOICES.wind.takes, tf: VOICES.traffic.file, wf: VOICES.wind.file };
+  VOICES.traffic.takes = ['traffic.opus', 'traffic-2.opus']; VOICES.wind.takes = ['wind.opus'];
   const asked: string[] = [];
-  const e = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: async (u) => { asked.push(u); if (u.includes('wind')) throw new Error('404'); return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) }; } });
-  e.start(); await tick();
-  ok(asked.length === 2 && e.sample('traffic') !== null, 'a voice with a file is fetched and decoded');
-  ok(e.sample('wind') === null && e.ready, 'a missing recording falls back to synthesis and does not block start');
-  delete VOICES.traffic.file; delete VOICES.wind.file;
+  const e = new AudioEngine({ storage: mem(), create: fakeCtx, url: (f) => `u/${f}`, fetch: async (u) => { asked.push(u); if (u.includes('wind')) throw new Error('404'); if (u.includes('traffic-2')) return { ok: false, arrayBuffer: async () => new ArrayBuffer(0) }; return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) }; } });
+  e.start();
+  ok(asked.length === 0 && e.ready, 'starting the engine fetches no recording: they load lazily');
+  ok(e.sample('traffic') === null && asked.length === 2, 'the first wish for a voice starts fetching its takes and gets nothing yet');
+  e.sample('traffic'); ok(asked.length === 2, 'a voice is asked for once');
+  await tick();
+  ok(e.sample('traffic') !== null && e.loaded('traffic') === 1, 'a recording is decoded in the background and then served (a 404 take is skipped)');
+  ok(e.sample('wind') === null && e.sample('wind') === null && e.ready, 'a missing recording falls back to synthesis and does not block anything');
+  // a bed made before its recording has decoded plays synthesis, then cross-fades to the recording
+  const e2 = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: okFetch }); e2.start();
+  log.length = 0; const bed = makeBed(e2, 'traffic', 3); bed?.tune(0.5, 0.5, 1);
+  ok(/sawtooth|lowpass|type=/.test(log.join('|')) && e2.active === 1, 'a bed with a recording that has not decoded yet starts as synthesis');
+  await tick(); log.length = 0; bed?.tune(0.6, 0.5, 1);
+  ok(e2.active === 2 && e2.loaded('traffic') >= 1, 'when the recording arrives it cross-fades in (both sound for a moment)');
+  await new Promise<void>((r) => setTimeout(r, 1700));
+  ok(e2.active === 1, 'and the synthesis then lets go of its voice (one voice again)');
+  bed?.stop();
+  VOICES.traffic.takes = saved.t; VOICES.wind.takes = saved.w;
+  // a recording-only voice is silent without its file and plays with it
+  const e3 = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: okFetch }); e3.start();
+  const only = Object.values(VOICES).find((d) => d.synth === false && d.kind === 'event')!;
+  const wasTakes = only.takes; only.takes = undefined;
+  log.length = 0; fire(e3, only.id as EventId, { seed: 1 }); ok(log.length === 0 && e3.active === 0, `${only.id} (recording only) makes no sound when it has no file`);
+  only.takes = wasTakes; fire(e3, only.id as EventId, { seed: 1 }); await tick(); log.length = 0; fire(e3, only.id as EventId, { seed: 1 }); ok(log.length > 3, `${only.id} plays once its file has decoded`);
+}
+
+// ---- the recording files: present, Opus, small, credited, CC0 --------------------------------------------------------
+{
+  const dir = new URL('../src/audio/files/', import.meta.url), md = readFileSync(new URL('../src/audio/CREDITS.md', import.meta.url), 'utf8');
+  const onDisk = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.opus')) : [];
+  const wired = Object.values(VOICES).flatMap((d) => d.takes ?? []);
+  ok(wired.length > 0 && wired.every((f) => onDisk.includes(f)), `every manifest take exists (${wired.length} files)`);
+  ok(onDisk.every((f) => wired.includes(f)), 'every file on disk is a take of a voice');
+  const bad: string[] = [], big: string[] = [], uncredited: string[] = [];
+  let total = 0;
+  for (const f of onDisk) {
+    const b = readFileSync(new URL(f, dir)); total += b.length;
+    if (b.length > 400 * 1024) big.push(`${f} ${(b.length / 1024).toFixed(0)} KB`);
+    if (b.subarray(0, 4).toString() !== 'OggS' || !b.subarray(0, 120).toString('latin1').includes('OpusHead')) bad.push(f);
+    const c = CLIPS.find((x) => x.file === f);
+    if (!c || c.licence !== 'CC0' || !md.includes(`[${c.freesound}](https://freesound.org/s/${c.freesound}/)`) || !md.includes(f)) uncredited.push(f);
+    else if (statSync(new URL(f, dir)).size !== c.bytes) uncredited.push(`${f} (size differs from credits.ts: rebuild)`);
+  }
+  ok(bad.length === 0, `every file is Ogg Opus (${bad.join(', ') || 'all'})`);
+  ok(big.length === 0, `every file is under 400 KB (${big.join(', ') || 'all'})`);
+  ok(uncredited.length === 0, `every file has a CC0 row in credits.ts and CREDITS.md with its Freesound link (${uncredited.join(', ') || 'all'})`);
+  ok(total < 8 * 1048576, `the set is under 8 MB (${(total / 1048576).toFixed(2)} MB in ${onDisk.length} files)`);
+  ok(CLIPS.every((c) => VOICES[c.voice]?.source?.[c.file]?.freesound === c.freesound), 'every manifest row carries the source (Freesound id, title, author) of each take');
+  const beds = Object.values(VOICES).filter((d) => d.kind === 'bed' && d.takes).length;
+  console.log(`     (${beds} beds with recordings; ${Object.values(VOICES).filter((d) => !d.takes).map((d) => d.id).join(', ')} stay synthesised)`);
 }
 
 // ---- every voice builds against the fake context, and varies per instance ------------------------------------------
-{
-  const e = new AudioEngine({ storage: mem(), create: fakeCtx }); e.start(); await tick();
-  const events: EventId[] = ['bird', 'owl', 'bell', 'bell-deep', 'horn', 'beep', 'ui-click', 'ui-place', 'ui-refuse', 'ui-undo', 'fx-hiss', 'fx-stopbell', 'fx-chime', 'fx-joint'];
+for (const mode of ['synthesised', 'recorded'] as const) {
+  const e = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: mode === 'recorded' ? okFetch : async () => ({ ok: false, arrayBuffer: async () => new ArrayBuffer(0) }) });
+  e.start();
+  const synthOnly = (id: string) => mode === 'recorded' || VOICES[id].synth !== false;
+  for (const id of Object.keys(VOICES)) e.sample(id); // ask for everything; the recordings decode in the background
+  await tick();
+  const events = (Object.values(VOICES).filter((d) => d.kind === 'event').map((d) => d.id) as EventId[]).filter(synthOnly);
   let threw = '';
   const record = (f: () => void) => { log.length = 0; try { f(); } catch (err) { threw += `${(err as Error).message} `; } return log.join('|'); };
   const sigs = new Map<string, string[]>();
@@ -140,25 +195,29 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 5));
     sigs.set(id, [1, 2, 3, 4].map((seed) => record(() => { if (id === 'bell' || id === 'bell-deep') ringBell(e, id === 'bell-deep', seed, 3); else fire(e, id, { seed }); })));
     e.active = 0;
   }
-  ok(threw === '', `every event voice builds (${threw || 'no errors'})`);
+  ok(threw === '', `${mode}: every event voice builds (${threw || 'no errors'})`);
   const same = events.filter((id) => new Set(sigs.get(id)).size < 4);
-  ok(same.length === 0, `every event differs between instances (${same.join(', ') || 'all vary'})`);
-  const beds = ['traffic', 'wind', 'crowd', 'industry', 'water'] as const;
+  ok(same.length === 0, `${mode}: every event differs between instances (${same.join(', ') || 'all vary'})`);
+  const silent = events.filter((id) => (sigs.get(id)![0] ?? '').length < 20);
+  ok(silent.length === 0, `${mode}: every event makes a sound (${silent.join(', ') || 'all do'})`);
+  const beds = BEDS.filter(synthOnly);
   for (const id of beds) {
     const s = [1, 2, 3].map((seed) => record(() => { const b = makeBed(e, id, seed); b?.tune(0.5, 0.5, 1); }));
-    ok(new Set(s).size === 3, `${id} bed: start point, rate and modulation differ per instance`);
+    ok(new Set(s).size === 3, `${mode}: ${id} bed: start point, rate and modulation differ per instance`);
     e.active = 0;
   }
   for (const k of ['car', 'truck', 'bus', 'train', 'metro', 'boat', 'plane', 'heli'] as RideKind[]) {
     const s = [1, 2].map((seed) => record(() => { const r = makeRide(e, k, seed); r?.set(0.6); }));
-    ok(threw === '' && s[0].length > 50, `${k} ride builds and takes a speed`);
+    ok(threw === '' && s[0].length > 50, `${mode}: ${k} ride builds and takes a speed`);
     e.active = 0;
   }
-  ok(threw === '', `no voice threw (${threw || 'ok'})`);
-  // a bus and a train must not be the same recipe
-  const b2 = record(() => makeRide(e, 'bus', 5)), t2 = record(() => makeRide(e, 'train', 5));
-  ok(/type=sawtooth/.test(b2) && !/type=sawtooth/.test(t2) && /type=triangle/.test(t2), 'a bus is saws (a diesel); a train is triangles (a whine)');
-  e.muted = true; log.length = 0; fire(e, 'bird', { seed: 1 }); ok(log.length === 0, 'a muted engine builds nothing');
+  ok(threw === '', `${mode}: no voice threw (${threw || 'ok'})`);
+  if (mode === 'synthesised') {
+    // a bus and a train must not be the same recipe
+    const b2 = record(() => makeRide(e, 'bus', 5)), t2 = record(() => makeRide(e, 'train', 5));
+    ok(/type=sawtooth/.test(b2) && !/type=sawtooth/.test(t2) && /type=triangle/.test(t2), 'a bus is saws (a diesel); a train is triangles (a whine)');
+  }
+  e.muted = true; log.length = 0; fire(e, 'bird', { seed: 1 }); ok(log.length === 0, `${mode}: a muted engine builds nothing`);
 }
 
 // ---- the mix follows the city ---------------------------------------------------------------------------------------
@@ -175,6 +234,13 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 5));
   ok(birdRate(park, 5.5, 40) > birdRate(park, 12, 40) * 2, 'the dawn chorus (04:30 to 07:00) is busier than midday');
   ok(birdRate(park, 12, 40) > birdRate(newScan(), 12, 40), 'birds follow parks and homes');
   ok(birdRate(park, 23, 40) === 0 && birdRate(park, 12, 400) === 0, 'no birds at night or from far away');
+  const m0 = newMix();
+  const lv = (sc: ReturnType<typeof newScan>, h: number, d = 40, rain = 0) => mixFor(sc, d, h, false, m0, rain);
+  ok(lv({ ...newScan(), stadium: 2 }, 15).stadium.level > 0.3 && lv({ ...newScan(), stadium: 2 }, 3).stadium.level === 0 && lv({ ...newScan(), stadium: 2 }, 15, 400).stadium.level === 0, 'the stadium crowd is heard in the afternoon, close to a stadium, and not at night or from far off');
+  ok(lv({ ...newScan(), school: 1 }, 10).playground.level > 0.3 && lv({ ...newScan(), school: 1 }, 20).playground.level === 0, 'the playground is heard in school hours, near a school');
+  ok(lv({ ...newScan(), com: 0.4, walkers: 20 }, 11).market.level > 0.2 && lv({ ...newScan(), com: 0.4 }, 20).pub.level > 0.2 && lv({ ...newScan(), com: 0.4 }, 10).pub.level === 0, 'a market by day and a pub murmur in the evening, by the shops');
+  ok(lv(newScan(), 12, 40, 0)['rain-light'].level === 0 && lv(newScan(), 12, 40, 0.3)['rain-light'].level > 0.05 && lv(newScan(), 12, 40, 0.3)['rain-heavy'].level === 0 && lv(newScan(), 12, 40, 1)['rain-heavy'].level > 0.2 && lv(newScan(), 12, 40, 1)['rain-light'].level === 0, 'light rain then heavy rain follow the weather hook, and it is dry by default');
+  ok(lv({ ...newScan(), fountain: 1 }, 12).fountain.level > 0.2 && lv({ ...newScan(), fountain: 1 }, 12, 300).fountain.level === 0, 'a fountain is heard close in');
   ok(owlRate(park, 23, 40) > 0 && owlRate(park, 12, 40) === 0 && owlRate(newScan(), 23, 40) === 0, 'owls call at night in parks and homes only');
 }
 

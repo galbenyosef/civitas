@@ -117,7 +117,7 @@ const testCities = worldLauncherAvailable() // demos on every main server, test 
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
-  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json',
+  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json', '.opus': 'audio/ogg; codecs=opus',
 };
 async function serve(req: IncomingMessage, res: ServerResponse) {
   if (req.url === '/healthz') {
