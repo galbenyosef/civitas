@@ -1,4 +1,4 @@
-import type { KindDef, Op } from './schema';
+import type { Color, KindDef, Op } from './schema';
 import { Zone } from './codes';
 import { library } from './leisure';
 import { office } from './office';
@@ -162,7 +162,7 @@ export const merdeka118: KindDef = {
  * gold only, so no window rule is touched.
  */
 const LIMESTONE = 0x8f948c, CAVE_DARK = 0x3a3630;
-const RAINBOW = ['red', 0xe8943c, 'yellow', 'green', 0x2c5f9e, 0x7a4a9e];
+const RAINBOW: Color[] = ['red', 0xe8943c, 'yellow', 'green', 0x2c5f9e, 0x7a4a9e];
 
 const batuCavesOps = (): Op[] => {
   const ops: Op[] = [slab(2, 2, 'lawn')];
