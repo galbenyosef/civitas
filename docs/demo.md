@@ -76,7 +76,7 @@ is London at civitas.reneo.app, from the Dockerfile's image):
   closes, so the save does not collect everyone who ever looked. On the HTTP API, demo stop and reset and test-city
   start and stop answer 403; starting a demo is allowed, since that is how a visitor gets in.
 - `DEFAULT_DEMO=<id>` sends the game opened without `?demo=`, `?ws=` or `?city=` (`/?go`; a bare `/` is the home page, below) to that demo
-  instead of the live world, and the main server starts that demo as it starts, so the town is filled before the first visitor arrives.
+  instead of the live world, and the main server starts that demo as it starts, so the town is filled before the first visitor arrives (the other sample cities are built behind it: "Warming and rebuilding" below).
 - `DEFAULT_VIEW="x,y,dist,yaw,pitch[,hour]"` is the camera's opening shot on such a bare page: the tile looked at,
   the distance, the orbit angle and the tilt in degrees (yaw 0 looks north from the south, 90 looks west from the east;
   pitch 90 is straight down, 10 is near the horizon) and, optionally, an hour that freezes the lighting (the light chip
@@ -96,8 +96,8 @@ menu's changes (demolish, buy, build sooner, later, pause) are hidden, tool keys
 tax slider or name field and the lines panel lists every line without edit buttons. The camera, hover tooltips, the
 building, person and vehicle panels, follow, first-person view, the congestion and perf overlays, the underground view,
 the charts and the guided tour all work. The banner reads "London: a read-only showcase" and, with `DEFAULT_DEMO`
-set, offers no way back to the live world. With `DEFAULT_DEMO` set the showcase shows only that demo: `/api/demos` lists
-just it, starting another answers 403 ("This showcase only shows its own demo"), `/demo-ws/<other>` is refused, and a
+set, offers no way back to the live world. With `DEFAULT_DEMO` set the showcase shows only its allowed demos, the default
+plus `WARM_DEMOS` plus `KEEP_DEMOS` (by default every sample city, below): `/api/demos` lists just those, starting another answers 403 ("This showcase only shows its own demo"), `/demo-ws/<other>` is refused, and a
 `?demo=<other>` link opens the default like a bare page (each demo is a child process of about a gigabyte). Without
 `DEFAULT_DEMO` every demo stays reachable. Test cities stay dev-only (`NODE_ENV=production` has none).
 

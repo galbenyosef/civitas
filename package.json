@@ -18,6 +18,7 @@
     "buildings:check": "tsx packages/shared/scripts/check-buildings.ts",
     "landmarks:check": "tsx packages/shared/scripts/check-landmarks.ts",
     "demo:check": "tsx packages/server/src/demo/check.ts",
+    "warm:check": "tsx packages/server/src/loadtest/warm.ts",
     "local:check": "tsx packages/server/src/local/check.ts",
     "history:check": "tsx packages/server/src/history-check.ts",
     "parcels:check": "tsx packages/server/src/parcels-check.ts",
