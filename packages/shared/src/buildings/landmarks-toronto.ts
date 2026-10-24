@@ -19,7 +19,8 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
  *       the hill above the avenue
  *   207 the Royal Ontario Museum: a library-family attraction, the stone
  *       museum with the glass crystal bursting out of its front corner
- *   208 to follow, one building at a time.
+ *   208 Old City Hall: an office tower, the Romanesque sandstone pile with
+ *       its clock tower over the old market square
  */
 
 const TAGS = ['world', 'toronto'];
@@ -180,4 +181,51 @@ export const royalOntarioMuseum: KindDef = {
   }],
 };
 
-export const TORONTO_LANDMARKS: KindDef[] = [cnTower, casaLoma, royalOntarioMuseum];
+// ================================================================= 208 Old City Hall
+
+/**
+ * The Romanesque pile the city raised over the old market square: the
+ * sandstone mass with its rows of round-arched windows, the grand arch of
+ * the door, and the clock tower that has kept the courts' time for over a
+ * hundred years. Plain sandstone and dark insets only, so no window rule
+ * is touched.
+ */
+const HALL_SAND = 0x9a7a5a, HALL_DK = 0x3a3028, HALL_ROOF = 0x4a5a6a;
+
+const oldCityHallOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the sandstone mass with its rows of dark windows
+  ops.push(['box', 1.3, 0.5, 0.7, -0.1, 0.02, -0.2, HALL_SAND]);
+  for (const y of [0.14, 0.32]) {
+    for (const x of [-0.55, -0.3, -0.05, 0.2, 0.45]) ops.push(['box', 0.1, 0.13, 0.02, x, y, 0.165, HALL_DK]);
+  }
+  // the grand arch of the door
+  ops.push(['box', 0.3, 0.22, 0.04, -0.1, 0.02, 0.165, HALL_DK]);
+  // the clock tower with its faces and pointed roof
+  ops.push(['box', 0.34, 0.95, 0.34, 0.42, 0.02, -0.28, HALL_SAND]);
+  ops.push(['box', 0.16, 0.16, 0.02, 0.42, 0.8, -0.095, 'white']);
+  ops.push(['box', 0.16, 0.16, 0.02, 0.42, 0.8, -0.465, 'white']);
+  ops.push(['box', 0.02, 0.16, 0.16, 0.245, 0.8, -0.28, 'white']);
+  ops.push(['cone', 0.26, 0.22, 0.42, 0.97, -0.28, HALL_ROOF, 8]);
+  // the square: lamps, flags, a pair of trees
+  ops.push(...lampPost(-0.6, 0.75, 0.3, 'marquee', 0.02), ...lampPost(0.3, 0.75, 0.3, 'marquee', 0.02));
+  ops.push(...flags(-0.15, 0.85, 2, 0.4, ['red', 'white'], 0.02));
+  ops.push(...tree(-0.82, -0.72, 0.5), ...tree(0.8, -0.75, 0.5));
+  return ops;
+};
+
+export const oldCityHall: KindDef = {
+  ...towerBase, id: 'old-city-hall', name: 'Old City Hall', kindId: 208, tier: 4,
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The Romanesque pile over the old market square: the sandstone mass with its round-arched windows, the grand arch of the door, and the clock tower that has kept the courts\' time for over a hundred years.',
+  howTo: 'A 2×2 plot among offices near a square; a big workplace, so give it buses or a station and leave the street clear. World landmark: unlock rule to be decided.',
+  tool: { id: 'oldcityhall', key: '', label: 'Old City Hall', color: '#9a7a5a' },
+  levels: [{
+    capacity: 340, wage: 44, cost: 19000, upkeep: 110, work: 4200, parking: { surface: 0, underground: 50 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the Romanesque sandstone pile with its clock tower over the square', height: 1.2, ops: oldCityHallOps() },
+    ],
+  }],
+};
+
+export const TORONTO_LANDMARKS: KindDef[] = [cnTower, casaLoma, royalOntarioMuseum, oldCityHall];
