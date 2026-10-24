@@ -8,7 +8,7 @@
  * catalogue plugin recompiles on change and HMR reloads this page.
  */
 import {
-  WebGLRenderer, Scene, PerspectiveCamera, Mesh, Vector3, PlaneGeometry, GridHelper, MeshLambertMaterial, Group,
+  WebGLRenderer, Scene, PerspectiveCamera, Mesh, Vector3, Box3, PlaneGeometry, GridHelper, MeshLambertMaterial, Group,
   ACESFilmicToneMapping, type Object3D, type MeshLambertMaterial as LambertT,
 } from 'three';
 import { MANIFEST, CATALOGUE_HASH, type KindManifest, type LevelManifest, type DesignManifest } from '@msimcity/shared';
@@ -55,7 +55,23 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const hh = (h: number) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`;
-const spanOf = (k: KindManifest) => Math.max(k.footprint?.w ?? 1, k.footprint?.h ?? 1);
+/** Camera offset from the look-at point for a yaw and pitch (the same orbit the modal and thumbnails use). */
+const viewDir = (yaw: number, pitch: number) => new Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+/**
+ * The smallest distance from `center` at which a camera looking along -dir with vertical field `fovDeg` sees every corner
+ * of `box`, plus a margin. Fits the real bounds, so a tall or wide design is never cropped at the edge of its picture.
+ */
+function fitDist(box: Box3, center: Vector3, dir: Vector3, fovDeg: number, aspect = 1, margin = 1.12): number {
+  const t = Math.tan((fovDeg * Math.PI) / 360), tx = t * aspect;
+  const right = new Vector3().crossVectors(dir.clone().negate(), new Vector3(0, 1, 0)).normalize();
+  const up = new Vector3().crossVectors(right, dir.clone().negate());
+  let d = 0;
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+    const p = new Vector3(x, y, z).sub(center), s = p.dot(dir);
+    d = Math.max(d, s + Math.abs(p.dot(right)) / tx, s + Math.abs(p.dot(up)) / t);
+  }
+  return Math.max(d, 0.5) * margin;
+}
 
 // ---------------------------------------------------------------- rows: one per building (kind × level)
 
@@ -130,9 +146,13 @@ function shoot(list: Entry[], hour: number) {
         if (trees) thumbScene.add(trees);
         const parts = landmarkPreview(e.kind.kindId);
         if (parts) { parts.update(hour, nightUniform.value); thumbScene.add(parts.object); }
-        const hgt = e.design.height, y = Math.min(hgt * 0.42, 1.6), dist = 1.75 * Math.max(1.2, hgt * 1.1 + 0.45, spanOf(e.kind) * 1.05 + 0.2);
-        thumbCam.position.set(Math.sin(-0.6) * Math.cos(0.45) * dist, y + Math.sin(0.45) * dist, Math.cos(-0.6) * Math.cos(0.45) * dist);
-        target.set(0, y, 0);
+        const box = new Box3().expandByObject(m);
+        if (trees) box.expandByObject(trees);
+        if (parts) box.expandByObject(parts.object);
+        const center = box.getCenter(new Vector3()), dir = viewDir(-0.6, 0.45);
+        const dist = fitDist(box, center, dir, thumbCam.fov);
+        thumbCam.position.copy(center).addScaledVector(dir, dist);
+        target.copy(center);
         thumbCam.lookAt(target);
         thumbLight.fixedHour = hour;
         thumbLight.update(hour, target, dist);
@@ -303,8 +323,12 @@ function openModal(key: string) {
     modalTurntable!.add(m);
     if (modalTrees) modalTurntable!.add(modalTrees);
     if (modalMoving) modalTurntable!.add(modalMoving.object);
-    mFrameY = Math.min(e.design.height * 0.42, 1.6);
-    mDist = 1.65 * Math.max(2.1, e.design.height * 1.2 + 1.0, spanOf(e.kind) * 1.15 + 0.8);
+    // the turntable spins about the vertical axis through the middle of the model: fit it at every yaw, not just the first
+    const box = new Box3().setFromObject(modalTurntable!);
+    mFrameY = (box.min.y + box.max.y) / 2;
+    const axis = new Vector3(0, mFrameY, 0);
+    mDist = 0;
+    for (let i = 0; i < 24; i++) mDist = Math.max(mDist, fitDist(box, axis, viewDir((i * Math.PI) / 12, mPitch), 35));
   }
   modal.hidden = false;
   $('modalClose').focus();

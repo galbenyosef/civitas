@@ -1,6 +1,9 @@
 import type { KindDef, Op } from './schema';
 import { library, theatre } from './leisure';
 import { slab, tree, lampPost, flags, PAVING } from './tierkit';
+import { haikuEiffelOps, haikuArcOps, haikuNotreDameOps, haikuLouvreOps, haikuOperaOps, haikuSacreCoeurOps } from './landmarks-paris-haiku';
+import { sonnetEiffelOps, sonnetArcOps, sonnetNotreDameOps, sonnetLouvreOps, sonnetOperaOps, sonnetSacreCoeurOps } from './landmarks-paris-sonnet';
+import { opusEiffelOps, opusArcOps, opusNotreDameOps, opusLouvreOps, opusOperaOps, opusSacreCoeurOps } from './landmarks-paris-opus';
 
 /**
  * Paris landmarks (docs/buildings.md "Landmarks"): the recognisable buildings of the ville
@@ -82,6 +85,9 @@ export const eiffelTower: KindDef = {
     capacity: 45, wage: 18, cost: 16000, upkeep: 70, work: 3400, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the iron lace of four legs leaning together over the Champ de Mars, the two floors and the antenna above the city', height: 5.13, ops: eiffelOps() },
+      { author: 'claude-haiku-5-5', draft: true, name: 'the iron tower on its stone plinth, the tapering legs rising to two galleries, the antenna with its red light', height: 4.95, ops: haikuEiffelOps() },
+      { author: 'claude-sonnet-5-5', draft: true, name: 'the four-legged iron lattice with its girder belts, two galleries, the slender shaft and the red-lit antenna', height: 4.95, ops: sonnetEiffelOps() },
+      { author: 'claude-opus-5-5', draft: true, name: 'the four splayed legs and their lattice belts, the two floors, the long shaft to the summit room and red-lit antenna', height: 5.02, ops: opusEiffelOps() },
     ],
   }],
 };
@@ -140,6 +146,9 @@ export const arcDeTriomphe: KindDef = {
     capacity: 26, wage: 16, cost: 11000, upkeep: 55, work: 2800, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the great arch on its roundabout, the vault over the unknown soldier, the friezes of the attic above', height: 1.66, ops: arcOps() },
+      { author: 'claude-haiku-5-5', draft: true, name: 'the arch on its roundabout, two piers and the dark archway, the attic and stepped roof above', height: 1.34, ops: haikuArcOps() },
+      { author: 'claude-sonnet-5-5', draft: true, name: 'the great arch on its roundabout, two sculpted piers around the dark vault, the friezed attic and stepped crown', height: 1.27, ops: sonnetArcOps() },
+      { author: 'claude-opus-5-5', draft: true, name: 'the arch on the paved Étoile, two sculpted piers and the open vault, side arches, the attic and its cornices', height: 1.44, ops: opusArcOps() },
     ],
   }],
 };
@@ -205,6 +214,9 @@ export const notreDame: KindDef = {
     capacity: 30, wage: 15, cost: 12000, upkeep: 50, work: 2600, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the twin-towered west front with the rose window, the lead spire over the crossing, the flying buttresses of the apse', height: 1.4, ops: notreDameOps() },
+      { author: 'claude-haiku-5-5', draft: true, name: 'the nave under its slate roof, the west front with two towers and the rose window, the lead spire at the crossing', height: 1.25, ops: haikuNotreDameOps() },
+      { author: 'claude-sonnet-5-5', draft: true, name: 'the high nave with aisles and flying buttresses, the flat-topped west towers and rose window, the lead flèche', height: 1.31, ops: sonnetNotreDameOps() },
+      { author: 'claude-opus-5-5', draft: true, name: 'the cruciform nave and transept under lead, the round apse, flat-topped twin towers and rose, the flèche', height: 1.67, ops: opusNotreDameOps() },
     ],
   }],
 };
@@ -254,6 +266,9 @@ export const louvre: KindDef = {
     capacity: 60, wage: 19, cost: 20000, upkeep: 85, work: 4200, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the three wings of the Cour Napoleon under their slate roofs, the glass pyramid between the two fountains', height: 0.66, ops: louvreOps() },
+      { author: 'claude-haiku-5-5', draft: true, name: 'three stone wings under slate roofs around the court, the glass pyramid and its fountain basins', height: 0.68, ops: haikuLouvreOps() },
+      { author: 'claude-sonnet-5-5', draft: true, name: 'the mansard-roofed wings round the Cour Napoléon, the tall central pavilion, the glass pyramid and its satellites', height: 0.77, ops: sonnetLouvreOps() },
+      { author: 'claude-opus-5-5', draft: true, name: 'the mansarded wings and corner pavilions round the court, the Pavillon de l\'Horloge, the pyramid and its sisters', height: 0.86, ops: opusLouvreOps() },
     ],
   }],
 };
@@ -309,6 +324,9 @@ export const operaGarnier: KindDef = {
     capacity: 40, wage: 20, cost: 14000, upkeep: 100, work: 3000, parking: { surface: 0, underground: 30 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the columned opera house under its green dome, the stage tower rising behind', height: 1.1, ops: operaGarnierOps() },
+      { author: 'claude-haiku-5-5', draft: true, name: 'the colonnaded opera front under its roof, the green dome at the corner, the stage house behind', height: 1.08, ops: haikuOperaOps() },
+      { author: 'claude-sonnet-5-5', draft: true, name: 'the arcaded front between two gilded pavilions, the great green cupola and the stage house behind', height: 1.24, ops: sonnetOperaOps() },
+      { author: 'claude-opus-5-5', draft: true, name: 'the loggia between domed end pavilions, the crowned copper dome, the gabled stage house with Apollo', height: 1.28, ops: opusOperaOps() },
     ],
   }],
 };
@@ -368,6 +386,9 @@ export const sacreCoeur: KindDef = {
     capacity: 24, wage: 15, cost: 10000, upkeep: 45, work: 2200, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the white basilica on its terrace above the steps, the great dome and the bell tower over the city', height: 1.13, ops: sacreCoeurOps() },
+      { author: 'claude-haiku-5-5', draft: true, name: 'the white basilica on its terrace over the steps, the great dome and the square bell tower', height: 1.27, ops: haikuSacreCoeurOps() },
+      { author: 'claude-sonnet-5-5', draft: true, name: 'the white basilica on its terrace, the portico, the great ovoid dome with four lesser domes, the campanile', height: 1.37, ops: sonnetSacreCoeurOps() },
+      { author: 'claude-opus-5-5', draft: true, name: 'the white basilica above its steps, the tall ovoid dome and lantern, four lesser domes, the campanile behind', height: 1.48, ops: opusSacreCoeurOps() },
     ],
   }],
 };
