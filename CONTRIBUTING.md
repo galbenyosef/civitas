@@ -48,7 +48,7 @@ or read it yourself.
 - [ ] One landmark, a draft in `landmark-drafts.ts` with `draft: true` on the kind and the design, and an `author`
 - [ ] Kind id in the reserved range 230-249, unused; tags include `draft`
 - [ ] Footprint up to 4×4, door on the front row, the model's door on the front inside the door tile
-- [ ] Heights follow the 33 m rule and stay within 10 tiles; the silhouette reads at far zoom
+- [ ] Heights follow the 33 m rule and stay within 12 tiles; the silhouette reads at far zoom
 - [ ] Palette names or `0xRRGGBB` only; windows by class and facade; nothing drawn by hand over a window
 - [ ] `blurb` and `howTo` in the game's voice; no brand names, logos or signage text
 - [ ] No moving parts in the recipe; any motion is an exported constant plus a described, separately reviewed client change

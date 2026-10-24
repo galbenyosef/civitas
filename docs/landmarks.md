@@ -56,7 +56,7 @@ A landmark is **one building, not a type**: it has one level and **one design**.
 | Tower Bridge towers | 65 m | 2.0 |
 | Buckingham Palace, Tower of London, Royal Opera House | 25-35 m | 1.2-1.7 |
 
-A Victorian town hall tower of 80 m is about 2.5 tiles. A parish church spire is 1 to 1.5. Wide buildings are drawn **shorter and tighter than life** when needed so they fit their footprint (the Palace of Westminster is drawn smaller than the real one); keep the silhouette and the proportions between the parts, not the metres. Never taller than 10 tiles (`landmarks:check` fails over 10, warns over 8).
+A Victorian town hall tower of 80 m is about 2.5 tiles. A parish church spire is 1 to 1.5. Wide buildings are drawn **shorter and tighter than life** when needed so they fit their footprint (the Palace of Westminster is drawn smaller than the real one); keep the silhouette and the proportions between the parts, not the metres. Never taller than 12 tiles (`landmarks:check` fails over 12, warns over 8; the Shard is 9.6, the Burj Khalifa, drawn compressed, 11.6).
 
 ## 3. Footprint and coordinates
 
@@ -264,7 +264,7 @@ Run them in this order before opening a pull request:
 | Command | What it checks |
 | --- | --- |
 | `npm run buildings:compile` | Validates the catalogue and regenerates `compiled.ts` and `recipes.ts` (commit them) |
-| `npm run landmarks:check` | Every landmark (live and draft), or one file: the model within its footprint in all four rotations; height at most 10 tiles (warning over 8); compiled ops at most 800 (warning over 400, London for reference); no floating parts (live London parts are the baseline); no part covering a window; palette names or `0xRRGGBB` only; `tags`, `blurb`, `howTo` present; a draft has no tool, only draft designs and an id in 230-249; every live landmark stands in a city demo |
+| `npm run landmarks:check` | Every landmark (live and draft), or one file: the model within its footprint in all four rotations; height at most 12 tiles (warning over 8); compiled ops at most 800 (warning over 400, London for reference); no floating parts (live London parts are the baseline); no part covering a window; palette names or `0xRRGGBB` only; `tags`, `blurb`, `howTo` present; a draft has no tool, only draft designs and an id in 230-249; every live landmark stands in a city demo |
 | `npm run buildings:check` | The whole catalogue snapshot: places every landmark in all four rotations, the window collision rule, and that no draft leaks into the city batch |
 | `npm run demo:check` | Every live landmark is in its city demo |
 | `npm run typecheck` | Types |
@@ -291,7 +291,7 @@ Score each 0 (fails), 1 (needs work) or 2 (good). Ship at 18 or more with no zer
 2. **Footprint:** the model fits its footprint in all four rotations; the door tile is on the front row; the model's door is on the front inside it.
 3. **Palette:** palette names or `0xRRGGBB` only; no saturated `red`, `navy` or `terracotta` walls.
 4. **Windows:** boxes with windows have a facade and a name; doors and bands are placed by cell; nothing covers a window; `beacon`, `sign` and `fire` used only as lights.
-5. **Scale:** heights agree with the 33 m rule and the London table; within 10 tiles.
+5. **Scale:** heights agree with the 33 m rule and the London table; within 12 tiles.
 6. **Organic rule:** nothing visual is a uniform switch; lights and motion phases hash per instance.
 7. **Moving parts:** none in the recipe; any motion is an exported constant, clock-driven, per-instance phased, and a separate client change.
 8. **No trademarks:** no brand names, logos, or signage text; public buildings depicted by form.

@@ -5,7 +5,7 @@
  *   npm run landmarks:check -- <file.ts>          one scratch file of draft landmarks (an exported KindDef[]) before it joins
  *                                                 the tree; also what `check-drafts.ts <file>` does for such a file
  *
- * For every landmark design: the model stays inside its footprint in all four rotations, its height is within 10 tiles
+ * For every landmark design: the model stays inside its footprint in all four rotations, its height is within 12 tiles (the Burj Khalifa, drawn compressed, reaches 11.6; the Shard 9.6)
  * (a warning over 8), its compiled op count is within budget (a warning over 400, a failure over 800, London's numbers
  * printed for reference), nothing floats, no part covers a window, colours are palette names or 0xRRGGBB (the catalogue
  * validator), tags are present, `blurb` and `howTo` are written, a draft landmark can never reach the city (no tool, all
@@ -25,7 +25,7 @@ import { LANDMARK_DRAFT_IDS } from '../src/buildings/codes';
 import { showcaseProblems } from '../src/demo/showcase';
 import type { CompiledOp, KindDef } from '../src/buildings/schema';
 
-export const MAX_HEIGHT = 10, WARN_HEIGHT = 8, WARN_OPS = 400, MAX_OPS = 800;
+export const MAX_HEIGHT = 12, WARN_HEIGHT = 8, WARN_OPS = 400, MAX_OPS = 800;
 
 interface Row { id: string; kindId: number; draft: boolean; w: number; h: number; design: string; height: number; top: number; ops: number; floating: number }
 export interface LandmarkReport { errors: string[]; warnings: string[]; notes: string[]; rows: Row[] }
