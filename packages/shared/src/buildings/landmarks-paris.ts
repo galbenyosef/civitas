@@ -4,6 +4,7 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
 import { haikuEiffelOps, haikuArcOps, haikuNotreDameOps, haikuLouvreOps, haikuOperaOps, haikuSacreCoeurOps } from './landmarks-paris-haiku';
 import { sonnetEiffelOps, sonnetArcOps, sonnetNotreDameOps, sonnetLouvreOps, sonnetOperaOps, sonnetSacreCoeurOps } from './landmarks-paris-sonnet';
 import { opusEiffelOps, opusArcOps, opusNotreDameOps, opusLouvreOps, opusOperaOps, opusSacreCoeurOps } from './landmarks-paris-opus';
+import { fableEiffelOps, fableArcOps, fableNotreDameOps, fableLouvreOps, fableOperaOps, fableSacreCoeurOps } from './landmarks-paris-fable';
 
 /**
  * Paris landmarks (docs/buildings.md "Landmarks"): the recognisable buildings of the ville
@@ -88,6 +89,7 @@ export const eiffelTower: KindDef = {
       { author: 'claude-haiku-5-5', draft: true, name: 'the iron tower on its stone plinth, the tapering legs rising to two galleries, the antenna with its red light', height: 4.95, ops: haikuEiffelOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the four-legged iron lattice with its girder belts, two galleries, the slender shaft and the red-lit antenna', height: 4.95, ops: sonnetEiffelOps() },
       { author: 'claude-opus-5-5', draft: true, name: 'the four splayed legs and their lattice belts, the two floors, the long shaft to the summit room and red-lit antenna', height: 5.02, ops: opusEiffelOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the legs bending in from four stone feet through the great arches to the first floor, the second stage, the needle in three shades of brown', height: 5.06, ops: fableEiffelOps() },
     ],
   }],
 };
@@ -149,6 +151,7 @@ export const arcDeTriomphe: KindDef = {
       { author: 'claude-haiku-5-5', draft: true, name: 'the arch on its roundabout, two piers and the dark archway, the attic and stepped roof above', height: 1.34, ops: haikuArcOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the great arch on its roundabout, two sculpted piers around the dark vault, the friezed attic and stepped crown', height: 1.27, ops: sonnetArcOps() },
       { author: 'claude-opus-5-5', draft: true, name: 'the arch on the paved Étoile, two sculpted piers and the open vault, side arches, the attic and its cornices', height: 1.44, ops: opusArcOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the arch in its true proportions on the twelve-avenue star, the round-headed vault, the frieze, the attic and its shields', height: 1.5, ops: fableArcOps() },
     ],
   }],
 };
@@ -217,6 +220,7 @@ export const notreDame: KindDef = {
       { author: 'claude-haiku-5-5', draft: true, name: 'the nave under its slate roof, the west front with two towers and the rose window, the lead spire at the crossing', height: 1.25, ops: haikuNotreDameOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the high nave with aisles and flying buttresses, the flat-topped west towers and rose window, the lead flèche', height: 1.31, ops: sonnetNotreDameOps() },
       { author: 'claude-opus-5-5', draft: true, name: 'the cruciform nave and transept under lead, the round apse, flat-topped twin towers and rose, the flèche', height: 1.67, ops: opusNotreDameOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the whole plan in one piece: double aisles, the fan of flyers round the chevet, the round rose between flat-topped towers, the lead flèche', height: 1.5, ops: fableNotreDameOps() },
     ],
   }],
 };
@@ -269,6 +273,7 @@ export const louvre: KindDef = {
       { author: 'claude-haiku-5-5', draft: true, name: 'three stone wings under slate roofs around the court, the glass pyramid and its fountain basins', height: 0.68, ops: haikuLouvreOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the mansard-roofed wings round the Cour Napoléon, the tall central pavilion, the glass pyramid and its satellites', height: 0.77, ops: sonnetLouvreOps() },
       { author: 'claude-opus-5-5', draft: true, name: 'the mansarded wings and corner pavilions round the court, the Pavillon de l\'Horloge, the pyramid and its sisters', height: 0.86, ops: opusLouvreOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'three pavilions a wing under steep slate roofs, the Horloge dome, the pyramid in its real ratio, the Carrousel arch at the open end', height: 0.9, ops: fableLouvreOps() },
     ],
   }],
 };
@@ -327,6 +332,7 @@ export const operaGarnier: KindDef = {
       { author: 'claude-haiku-5-5', draft: true, name: 'the colonnaded opera front under its roof, the green dome at the corner, the stage house behind', height: 1.08, ops: haikuOperaOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the arcaded front between two gilded pavilions, the great green cupola and the stage house behind', height: 1.24, ops: sonnetOperaOps() },
       { author: 'claude-opus-5-5', draft: true, name: 'the loggia between domed end pavilions, the crowned copper dome, the gabled stage house with Apollo', height: 1.28, ops: opusOperaOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the arcaded loggia between the two rotundas, the low wide copper dome, the stone pediment of the stage house with Apollo', height: 1.29, ops: fableOperaOps() },
     ],
   }],
 };
@@ -389,6 +395,7 @@ export const sacreCoeur: KindDef = {
       { author: 'claude-haiku-5-5', draft: true, name: 'the white basilica on its terrace over the steps, the great dome and the square bell tower', height: 1.27, ops: haikuSacreCoeurOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the white basilica on its terrace, the portico, the great ovoid dome with four lesser domes, the campanile', height: 1.37, ops: sonnetSacreCoeurOps() },
       { author: 'claude-opus-5-5', draft: true, name: 'the white basilica above its steps, the tall ovoid dome and lantern, four lesser domes, the campanile behind', height: 1.48, ops: opusSacreCoeurOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the ovoid domes over the grass embankment and its stair, the arcaded drum, the campanile as tall as the dome', height: 1.46, ops: fableSacreCoeurOps() },
     ],
   }],
 };

@@ -4,6 +4,9 @@ import { repeat } from './helpers';
 import { office } from './office';
 import { theatre, library } from './leisure';
 import { slab, tree, treeLine, lampPost, flags, fence, PAVING, ASPHALT } from './tierkit';
+import {
+  fableEmpireStateOps, fableChryslerOps, fableStatueOps, fableOneWorldOps, fableBrooklynOps, fableFlatironOps, fableRockefellerOps, fableRadioCityOps,
+} from './landmarks-new-york-fable';
 
 /**
  * New York landmarks (docs/buildings.md "Landmarks"): recognisable real buildings of Manhattan and the harbour, tagged
@@ -80,6 +83,7 @@ export const empireState: KindDef = {
     capacity: 400, wage: 46, cost: 28000, upkeep: 140, work: 5000, parking: { surface: 0, underground: 80 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'five limestone setbacks under a silver mooring-mast spire', height: 7.3, ops: empireStateOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'a limestone slab narrow to the avenue and long down the block, four setbacks to the art-deco crown, the round mooring mast', height: 6.6, ops: fableEmpireStateOps() },
     ],
   }],
 };
@@ -123,6 +127,7 @@ export const chrysler: KindDef = {
     capacity: 320, wage: 44, cost: 22000, upkeep: 120, work: 4200, parking: { surface: 0, underground: 70 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'dark shaft under four shrinking chrome crown terraces, a dome and a needle', height: 5.14, ops: chryslerOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'pale glazed brick in three stages, the eagles at the setback corners, seven chrome tiers each with its dark window band, the needle', height: 5.36, ops: fableChryslerOps() },
     ],
   }],
 };
@@ -193,6 +198,7 @@ export const statueOfLiberty: KindDef = {
     capacity: 30, wage: 17, cost: 13000, upkeep: 60, work: 3000, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'star-fort pedestal on the island under the green copper figure and her raised torch', height: 1.6, ops: statueOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the star fort, a pedestal as tall as the figure, the copper lady with her torch raised, the ferry at the landing', height: 1.86, ops: fableStatueOps() },
     ],
   }],
 };
@@ -234,6 +240,7 @@ export const oneWorldTradeCenter: KindDef = {
     capacity: 380, wage: 46, cost: 26000, upkeep: 140, work: 4800, parking: { surface: 0, underground: 75 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'glass podium under the gently tapering square shaft, the flat crown and the spire', height: 4.88, ops: oneWorldOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'a square glass prism turned a quarter turn between foot and crown so every face splits into two long triangles, the spire', height: 7.0, ops: fableOneWorldOps() },
     ],
   }],
 };
@@ -308,6 +315,7 @@ export const brooklynBridge: KindDef = {
     capacity: 16, wage: 16, cost: 15000, upkeep: 65, work: 3200, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'two stone towers with arched openings and diagonal cable fans over the road deck', height: 1.86, ops: brooklynOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'granite towers with twin pointed arches over the river, four cables over the saddles, the fan of stays, the raised promenade', height: 1.79, ops: fableBrooklynOps() },
     ],
   }],
 };
@@ -348,6 +356,7 @@ export const flatiron: KindDef = {
     capacity: 240, wage: 44, cost: 15000, upkeep: 95, work: 3000, parking: { surface: 0, underground: 50 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'rusticated base under the limestone wedge that tapers along one axis to the knife edge', height: 2.25, ops: flatironOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'a true three-sided prism with its prow on the avenue, the office grid on every face, the heavy cornice and attic', height: 2.38, ops: fableFlatironOps() },
     ],
   }],
 };
@@ -390,6 +399,7 @@ export const rockefellerCenter: KindDef = {
     capacity: 320, wage: 46, cost: 24000, upkeep: 150, work: 4200, parking: { surface: 0, underground: 80 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'limestone setbacks behind the sunken plaza, the pale rink with its flags and gilded Prometheus', height: 2.66, ops: rockefellerOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the Channel Gardens between two low blocks, the sunken rink ringed with flags, the thin slab of 30 Rock stepped at its ends', height: 3.47, ops: fableRockefellerOps() },
     ],
   }],
 };
@@ -443,6 +453,7 @@ export const radioCity: KindDef = {
     capacity: 35, wage: 19, cost: 12000, upkeep: 95, work: 2600, parking: { surface: 0, underground: 40 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'long limestone facade under an even longer lit marquee, the stage house rising behind', height: 1.02, ops: radioCityOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the windowless limestone block, the marquee wrapping the corner with its lit fascia, two neon blades, the stage house behind', height: 1.02, ops: fableRadioCityOps() },
     ],
   }],
 };
