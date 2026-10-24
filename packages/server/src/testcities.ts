@@ -1,10 +1,11 @@
-import { spawn, type ChildProcess } from 'node:child_process';
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { setPriority } from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { connect } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { join } from 'node:path';
-import { DEMOS, DEMO_BY_ID, type DemoId } from '@msimcity/shared';
+import { DEMOS, DEMO_BY_ID, CATALOGUE_HASH, SCENARIO_VERSION, scenarioHash, type DemoId } from '@msimcity/shared';
 import type { World } from './world';
 
 /**
@@ -33,6 +34,11 @@ import type { World } from './world';
  * `/demo-ws/<id>` is proxied to the child's port (`upgrade`), so a deployment that publishes one port still works.
  * After its first fill a demo child saves a snapshot (`demo-<id>.seed.json`); Reset demo (`POST /api/demos/<id>/reset`)
  * stops the child, puts the snapshot back as its world and starts it again, so the town is exactly the one first seeded.
+ *
+ * Warming (docs/demo.md, "Warming and rebuilding"): `warm()` seeds and fills the listed demos one after another at low
+ * priority, so a visitor finds them built; the demos in `keep` stay running (and are exempt from the idle stop), the
+ * others save and stop. A save records the scenario hash it was built from in `demo-<id>.meta.json` (written by the
+ * child after its fill); a save whose hash is not the current one is set aside (`.stale-<hash>`) and the demo seeds again.
  */
 export const TEST_CITY_SIZES = [1, 2, 3, 4, 6, 8] as const;
 /** children listen 20 above this server's port (8080 → 8100+n), so a second stack (UAT on 9080) never meets the first */
@@ -44,8 +50,26 @@ const POLL_MS = Number(process.env.TEST_CITY_POLL_MS ?? 2_000);
 
 /** what a read-only showcase (SPECTATE) answers to a demo stop or reset, or a test-city start or stop */
 const READ_ONLY_REFUSAL = 'Read-only showcase: demos cannot be stopped or reset here';
-/** what a showcase pinned to its default demo (`onlyDemo`) answers to starting another */
+/** what a showcase pinned to its allowed demos (`allowed`) answers to starting another */
 const ONLY_DEMO_REFUSAL = 'This showcase only shows its own demo';
+
+/** SCENARIO_VERSION, unless env SCENARIO_VERSION overrides it (the warm probe bumps it to force a rebuild) */
+export const scenarioVersion = () => { const v = Number(process.env.SCENARIO_VERSION); return process.env.SCENARIO_VERSION && Number.isInteger(v) ? v : SCENARIO_VERSION; };
+/** the hash a demo's save must carry to be resumed (shared/src/demo/scenario.ts), under this process's SCENARIO_VERSION */
+export const currentScenarioHash = (id: DemoId) => scenarioHash(id, scenarioVersion());
+/** what a demo child records beside its save when its fill completes: `demo-<id>.meta.json` */
+export interface DemoMeta { scenarioHash: string; scenarioVersion: number; catalogue: string; citizens?: number; filledAt: string }
+/** the meta file of a demo's world file (`…/demo-<id>.json` → `…/demo-<id>.meta.json`) */
+export const metaFileOf = (worldFile: string) => worldFile.replace(/\.json$/, '.meta.json');
+/** the child's side: write the meta atomically, after the world and its snapshot, so a crash in between reads as "no meta" and seeds again */
+export function writeDemoMeta(worldFile: string, id: DemoId, citizens: number) {
+  const meta: DemoMeta = { scenarioHash: currentScenarioHash(id), scenarioVersion: scenarioVersion(), catalogue: CATALOGUE_HASH, citizens, filledAt: new Date().toISOString() };
+  const tmp = metaFileOf(worldFile) + '.tmp';
+  writeFileSync(tmp, JSON.stringify(meta, null, 2) + '\n');
+  renameSync(tmp, metaFileOf(worldFile));
+  return meta;
+}
+const mb = (bytes: number) => `${Math.round(bytes / 1048576)} MB`;
 
 export type CityStatus = 'stopped' | 'starting' | 'running' | 'stopping';
 /** what a test-city child reports on /healthz */
@@ -54,12 +78,14 @@ export interface ChildHealth {
   chunks?: number; citizens?: number; clients?: number; day?: number; dayFrac?: number;
   fill?: { tick: number; of: number; pop: number };
   tickAvg?: number; tickP95?: number; tickMax?: number;
+  /** the child's resident memory in bytes */
+  rss?: number;
 }
 interface Entry {
   /** slot: districts for a test city (1-16), 90+ for a demo; the child listens on TEST_CITY_BASE_PORT + n */
   n: number; demo?: DemoId;
   proc: ChildProcess | null; pid: number | null; status: CityStatus; health: ChildHealth | null;
-  idleSince: number | null; startedAt: number; failed?: string;
+  idleSince: number | null; startedAt: number; failed?: string; peakRss?: number;
   /** a Reset demo is waiting for this child to stop */
   resetting?: Promise<void>;
 }
@@ -87,6 +113,8 @@ export const stopsChildrenOn = (sig: NodeJS.Signals) => sig === 'SIGINT' || proc
 
 export class TestCities {
   private entries = new Map<number, Entry>();
+  /** the demos the warm run has still to build, the one under way first */
+  private queue: DemoId[] = [];
   private timer: NodeJS.Timeout;
   /** resolves once the registry and the ports have been checked for children of an earlier server */
   private adopted: Promise<void>;
@@ -94,9 +122,10 @@ export class TestCities {
    * @param entry the server entry script to spawn, @param staticDir the built client the children serve,
    * @param cities offer test cities (dev servers), @param demoDir where demo worlds, snapshots and logs go,
    * @param spectate a read-only showcase (index.ts SPECTATE): demos may be started (that is how a visitor gets in), nothing else
-   * @param onlyDemo a showcase's DEFAULT_DEMO: the only demo listed, started or joined (the others each cost a large child process)
+   * @param allowed a showcase's allowed demos (DEFAULT_DEMO, WARM_DEMOS and KEEP_DEMOS): the only ones listed, started or joined (each costs a large child process)
+   * @param warm the demos `warm()` builds, in order; @param keep the demos left running, exempt from the idle stop (the rest of the warmed ones are stopped)
    */
-  constructor(private opts: { entry: string; staticDir: string; dataDir: string; cwd: string; cities: boolean; demoDir: string; spectate?: boolean; onlyDemo?: DemoId }) {
+  constructor(private opts: { entry: string; staticDir: string; dataDir: string; cwd: string; cities: boolean; demoDir: string; spectate?: boolean; allowed?: ReadonlySet<DemoId>; warm?: readonly DemoId[]; keep?: ReadonlySet<DemoId> }) {
     if (opts.cities) for (const n of TEST_CITY_SIZES) this.entries.set(n, { n, proc: null, pid: null, status: 'stopped', health: null, idleSince: null, startedAt: 0 });
     for (const d of DEMOS) this.entries.set(d.slot, { n: d.slot, demo: d.id, proc: null, pid: null, status: 'stopped', health: null, idleSince: null, startedAt: 0 });
     this.timer = setInterval(() => { void this.poll(); }, POLL_MS);
@@ -108,6 +137,32 @@ export class TestCities {
   private logFile(n: number) { const d = this.entries.get(n)?.demo; return d ? join(this.opts.demoDir, `demo-${d}.log`) : join(this.opts.dataDir, `city-${n}.log`); }
   /** a demo's world as first seeded and filled: Reset demo starts from this */
   private snapshotFile(d: DemoId) { return join(this.opts.demoDir, `demo-${d}.seed.json`); }
+  private metaFile(d: DemoId) { return metaFileOf(join(this.opts.demoDir, `demo-${d}.json`)); }
+  private readMeta(d: DemoId): DemoMeta | null { try { return JSON.parse(readFileSync(this.metaFile(d), 'utf8')) as DemoMeta; } catch { return null; } }
+  private kept(e: Entry) { return !!e.demo && !!this.opts.keep?.has(e.demo); }
+  /** why a demo's save cannot be resumed (null: there is no save, or it was built from the current scenario) */
+  private staleReason(e: Entry): string | null {
+    if (!e.demo || !existsSync(this.worldFile(e.n))) return null;
+    const m = this.readMeta(e.demo);
+    if (!m) return 'the save has no scenario record';
+    if (m.scenarioHash === currentScenarioHash(e.demo)) return null;
+    if (m.scenarioVersion !== scenarioVersion()) return `SCENARIO_VERSION ${m.scenarioVersion} → ${scenarioVersion()}`;
+    if (m.catalogue !== CATALOGUE_HASH) return `catalogue ${m.catalogue} → ${CATALOGUE_HASH}`;
+    return 'the scenario changed';
+  }
+  /** Rename a stale save (and its Reset snapshot) aside as `….stale-<its hash>`; only the newest set-aside save of a demo is kept. The child must be stopped. */
+  private setAside(e: Entry, reason: string) {
+    const d = e.demo!, old = this.readMeta(d)?.scenarioHash ?? 'nometa';
+    try {
+      for (const f of readdirSync(this.opts.demoDir)) if (f.startsWith(`demo-${d}.json.stale-`) || f.startsWith(`demo-${d}.seed.json.stale-`)) unlinkSync(join(this.opts.demoDir, f));
+      renameSync(this.worldFile(e.n), `${this.worldFile(e.n)}.stale-${old}`);
+      if (existsSync(this.snapshotFile(d))) renameSync(this.snapshotFile(d), `${this.snapshotFile(d)}.stale-${old}`);
+      if (existsSync(this.metaFile(d))) unlinkSync(this.metaFile(d));
+      console.log(`demo ${d}: re-seeding (${reason}); the old save is ${join(this.opts.demoDir, `demo-${d}.json.stale-${old}`)}`);
+    } catch (err) { console.error(`demo ${d}: could not set the stale save aside`, err); }
+  }
+  /** a demo's slot in the warm run: 0 building now, 1 next, …; -1 when it is not waiting for the run */
+  private queueOf(id: DemoId) { return this.queue.indexOf(id); }
   private registryFile() { return join(this.opts.dataDir, 'running.json'); }
   /** what a child of this entry reports on /healthz to prove it is that entry */
   private isOurs(e: Entry, h: ChildHealth | null) { return !!h && (e.demo ? h.demo === e.demo : h.districts === e.n); }
@@ -181,8 +236,12 @@ export class TestCities {
       }
       if (h) {
         e.health = h;
-        if (e.status === 'starting' && h.ready) e.status = 'running';
-        if (e.status === 'running') {
+        if (h.rss) e.peakRss = Math.max(e.peakRss ?? 0, h.rss);
+        if (e.status === 'starting' && h.ready) {
+          e.status = 'running';
+          console.log(`${this.label(e)}: ready after ${Math.round((Date.now() - e.startedAt) / 1000)} s, ${h.citizens ?? '?'} citizens, RSS ${h.rss ? mb(h.rss) : this.psRss(e.pid)} (peak seen ${e.peakRss ? mb(e.peakRss) : '?'})`);
+        }
+        if (e.status === 'running' && !this.kept(e)) {
           if ((h.clients ?? 0) > 0) e.idleSince = null;
           else if (e.idleSince === null) e.idleSince = Date.now();
           else if (Date.now() - e.idleSince > IDLE_MS) { console.log(`${this.label(e)}: idle for ${Math.round(IDLE_MS / 1000)} s, stopping`); this.stop(e); }
@@ -191,18 +250,29 @@ export class TestCities {
     }
   }
 
-  /** Starts city n (a no-op if it is running or adopted); call after `adopted` so a surviving child is not fought over its port. */
-  start(n: number): Entry | null {
+  /** a child's resident memory from ps, for a child too old to report it on /healthz */
+  private psRss(pid: number | null) {
+    if (!pid) return '?';
+    try { return mb(Number(execFileSync('ps', ['-o', 'rss=', '-p', String(pid)], { encoding: 'utf8' }).trim()) * 1024); } catch { return '?'; }
+  }
+
+  /**
+   * Starts city n (a no-op if it is running or adopted); call after `adopted` so a surviving child is not fought over its port.
+   * A demo whose save is out of date is set aside first, so it seeds again. `low` runs the child at low priority (the warm run).
+   */
+  start(n: number, low = false): Entry | null {
     const e = this.entries.get(n);
     if (!e) return null;
     if (e.status !== 'stopped') return e;
+    if (e.demo && !e.resetting) { const why = this.staleReason(e); if (why) this.setAside(e, why); }
     mkdirSync(this.opts.dataDir, { recursive: true });
     if (e.demo) mkdirSync(this.opts.demoDir, { recursive: true });
     const env: NodeJS.ProcessEnv = { ...process.env };
-    for (const k of ['SIM_STEPS', 'SEED_BUILT', 'SEED', 'PARENT_PID', 'CITY_DISTRICTS', 'DEMO', 'DEMO_SNAPSHOT', 'SPECTATE']) delete env[k];
+    for (const k of ['SIM_STEPS', 'SEED_BUILT', 'SEED', 'PARENT_PID', 'CITY_DISTRICTS', 'DEMO', 'DEMO_SNAPSHOT', 'DEMO_KEEP', 'SPECTATE']) delete env[k];
     Object.assign(env, {
       PORT: String(TEST_CITY_BASE_PORT + n), HOST: '0.0.0.0', WORLD_FILE: this.worldFile(n), STATIC_DIR: this.opts.staticDir,
       ...(e.demo ? { DEMO: e.demo, DEMO_SNAPSHOT: this.snapshotFile(e.demo) } : { CITY_DISTRICTS: String(n) }),
+      ...(this.kept(e) ? { DEMO_KEEP: '1' } : {}), // a kept demo never stops itself for want of visitors (index.ts)
       ...(this.opts.spectate ? { SPECTATE: '1' } : {}), // a read-only showcase is read-only in every child world too
     });
     // Detached into its own process group (a Ctrl-C on the dev stack must not reach it; this server stops it on purpose)
@@ -211,7 +281,8 @@ export class TestCities {
     const proc = spawn(process.execPath, [...TSX_FLAGS, this.opts.entry], { cwd: this.opts.cwd, env, stdio: ['ignore', out, out], detached: true });
     closeSync(out);
     proc.unref();
-    Object.assign(e, { proc, pid: proc.pid ?? null, status: 'starting', health: null, idleSince: null, startedAt: Date.now(), failed: undefined });
+    Object.assign(e, { proc, pid: proc.pid ?? null, status: 'starting', health: null, idleSince: null, startedAt: Date.now(), failed: undefined, peakRss: undefined });
+    if (low && proc.pid) try { setPriority(proc.pid, 10); } catch { /* not permitted: it runs at normal priority */ }
     proc.on('exit', (code, sig) => {
       console.log(`${this.label(e)} exited (${sig ?? code})`);
       if (e.status === 'starting' && code) e.failed = this.lastLines(n);
@@ -220,7 +291,7 @@ export class TestCities {
     });
     proc.on('error', (err) => { e.failed = String(err); Object.assign(e, { proc: null, pid: null, status: 'stopped' }); this.persist(); });
     this.persist();
-    console.log(`${this.label(e)}: starting on port ${TEST_CITY_BASE_PORT + n} (pid ${proc.pid}, log ${this.logFile(n)})`);
+    console.log(`${this.label(e)}: starting${low ? ' at low priority' : ''} on port ${TEST_CITY_BASE_PORT + n} (pid ${proc.pid}, log ${this.logFile(n)})`);
     return e;
   }
 
@@ -229,6 +300,48 @@ export class TestCities {
     await this.adopted;
     const d = DEMO_BY_ID.get(id);
     if (d) this.start(d.slot);
+  }
+
+  /**
+   * The warm run (index.ts: WARM_DEMOS): bring each demo in `opts.warm` up in turn, one child at a time and at low
+   * priority, so the main server stays responsive and peak memory is one warming child plus the kept ones. A save that
+   * is out of date is set aside first (a running child of it is stopped), so it seeds again. A demo with a current save
+   * is only started when it is kept (it resumes in seconds); the others are left asleep. A warmed demo that is not
+   * kept is stopped once it is ready and nobody is in it. The state shows on /api/demos as `warming` and `queue`.
+   */
+  async warm() {
+    const ids = [...new Set(this.opts.warm ?? [])].filter((id) => DEMO_BY_ID.has(id));
+    if (!ids.length) return;
+    await this.adopted;
+    const todo: DemoId[] = [];
+    for (const id of ids) {
+      const e = this.entries.get(DEMO_BY_ID.get(id)!.slot)!;
+      const why = this.staleReason(e);
+      if (why) {
+        if (e.status !== 'stopped') { console.log(`demo ${id}: running on an out-of-date save (${why}); stopping it`); this.stop(e); await this.waitStopped(e); }
+        this.setAside(e, why);
+      } else if (existsSync(this.worldFile(e.n))) console.log(`demo ${id}: resumed (the save is current, scenario ${currentScenarioHash(id)})${this.kept(e) ? '' : '; left asleep'}`);
+      else console.log(`demo ${id}: building (no save yet, scenario ${currentScenarioHash(id)})`);
+      if (!existsSync(this.worldFile(e.n)) || this.kept(e)) todo.push(id);
+    }
+    this.queue = todo;
+    while (this.queue.length) {
+      const id = this.queue[0], e = this.entries.get(DEMO_BY_ID.get(id)!.slot)!;
+      this.start(e.n, true);
+      const t0 = Date.now();
+      while (e.status !== 'running' && e.status !== 'stopped' && Date.now() - t0 < 60 * 60_000) await sleep(500);
+      if (e.status === 'running') {
+        if (!this.kept(e) && (e.health?.clients ?? 0) === 0) { console.log(`demo ${id}: warmed, saving and stopping (not kept)`); this.stop(e); await this.waitStopped(e); }
+      } else console.log(`demo ${id}: warming did not finish (${e.failed ?? e.status})`);
+      this.queue.shift();
+    }
+    console.log(`warm run done: ${ids.join(', ')}`);
+  }
+
+  /** wait (up to `ms`) for a stopping child to save and go */
+  private async waitStopped(e: Entry, ms = 70_000) {
+    const t0 = Date.now();
+    while (e.status !== 'stopped' && Date.now() - t0 < ms) { await sleep(250); if (!e.proc && !alive(e.pid)) Object.assign(e, { pid: null, status: 'stopped', health: null }); }
   }
 
   /**
@@ -242,8 +355,7 @@ export class TestCities {
     e.resetting = (async () => {
       if (e.status === 'starting' && !existsSync(this.snapshotFile(d))) return; // a first fill is already under way: that is the reset
       this.stop(e);
-      const t0 = Date.now();
-      while (e.status !== 'stopped' && Date.now() - t0 < 70_000) { await sleep(250); if (!e.proc && !alive(e.pid)) Object.assign(e, { pid: null, status: 'stopped', health: null }); }
+      await this.waitStopped(e);
       try {
         if (existsSync(this.snapshotFile(d))) copyFileSync(this.snapshotFile(d), this.worldFile(e.n));
         else if (existsSync(this.worldFile(e.n))) unlinkSync(this.worldFile(e.n));
@@ -263,7 +375,7 @@ export class TestCities {
     const m = /^\/demo-ws\/([a-z]+)$/.exec((req.url ?? '').split('?')[0]);
     if (!m) return false;
     const d = DEMO_BY_ID.get(m[1] as DemoId);
-    const e = d && (!this.opts.onlyDemo || d.id === this.opts.onlyDemo) ? this.entries.get(d.slot) : undefined;
+    const e = d && (!this.opts.allowed || this.opts.allowed.has(d.id)) ? this.entries.get(d.slot) : undefined;
     if (!e || e.status !== 'running') { socket.end('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n'); return true; }
     const up = connect(TEST_CITY_BASE_PORT + e.n, '127.0.0.1');
     const close = () => { socket.destroy(); up.destroy(); };
@@ -310,8 +422,11 @@ export class TestCities {
       saved: existsSync(this.worldFile(e.n)), snapshot: existsSync(this.snapshotFile(d.id)),
       citizens: h?.citizens, clients: h?.clients, dayFrac: h?.dayFrac, fill, fillPopulation: h?.fill?.pop, startHash: h?.startHash,
       startedAt: e.startedAt || undefined, error: e.status === 'stopped' ? e.failed : undefined,
+      scenarioHash: currentScenarioHash(d.id), saveCurrent: this.saveCurrent(e), warming: this.queueOf(d.id) === 0, queue: this.queueOf(d.id), kept: this.kept(e),
     };
   }
+  /** there is a save and it was built from the current scenario: it resumes as it is */
+  private saveCurrent(e: Entry) { return !!e.demo && existsSync(this.worldFile(e.n)) && this.readMeta(e.demo)?.scenarioHash === currentScenarioHash(e.demo); }
 
   private view(e: Entry) {
     const h = e.health;
@@ -336,12 +451,12 @@ export class TestCities {
     if (!demos && path !== '/api/test-cities' && !path.startsWith('/api/test-cities/')) return false;
     if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': '*' }); res.end(); return true; }
     if (demos) {
-      const list = [...this.entries.values()].filter((e) => e.demo && (!this.opts.onlyDemo || e.demo === this.opts.onlyDemo));
+      const list = [...this.entries.values()].filter((e) => e.demo && (!this.opts.allowed || this.opts.allowed.has(e.demo)));
       if (path === '/api/demos') { send(200, { available: true, idleMinutes: IDLE_MS / 60_000, demos: list.map((e) => this.demoView(e)) }); return true; }
       const dm = /^\/api\/demos\/([a-z]+)\/(start|stop|reset)$/.exec(path);
       const e = dm ? list.find((x) => x.demo === dm[1]) : undefined;
       if (!dm || req.method !== 'POST') { send(404, { error: 'POST /api/demos/<id>/start, /stop or /reset' }); return true; }
-      if (!e && this.opts.onlyDemo && DEMO_BY_ID.has(dm[1] as DemoId)) { send(403, { error: ONLY_DEMO_REFUSAL }); return true; }
+      if (!e && this.opts.allowed && DEMO_BY_ID.has(dm[1] as DemoId)) { send(403, { error: ONLY_DEMO_REFUSAL }); return true; }
       if (!e) { send(404, { error: `no demo called ${dm[1]}` }); return true; }
       if (this.opts.spectate && dm[2] !== 'start') { send(403, { error: READ_ONLY_REFUSAL }); return true; }
       void this.adopted.then(() => {

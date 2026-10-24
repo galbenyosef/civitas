@@ -26,6 +26,8 @@ export interface DemoInfo {
   /** `town`: a sample city on its own map (London), not the 3×3 showcase town; `hero`: its card picture on the home page (DemoDef.hero) */
   town?: string; hero?: string;
   saved: boolean; snapshot: boolean; citizens?: number; clients?: number; fill?: number; fillPopulation?: number; startHash?: string; error?: string;
+  /** the warm run (server testcities.ts): `saveCurrent` the save was built from today's scenario; `queue` 0 building now, 1 next, -1 not waiting; `kept` left running */
+  saveCurrent?: boolean; warming?: boolean; queue?: number; kept?: boolean; scenarioHash?: string;
 }
 export async function demoList(): Promise<DemoInfo[] | null> {
   try {
