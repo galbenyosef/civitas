@@ -13,6 +13,7 @@ import { BARCELONA_LANDMARKS } from './landmarks-barcelona';
 import { KUALA_LUMPUR_LANDMARKS } from './landmarks-kuala-lumpur';
 import { TORONTO_LANDMARKS } from './landmarks-toronto';
 import { SEATTLE_LANDMARKS } from './landmarks-seattle';
+import { AGRA_LANDMARKS } from './landmarks-agra';
 
 /**
  * World landmarks (docs/buildings.md "Landmarks"): recognisable real buildings in cities around the world, each a placed
@@ -58,4 +59,5 @@ export const WORLD_LANDMARKS: KindDef[] = [
   ...KUALA_LUMPUR_LANDMARKS,
   ...TORONTO_LANDMARKS,
   ...SEATTLE_LANDMARKS,
+  ...AGRA_LANDMARKS,
 ];
