@@ -562,7 +562,7 @@ export interface SiteDTO { x: number; y: number; kind: number; level: number; ta
  * welcome, and refuses every intent that changes it). `defaultDemo`: DEFAULT_DEMO=<id>, a page opened without
  * `?demo=`, `?ws=` or `?city=` goes to that demo instead of the live world. `defaultView`: DEFAULT_VIEW, the camera's opening shot.
  */
-export interface ServerConfig { spectate?: boolean; defaultDemo?: string; /** DEFAULT_VIEW: the opening camera shot for a page with no camera parameters, "x,y,dist,yaw,pitch[,hour]" (yaw and pitch in degrees; client camera.ts) */ defaultView?: string }
+export interface ServerConfig { /** this server also serves the offline build at /play/ (the home page's Play section links there) */ play?: boolean; spectate?: boolean; defaultDemo?: string; /** DEFAULT_VIEW: the opening camera shot for a page with no camera parameters, "x,y,dist,yaw,pitch[,hour]" (yaw and pitch in degrees; client camera.ts) */ defaultView?: string }
 
 export type ClientMsg =
   | { t: 'hello'; name: string }

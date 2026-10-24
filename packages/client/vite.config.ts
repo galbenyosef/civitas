@@ -1,5 +1,5 @@
 import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve, relative, join } from 'node:path';
 import { readdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
@@ -9,6 +9,11 @@ const here = fileURLToPath(new URL('.', import.meta.url));
 const root = resolve(here, '../..');
 const catalogueDir = resolve(root, 'packages/shared/src/buildings');
 const GENERATED = new Set(['compiled.ts', 'recipes.ts']);
+/** the build's git short sha (the home page's footer): GIT_SHA from the environment when there is no .git (the Docker build), else asked of git */
+const BUILD = (() => {
+  if (process.env.GIT_SHA) return process.env.GIT_SHA.slice(0, 7);
+  try { return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return 'dev'; }
+})();
 
 /**
  * Keeps the building catalogue compiled: runs `npm run buildings:compile`'s
@@ -95,7 +100,7 @@ export default defineConfig(({ mode }) => ({
   // would otherwise answer 403 to anything but localhost and raw IPs
   server: { host: '0.0.0.0', port: 5173, strictPort: true, allowedHosts: true as const },
   preview: { host: '0.0.0.0', allowedHosts: true as const },
-  define: { __LOCAL_ONLY__: JSON.stringify(mode === 'offline') },
+  define: { __LOCAL_ONLY__: JSON.stringify(mode === 'offline'), __BUILD__: JSON.stringify(BUILD) },
   base: mode === 'offline' ? './' : '/',
   worker: { format: 'es' as const },
   build: {

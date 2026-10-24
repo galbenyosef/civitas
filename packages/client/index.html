@@ -9,10 +9,14 @@
   <script src="https://stats.ragg.uk/api/script.js?siteId=8f1183940248" defer></script>
 </head>
 <body>
+  <script>
+    // the home page shows for a bare address on the online build ('offline' is the static build, which is the game itself); entry.ts decides for good
+    if (!location.search && '%MODE%' !== 'offline') document.body.classList.add('landing');
+  </script>
   <canvas id="c"></canvas>
   <div id="ui">
     <div id="top">
-      <span id="brand">civitas</span>
+      <a id="brand" href="/" title="Home page">civitas</a>
       <span id="who" class="stat"></span>
       <span id="money" class="stat"></span>
       <button id="adminBtn" class="chip" style="display:none"></button>
@@ -51,6 +55,6 @@
       <button type="submit">Join world</button>
     </form>
   </div>
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="/src/entry.ts"></script>
 </body>
 </html>

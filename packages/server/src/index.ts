@@ -23,6 +23,11 @@ const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const DATA = resolve(process.env.WORLD_FILE ?? join(here, '../../../data/world.json'));
 const STATIC = resolve(process.env.STATIC_DIR ?? join(here, '../../client/dist'));
+/** The offline build (npm run build:local, relative paths) served under /play/ so the home page can offer the in-browser game from this very site (docs/local-mode.md) */
+const PLAY = resolve(process.env.PLAY_DIR ?? join(here, '../../client/dist-local'));
+const playAvailable = () => existsSync(join(PLAY, 'index.html'));
+/** The public servers the home page lists under Multiplayer (`GET /api/servers`): name, url, region, status 'open' | 'closed' | 'coming', note; read on each request */
+const SERVERS_FILE = resolve(process.env.SERVERS_FILE ?? join(here, '../servers.json'));
 const SAVE_EVERY_MS = 30_000;
 /** Dev knobs: SIM_STEPS runs several simulation ticks per interval (fast-forward); a RESET marker next to the
  *  world file makes the next start discard the world and reseed; SEED_BUILT pre-builds the Commons at that level. */
@@ -117,7 +122,7 @@ const testCities = worldLauncherAvailable() // demos on every main server, test 
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
-  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json', '.opus': 'audio/ogg; codecs=opus',
+  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json', '.webmanifest': 'application/manifest+json', '.opus': 'audio/ogg; codecs=opus',
 };
 async function serve(req: IncomingMessage, res: ServerResponse) {
   if (req.url === '/healthz') {
@@ -129,14 +134,33 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
     }));
   }
   if (req.url?.split('?')[0] === '/api/config') {
-    const cfg: ServerConfig = { ...(SPECTATE ? { spectate: true } : {}), ...(DEFAULT_DEMO && !CHILD ? { defaultDemo: DEFAULT_DEMO } : {}), ...(DEFAULT_VIEW && !CHILD ? { defaultView: DEFAULT_VIEW } : {}) };
+    const cfg: ServerConfig = { ...(playAvailable() ? { play: true } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(DEFAULT_DEMO && !CHILD ? { defaultDemo: DEFAULT_DEMO } : {}), ...(DEFAULT_VIEW && !CHILD ? { defaultView: DEFAULT_VIEW } : {}) };
     res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
     return res.end(JSON.stringify(cfg));
+  }
+  if (req.url?.split('?')[0] === '/api/servers') {
+    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
+    try {
+      const j = JSON.parse(readFileSync(SERVERS_FILE, 'utf8')) as { servers?: unknown };
+      return res.end(JSON.stringify({ servers: Array.isArray(j.servers) ? j.servers : [] }));
+    } catch { return res.end('{"servers":[]}'); } // no file, or one that does not parse: an empty list, which the page says in words
   }
   if (testCities?.handle(req, res)) return;
   if (['/api/test-cities', '/api/demos'].includes(req.url?.split('?')[0] ?? '')) { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); return res.end('{"available":false}'); }
   if (!existsSync(STATIC)) { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('msimcity server running. Build the client (npm run build) or use the Vite dev server.\n'); }
   const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
+  if (urlPath === '/play' || urlPath.startsWith('/play/')) { // the offline build: its own root, no fallback to the online page (it has a service worker and a scope of its own)
+    if (!playAvailable()) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('The offline build is not on this server (npm run build:local).\n'); }
+    if (urlPath === '/play') { res.writeHead(302, { location: '/play/' + (req.url?.includes('?') ? req.url.slice(req.url.indexOf('?')) : '') }); return res.end(); }
+    let f = join(PLAY, urlPath.slice('/play/'.length) || 'index.html');
+    if (!f.startsWith(PLAY)) { res.writeHead(403); return res.end(); }
+    try {
+      if ((await stat(f)).isDirectory()) f = join(f, 'index.html');
+      const body = await readFile(f);
+      res.writeHead(200, { 'content-type': MIME[extname(f)] ?? 'application/octet-stream', ...(f.endsWith('sw.js') ? { 'cache-control': 'no-cache' } : {}) }); // the service worker script is always revalidated
+      return res.end(body);
+    } catch { res.writeHead(404); return res.end(); }
+  }
   let file = join(STATIC, urlPath === '/' ? 'index.html' : urlPath);
   if (!file.startsWith(STATIC)) { res.writeHead(403); return res.end(); }
   try {
