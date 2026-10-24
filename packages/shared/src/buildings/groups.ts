@@ -69,6 +69,7 @@ export const GROUPS: GroupDef[] = [
   { id: 'san-francisco', label: 'San Francisco', section: 'Landmarks', color: '#c0362c', holds: 'staff', collection: true },
   { id: 'barcelona', label: 'Barcelona', section: 'Landmarks', color: '#c95f2c', holds: 'staff', collection: true },
   { id: 'kuala-lumpur', label: 'Kuala Lumpur', section: 'Landmarks', color: '#4a7fb5', holds: 'staff', collection: true },
+  { id: 'toronto', label: 'Toronto', section: 'Landmarks', color: '#2c8a5f', holds: 'staff', collection: true },
   // reserved for other cards
   { id: 'bus', label: 'Buses', section: 'Transport', color: '#e0a92e', holds: 'staff', reserved: true },
   { id: 'rail', label: 'Rail', section: 'Transport', color: '#b0563d', holds: 'staff', reserved: true },
