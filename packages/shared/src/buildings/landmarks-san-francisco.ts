@@ -3,6 +3,7 @@ import { Zone } from './codes';
 import { office } from './office';
 import { library } from './leisure';
 import { slab, tree, lampPost, PAVING, ASPHALT } from './tierkit';
+import { fableGoldenGateOps, fableTransamericaOps, fableCoitOps, fableFerryOps, fableAlcatrazOps } from './landmarks-san-francisco-fable';
 
 /**
  * San Francisco landmarks (docs/buildings.md "Landmarks"): the monuments of the bay city
@@ -89,6 +90,7 @@ export const goldenGate: KindDef = {
     capacity: 24, wage: 16, cost: 14000, upkeep: 65, work: 3200, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the orange towers and the great cables over the strait', height: 0.74, ops: goldenGateOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the orange towers tall over the strait between the two headlands, the cables sagging to the deck and the hangers dropping from them', height: 2.0, ops: fableGoldenGateOps() },
     ],
   }],
 };
@@ -129,6 +131,7 @@ export const transamerica: KindDef = {
     capacity: 260, wage: 42, cost: 20000, upkeep: 110, work: 4200, parking: { surface: 0, underground: 55 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the white pyramid with its wings and spire', height: 1.8, ops: transamericaOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the pyramid at its real slenderness over the open truss base, the wings following its slope, the aluminium spire', height: 3.58, ops: fableTransamericaOps() },
     ],
   }],
 };
@@ -175,6 +178,7 @@ export const coitTower: KindDef = {
     capacity: 12, wage: 14, cost: 7000, upkeep: 30, work: 1400, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the white tower on its hill above the bay, the dark observation band under its cap', height: 0.76, ops: coitOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the fluted column flared at its top on a higher Telegraph Hill, the arcaded lookout, the Filbert steps down the front', height: 1.64, ops: fableCoitOps() },
     ],
   }],
 };
@@ -226,6 +230,7 @@ export const ferryBuilding: KindDef = {
     capacity: 16, wage: 15, cost: 9000, upkeep: 40, work: 1800, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the arched hall on the pier with its clock tower over the embarkation front', height: 0.92, ops: ferryOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the long arcade of thirteen arches under a stepped clock tower with four dials, the bay and a ferry behind', height: 1.59, ops: fableFerryOps() },
     ],
   }],
 };
@@ -275,6 +280,7 @@ export const alcatraz: KindDef = {
     capacity: 20, wage: 16, cost: 10000, upkeep: 45, work: 2000, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'kimi-2.8-preview', name: 'the rock in the bay, the cellhouse and the lighthouse on their island', height: 0.4, ops: alcatrazOps() },
+      { author: 'claude-fable-5-1', draft: true, name: 'the oval rock in the bay, the cellhouse along its top, the lighthouse, the water tower and the dock with its ferry', height: 0.54, ops: fableAlcatrazOps() },
     ],
   }],
 };
