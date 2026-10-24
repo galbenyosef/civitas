@@ -132,7 +132,7 @@ export const TECH: TechNode[] = [
       'petronas', 'kltower', 'merdeka118', 'batucaves',
       'cntower', 'casaloma', 'rom', 'oldcityhall',
       'spaceneedle', 'pikeplace', 'columbiacenter', 'smithtower',
-      'tajmahal', 'agrafort'] },
+      'tajmahal', 'agrafort', 'fatehpursikri'] },
 ];
 export const TECH_BY_ID = new Map(TECH.map((t) => [t.id, t]));
 export const ALL_TECH_IDS = TECH.map((t) => t.id);

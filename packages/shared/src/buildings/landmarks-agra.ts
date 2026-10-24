@@ -15,7 +15,9 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       mausoleum with its dome and minarets on the riverfront terrace
  *   214 the Agra Fort: a library-family attraction, the red sandstone walls
  *       of the emperors' palace above the river
- *   215-216 to follow, one building at a time.
+ *   215 Fatehpur Sikri: a library-family attraction, the emperor's abandoned
+ *       city on the ridge, its great gate still standing
+ *   216 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'agra'];
@@ -129,4 +131,56 @@ export const agraFort: KindDef = {
   }],
 };
 
-export const AGRA_LANDMARKS: KindDef[] = [tajMahal, agraFort];
+// ================================================================= 215 Fatehpur Sikri
+
+/**
+ * The city the emperor built on the ridge and abandoned in a single
+ * generation: the great gate of the mosque still standing over the court,
+ * its domed chhatris silhouetted against the sky, and beside it the white
+ * marble tomb of the saint whose blessing founded the place. Plain
+ * sandstone, marble and dark insets only, so no window rule is touched.
+ */
+const SIKRI_SAND = 0xc09a6a, SIKRI_DK = 0x4a3828;
+
+const fatehpurSikriOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the great gate of the mosque: the tall pishtaq with its dark arch
+  ops.push(['box', 0.7, 0.75, 0.4, 0, 0.02, -0.2, SIKRI_SAND]);
+  ops.push(['box', 0.3, 0.5, 0.02, 0, 0.06, 0.005, SIKRI_DK]);
+  // the six domed chhatris along the gate top
+  for (const cx of [-0.28, -0.14, 0, 0.14, 0.28]) {
+    ops.push(['cyl', 0.045, 0.045, 0.1, cx, 0.77, -0.2, SIKRI_SAND, 8]);
+    ops.push(['cone', 0.055, 0.08, cx, 0.87, -0.2, SIKRI_SAND, 8]);
+  }
+  // the white marble tomb of the saint with its jali screens
+  ops.push(['box', 0.3, 0.25, 0.3, 0.55, 0.02, 0.3, 0xf2ede2]);
+  ops.push(['box', 0.1, 0.14, 0.02, 0.55, 0.08, 0.46, SIKRI_DK]);
+  ops.push(['lathe', 0.55, 0.27, 0.3, 0xf2ede2, [0.09, 0, 0.12, 0.04, 0.1, 0.09, 0.03, 0.13, 0, 0.15], { seg: 12 }]);
+  // the ridge court: lamps and a pair of trees
+  ops.push(...lampPost(-0.6, 0.6, 0.3, 'marquee', 0.02), ...lampPost(-0.2, 0.75, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.75, -0.7, 0.5, 'dark'), ...tree(0.75, -0.72, 0.5, 'dark'));
+  return ops;
+};
+
+export const fatehpurSikri: KindDef = {
+  id: 'fatehpur-sikri', name: 'Fatehpur Sikri', code: library.code, kindId: 215, family: 'leisure', tier: 3,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'agra',
+  occupation: { ...library.occupation!, name: 'ridge city keeper' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 180, ticket: 12, openHours: [8.5, 18], stay: [1.0, 2.0], leisureValue: 8, radius: 26,
+    dayAppeal: 1.4, eveningAppeal: 0.2, retireeAppeal: 1.6, childAppeal: 1.4, title: 'Fatehpur Sikri',
+  },
+  lot: { wage: 15 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The city the emperor built on the ridge and abandoned in a single generation: the great gate of the mosque still standing over the court, its domed chhatris against the sky, and beside it the white marble tomb of the saint whose blessing founded the place.',
+  howTo: 'A 2×2 plot at the city\'s edge; a ticketed daytime visit, best near the Taj Mahal for the tourist trail and a bus stop. World landmark: unlock rule to be decided.',
+  tool: { id: 'fatehpursikri', key: '', label: 'Fatehpur Sikri', color: '#c09a6a' },
+  levels: [{
+    capacity: 34, wage: 15, cost: 14000, upkeep: 55, work: 2800, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the abandoned city on the ridge, its great gate still standing', height: 0.95, ops: fatehpurSikriOps() },
+    ],
+  }],
+};
+
+export const AGRA_LANDMARKS: KindDef[] = [tajMahal, agraFort, fatehpurSikri];
