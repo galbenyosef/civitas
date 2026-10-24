@@ -17,7 +17,9 @@ import { slab, tree, lampPost, flags, PAVING } from './tierkit';
  *       with its pod in the sky
  *   206 Casa Loma: a library-family attraction, the millionaire's castle on
  *       the hill above the avenue
- *   207-208 to follow, one building at a time.
+ *   207 the Royal Ontario Museum: a library-family attraction, the stone
+ *       museum with the glass crystal bursting out of its front corner
+ *   208 to follow, one building at a time.
  */
 
 const TAGS = ['world', 'toronto'];
@@ -128,4 +130,54 @@ export const casaLoma: KindDef = {
   }],
 };
 
-export const TORONTO_LANDMARKS: KindDef[] = [cnTower, casaLoma];
+// ================================================================= 207 the Royal Ontario Museum
+
+/**
+ * The museum of stone and crystal on the avenue: the pale 1914 building with
+ * its rows of arched windows, and the crystal the architect bolted onto its
+ * front corner — five glass prisms stepping out over the pavement, jagged
+ * as a quartz seam. Plain stone and glass only, so no window rule is touched.
+ */
+const ROM_STONE = 0xcabf9f, ROM_DK = 0x3a3630, ROM_GLASS = 0xbfd4e0;
+
+const romOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the 1914 building of pale stone
+  ops.push(['box', 1.1, 0.5, 0.6, -0.25, 0.02, -0.25, ROM_STONE]);
+  for (const y of [0.14, 0.32]) {
+    for (const x of [-0.6, -0.35, -0.1, 0.15]) ops.push(['box', 0.1, 0.14, 0.02, x, y, 0.065, ROM_DK]);
+  }
+  // the crystal: five glass prisms stepping out over the front corner
+  ops.push(['box', 0.34, 0.2, 0.34, 0.42, 0.02, 0.25, ROM_GLASS]);
+  ops.push(['box', 0.3, 0.34, 0.3, 0.5, 0.22, 0.3, ROM_GLASS]);
+  ops.push(['box', 0.24, 0.3, 0.24, 0.58, 0.56, 0.34, ROM_GLASS]);
+  ops.push(['box', 0.16, 0.22, 0.16, 0.64, 0.86, 0.36, ROM_GLASS]);
+  ops.push(['cone', 0.1, 0.24, 0.66, 1.08, 0.36, ROM_GLASS, 4]);
+  // the pavement: lamps and a pair of trees
+  ops.push(...lampPost(-0.7, 0.75, 0.3, 'marquee', 0.02), ...lampPost(0.3, 0.78, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.82, -0.7, 0.5), ...tree(0.8, -0.72, 0.5));
+  return ops;
+};
+
+export const royalOntarioMuseum: KindDef = {
+  id: 'royal-ontario-museum', name: 'the Royal Ontario Museum', code: library.code, kindId: 207, family: 'leisure', tier: 3,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'toronto',
+  occupation: { ...library.occupation!, name: 'museum guide' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 200, ticket: 16, openHours: [10, 17.5], stay: [0.9, 1.8], leisureValue: 8, radius: 26,
+    dayAppeal: 1.4, eveningAppeal: 0.4, retireeAppeal: 1.6, childAppeal: 1.8, title: 'the Royal Ontario Museum',
+  },
+  lot: { wage: 16 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The museum of stone and crystal on the avenue: the pale 1914 building with its arched windows, and the crystal bolted onto its front corner — five glass prisms stepping out over the pavement, jagged as a quartz seam.',
+  howTo: 'A 2×2 plot on a shopping avenue among apartments; a ticketed visit that glows at dusk, best near cafes and a bus stop. World landmark: unlock rule to be decided.',
+  tool: { id: 'rom', key: '', label: 'Royal Ontario Museum', color: '#bfd4e0' },
+  levels: [{
+    capacity: 30, wage: 16, cost: 13000, upkeep: 55, work: 2800, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the stone museum with the glass crystal bursting out of its corner', height: 1.35, ops: romOps() },
+    ],
+  }],
+};
+
+export const TORONTO_LANDMARKS: KindDef[] = [cnTower, casaLoma, royalOntarioMuseum];
