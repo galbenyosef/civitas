@@ -17,7 +17,8 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       of the emperors' palace above the river
  *   215 Fatehpur Sikri: a library-family attraction, the emperor's abandoned
  *       city on the ridge, its great gate still standing
- *   216 to follow, one building at a time.
+ *   216 the Itimad-ud-Daulah: a library-family attraction, the marble jewel
+ *       box on the river they call the Baby Taj
  */
 
 const TAGS = ['world', 'agra'];
@@ -183,4 +184,60 @@ export const fatehpurSikri: KindDef = {
   }],
 };
 
-export const AGRA_LANDMARKS: KindDef[] = [tajMahal, agraFort, fatehpurSikri];
+// ================================================================= 216 the Itimad-ud-Daulah
+
+/**
+ * The marble jewel box on the east bank of the river that they call the
+ * Baby Taj: the white plinth rising out of the water garden, the cube of
+ * the tomb with its screens of pierced marble, the four hexagonal turrets
+ * at its corners, and the dome floating over it all. Plain marble and
+ * dark insets only, so no window rule is touched.
+ */
+const ITIMAD_WHITE = 0xf2ede2, ITIMAD_DK = 0x6a7a6a;
+
+const itimadOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  // the river bend behind the water garden
+  ops.push(['cyl', 0.42, 0.42, 0.015, -0.5, 0.02, -0.5, 'pond', 20]);
+  // the white plinth and the cube of the tomb
+  ops.push(['box', 0.7, 0.06, 0.7, 0, 0.02, -0.05, ITIMAD_WHITE]);
+  ops.push(['box', 0.36, 0.3, 0.36, 0, 0.08, -0.05, ITIMAD_WHITE]);
+  // the dark screens of pierced marble on each face
+  for (const [sx, sz, w, d] of [[0, 0.14, 0.14, 0.02], [0, -0.24, 0.14, 0.02], [-0.19, -0.05, 0.02, 0.14], [0.19, -0.05, 0.02, 0.14]] as const) {
+    ops.push(['box', w, 0.14, d, sx, 0.14, sz - 0.05, ITIMAD_DK]);
+  }
+  // the four hexagonal turrets at the corners, each with its dome
+  for (const [tx, tz] of [[-0.24, -0.29], [0.24, -0.29], [-0.24, 0.19], [0.24, 0.19]] as const) {
+    ops.push(['cyl', 0.06, 0.06, 0.42, tx, 0.02, tz, ITIMAD_WHITE, 6]);
+    ops.push(['cone', 0.07, 0.08, tx, 0.44, tz, ITIMAD_WHITE, 6]);
+  }
+  // the dome floating over the cube
+  ops.push(['lathe', 0, 0.38, -0.05, ITIMAD_WHITE, [0.12, 0, 0.15, 0.04, 0.14, 0.08, 0.05, 0.12, 0.02, 0.14, 0, 0.15], { seg: 16 }]);
+  // the water garden: lamps and cypresses
+  ops.push(...lampPost(-0.6, 0.65, 0.3, 'marquee', 0.02), ...lampPost(0.55, 0.68, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.75, 0.72, 0.5, 'dark'), ...tree(0.75, 0.75, 0.5, 'dark'));
+  return ops;
+};
+
+export const itimadUddaulah: KindDef = {
+  id: 'itimad-ud-daulah', name: 'the Itimad-ud-Daulah', code: library.code, kindId: 216, family: 'leisure', tier: 4,
+  flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'agra',
+  occupation: { ...library.occupation!, name: 'tomb keeper' },
+  attrs: {
+    ...library.attrs, visitorCapacity: 120, ticket: 12, openHours: [8.5, 18.5], stay: [0.7, 1.4], leisureValue: 8, radius: 24,
+    dayAppeal: 1.3, eveningAppeal: 0.5, retireeAppeal: 1.6, childAppeal: 1.3, title: 'the Itimad-ud-Daulah',
+  },
+  lot: { wage: 15 },
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The marble jewel box on the east bank of the river that they call the Baby Taj: the white plinth in the water garden, the cube of the tomb with its screens of pierced marble, the four hexagonal turrets, and the dome floating over it all.',
+  howTo: 'A 2×2 plot on the river or the green edge; a quiet ticketed visit, best near the Taj Mahal for the tourist trail and a bus stop. World landmark: unlock rule to be decided.',
+  tool: { id: 'itimad', key: '', label: 'Itimad-ud-Daulah', color: '#f2ede2' },
+  levels: [{
+    capacity: 22, wage: 15, cost: 11000, upkeep: 45, work: 2400, parking: { surface: 0, underground: 0 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the marble jewel box on the river they call the Baby Taj', height: 0.55, ops: itimadOps() },
+    ],
+  }],
+};
+
+export const AGRA_LANDMARKS: KindDef[] = [tajMahal, agraFort, fatehpurSikri, itimadUddaulah];
