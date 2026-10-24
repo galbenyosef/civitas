@@ -19,7 +19,8 @@ import { slab, tree, lampPost, PAVING } from './tierkit';
  *       sloping to the harbour with their neon sign
  *   211 the Columbia Center: an office tower, the black glass monolith with
  *       its three white fins
- *   212 to follow, one building at a time.
+ *   212 the Smith Tower: an office tower, the white terra-cotta tower of
+ *       1914 with its pyramid roof and little cupola
  */
 
 const TAGS = ['world', 'seattle'];
@@ -163,4 +164,43 @@ export const columbiaCenter: KindDef = {
   }],
 };
 
-export const SEATTLE_LANDMARKS: KindDef[] = [spaceNeedle, pikePlace, columbiaCenter];
+// ================================================================= 212 the Smith Tower
+
+/**
+ * The white tower of 1914 that was the city's boast for half a century: the
+ * terra-cotta shaft with its lattice of windows, the four-sided pyramid of
+ * the roof, and the little cupola with its ball on top, built by the
+ * typewriter magnate. Plain painted terra-cotta only, so no window rule
+ * is touched.
+ */
+const SMITH_WHITE = 0xe8e2d4, SMITH_ROOF = 0x5a6b5a;
+
+const smithTowerOps = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  // the terra-cotta shaft with its lattice of windows
+  ops.push(['taper', 0.52, 0.52, 0.42, 0.42, 2.6, 0, 0.02, -0.05, SMITH_WHITE, { win: 'office' }]);
+  // the four-sided pyramid and the little cupola with its ball
+  ops.push(['cone', 0.4, 0.5, 0, 2.62, -0.05, SMITH_ROOF, 4]);
+  ops.push(['cyl', 0.06, 0.06, 0.16, 0, 3.12, -0.05, SMITH_WHITE, 8]);
+  ops.push(['cone', 0.07, 0.1, 0, 3.28, -0.05, SMITH_ROOF, 8]);
+  // the pavement: lamps and a pair of trees
+  ops.push(...lampPost(-0.7, 0.72, 0.3, 'marquee', 0.02), ...lampPost(0.7, 0.72, 0.3, 'marquee', 0.02));
+  ops.push(...tree(-0.78, -0.7, 0.5), ...tree(0.78, -0.7, 0.5));
+  return ops;
+};
+
+export const smithTower: KindDef = {
+  ...towerBase, id: 'smith-tower', name: 'the Smith Tower', kindId: 212, tier: 4,
+  footprint: { w: 2, h: 2, door: [1, 1] },
+  blurb: 'The white tower of 1914 that was the city\'s boast for half a century: the terra-cotta shaft with its lattice of windows, the four-sided pyramid of the roof, and the little cupola with its ball on top, built by the typewriter magnate.',
+  howTo: 'A 2×2 plot among offices on an avenue; a big workplace, so give it buses or a station and leave the street clear. World landmark: unlock rule to be decided.',
+  tool: { id: 'smithtower', key: '', label: 'Smith Tower', color: '#e8e2d4' },
+  levels: [{
+    capacity: 300, wage: 43, cost: 17000, upkeep: 100, work: 4000, parking: { surface: 0, underground: 45 },
+    designs: [
+      { author: 'kimi-2.8-preview', name: 'the white terra-cotta tower of 1914 with its pyramid roof and cupola', height: 3.4, ops: smithTowerOps() },
+    ],
+  }],
+};
+
+export const SEATTLE_LANDMARKS: KindDef[] = [spaceNeedle, pikePlace, columbiaCenter, smithTower];
