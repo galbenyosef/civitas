@@ -71,7 +71,7 @@ export function showDemoBanner(id: DemoId, params: URLSearchParams, mount: HTMLE
   el.id = 'cityBanner';
   el.className = 'demo';
   el.innerHTML = `${DEMO_BY_ID.get(id)?.name ?? 'Demo'}: ${readOnly ? 'a read-only showcase · look around, follow anyone, take the tour' : 'a sandbox, not the live world'}`
-    + (home ? ` · <a href="${location.pathname}?${back.toString()}">back to the live world</a>` : '');
+    + (home ? ` · <a href="${location.pathname}?${back.toString() || 'go'}">back to the live world</a>` : '');
   mount.appendChild(el);
 }
 

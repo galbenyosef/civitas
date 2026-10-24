@@ -320,7 +320,7 @@ export async function localLogin(game: LocalGame, form: HTMLElement, dialog: Sav
     h('button', { type: 'button', id: 'loginNew', class: 'alt', onclick: () => void dialog.open().then(() => (document.querySelector('#savesDlg details.fresh') as HTMLDetailsElement | null)?.setAttribute('open', '')) }, 'New game…'),
     h('button', { type: 'button', id: 'loginSaves', class: 'alt', onclick: () => void dialog.open() }, 'Saves…'));
   submit.after(links);
-  if (online) links.after(h('a', { id: 'playOnline', href: location.pathname, class: 'online' }, 'Play on the online server instead'));
+  if (online) links.after(h('a', { id: 'playOnline', href: `${location.pathname}?go`, class: 'online' }, 'Play on the online server instead'));
   try {
     const info = await game.info();
     const saves = (await game.listSaves()).filter((s) => AUTO.test(s.slot)).sort((a, b) => b.savedAt - a.savedAt);

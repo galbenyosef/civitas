@@ -199,7 +199,7 @@ export function showCityBanner(n: number, params: URLSearchParams, mount: HTMLEl
   back.delete('ws'); back.delete('city');
   const el = document.createElement('div');
   el.id = 'cityBanner';
-  el.innerHTML = `Test city ${label(n)} — not the live world · <a href="${location.pathname}?${back.toString()}">back to the live world</a>`;
+  el.innerHTML = `Test city ${label(n)} — not the live world · <a href="${location.pathname}?${back.toString() || 'go'}">back to the live world</a>`;
   mount.appendChild(el);
 }
 

@@ -15,11 +15,10 @@ if (!__LOCAL_ONLY__ && !location.search) {
   void import('./landing');
 } else {
   document.body.classList.remove('landing');
-  if (q.has('go')) { // the home page's way into the game: ?go=london is ?demo=london, a bare ?go is the bare game
-    const id = q.get('go') ?? '';
-    q.delete('go');
-    if (/^[a-z]+$/.test(id)) q.set('demo', id);
-    history.replaceState(null, '', `${location.pathname}${q.size ? `?${q}` : ''}${location.hash}`);
+  const go = q.get('go') ?? '';
+  if (/^[a-z]+$/.test(go)) { // the home page's way into the game: ?go=london is ?demo=london (a bare ?go stays in the address, so a reload is the game and not the home page)
+    q.delete('go'); q.set('demo', go);
+    history.replaceState(null, '', `${location.pathname}?${q}${location.hash}`);
   }
   if (__LOCAL_ONLY__ && location.pathname.endsWith('/play/')) {
     // served by the online server under /play/: the brand leads back to its home page (a static host elsewhere has none, and the link stays on the game)
