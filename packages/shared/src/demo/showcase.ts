@@ -31,6 +31,7 @@ import type { SeaGate } from '../waterways';
 import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
 import { cityScenario, type CityDemo } from './citydemo';
 import { PARIS, PARIS_TOUR, PARIS_VIEW } from './city-paris';
+import { NEW_YORK, NEW_YORK_TOUR, NEW_YORK_VIEW } from './city-new-york';
 import { withKindsTour, KIND_TOUR_IDS, LONDON_EXEMPT, CITY_DEMO_GROUPS } from './london-kinds';
 import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
 import { zoneOf, levelOf, Zone, isRoad } from '../tile';
@@ -66,7 +67,7 @@ export type SectionId = 'downtown' | 'roads' | 'transport' | 'civic' | 'rail' | 
   | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-kinds' | 'london-rail' | 'london-buses' | 'london-river' | 'london-roads' | 'london-tube'
   // a sample city on the city-map kit (citydemo.ts): each city's own, built from its CityDemo
   | 'city-areas' | 'city-landmarks' | 'city-transit' | 'city-roads';
-export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london' | 'paris';
+export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london' | 'paris' | 'new-york';
 export type DemoXY = readonly [number, number];
 /** x, y, width, height in tiles */
 export type DemoRect = readonly [number, number, number, number];
@@ -858,6 +859,8 @@ export const DEMOS: DemoDef[] = [
   // the sample cities on the city-map kit (citydemo.ts): each a CityDemo, its sections built on first use
   { id: 'paris', name: 'Paris', slot: 95, sections: CITY_SECTIONS, town: 'city', city: PARIS, tour: PARIS_TOUR, view: PARIS_VIEW, hero: 'heroes/paris.jpg',
     blurb: PARIS.blurb },
+  { id: 'new-york', name: 'New York', slot: 96, sections: CITY_SECTIONS, town: 'city', city: NEW_YORK, tour: NEW_YORK_TOUR, view: NEW_YORK_VIEW, hero: 'heroes/new-york.jpg',
+    blurb: NEW_YORK.blurb },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
 export const isDemoId = (s: unknown): s is DemoId => typeof s === 'string' && DEMO_BY_ID.has(s as DemoId);
