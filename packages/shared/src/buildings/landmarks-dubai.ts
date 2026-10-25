@@ -72,6 +72,34 @@ const burjKhalifaOps = (): Op[] => {
   return ops;
 };
 
+const burjKhalifaOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(3, 3, PAVING)];
+  ops.push(['box', 2.35, 0.45, 2.35, 0, 0.02, 0, SAND]);
+  ops.push(['box', 0.48, 0.28, 0.025, 0, 0.06, 1.188, 'dark']);
+  ops.push(['box', 0.65, 0.04, 0.35, 0, 0.35, 1.32, 'gold']);
+  for (let i = 0; i < 9; i++) {
+    const y = 0.47 + i * 0.78;
+    const core = 0.94 - i * 0.065;
+    const thick = Math.max(0.3, 0.6 - i * 0.035);
+    const span = Math.max(0.85, 2.05 - i * 0.17);
+    const back = Math.max(0.8, 1.5 - i * 0.09);
+    const color = i % 2 ? SILVER_DK : SILVER;
+    ops.push(['taper', core, core, core * 0.94, core * 0.94, 0.78, 0, y, 0, color, { win: 'office' }]);
+    ops.push(['taper', span, thick, span * 0.95, thick * 0.94, 0.78, 0, y, 0, color, { win: 'office' }]);
+    ops.push(['taper', thick, back, thick * 0.94, back * 0.95, 0.78, 0, y, -0.25, color, { win: 'office' }]);
+  }
+  ops.push(['taper', 0.4, 0.4, 0.23, 0.23, 0.72, 0, 7.49, 0, SILVER_DK, { win: 'office' }]);
+  ops.push(['taper', 0.24, 0.24, 0.08, 0.08, 0.62, 0, 8.21, 0, 'steel']);
+  ops.push(['cyl', 0.018, 0.045, 0.82, 0, 8.83, 0, 'steel', 8]);
+  ops.push(['cyl', 0.025, 0.025, 0.06, 0, 9.65, 0, 'red', 6]);
+  ops.push(['box', 2.2, 0.035, 0.55, 0, 0.03, 1.15, 'stone']);
+  ops.push(['box', 2.08, 0.025, 0.43, 0, 0.065, 1.15, 'pond']);
+  for (let i = 0; i < 7; i++) ops.push(['cone', 0.018, 0.1, -0.9 + i * 0.3, 0.09, 1.15, 'white', 6]);
+  ops.push(...tree(-1.25, 1.22, 0.65, 'green'), ...tree(1.25, 1.22, 0.65, 'green'), ...tree(-1.25, -1.25, 0.7, 'green'), ...tree(1.25, -1.25, 0.7, 'green'));
+  ops.push(...flags(-0.95, 1.4, 3, 0.5, ['red', 'green', 'white'], 0.02));
+  return ops;
+};
+
 export const burjKhalifa: KindDef = {
   ...towerBase, id: 'burj-khalifa', name: 'the Burj Khalifa', kindId: 167, tier: 1,
   footprint: { w: 3, h: 3, door: [1, 2] },
@@ -81,6 +109,7 @@ export const burjKhalifa: KindDef = {
   levels: [{
     capacity: 450, wage: 48, cost: 30000, upkeep: 160, work: 5400, parking: { surface: 0, underground: 90 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'nine three-wing setbacks around a buttressed core, a silver needle and seven fountain jets', height: 9.71, ops: burjKhalifaOpsK31() },
       { author: 'kimi-2.8-preview', name: 'eight silver setbacks spiralling under the needle', height: 11.63, ops: burjKhalifaOps() },
     ],
   }],
