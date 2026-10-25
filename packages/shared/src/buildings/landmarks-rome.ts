@@ -241,6 +241,40 @@ const pantheonOps = (): Op[] => {
   return ops;
 };
 
+const pantheonOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  ops.push(['cyl', 0.56, 0.58, 0.46, 0, 0.025, -0.23, ROMAN_BRICK, 32]);
+  ops.push(['cyl', 0.59, 0.59, 0.045, 0, 0.485, -0.23, TRAVERTINE_DK, 32]);
+  ops.push(['lathe', 0, 0.53, -0.23, ROMAN_BRICK_DK, [0.58, 0, 0.58, 0.045, 0.535, 0.045, 0.535, 0.105, 0.47, 0.105, 0.47, 0.17, 0.37, 0.17, 0.37, 0.235, 0.24, 0.235, 0.24, 0.29, 0.1, 0.29, 0.1, 0.315, 0, 0.315], { seg: 32 }]);
+  ops.push(['cyl', 0.102, 0.102, 0.008, 0, 0.845, -0.23, 'dark', 24]);
+  for (let i = 0; i < 16; i++) {
+    const a = i * Math.PI / 8;
+    ops.push(['box', 0.055, 0.3, 0.04, Math.sin(a) * 0.565, 0.1, -0.23 + Math.cos(a) * 0.565, ROMAN_BRICK_DK]);
+  }
+  ops.push(['box', 0.88, 0.36, 0.17, 0, 0.025, 0.36, ROMAN_BRICK]);
+  ops.push(['box', 0.18, 0.29, 0.02, 0, 0.025, 0.455, 0x41352b]);
+  for (const x of [-0.06, 0.06]) ops.push(['box', 0.008, 0.27, 0.024, x, 0.035, 0.455, 'gold']);
+  for (const z of [0.51, 0.73]) {
+    for (let i = 0; i < 8; i++) {
+      const x = -0.49 + i * 0.14;
+      ops.push(['cyl', 0.027, 0.034, 0.36, x, 0.025, z, TRAVERTINE, 10]);
+      ops.push(['box', 0.075, 0.035, 0.075, x, 0.025, z, TRAVERTINE_DK]);
+      ops.push(['box', 0.07, 0.03, 0.07, x, 0.385, z, TRAVERTINE]);
+    }
+  }
+  ops.push(['box', 1.1, 0.075, 0.43, 0, 0.415, 0.62, TRAVERTINE]);
+  ops.push(['roof', 1.14, 0.21, 0.46, 0, 0.49, 0.62, TRAVERTINE_DK, false]);
+  ops.push(['roof', 0.96, 0.14, 0.025, 0, 0.515, 0.86, TRAVERTINE, false]);
+  for (const x of [-0.38, -0.19, 0, 0.19, 0.38]) ops.push(['box', 0.08, 0.035, 0.02, x, 0.45, 0.845, ROMAN_BRICK_DK]);
+  ops.push(['cyl', 0.21, 0.23, 0.045, -0.69, 0.025, 0.45, TRAVERTINE_DK, 20]);
+  ops.push(['cyl', 0.18, 0.18, 0.012, -0.69, 0.07, 0.45, 'pond', 20]);
+  ops.push(['cyl', 0.055, 0.08, 0.18, -0.69, 0.082, 0.45, TRAVERTINE, 12]);
+  ops.push(['taper', 0.07, 0.07, 0.018, 0.018, 0.43, -0.69, 0.262, 0.45, ROMAN_BRICK_DK]);
+  ops.push(['cone', 0.018, 0.07, -0.69, 0.692, 0.45, 'gold', 4]);
+  ops.push(...lampPost(0.76, 0.65, 0.32, 'marquee', 0.02));
+  return ops;
+};
+
 export const pantheon: KindDef = {
   id: 'pantheon', name: 'the Pantheon', code: library.code, kindId: 143, family: 'leisure', tier: 3,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rome',
@@ -257,6 +291,7 @@ export const pantheon: KindDef = {
   levels: [{
     capacity: 18, wage: 14, cost: 9000, upkeep: 40, work: 2000, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'sixteen granite columns before the brick drum, a five-stepped dome with an open oculus and the piazza obelisk', height: 0.853, ops: pantheonOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the temple of all the gods, the columns and pediment before the great dome with its rings', height: 0.54, ops: pantheonOps() },
     ],
   }],
