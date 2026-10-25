@@ -148,7 +148,7 @@ export class PerfHud {
     this.on = on;
     this.el.classList.toggle('hidden', !on);
     this.chip?.classList.toggle('on', on);
-    if (on) this.render({ fps: 0, ms: 0, worst: 0, bps: 0, aps: 0, mps: 0 });
+    if (on) { const r = this.readout; this.render({ fps: r.fps, ms: r.ms, worst: r.worst, bps: r.bps, aps: r.aps, mps: r.mps }, this.seconds[this.seconds.length - 1]); }
   }
   toggle() { this.set(!this.on); }
 
