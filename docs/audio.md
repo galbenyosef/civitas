@@ -51,7 +51,7 @@ Files under 4 KB (a dog bark, a rail clack) are inlined by Vite as `data:` URLs 
 
 ### Budget
 
-8 MB for the whole set, 400 KB for any file (audio-check enforces both). Beds, rides and loops are mono 48 kHz Opus at 48 kbps, 14 to 18 s long; events are 0.3 to 14 s. The set is about 3.4 MB. If it grows: drop `--kbps 32` on the build, or shorten a bed.
+8 MB for the whole set, 400 KB for any file (audio-check enforces both). Beds, rides and loops are mono 48 kHz Opus at 48 kbps, 14 to 18 s long; events are 0.3 to 14 s. The set is about 5.4 MB (3.4 MB before the tour cues). If it grows: drop `--kbps 32` on the build, or shorten a bed.
 
 ### Re-running the fetch, and swapping a clip
 
@@ -76,3 +76,64 @@ A bed or ride is a loop: the file is cut so that the last moment flows into the 
 ### Listening
 
 Nothing here was judged by ear. The clips picked by score alone with the narrowest margin over the runner-up, and the ones whose titles are the least certain, are listed in the notes for the pull request; start your listening pass there, and swap what is wrong.
+
+## Tour cues
+
+The London tour has its sound: as the camera arrives at a stop, the stop sounds like the place (Big Ben striking at Parliament, gulls and a boat horn on the river, a train arriving under Waterloo, a crowd at Wembley, quiet birds and ravens in a cemetery). Client only: nothing here touches the simulation or the protocol.
+
+### The model
+
+`TourStop.sound?: TourSound` (shared/src/demo/tourSound.ts, set by `demoTour`):
+
+```ts
+type TourSound = 'ambience' | {
+  cues: { voice: string; at?: number; gain?: number; loop?: boolean }[];
+  ambience?: { traffic?, wind?, crowd?, industry?, water?, market?, pub?, playground?, stadium?, fountain?: number }; // 0..1
+  duck?: number; // dB the beds dip while a cue sounds, default 4
+}
+```
+
+- **cues**: `voice` is a manifest voice with a recording. A cue is a one-shot, varied like any event (take, pitch, level, pan). `at` is seconds after the camera has arrived (the 1.7 s flight is allowed for), default 0.3 to 1.2 chosen per play; an explicit `at` also moves a little per play, so no two plays are the same. `gain` multiplies the voice's level (the player adds 1.3: a cue is the point of the stop). `loop: true` runs a bed-class recording until the stop is left (the station hall, the tube hall, the gas burner).
+- **ambience**: each bed named is held at that share (0 to 1) of its own ceiling (`HINT_CEIL` in ambience.ts) while the stop is shown, whatever the tiles round the camera say, with a slow breath of its own; a bed not named follows the scene. 0 silences a bed (the underground stops silence the street). It starts as the flight starts, so the beds have glided to the place by the time the camera arrives.
+- **duck**: the ambience bus dips by this many dB while a cue sounds (the full amount for a one-shot, half while only a loop runs). The engine keeps ducks in layers (`duckAmbience(db, tc, layer)`), so the tour's dip and a ridden vehicle's 6 dB add and release apart.
+- **`'ambience'`**: no cue, the beds alone, on purpose (the Welcome stop, high over the City).
+
+The client's tour (`tour.ts`) hands the stop to `audio.tourStop` on every stop change (Next, Previous, Autoplay, the stop chips, the jump menu); closing the tour, leaving the stop or muting ends the cues, the loops, the bias and the duck. Nothing plays before the first gesture (the engine's own rule) and a muted engine plays nothing. A recording not yet decoded when its moment comes is waited for (up to 6 s, then dropped, so a slow file never sounds over the next stop). The ambience hour follows a pinned light (a stop with `hour`), so the birds and owls match the sky.
+
+`msc.audio.debug = true` (or `?audiodebug` on the URL) prints every cue as it starts, or why it did not (`silent: muted`, `silent: no recording`, `dropped: the recording came too late`); `msc.audio.tour.log` holds the rows. `msc.audio.tour.state` shows the bias and the loops running.
+
+### The table: where to edit
+
+One file: shared/src/demo/tourSound.ts.
+
+- `SCENES`: the sound of a kind of place (`river`, `pier`, `parliament`, `terminus`, `tube-line`, `school`, `cemetery`, `stadium`, ...), each a `{ cues, ambience, duck }`.
+- `LONDON_SOUND`: every London stop by id: a scene name, `[scene, { changes }]` (the scene with its cues or beds replaced), a full definition of its own, or `'ambience'`.
+- `SHOWCASE_SOUND`: the showcase's few (the Sound stop, the river, the level crossing, the bascule bridge).
+
+To give a stop a cue: add its id to `LONDON_SOUND` with a scene (or write one). To add a voice: a row in `scripts/audio-voices.ts`, the fetch and build (below), a `clip(...)` row in manifest.ts (and the id in `TourVoice` in voices.ts), then name it in a scene. A new London stop with no row fails demo:check; a cue naming no voice, or a voice with no recording, fails audio-check.
+
+### What the audit found (137 London stops)
+
+| Group | Stops | Sounds |
+|---|---|---|
+| The river | piers, RB1, Pool of London, marinas, the fish quay, Tower Bridge | gulls, a boat passing, a boat horn, rigging, ducks; Tower Bridge adds a warning bell; water held high |
+| Westminster | Westminster, Parliament, the Eye | Big Ben's chimes (faint from the Eye), pigeons, traffic |
+| West End and roads | Piccadilly (night), Carnaby, Oxford Street, junctions, the Traffic panel, 20 zones, yellows | horns, bus passing, bus doors and bell, bike bells, shop bell, the crowd and the pub at night; the 20 zone and the pedestrian streets hold traffic low |
+| The City | the City, Gherkin, Walkie Talkie, Tower of London | bells, pigeons, gusts at height, ravens and a boat for the Tower, office hum |
+| Rail | termini, stations, tracks, lines, freight yards | the Euston station-hall loop, the station chime, a train passing, rail joints, dock clank at the yards |
+| The Underground | Tube lines, crossover, entrances, Canary Wharf | the tube-hall loop, a train arriving, doors hiss and chime, Mind the Gap; street beds silenced; from the street, a train faintly below |
+| Theatres and learning | opera house, theatres, Albert Hall, universities, museums, library | applause, an orchestra tuning, footsteps, bike bells, a school bell at the Natural History Museum |
+| Schools | 11 schools | the school bell, the playground bed |
+| Parks, gardens, the dead | Hyde Park Corner, Regent's Park, Serpentine, Kew, six cemeteries | birds, ducks, parakeets at Kew with a plane over; crows, a distant bell, an owl and a fox at dusk |
+| Sport | Wembley, London Stadium, Copper Box, the O2, Lord's | the stadium bed, a whistle, a crowd roar; applause at Lord's |
+| Industry and power | Battersea, Beckton, the grid point, solar, Stratford construction | industry hum, the gas burner loop, hammer and drill, wind and birds at the solar farm |
+| Docks | Royal Docks, Dagenham Docks, Thames Gateway | dock machinery, ship horn, gulls, a plane over |
+| Emergency | police, hospitals, fire stations | a siren, an ambulance siren, a fire siren, once |
+| Broadcast and air | Broadcasting House, Heathrow | a helicopter overhead; a jet taking off |
+| Neighbourhoods | areas such as Brixton, Camden, Hackney, Islington | birds, a dog, a bin lorry, the market bed, bike bells |
+
+The weakest matches (listen first): the Tower Bridge bell (a railway-crossing bell), the ambulance siren (pattern not verified as UK), the dock machinery (a marina pile driver and a steel chain), the gas burner (a boiler-room recording), the Mind the Gap announcement (the Circle line one, CC0).
+
+### The new clips
+
+24 voices, 43 files, about 2 MB: `big-ben`, `bus-pass`, `tube-arrive`, `tube-gap`, `train-pass`, `boat-pass`, `port`, `crowd-roar`, `whistle`, `jet-takeoff`, `shop-bell`, `ducks`, `applause`, `orchestra`, `siren-ambulance`, `school-bell`, `crows`, `fox`, `rigging`, `bridge-bell`, `parakeets` (events) and `station-hall`, `tube-hall`, `flare-roar` (loops). They are recording-only voices fetched and built the same way as the rest ("Re-running the fetch" above); the set is now about 5.4 MB of the 8 MB budget, with a credits row for each in `CREDITS.md`.
