@@ -7,7 +7,7 @@
 #   scripts/uat.sh stop | status | log
 #
 # UAT serves the built client and the game on one port (default 9080, http://<lan-ip>:9080/); its test cities
-# listen on 9100+n and its world lives in $UAT_DIR/data, apart from dev (8080 / 8100+n / data/). It starts with WARM_DEMOS=london,
+# listen on 9100+n and its world lives in $UAT_DIR/data, apart from dev (8080 / 8100+n / data/). It starts with WARM_DEMOS=london and KEEP_DEMOS=london (London warmed and kept running),
 # so London is built (or rebuilt, when its scenario changed) and left running after every promote, not on the first visit.
 set -euo pipefail
 DEV_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,7 +36,7 @@ stop() {
 
 start() {
   cd "$UAT_DIR/packages/server"
-  PORT="$UAT_PORT" HOST=0.0.0.0 NODE_ENV=uat WARM_DEMOS=london nohup npx tsx src/index.ts >>"$LOG" 2>&1 &
+  PORT="$UAT_PORT" HOST=0.0.0.0 NODE_ENV=uat WARM_DEMOS=london KEEP_DEMOS=london nohup npx tsx src/index.ts >>"$LOG" 2>&1 &
   echo $! >"$PIDFILE"
   for _ in $(seq 1 60); do
     curl -sf -o /dev/null "http://127.0.0.1:$UAT_PORT/" && { echo "UAT up: http://$LAN_IP:$UAT_PORT/  ($(cat "$UAT_DIR/UAT_VERSION" 2>/dev/null))"; return 0; }
