@@ -26,7 +26,7 @@ export class TourCues {
   private gen = 0;
   private stop = '';
   private timers: ReturnType<typeof setTimeout>[] = [];
-  private loops = new Set<Bed>();
+  private loops = new Map<Bed, { voice: string; stop: string; index: number; of: number; at: number; born: number }>();
   private duckDb = DEFAULT_DUCK_DB;
   private duckUntil = 0;
   private duckTimer: ReturnType<typeof setTimeout> | null = null;
@@ -42,6 +42,7 @@ export class TourCues {
     const row: CueLog = { t: Math.round(performance.now()), stop: this.stop, ...e };
     this.log.push(row);
     if (this.log.length > 500) this.log.splice(0, 100);
+    if (/^(silent|dropped|NO SUCH)/.test(row.result)) this.eng.log('skip', 'cue', row.voice, `${row.stop || 'tour'}: ${row.result}`); // the readout's journal also has the starts (take, makeBed below)
     if (this.debug) console.log(`[tour-cue] ${row.stop} | ${row.kind} ${row.voice} +${row.at.toFixed(2)}s x${row.gain.toFixed(2)} ${row.result}`);
   }
 
@@ -53,15 +54,16 @@ export class TourCues {
     this.reset();
     this.stop = stop;
     const gen = this.gen;
+    this.eng.log('start', 'engine', `tour ${stop}`, sound === undefined ? 'stop shown: no sound row, the beds alone' : sound === 'ambience' ? 'stop shown: the beds alone, on purpose' : `stop shown: ${sound.cues.length} cue${sound.cues.length === 1 ? '' : 's'}${sound.ambience ? `, beds held ${JSON.stringify(sound.ambience)}` : ''}, duck ${sound.duck ?? DEFAULT_DUCK_DB} dB`);
     if (sound === undefined || sound === 'ambience') { this.note({ voice: '-', kind: sound ? 'ambience' : 'none', at: 0, gain: 1, result: sound ? 'the beds alone, on purpose' : 'no sound row' }); return; }
     this.amb.setHint(sound.ambience ?? null);
     this.duckDb = sound.duck ?? DEFAULT_DUCK_DB;
     if (sound.ambience) this.note({ voice: JSON.stringify(sound.ambience), kind: 'ambience', at: 0, gain: 1, result: 'beds biased' });
-    for (const cue of sound.cues) {
+    sound.cues.forEach((cue, i) => {
       if (this.eng.ready) this.eng.sample(cue.voice); // start fetching and decoding now, so the recording is there when its moment comes
       const at = Math.max(0, settle + (cue.at !== undefined ? cue.at + (this.rand() - 0.5) * 0.4 : 0.3 + 0.9 * this.rand()));
-      this.timers.push(setTimeout(() => this.play(gen, cue, at), at * 1000));
-    }
+      this.timers.push(setTimeout(() => this.play(gen, cue, at, i, sound.cues.length), at * 1000));
+    });
   }
 
   /** the tour closed (or is leaving): every cue, loop, bias and duck ends */
@@ -71,7 +73,7 @@ export class TourCues {
     this.gen++;
     for (const t of this.timers) clearTimeout(t);
     this.timers.length = 0;
-    for (const b of this.loops) { try { b.stop(); } catch { /* gone */ } }
+    for (const [b, l] of this.loops) { try { b.stop(); } catch { /* gone */ } this.eng.log('stop', 'cue', l.voice, `${l.stop}: the stop was left, loop ended`); }
     this.loops.clear();
     this.amb.setHint(null);
     this.duckUntil = 0;
@@ -79,7 +81,7 @@ export class TourCues {
     this.eng.duckAmbience(0, 0.6, 'tour');
   }
 
-  private play(gen: number, cue: TourCue, at: number) {
+  private play(gen: number, cue: TourCue, at: number, index = 0, of = 1) {
     if (gen !== this.gen) return;
     const eng = this.eng, gain = (cue.gain ?? 1) * CUE_BOOST, kind = cue.loop ? 'loop' : 'cue';
     const def = VOICES[cue.voice];
@@ -97,12 +99,14 @@ export class TourCues {
         const bed = makeBed(eng, cue.voice as BedId, seed);
         if (!bed) { this.note({ voice: cue.voice, kind, at, gain, result: 'silent: no voice free' }); return; }
         bed.tune(0.8 * gain, 0.85, 0.5);
-        this.loops.add(bed);
+        const why = `tour stop ${this.stop}, cue ${index + 1} of ${of}, loop from +${at.toFixed(1)} s until the stop is left`;
+        this.loops.set(bed, { voice: cue.voice, stop: this.stop, index: index + 1, of, at, born: performance.now() });
+        this.eng.log('start', 'cue', cue.voice, why);
         this.applyDuck();
         this.note({ voice: cue.voice, kind, at, gain, result: 'looping until the stop is left' });
         return;
       }
-      const sec = playClip(eng, cue.voice, { seed, gain, pan: this.rand() * 1.2 - 0.6 });
+      const sec = playClip(eng, cue.voice, { seed, gain, pan: this.rand() * 1.2 - 0.6, cls: 'cue', why: `tour stop ${this.stop}, cue ${index + 1} of ${of}, at +${at.toFixed(1)} s, gain x${gain.toFixed(2)}` });
       if (sec <= 0) { this.note({ voice: cue.voice, kind, at, gain, result: 'silent: no voice free' }); return; }
       this.duckFor(sec);
       this.note({ voice: cue.voice, kind, at, gain, result: `played ${sec.toFixed(1)} s, beds ducked ${this.duckDb} dB` });
@@ -129,4 +133,8 @@ export class TourCues {
 
   /** for the check and the perf readout: the ambience bias now, and how many loops run */
   get state(): { hint: AmbienceHint | null; loops: number; stop: string } { return { hint: this.amb.hinted, loops: this.loops.size, stop: this.stop }; }
+  /** the loops running, for the audio readout: the bed and the stop, cue index and moment it came from */
+  loopList() { return [...this.loops].map(([bed, l]) => ({ bed, ...l })); }
+  /** the stop shown now, '' when the tour is closed */
+  get shown() { return this.stop; }
 }

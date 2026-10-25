@@ -17,6 +17,20 @@ export function bindMuteKey(win: KeyTarget, eng: AudioEngine, onToggle: (muted: 
   });
 }
 
+/**
+ * Shift+S toggles the audio readout (readout.ts). Not while typing, not with Ctrl, Cmd or Alt, not on key repeat. S alone pans the camera back
+ * (WASD), so this listens in the capture phase and stops the press there: the camera does not creep while the key is down.
+ */
+export function bindReadoutKey(win: { addEventListener(t: 'keydown', f: (e: any) => void, capture?: boolean): void }, toggle: () => void) {
+  win.addEventListener('keydown', (e) => {
+    if (e.code !== 'KeyS' || !e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target as { tagName?: string; isContentEditable?: boolean } | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    e.stopPropagation();
+    if (!e.repeat) toggle();
+  }, true);
+}
+
 export interface ControlEls {
   /** the "sound" checkbox (checked = sound on) */
   toggle: HTMLInputElement | null;

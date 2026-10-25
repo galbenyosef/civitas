@@ -16,6 +16,18 @@ export const DEFAULT_VOLUME = 0.6;
 /** something the engine did that costs main-thread time or changes the graph, for the perf readout and the frame trace (render/perfhud.ts) */
 export interface AudioEvent { at: number; kind: 'start' | 'decode' | 'bed' | 'crossfade' | 'stop' | 'event'; id: string; /** decode: ms from the fetch to the decoded buffer */ ms?: number }
 
+/** what kind of sound a voice is, for the audio readout (readout.ts): a bed runs all the time, an event is fired once, a ride is the ridden vehicle, a cue is the tour's, ui is an interface click */
+export type VoiceClass = 'bed' | 'event' | 'ride' | 'cue' | 'ui';
+/** what a one-shot is and why it sounds, handed to `take` so the readout can list it; `db` is the level at the start (post-bus), `cents` the pitch offset, `take` the file or "synth" */
+export interface VoiceTag { id: string; cls: VoiceClass; bus: BusId; why: string; db?: number; cents?: number | null; take?: string }
+/** a one-shot still sounding: its tag, when it started and when its voice is given back (performance.now ms) */
+export interface ShotRow extends VoiceTag { at: number; until: number }
+/** one start, stop or skipped start in the journal the readout shows (the last JOURNAL); `t` is performance.now ms */
+export interface JournalRow { t: number; ev: 'start' | 'stop' | 'skip'; cls: VoiceClass | 'engine'; id: string; why: string; /** the same row repeated inside two seconds (rail joints, footsteps) is one row with a count */ n?: number }
+export const JOURNAL = 40;
+/** a linear gain in dB (-Infinity for silence) */
+export const toDb = (g: number) => (g > 1e-6 ? 20 * Math.log10(g) : -Infinity);
+
 export interface AudioPrefs { volume: number; muted: boolean; /** the "sound on" chip has been shown and dismissed or timed out */ chipSeen: boolean }
 
 type Store = { getItem(k: string): string | null; setItem(k: string, v: string): void };
@@ -66,6 +78,19 @@ export class AudioEngine {
   private armed = false;
   /** the last 256 events: context start, each decode as it lands, beds made, cross-fades to a recording, stops; voices.ts and ambience.ts push */
   readonly events: AudioEvent[] = [];
+  /** the last JOURNAL starts, stops and skipped starts with their cause, for the audio readout (readout.ts); the tour's rows go here too (tourcue.ts) */
+  readonly journal: JournalRow[] = [];
+  log(ev: JournalRow['ev'], cls: JournalRow['cls'], id: string, why: string) {
+    const t = performance.now(), last = this.journal[this.journal.length - 1];
+    if (last && last.ev === ev && last.cls === cls && last.id === id && t - last.t < 2000) { last.t = t; last.why = why; last.n = (last.n ?? 1) + 1; return; }
+    this.journal.push({ t, ev, cls, id, why });
+    if (this.journal.length > JOURNAL) this.journal.shift();
+  }
+  /** one-shots started lately (those still sounding are the ones whose `until` is ahead), pruned as they pass */
+  readonly shots: ShotRow[] = [];
+  /** recording files being fetched or decoded now */
+  loading = 0;
+  private names = new Map<string, string[]>();
   note(kind: AudioEvent['kind'], id: string, ms?: number) { this.events.push({ at: performance.now(), kind, id, ...(ms !== undefined ? { ms } : {}) }); if (this.events.length > 256) this.events.shift(); }
 
   constructor(opts: EngineOpts = {}) {
@@ -116,6 +141,8 @@ export class AudioEngine {
   }
 
   get started() { return this.ctx !== null; }
+  /** a bus's gain now (the ambience bus carries the ducking), 1 when there is none to read */
+  busGain(bus: BusId): number { const v = this.buses[bus]?.gain?.value; return typeof v === 'number' ? v : 1; }
   /** the context's clock, 0 before it exists */
   get now() { return this.ctx?.currentTime ?? 0; }
 
@@ -155,6 +182,8 @@ export class AudioEngine {
     this.buses.ambience.gain.setTargetAtTime(0.9 * Math.pow(10, sum / 20), this.ctx.currentTime, tc);
   }
   private ducks = new Map<string, number>();
+  /** the ambience bus's dips by layer, dB (the audio readout) */
+  get duckLayers(): [string, number][] { return [...this.ducks]; }
 
   private save() {
     try { this.store?.setItem(AUDIO_KEY, JSON.stringify({ volume: Math.round(this.volume * 1000) / 1000, muted: this.muted, chipSeen: this.chipSeen })); } catch { /* not remembered */ }
@@ -166,10 +195,16 @@ export class AudioEngine {
    * Reserve a voice for `seconds`, or (0) hold it until `give` as a bed or the ridden vehicle does. False when the budget is
    * spent and the caller skips the sound. One-shots leave the last few voices free, so a bed or an engine can always start.
    */
-  take(seconds = 0): boolean {
+  take(seconds = 0, tag?: VoiceTag): boolean {
     if (this.active >= (seconds > 0 ? MAX_VOICES - HELD_RESERVE : MAX_VOICES)) return false;
     this.active++;
     if (seconds > 0) setTimeout(() => this.give(), seconds * 1000 + 50);
+    if (tag && seconds > 0) { // the readout's list of one-shots: a small row, dropped once its voice is given back
+      const at = performance.now();
+      if (this.shots.length > 40) { const live = this.shots.filter((x) => x.until > at); this.shots.length = 0; this.shots.push(...live); }
+      this.shots.push({ ...tag, at, until: at + seconds * 1000 + 50 });
+      this.log('start', tag.cls, tag.id, tag.why);
+    }
     return true;
   }
   give() { if (this.active > 0) this.active--; }
@@ -221,6 +256,8 @@ export class AudioEngine {
     if (!VOICES[id]?.takes?.length) return;
     (this.waiting.get(id) ?? this.waiting.set(id, []).get(id)!).push(f);
   }
+  /** the file a decoded take of `id` came from, or "synth" (the audio readout) */
+  fileOf(id: string, buf: AudioBuffer | null): string { const i = buf ? this.takes.get(id)?.indexOf(buf) ?? -1 : -1; return i >= 0 ? this.names.get(id)?.[i] ?? 'synth' : 'synth'; }
   /** how many takes of a voice are decoded now */
   loaded(id: string) { return this.takes.get(id)?.length ?? 0; }
 
@@ -230,6 +267,7 @@ export class AudioEngine {
     if (!c || !f) return;
     for (const file of files) {
       void (async () => {
+        this.loading++;
         try {
           const url = this.resolveUrl(file);
           if (!url) return;
@@ -240,9 +278,10 @@ export class AudioEngine {
           this.note('decode', id, performance.now() - t0);
           const have = this.takes.get(id) ?? this.takes.set(id, []).get(id)!;
           have.push(buf);
+          (this.names.get(id) ?? this.names.set(id, []).get(id)!).push(file);
           const w = this.waiting.get(id);
           if (w) { this.waiting.delete(id); for (const cb of w) cb(buf); }
-        } catch { /* not there, or not decodable: the voice stays synthesised (or silent, if it has no synthesis) */ }
+        } catch { /* not there, or not decodable: the voice stays synthesised (or silent, if it has no synthesis) */ } finally { this.loading--; }
       })();
     }
   }

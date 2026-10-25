@@ -1,8 +1,10 @@
-import { AudioEngine } from './engine';
+import { AudioEngine, MAX_VOICES, toDb } from './engine';
 import { Ambience, type AmbSources } from './ambience';
 import { FpvSound, type FpvSources } from './fpv';
 import { fire } from './voices';
 import { bindControls, bindMuteKey } from './controls';
+import { VOICES } from './manifest';
+import type { AudioState, VoiceRow } from './readout';
 import { clipUrl } from './urls';
 import { TourCues } from './tourcue';
 import type { TourSound } from '@msimcity/shared';
@@ -11,6 +13,7 @@ export { AudioEngine } from './engine';
 export type { AmbSources } from './ambience';
 export type { FpvSources, RideNow } from './fpv';
 export { TourCues } from './tourcue';
+export { AudioReadout, type AudioState, type VoiceRow } from './readout';
 
 export type UiSound = 'click' | 'place' | 'refuse' | 'undo';
 
@@ -52,7 +55,7 @@ export class Audio {
     const t = performance.now();
     if (t - (this.uiAt[id] ?? -1e9) < 70) return;
     this.uiAt[id] = t;
-    fire(this.engine, `ui-${id}`, { seed: (this.n++ * 7919 + this.salt) | 0 });
+    fire(this.engine, `ui-${id}`, { seed: (this.n++ * 7919 + this.salt) | 0, why: `ui: ${id}` });
   }
 
   /** msc.audio.debug = true prints every tour cue as it starts (or why it did not); ?audiodebug turns it on at load */
@@ -72,6 +75,32 @@ export class Audio {
     if (!this.engine.ready) return;
     this.ambience.frame(now);
     this.fpv.frame(now);
+  }
+
+  /**
+   * What is sounding now and why, for the audio readout (readout.ts): the context, volume and mute, the voices and the cap, decodes in flight,
+   * the duck layers, the ambience hour and its source, one row per voice (beds with their inputs, tour loops with their stop, the ride, the
+   * one-shots still sounding) and the journal. Built only when the readout is open, twice a second; it only reads.
+   */
+  state(): AudioState {
+    const e = this.engine, now = performance.now(), rows: VoiceRow[] = [];
+    const level = (g: { gain?: { value?: unknown } } | null | undefined, bus: 'ambience' | 'vehicles' | 'ui') => { const v = g?.gain?.value; return typeof v === 'number' ? v * e.busGain(bus) : 0; };
+    for (const b of this.ambience.bedList()) {
+      const i = b.bed.info?.();
+      rows.push({ id: b.id, cls: 'bed', bus: VOICES[b.id].bus, db: toDb(level(b.bed.out, VOICES[b.id].bus)), cents: i?.cents ?? null, take: i?.take ?? 'synth', age: now - b.born, why: b.why });
+    }
+    for (const l of this.tour.loopList()) {
+      const i = l.bed.info?.();
+      rows.push({ id: l.voice, cls: 'cue', bus: VOICES[l.voice].bus, db: toDb(level(l.bed.out, VOICES[l.voice].bus)), cents: i?.cents ?? null, take: i?.take ?? 'synth', age: now - l.born, why: `tour stop ${l.stop}, cue ${l.index} of ${l.of}, loop from +${l.at.toFixed(1)} s until the stop is left` });
+    }
+    const ride = this.fpv.state();
+    if (ride) rows.push({ id: ride.id, cls: 'ride', bus: 'vehicles', db: toDb(ride.gain), cents: 1200 * Math.log2(0.8 + 0.5 * ride.speed), take: ride.take, age: now - ride.born, why: `riding ${ride.key}: a ${ride.kind} at ${Math.round(ride.speed * 100)}% of its top speed (pitch and level follow it); the ambience is down 6 dB` });
+    for (const s of e.shots) if (s.until > now) rows.push({ id: s.id, cls: s.cls, bus: s.bus, db: s.db ?? -Infinity, cents: s.cents ?? null, take: s.take ?? 'synth', age: now - s.at, left: (s.until - now) / 1000, why: s.why });
+    const h = this.ambience.hourInfo();
+    return {
+      at: now, context: e.ctx ? (e.ctx.state as AudioState['context']) : 'not started', muted: e.muted, volume: e.volume, masterDb: toDb(e.gainFor()),
+      voices: e.active, cap: MAX_VOICES, loading: e.loading, ducks: e.duckLayers, hour: h.hour, hourSource: h.source, stop: this.tour.shown, rows, journal: e.journal.map((j) => ({ ...j })),
+    };
   }
 
   /** for the perf readout (render/perfhud.ts): the 250 ms tick's cost, the voices, and the engine's event log and tick times for the trace and the jitter finder */

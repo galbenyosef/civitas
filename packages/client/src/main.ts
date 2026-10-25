@@ -61,7 +61,8 @@ import { ChartsPanel } from './charts';
 import { PolicyPanel } from './policies';
 import { AdPanel } from './adverts';
 import { PerfHud } from './render/perfhud';
-import { Audio, type RideNow } from './audio';
+import { Audio, AudioReadout, type RideNow } from './audio';
+import { bindReadoutKey } from './audio/controls';
 import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered, serverConfig } from './worlds';
 import { apiBase } from './serverApi';
 import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, type DemoInfo } from './tour';
@@ -1557,6 +1558,7 @@ const audio = new Audio({
   ambience: {
     // the sound keeps the hour the eye is shown: a tour stop that pins the light (the Lights at night, a dusk cemetery) pins the beds and the birds to it too
     hour: () => (tourLight ? lighting.fixedHour : liveHour()),
+    hourSource: () => (tourLight ? 'pinned light (a tour stop sets the hour)' : 'clock'),
     camera: () => { const e = rig.camera.matrixWorld.elements; return { x: rig.target.x, z: rig.target.z, dist: rig.dist, map: mapMode.on, rightX: e[0], rightZ: e[2] }; },
     tileAt: (x, y) => world.getTile(x, y),
     kindIdAt: (x, y) => world.kindIdAt(x, y),
@@ -1567,8 +1569,11 @@ const audio = new Audio({
   notice: (t) => ui.notice(t),
 });
 ui.onSound = (id) => audio.ui(id);
+/** the audio readout (audio/readout.ts, docs/audio.md "Readout"): the audio chip and Shift+S; reads the engine twice a second while open, nothing while closed */
+const audioReadout = new AudioReadout(audio, hud, document.getElementById('audioBtn'));
+bindReadoutKey(window, () => audioReadout.toggle());
 fireworks.onShell = (x, z, at, size) => audio.firework(x, z, at, size);
-Object.assign((window as any).msc, { perf, lines, audio });
+Object.assign((window as any).msc, { perf, lines, audio, audioReadout });
 /** the chunk rebuild scheduler (render/chunkWork.ts); setLegacy(true) brings back the old invalidation and loop for paired measurements */
 (window as any).msc.chunkWork = Object.assign(chunkWork, {
   setLegacy(on: boolean) { chunkWork.legacy = on; world.legacyDirty = on; if (junctions.legacySigns !== on) { junctions.legacySigns = on; if (!on) junctions.signs.rebuild(); } },

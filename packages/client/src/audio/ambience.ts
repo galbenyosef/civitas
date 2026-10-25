@@ -15,6 +15,8 @@ export interface AgentLike { rx: number; rz: number; car: boolean; trav: boolean
 export interface AmbSources {
   /** the game hour, 0..24 */
   hour(): number;
+  /** where the hour comes from, for the audio readout: "clock", or "pinned light (tour stop)" */
+  hourSource?(): string;
   camera(): { x: number; z: number; dist: number; map: boolean; rightX: number; rightZ: number };
   tileAt(x: number, y: number): number | undefined;
   kindIdAt(x: number, y: number): number;
@@ -48,6 +50,50 @@ const smooth = (a: number, b: number, v: number) => { const t = clamp01((v - a) 
 
 /** how busy the city is at an hour, 0.25 at night to 1 by day */
 export const activityAt = (h: number) => (h < 5 ? 0.25 : h < 8 ? lerp(0.25, 1, (h - 5) / 3) : h < 21 ? 1 : lerp(1, 0.25, Math.min(1, (h - 21) / 3)));
+
+/** an hour as 08:05 (the audio readout's words) */
+export const hm = (h: number) => `${String(Math.floor(h) % 24).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`;
+const pc = (v: number) => `${Math.round(v * 100)}%`;
+/** the most each bed is driven to, rain included (HINT_CEIL covers the beds a tour stop can name) */
+const CEIL = (id: string) => (id === 'rain-light' ? 0.45 : id === 'rain-heavy' ? 0.55 : (HINT_CEIL as Record<string, number>)[id] ?? 1);
+
+/**
+ * In words, what a bed is being driven by (the audio readout): the numbers the 250 ms tick read, the share of the bed's ceiling it
+ * is aiming at and the tour stop's hold on it, if any. Pure.
+ */
+export function bedWhy(id: string, sc: Scan, dist: number, hour: number, level: number, hint: AmbienceHint | null, map: boolean, rain = 0): string {
+  const d = Math.round(dist), t = hm(hour);
+  let inputs: string;
+  switch (id) {
+    case 'traffic': inputs = `cars near ${sc.cars}, roads ${pc(sc.road)} of tiles, zoom ${d}, hour ${t}`; break;
+    case 'wind': inputs = `zoom ${d} (louder the higher the camera)`; break;
+    case 'crowd': inputs = `walkers ${sc.walkers}, shops and offices ${pc(sc.com)}, zoom ${d}, hour ${t}`; break;
+    case 'industry': inputs = `industry and power ${pc(sc.ind)} of tiles, zoom ${d}, hour ${t}`; break;
+    case 'water': inputs = `water ${pc(sc.water)} of tiles, zoom ${d}`; break;
+    case 'market': inputs = `shops ${pc(sc.com)}, walkers ${sc.walkers}, hour ${t} (08:00 to 17:00)`; break;
+    case 'pub': inputs = `shops ${pc(sc.com)}, hour ${t} (16:30 to midnight)`; break;
+    case 'playground': inputs = `schools in view ${sc.school}, hour ${t} (08:45 to 15:30)`; break;
+    case 'stadium': inputs = `stadiums in view ${sc.stadium}, hour ${t} (13:00 to 22:00)`; break;
+    case 'fountain': inputs = `fountains in view ${sc.fountain}, zoom ${d}`; break;
+    case 'rain-light': case 'rain-heavy': inputs = `weather ${rain.toFixed(2)}`; break;
+    default: inputs = `zoom ${d}, hour ${t}`;
+  }
+  const held = (hint as Record<string, number | undefined> | null)?.[id];
+  return `${inputs} → ${(level / CEIL(id)).toFixed(2)} of its ceiling${map ? ' (map view: thinned)' : ''}${held !== undefined ? `; tour stop holds it at ${held}` : ''}`;
+}
+
+/** why a second-pass event fired, in words: the Poisson rate it was drawn at and the numbers behind it */
+export function placeWhy(id: string, sc: Scan, dist: number, hour: number, lambda: number): string {
+  const t = hm(hour), d = Math.round(dist);
+  const w: Record<string, string> = {
+    gust: `high camera, zoom ${d}`, footsteps: `walkers ${sc.walkers} close in, hour ${t}`, siren: `police stations in view ${sc.police}`, 'siren-fire': `fire stations in view ${sc.fire}`,
+    seagulls: `water ${pc(sc.water)} of tiles, by day (${t})`, pigeons: `parks ${pc(sc.park)}, shops ${pc(sc.com)}, by day (${t})`, dog: `homes ${pc(sc.res)}, hour ${t}`,
+    'bike-bell': `walkers ${sc.walkers} on roads ${pc(sc.road)}, by day (${t})`, 'bin-lorry': `homes ${pc(sc.res)}, morning (${t})`, 'station-chime': `shops and offices ${pc(sc.com)}, by day (${t})`,
+    'heli-over': `camera high, zoom ${d}, by day (${t})`, 'plane-over': `camera high, zoom ${d}, hour ${t}`, 'boat-horn': `water ${pc(sc.water)} of tiles, zoom ${d}`,
+    hammer: `builders' depots in view ${sc.builders}, working hours (${t})`, drill: `builders' depots in view ${sc.builders}, working hours (${t})`, lawnmower: `homes ${pc(sc.res)}, hour ${t}`, thunder: 'storm',
+  };
+  return `${w[id] ?? `zoom ${d}, hour ${t}`}; drawn at ${lambda.toFixed(3)} a second`;
+}
 
 /** Fill `out` from the tiles round (cx, cz) within `rad` tiles (a grid of at most 15 by 15 samples) and the agents drawn round it. */
 export function scanAround(src: AmbSources, cx: number, cz: number, dist: number, out: Scan): Scan {
@@ -189,6 +235,8 @@ export class Ambience {
   readonly scan = newScan();
   readonly mix = newMix();
   private beds: Partial<Record<BedId, Bed>> = {};
+  /** when each bed started (performance.now), for the audio readout */
+  private born: Partial<Record<BedId, number>> = {};
   /** seconds each optional bed has been wanted at nothing: it is stopped after a while, freeing its voice */
   private quiet: Partial<Record<BedId, number>> = {};
   /** the weather hook: rain 0..1. Nothing in the game sets it yet (there is no weather); a future weather system calls setWeather */
@@ -196,6 +244,9 @@ export class Ambience {
   /** the tour stop's bias on the beds (setHint), or null */
   private hint: AmbienceHint | null = null;
   private made = false;
+  /** the camera distance, map view and hour the last tick read (the audio readout) */
+  private camNow = { dist: 0, map: false };
+  private hourNow = 0;
   private at = 0;
   private n = 0;
   private lastHour = -1;
@@ -219,7 +270,7 @@ export class Ambience {
     const cam = this.src.camera(), dx = x - cam.x, dz = z - cam.z, d = Math.hypot(dx, dz);
     const far = 1 - smooth(25, 260 + cam.dist, d);
     if (far < 0.03) return;
-    fire(this.eng, 'fireworks', { seed: (this.rand() * 1e9) | 0, gain: far * Math.min(1, 0.5 + 0.2 * size), delay: Math.max(0, at) + 1.1 + Math.min(2, d / 150), pan: Math.max(-1, Math.min(1, (dx * cam.rightX + dz * cam.rightZ) / (12 + d * 0.3))) });
+    fire(this.eng, 'fireworks', { why: `fireworks shell at ${Math.round(x)},${Math.round(z)}, ${Math.round(d)} tiles off, size ${size}`, seed: (this.rand() * 1e9) | 0, gain: far * Math.min(1, 0.5 + 0.2 * size), delay: Math.max(0, at) + 1.1 + Math.min(2, d / 150), pan: Math.max(-1, Math.min(1, (dx * cam.rightX + dz * cam.rightZ) / (12 + d * 0.3))) });
   }
 
   private rand() { return hash2(this.n++, this.salt); }
@@ -243,11 +294,12 @@ export class Ambience {
 
   private tick(dt: number, now: number) {
     const src = this.src, cam = src.camera(), hour = src.hour(), eng = this.eng;
+    this.camNow.dist = cam.dist; this.camNow.map = cam.map; this.hourNow = hour;
     if (!this.made) {
       this.made = true;
       for (const id of ALWAYS) {
         const b = makeBed(eng, id, hash2(this.n++, this.salt));
-        if (b) this.beds[id] = b;
+        if (b) { this.beds[id] = b; this.born[id] = performance.now(); eng.log('start', 'bed', id, 'always on: the ambience started'); } else eng.log('skip', 'bed', id, 'no voice free');
       }
     }
     const sc = scanAround(src, cam.x, cam.z, cam.dist, this.scan);
@@ -255,8 +307,8 @@ export class Ambience {
     for (const id of Object.keys(mix) as BedId[]) { // the optional beds (recordings only) start when wanted and stop after eight quiet seconds
       if (ALWAYS.includes(id)) continue;
       const lv = mix[id].level;
-      if (lv > 0.02 && !this.beds[id] && VOICES[id].takes?.length) { const b = makeBed(eng, id, hash2(this.n++, this.salt)); if (b) this.beds[id] = b; }
-      if (lv < 0.004 && this.beds[id]) { const q = (this.quiet[id] ?? 0) + dt; this.quiet[id] = q; if (q > 8) { this.beds[id]!.stop(); delete this.beds[id]; this.quiet[id] = 0; } } else this.quiet[id] = 0;
+      if (lv > 0.02 && !this.beds[id] && VOICES[id].takes?.length) { const b = makeBed(eng, id, hash2(this.n++, this.salt)); if (b) { this.beds[id] = b; this.born[id] = performance.now(); eng.log('start', 'bed', id, `wanted: ${bedWhy(id, sc, cam.dist, hour, lv, this.hint, cam.map, this.rain)}`); } }
+      if (lv < 0.004 && this.beds[id]) { const q = (this.quiet[id] ?? 0) + dt; this.quiet[id] = q; if (q > 8) { this.beds[id]!.stop(); delete this.beds[id]; this.quiet[id] = 0; eng.log('stop', 'bed', id, 'quiet for 8 s, voice given back'); } } else this.quiet[id] = 0;
     }
     for (const id in this.beds) {
       const k = id as BedId, tg = mix[k];
@@ -266,11 +318,11 @@ export class Ambience {
     // events
     if (this.rate(birdRate(sc, hour, cam.dist), dt)) {
       const chorus = hour >= 4.5 && hour < 7, n = chorus ? 1 + Math.floor(this.rand() * 3) : 1;
-      for (let i = 0; i < n; i++) fire(eng, 'bird', { seed: (this.rand() * 1e9) | 0, delay: i * (0.15 + this.rand() * 0.5), gain: 0.5 + 0.5 * this.rand() });
+      for (let i = 0; i < n; i++) fire(eng, 'bird', { why: `${chorus ? 'dawn chorus' : 'daytime'} ${hm(hour)}, parks ${pc(sc.park)}, homes ${pc(sc.res)}`, seed: (this.rand() * 1e9) | 0, delay: i * (0.15 + this.rand() * 0.5), gain: 0.5 + 0.5 * this.rand() });
     }
-    if (this.rate(owlRate(sc, hour, cam.dist), dt)) fire(eng, 'owl', { seed: (this.rand() * 1e9) | 0, gain: 0.6 + 0.4 * this.rand() });
+    if (this.rate(owlRate(sc, hour, cam.dist), dt)) fire(eng, 'owl', { why: `night ${hm(hour)}, parks ${pc(sc.park)}, homes ${pc(sc.res)}`, seed: (this.rand() * 1e9) | 0, gain: 0.6 + 0.4 * this.rand() });
     if (sc.cars > 5 && cam.dist < 90 && this.rate(0.006 * Math.min(1, sc.cars / 30) * lerp(0.4, 1, activityAt(hour)), dt)) {
-      fire(eng, 'horn', { seed: (this.rand() * 1e9) | 0, gain: 0.4 + 0.6 * this.rand() * (1 - smooth(20, 90, cam.dist)) });
+      fire(eng, 'horn', { why: `horn: ${sc.cars} cars near, zoom ${Math.round(cam.dist)}`, seed: (this.rand() * 1e9) | 0, gain: 0.4 + 0.6 * this.rand() * (1 - smooth(20, 90, cam.dist)) });
     }
     this.places(sc, cam, hour, dt);
     // the hour: a bell, if one is in the view and it is a striking hour (every third, by day) and has not just rung
@@ -278,9 +330,9 @@ export class Ambience {
     if (this.lastHour >= 0 && hf !== this.lastHour && hf >= 6 && hf <= 21 && hf % 3 === 0 && cam.dist < 140 && (sc.bell > 0 || sc.bellDeep > 0) && now - this.lastBell > 40000) {
       this.lastBell = now;
       if (hf === 10 || (hf === 18 && sc.bell > 0)) { // a peal at ten and six (in place of the strikes at six) when there is a recording
-        if (VOICES['bell-peal'].takes?.length && sc.bellDeep === 0) { fire(eng, 'bell-peal', { seed: (this.rand() * 1e9) | 0, gain: 1 - smooth(40, 140, cam.dist), pan: this.rand() * 1.2 - 0.6 }); this.lastHour = hf; return; }
+        if (VOICES['bell-peal'].takes?.length && sc.bellDeep === 0) { fire(eng, 'bell-peal', { why: `peal at ${hf}:00, bell tiles in view ${sc.bell}`, seed: (this.rand() * 1e9) | 0, gain: 1 - smooth(40, 140, cam.dist), pan: this.rand() * 1.2 - 0.6 }); this.lastHour = hf; return; }
       }
-      ringBell(eng, sc.bellDeep > 0, (this.rand() * 1e9) | 0, Math.min(6, hf % 12 || 12), 1 - smooth(40, 140, cam.dist), this.rand() * 1.2 - 0.6);
+      ringBell(eng, sc.bellDeep > 0, (this.rand() * 1e9) | 0, Math.min(6, hf % 12 || 12), 1 - smooth(40, 140, cam.dist), this.rand() * 1.2 - 0.6, `strikes ${hf}:00, ${sc.bellDeep > 0 ? 'Parliament' : 'a churchyard'} in view`);
     }
     this.lastHour = hf;
     // a signal crossing holding the cars at red, near the camera: its beep, every half second
@@ -289,7 +341,7 @@ export class Ambience {
       if (p) {
         this.beepAt = now + 500;
         const dx = p.x - cam.x, dz = p.z - cam.z, d = Math.hypot(dx, dz);
-        fire(eng, 'beep', { seed: (this.rand() * 1e9) | 0, gain: (1 - d / 20) * (1 - smooth(30, 80, cam.dist)), pan: Math.max(-1, Math.min(1, (dx * cam.rightX + dz * cam.rightZ) / 12)) });
+        fire(eng, 'beep', { why: `crossing red at ${Math.round(p.x)},${Math.round(p.z)}, ${d.toFixed(0)} tiles off`, seed: (this.rand() * 1e9) | 0, gain: (1 - d / 20) * (1 - smooth(30, 80, cam.dist)), pan: Math.max(-1, Math.min(1, (dx * cam.rightX + dz * cam.rightZ) / 12)) });
       }
     }
   }
@@ -298,7 +350,7 @@ export class Ambience {
   private places(sc: Scan, cam: ReturnType<AmbSources['camera']>, hour: number, dt: number) {
     const eng = this.eng, d = cam.dist, day = during(hour, 6.5, 20), act = activityAt(hour);
     const go = (id: Parameters<typeof fire>[1], lambda: number, gain: number, pan?: number) => {
-      if (lambda > 0 && gain > 0.02 && VOICES[id].takes?.length && this.rate(lambda, dt)) fire(eng, id, { seed: (this.rand() * 1e9) | 0, gain, pan: pan ?? this.rand() * 1.6 - 0.8 });
+      if (lambda > 0 && gain > 0.02 && VOICES[id].takes?.length && this.rate(lambda, dt)) fire(eng, id, { why: placeWhy(id, sc, d, hour, lambda), seed: (this.rand() * 1e9) | 0, gain, pan: pan ?? this.rand() * 1.6 - 0.8 });
     };
     go('gust', 0.045 * smooth(40, 260, d), 0.35 + 0.6 * smooth(60, 300, d));
     go('footsteps', 0.3 * clamp01(sc.walkers / 12) * act * (1 - smooth(25, 50, d)), 0.35 + 0.65 * this.rand());
@@ -320,6 +372,14 @@ export class Ambience {
     go('thunder', 0.02 * smooth(0.6, 0.9, this.rain), 0.5 + 0.5 * this.rand());
   }
 
+  /** the beds sounding now, each with what drives it, in words (the audio readout; built only when it is open) */
+  bedList(): { id: BedId; bed: Bed; level: number; why: string; born: number }[] {
+    const sc = this.scan, c = this.camNow;
+    return (Object.keys(this.beds) as BedId[]).map((id) => ({ id, bed: this.beds[id]!, born: this.born[id] ?? 0, level: this.mix[id].level, why: bedWhy(id, sc, c.dist, this.hourNow, this.mix[id].level, this.hint, c.map, this.rain) }));
+  }
+  /** the hour the beds and events use now and where it comes from */
+  hourInfo(): { hour: number; source: string } { return { hour: this.hourNow, source: this.src.hourSource?.() ?? 'clock' }; }
+
   /** drop every bed (the context is going away, or the player left the world) */
-  dispose() { for (const id in this.beds) this.beds[id as BedId]!.stop(); this.beds = {}; this.quiet = {}; this.made = false; }
+  dispose() { for (const id in this.beds) { this.beds[id as BedId]!.stop(); this.eng.log('stop', 'bed', id, 'the ambience was disposed'); } this.beds = {}; this.quiet = {}; this.made = false; }
 }
