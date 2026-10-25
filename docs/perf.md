@@ -288,6 +288,10 @@ the game hour and the machine); the manual check is the readout's **chunk rebuil
 on London at midday: about 10 dirty marks and rebuilds a second at the welcome view, **a few ms of rebuilds a second, and no
 slow frame attributed to `chunks`**. More than about 100 ms of rebuilds a second turns the row amber.
 
+Checks on the branch (2026-10-25), all passing: `npm run typecheck`, `npm run demo:check`, `npm run perf:check` (the server is
+untouched: the same game, shares within their limits, no baseline update), `gesture-check`, `tv-check`, `audio-check`,
+`chunk-check`, `npm run build`. No server file changed, so `ab.ts` was not rerun.
+
 ## Checks
 
 Run on 2026-10-25 on the branch, all passing: `npm run typecheck` (includes `local:check`: the worker bundle carries the
