@@ -204,6 +204,39 @@ const statueOps = (): Op[] => {
   return ops;
 };
 
+const statueOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'pond')];
+  ops.push(['cyl', 0.91, 0.91, 0.035, 0, 0.005, 0, 'lawn', 24]);
+  ops.push(['cyl', 0.69, 0.74, 0.17, 0, 0.04, -0.08, FORT_DK, 8]);
+  ops.push(['cyl', 0.62, 0.62, 0.04, 0, 0.21, -0.08, FORT, 8]);
+  ops.push(['taper', 0.58, 0.58, 0.42, 0.42, 0.4, 0, 0.25, -0.12, FORT]);
+  ops.push(['box', 0.46, 0.06, 0.46, 0, 0.65, -0.12, FORT_DK]);
+  ops.push(['lathe', 0, 0.71, -0.12, COPPER, [0.17, 0, 0.18, 0.05, 0.15, 0.23, 0.12, 0.43, 0.1, 0.56, 0.075, 0.62, 0, 0.63], { seg: 20 }]);
+  for (const x of [-0.1, -0.05, 0, 0.05, 0.1]) {
+    ops.push(['taper', 0.018, 0.025, 0.012, 0.018, 0.42, x, 0.76, 0.015, COPPER_DK]);
+  }
+  ops.push(['box', 0.22, 0.09, 0.14, 0, 1.25, -0.12, COPPER]);
+  ops.push(['cyl', 0.045, 0.05, 0.08, 0, 1.32, -0.12, COPPER, 10]);
+  ops.push(['lathe', 0, 1.4, -0.12, COPPER, [0.045, 0, 0.07, 0.035, 0.065, 0.09, 0.035, 0.12, 0, 0.13], { seg: 16 }]);
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2;
+    ops.push(['taper', 0.018, 0.018, 0.004, 0.004, 0.1, Math.cos(a) * 0.067, 1.46, -0.12 + Math.sin(a) * 0.067, COPPER]);
+  }
+  ops.push(['taper', 0.07, 0.07, 0.045, 0.045, 0.4, 0.085, 1.19, -0.12, COPPER, { shift: [0.13, 0] }]);
+  ops.push(['cyl', 0.024, 0.03, 0.12, 0.215, 1.57, -0.12, 'gold', 8]);
+  ops.push(['lathe', 0.215, 1.69, -0.12, 'marquee', [0.02, 0, 0.04, 0.045, 0.022, 0.1, 0, 0.14], { seg: 10 }]);
+  ops.push(['taper', 0.055, 0.055, 0.04, 0.04, 0.25, -0.09, 1.08, -0.1, COPPER, { shift: [-0.08, 0] }]);
+  ops.push(['box', 0.17, 0.25, 0.065, -0.15, 0.98, -0.055, COPPER_DK]);
+  ops.push(['box', 0.12, 0.012, 0.008, -0.15, 1.16, -0.018, 'gold']);
+  ops.push(['box', 0.44, 0.14, 0.25, -0.35, 0.04, 0.65, FORT]);
+  ops.push(['box', 0.12, 0.1, 0.015, -0.35, 0.04, 0.783, 'dark']);
+  ops.push(['box', 0.32, 0.045, 0.13, 0.6, 0.02, 0.72, 'navy']);
+  ops.push(['box', 0.22, 0.09, 0.1, 0.6, 0.065, 0.72, 'white']);
+  ops.push(['box', 0.04, 0.09, 0.04, 0.6, 0.155, 0.72, 'dark']);
+  ops.push(...tree(-0.72, 0.3, 0.55), ...tree(0.7, -0.45, 0.55));
+  return ops;
+};
+
 export const statueOfLiberty: KindDef = {
   id: 'statue-of-liberty', name: 'the Statue of Liberty', code: library.code, kindId: 123, family: 'leisure', tier: 3,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'new-york',
@@ -220,6 +253,7 @@ export const statueOfLiberty: KindDef = {
   levels: [{
     capacity: 30, wage: 17, cost: 13000, upkeep: 60, work: 3000, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'an octagonal island fort, a tall stone pedestal and a robed figure with tablet held close and torch aloft', height: 1.83, ops: statueOpsK31() },
       { author: 'kimi-2.8-preview', name: 'star-fort pedestal on the island under the green copper figure and her raised torch', height: 1.6, ops: statueOps() },
       { author: 'claude-fable-5-1', draft: true, name: 'the star fort, a pedestal as tall as the figure, the copper lady with her torch raised, the ferry at the landing', height: 1.86, ops: fableStatueOps() },
     ],
