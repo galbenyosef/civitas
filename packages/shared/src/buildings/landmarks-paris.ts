@@ -368,6 +368,48 @@ const louvreOps = (): Op[] => {
   return ops;
 };
 
+const louvreOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  ops.push(['box', 0.34, 0.44, 1.48, -0.74, 0.02, -0.08, LSTONE], ['box', 0.34, 0.44, 1.48, 0.74, 0.02, -0.08, LSTONE]);
+  ops.push(['box', 1.48, 0.44, 0.3, 0, 0.02, -0.75, LSTONE]);
+  for (const sx of [-1, 1]) {
+    for (const z of [-0.67, 0.5]) {
+      ops.push(['box', 0.44, 0.56, 0.44, sx * 0.72, 0.02, z, LSTONE]);
+      ops.push(['box', 0.48, 0.045, 0.48, sx * 0.72, 0.58, z, LSTONE]);
+      ops.push(['roof', 0.48, 0.2, 0.48, sx * 0.72, 0.625, z, 'slate', true]);
+      ops.push(['box', 0.28, 0.06, 0.28, sx * 0.72, 0.825, z, 'slate']);
+      ops.push(['cyl', 0.012, 0.016, 0.1, sx * 0.72, 0.885, z, 'gold', 6]);
+    }
+    ops.push(['roof', 0.36, 0.15, 0.68, sx * 0.74, 0.46, -0.05, 'slate', true]);
+    for (const z of [-0.3, -0.08, 0.14, 0.36]) {
+      ops.push(['box', 0.018, 0.19, 0.09, sx * 0.56, 0.18, z, 'dark']);
+      ops.push(['box', 0.025, 0.025, 0.12, sx * 0.552, 0.38, z, LSTONE]);
+    }
+  }
+  ops.push(['box', 0.48, 0.66, 0.4, 0, 0.02, -0.73, LSTONE]);
+  ops.push(['roof', 0.52, 0.13, 0.44, 0, 0.68, -0.73, 'slate', false]);
+  ops.push(['cyl', 0.16, 0.18, 0.1, 0, 0.81, -0.73, LSTONE, 12]);
+  ops.push(['lathe', 0, 0.91, -0.73, 'slate', [0.18, 0, 0.19, 0.035, 0.15, 0.12, 0.07, 0.19, 0.025, 0.22], { seg: 16 }]);
+  ops.push(['cyl', 0.008, 0.012, 0.09, 0, 1.13, -0.73, 'gold', 6]);
+  ops.push(['lathe', 0, 0.43, -0.519, 'navy', [0, 0, 0.065, 0, 0.065, 0.008], { axis: 'z', seg: 16 }]);
+  for (const x of [-0.48, -0.24, 0.24, 0.48]) ops.push(['box', 0.11, 0.22, 0.018, x, 0.15, -0.59, 'dark']);
+  ops.push(['cone', 0.37, 0.48, 0, 0.035, 0.1, 0x91b9bd, 4]);
+  for (const y of [0.09, 0.2, 0.31]) {
+    const r = 0.37 * (1 - (y - 0.035) / 0.48);
+    ops.push(['cyl', r, r, 0.009, 0, y, 0.1, 'steel', 4]);
+  }
+  ops.push(['cyl', 0.008, 0.012, 0.05, 0, 0.515, 0.1, 'gold', 6]);
+  for (const sx of [-1, 1]) {
+    ops.push(['cyl', 0.19, 0.21, 0.035, sx * 0.36, 0.02, 0.49, LSTONE, 20]);
+    ops.push(['cyl', 0.17, 0.17, 0.012, sx * 0.36, 0.055, 0.49, 'pond', 20]);
+    ops.push(['cyl', 0.009, 0.012, 0.18, sx * 0.36, 0.067, 0.49, 'pond', 6]);
+    ops.push(['cone', 0.1, 0.24, sx * 0.31, 0.025, 0.02, 0x91b9bd, 4]);
+  }
+  for (const x of [-0.42, -0.21, 0, 0.21, 0.42]) ops.push(['box', 0.012, 0.005, 0.62, x, 0.025, 0.25, 'gravel']);
+  ops.push(...lampPost(-0.5, 0.84, 0.28, 'marquee', 0.02), ...lampPost(0.5, 0.84, 0.28, 'marquee', 0.02));
+  return ops;
+};
+
 export const louvre: KindDef = {
   id: 'louvre', name: 'the Louvre', code: library.code, kindId: 136, family: 'leisure', tier: 4,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'paris',
@@ -384,6 +426,7 @@ export const louvre: KindDef = {
   levels: [{
     capacity: 60, wage: 19, cost: 20000, upkeep: 85, work: 4200, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'four steep-roofed pavilions around the Cour Napoléon, a clock dome and a banded glass pyramid with two smaller companions', height: 1.22, ops: louvreOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the three wings of the Cour Napoleon under their slate roofs, the glass pyramid between the two fountains', height: 0.66, ops: louvreOps() },
       { author: 'claude-haiku-5-5', draft: true, name: 'three stone wings under slate roofs around the court, the glass pyramid and its fountain basins', height: 0.68, ops: haikuLouvreOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the mansard-roofed wings round the Cour Napoléon, the tall central pavilion, the glass pyramid and its satellites', height: 0.77, ops: sonnetLouvreOps() },
