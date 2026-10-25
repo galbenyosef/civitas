@@ -52,6 +52,33 @@ const colosseumOps = (): Op[] => {
   return ops;
 };
 
+const colosseumOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  ops.push(['cyl', 0.92, 0.94, 0.045, 0, 0.015, 0, TRAVERTINE_DK, 32]);
+  ops.push(['cyl', 0.69, 0.69, 0.5, 0, 0.06, 0, 'dark', 32]);
+  for (let level = 0; level < 3; level++) {
+    const y = 0.06 + level * 0.18;
+    const r = 0.84 - level * 0.035;
+    for (let i = 0; i < 24; i++) {
+      const a = i * Math.PI * 2 / 24;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      ops.push(['cyl', 0.027, 0.033, 0.145, x, y, z, TRAVERTINE, 6]);
+      ops.push(['box', 0.065, 0.025, 0.065, x, y + 0.145, z, TRAVERTINE_DK]);
+    }
+    ops.push(['cyl', r + 0.055, r + 0.055, 0.035, 0, y + 0.145, 0, TRAVERTINE, 32]);
+  }
+  ops.push(['cyl', 0.79, 0.79, 0.055, 0, 0.585, 0, TRAVERTINE_DK, 32]);
+  ops.push(['cyl', 0.55, 0.55, 0.018, 0, 0.64, 0, 'sand', 32]);
+  for (const x of [-0.24, 0, 0.24]) ops.push(['box', 0.055, 0.012, 0.74, x, 0.658, 0, 'dark']);
+  for (let i = 0; i < 11; i++) {
+    const a = Math.PI * 0.08 + i * Math.PI * 0.084;
+    ops.push(['box', 0.09, 0.12 + (i % 3) * 0.025, 0.09, Math.cos(a) * 0.77, 0.64, Math.sin(a) * 0.77, TRAVERTINE]);
+  }
+  ops.push(...tree(-0.78, 0.72, 0.45), ...tree(0.78, 0.72, 0.45));
+  ops.push(...lampPost(-0.45, 0.9, 0.28, 'marquee', 0.02), ...lampPost(0.45, 0.9, 0.28, 'marquee', 0.02));
+  return ops;
+};
+
 export const colosseum: KindDef = {
   id: 'colosseum', name: 'the Colosseum', code: library.code, kindId: 141, family: 'leisure', tier: 1,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rome',
@@ -68,6 +95,7 @@ export const colosseum: KindDef = {
   levels: [{
     capacity: 48, wage: 17, cost: 15000, upkeep: 65, work: 3200, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'three open arcaded rings, a broken upper rim and the excavated hypogeum in the arena', height: 0.82, ops: colosseumOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the amphitheatre of the emperors, the arena and the receding rings of arches', height: 0.7, ops: colosseumOps() },
     ],
   }],
