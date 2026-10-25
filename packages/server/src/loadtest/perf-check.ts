@@ -74,7 +74,13 @@ const r2 = (v: number) => Math.round(v * 100) / 100;
 
 /** the cost of the laps: alternating blocks with the timers on and off (on-off, off-on, ...), the same game; mean and s.e. of the pair differences */
 function cost(loop: () => number, perf: PhaseStats) {
-  const BLOCK = 100, PAIRS = 6;
+  // the laps themselves, measured directly: a million of them, the minimum of five runs
+  let lapNs = Infinity;
+  for (let r = 0; r < 5; r++) { const t0 = performance.now(); for (let i = 0; i < 1_000_000; i++) perf.lap(PHASES[i % PHASES.length]); lapNs = Math.min(lapNs, performance.now() - t0); } // ms for a million = ns each
+  perf.cur.fill(0);
+  const perTick = (lapNs * 14) / 1000; // µs: twelve laps, a begin and the endTick's bookkeeping
+  console.log(`one lap ${lapNs.toFixed(0)} ns; fourteen a tick ${perTick.toFixed(1)} µs = ${((100 * perTick) / 1000 / 4).toFixed(3)}% of a 4 ms 2×2 tick, ${((100 * perTick) / 1000 / 36).toFixed(4)}% of a 36 ms London tick`);
+  const BLOCK = 25, PAIRS = 40;
   const diffs: number[] = [], onMs: number[] = [], offMs: number[] = [];
   const run = () => { let s = 0; for (let i = 0; i < BLOCK; i++) s += loop(); return s / BLOCK; };
   for (let p = 0; p < PAIRS; p++) {

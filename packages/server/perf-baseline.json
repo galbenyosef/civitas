@@ -1,81 +1,81 @@
 {
   "version": 1,
   "city": "2x2",
-  "ticks": 600,
+  "ticks": 900,
   "date": "2026-10-25",
   "node": "v20.2.0",
   "arch": "x64",
-  "calibMs": 22.07,
+  "calibMs": 20.58,
   "tick": {
-    "avg": 2.02,
-    "p95": 4.75,
-    "max": 36.01
+    "avg": 3.21,
+    "p95": 7.35,
+    "max": 29.28
   },
   "rel": {
-    "avg": 0.09,
-    "p95": 0.22
+    "avg": 0.16,
+    "p95": 0.36
   },
   "phases": {
     "plan": {
       "avg": 0.13,
-      "share": 6.43
+      "share": 4
     },
     "gateways": {
       "avg": 0,
-      "share": 0.02
+      "share": 0.03
     },
     "traffic0": {
-      "avg": 0.03,
-      "share": 1.3
+      "avg": 0.05,
+      "share": 1.48
     },
     "citizens": {
-      "avg": 0.84,
-      "share": 41.42
+      "avg": 1.52,
+      "share": 47.29
     },
     "vehicles": {
-      "avg": 0.47,
-      "share": 23.44
+      "avg": 0.69,
+      "share": 21.6
     },
     "transit": {
       "avg": 0.01,
-      "share": 0.48
+      "share": 0.37
     },
     "mobile": {
-      "avg": 0.04,
-      "share": 1.83
+      "avg": 0.06,
+      "share": 2.02
     },
     "dispatch": {
-      "avg": 0.05,
-      "share": 2.36
+      "avg": 0.11,
+      "share": 3.35
     },
     "traffic1": {
-      "avg": 0.02,
-      "share": 0.91
+      "avg": 0.03,
+      "share": 1.01
     },
     "systems": {
       "avg": 0.12,
-      "share": 5.92
+      "share": 3.87
     },
     "flush": {
-      "avg": 0.31,
-      "share": 15.47
+      "avg": 0.47,
+      "share": 14.74
     },
     "history": {
       "avg": 0,
-      "share": 0.05
+      "share": 0.06
     }
   },
   "work": {
-    "routes": 2403,
-    "nodes": 81961,
+    "routes": 7716,
+    "nodes": 185873,
     "msgs": 0,
     "bytes": 0,
-    "pop": 4884,
-    "hash": "b9e2d218"
+    "pop": 4899,
+    "hash": "b00df754"
   },
   "load": [
-    55.59,
-    27.02,
-    18.94
+    9.12,
+    9.98,
+    11.17
   ]
 }
