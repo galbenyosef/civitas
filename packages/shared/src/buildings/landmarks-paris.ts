@@ -69,6 +69,46 @@ const eiffelOps = (): Op[] => {
   return ops;
 };
 
+/**
+ * The k3.1-pro take on the iron lady, for the model-comparison matrix: a slimmer,
+ * more continuous silhouette in bronze — four feet and legs, two cross-braced
+ * rings before the first gallery, two thin platforms, then one long taper to the
+ * antenna. Same site, a plainer esplanade of trees and lamps. Draft design:
+ * viewer only, never placed in the city (schema.ts).
+ */
+const BRONZE = 0x8f6a3a, BRONZE_LT = 0xa37c48;
+
+const eiffelOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  // the esplanade cross of gravel paths
+  ops.push(['box', 0.5, 0.004, 2.0, 0, 0.02, 0, 'gravel'], ['box', 2.0, 0.004, 0.5, 0, 0.02, 0, 'gravel']);
+  // the four masonry feet and the leaning legs
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    ops.push(['box', 0.22, 0.1, 0.22, sx * 0.6, 0.02, sz * 0.6, 'stone']);
+    ops.push(['taper', 0.13, 0.13, 0.08, 0.08, 1.5, sx * 0.6, 0.12, sz * 0.6, BRONZE, { shift: [-sx * 0.42, -sz * 0.42] }]);
+  }
+  // two cross-braced rings before the first gallery
+  for (const y of [0.7, 1.15]) {
+    ops.push(['box', 0.84, 0.03, 0.03, 0, y, -0.42, BRONZE_LT], ['box', 0.84, 0.03, 0.03, 0, y, 0.42, BRONZE_LT]);
+    ops.push(['box', 0.03, 0.03, 0.84, -0.42, y, 0, BRONZE_LT], ['box', 0.03, 0.03, 0.84, 0.42, y, 0, BRONZE_LT]);
+  }
+  // the first gallery, the slimmer second stage, the second gallery
+  ops.push(['box', 0.98, 0.1, 0.98, 0, 1.62, 0, BRONZE_LT]);
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    ops.push(['taper', 0.08, 0.08, 0.05, 0.05, 1.3, sx * 0.18, 1.72, sz * 0.18, BRONZE, { shift: [-sx * 0.08, -sz * 0.08] }]);
+  }
+  ops.push(['box', 0.5, 0.09, 0.5, 0, 3.02, 0, BRONZE_LT]);
+  // the long single taper to the summit, the antenna and its aircraft light
+  ops.push(['taper', 0.3, 0.3, 0.08, 0.08, 1.4, 0, 3.11, 0, BRONZE]);
+  ops.push(['cyl', 0.05, 0.06, 0.2, 0, 4.51, 0, BRONZE_LT, 10]);
+  ops.push(['cyl', 0.012, 0.015, 0.75, 0, 4.71, 0, 'steel', 6]);
+  ops.push(['cyl', 0.028, 0.028, 0.05, 0, 5.46, 0, 'red', 6]);
+  // a plainer esplanade: trees and lamps, no flags
+  ops.push(...lampPost(-0.6, 0.85, 0.34, 'marquee', 0.02), ...lampPost(0.6, 0.85, 0.34, 'marquee', 0.02));
+  ops.push(...tree(-0.85, -0.8, 0.5), ...tree(0.85, -0.8, 0.5), ...tree(-0.85, 0.5, 0.5), ...tree(0.85, 0.5, 0.5));
+  return ops;
+};
+
 export const eiffelTower: KindDef = {
   id: 'eiffel-tower', name: 'the Eiffel Tower', code: library.code, kindId: 133, family: 'leisure', tier: 1,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'paris',
@@ -90,6 +130,7 @@ export const eiffelTower: KindDef = {
       { author: 'claude-sonnet-5-5', draft: true, name: 'the four-legged iron lattice with its girder belts, two galleries, the slender shaft and the red-lit antenna', height: 4.95, ops: sonnetEiffelOps() },
       { author: 'claude-opus-5-5', draft: true, name: 'the four splayed legs and their lattice belts, the two floors, the long shaft to the summit room and red-lit antenna', height: 5.02, ops: opusEiffelOps() },
       { author: 'claude-fable-5-1', draft: true, name: 'the legs bending in from four stone feet through the great arches to the first floor, the second stage, the needle in three shades of brown', height: 5.06, ops: fableEiffelOps() },
+      { author: 'k3.1-pro', name: 'the bronze needle: slimmer legs, two cross-braced rings and one long taper to the antenna', height: 5.51, ops: eiffelOpsK31(), draft: true },
     ],
   }],
 };
