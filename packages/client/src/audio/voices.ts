@@ -11,7 +11,8 @@ import { VOICES, type BusId } from './manifest';
 const P = (id: string) => VOICES[id].params;
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const vary = (base: number, frac: number, r: number) => base * (1 + (r * 2 - 1) * frac);
-const r = (seed: number, i: number) => hash2(seed | 0, i);
+/** per-instance randomness: a seed is usually a hash2 fraction in [0, 1), so scale it to an integer first (`| 0` alone made every bed and ride share seed 0) */
+const r = (seed: number, i: number) => hash2(seed < 1 && seed > -1 ? Math.floor(seed * 2147483647) : seed | 0, i);
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 
 /** What an ambience bed gives its controller: a level (0..1), a tone (0..1, each bed maps it to its own filter) and how fast to move. */
