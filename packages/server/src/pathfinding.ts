@@ -295,6 +295,7 @@ export function findRoute(
    */
   lorry: boolean | Set<number> = false,
 ): { path: number[]; cost: number } | null {
+  SEARCH.routes++;
   if (sx === gx && sy === gy) return { path: [sx, sy], cost: 0 };
   const goalRoad = (() => { const t = w.peekTile(gx, gy); return t !== undefined && isRoad(t); })();
   // next door: the one step, unless a road's class forbids it (a one-way, a reservation, a pedestrian street, a motorway's frontage)
@@ -397,6 +398,7 @@ export function findRoute(
         for (; cur >= 0; cur = parent[cur]) { const c = S.chunks[(cur / NODES) | 0], i = cur & (CELLS - 1); path.push(c.cy * CHUNK_SIZE + ((i / CHUNK_SIZE) | 0), c.cx * CHUNK_SIZE + (i % CHUNK_SIZE)); }
         if (cur === START && start === START) path.push(sy, sx);
         path.reverse();
+        SEARCH.nodes += expanded;
         return { path, cost: gk + (goalRoad ? cost(gx, gy) : 1) };
       }
       if (ls < 0) continue; // not loaded: no road
@@ -414,8 +416,12 @@ export function findRoute(
       push(nk, ng + h(nx, ny));
     }
   }
+  SEARCH.nodes += expanded;
   return null;
 }
+
+/** route searches since the module loaded and the A* nodes they expanded; Simulation.tick takes the difference per tick (perf/phases.ts) */
+export const SEARCH = { routes: 0, nodes: 0 };
 
 // ---- the road searches' scratch (docs/search-perf.md) -------------------------------------------------------------------
 

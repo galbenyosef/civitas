@@ -13,6 +13,9 @@ export const MAX_VOICES = 24;
 export const HELD_RESERVE = 4;
 export const DEFAULT_VOLUME = 0.6;
 
+/** something the engine did that costs main-thread time or changes the graph, for the perf readout and the frame trace (render/perfhud.ts) */
+export interface AudioEvent { at: number; kind: 'start' | 'decode' | 'bed' | 'crossfade' | 'stop' | 'event'; id: string; /** decode: ms from the fetch to the decoded buffer */ ms?: number }
+
 export interface AudioPrefs { volume: number; muted: boolean; /** the "sound on" chip has been shown and dismissed or timed out */ chipSeen: boolean }
 
 type Store = { getItem(k: string): string | null; setItem(k: string, v: string): void };
@@ -61,6 +64,9 @@ export class AudioEngine {
   private waiting = new Map<string, ((b: AudioBuffer) => void)[]>();
   private resolveUrl: (file: string) => string | undefined;
   private armed = false;
+  /** the last 256 events: context start, each decode as it lands, beds made, cross-fades to a recording, stops; voices.ts and ambience.ts push */
+  readonly events: AudioEvent[] = [];
+  note(kind: AudioEvent['kind'], id: string, ms?: number) { this.events.push({ at: performance.now(), kind, id, ...(ms !== undefined ? { ms } : {}) }); if (this.events.length > 256) this.events.shift(); }
 
   constructor(opts: EngineOpts = {}) {
     this.store = opts.storage === undefined ? safeLocal() : opts.storage;
@@ -103,6 +109,7 @@ export class AudioEngine {
       for (const id of Object.keys(levels) as BusId[]) { const b = c.createGain(); b.gain.value = levels[id]; b.connect(master); this.buses[id] = b; }
       this.applyGain(true);
       this.ready = true; // recordings are fetched and decoded in the background when a voice first wants one; synthesis plays until then
+      this.note('start', 'context');
       for (const f of this.onStart) f();
     }
     if (this.ctx.state !== 'running' && !this.muted) void this.ctx.resume();
@@ -219,9 +226,11 @@ export class AudioEngine {
         try {
           const url = this.resolveUrl(file);
           if (!url) return;
+          const t0 = performance.now();
           const res = await f(url);
           if (!res.ok) return;
           const buf = await c.decodeAudioData(await res.arrayBuffer());
+          this.note('decode', id, performance.now() - t0);
           const have = this.takes.get(id) ?? this.takes.set(id, []).get(id)!;
           have.push(buf);
           const w = this.waiting.get(id);

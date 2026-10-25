@@ -26,3 +26,8 @@
 #perf i { color: var(--muted); font-style: normal; }
 #perf .warn, #perf .warn b { color: #ffbe5a; }
 #perf .bad, #perf .bad b { color: var(--danger); }
+#perf .pbar { display: flex; gap: 6px; margin-top: 5px; }
+#perf .pbar button { font: inherit; font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
+#perf .pbar button:hover { background: var(--line); }
+#perf .pnote { margin-top: 4px; max-width: 420px; color: var(--muted); font-size: 11px; line-height: 1.35; white-space: normal; }
+#perf .pnote:empty { display: none; }

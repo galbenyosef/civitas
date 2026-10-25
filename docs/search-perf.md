@@ -698,6 +698,13 @@ part has to run with or without clients, or the first frame a later client gets 
   reads a citizen or a vehicle, and the step order (who enters a box first) would have to be kept exactly. Look at it
   again if traffic grows back past about 40% of the tick.
 
+## Live monitoring
+
+Since 2026-10-25 the running server keeps the tick split by phase itself (citizens, vehicles, flush, mobile, ...), with a rolling minute,
+the worst ticks and traces of the long ones on `/api/perf`, an on-demand inspector profile on `POST /api/perf/profile`, and `/metrics`
+for Prometheus; `npm run perf:check` guards the 2×2 tick against a baseline. See [perf.md](perf.md). The `tprof`/`phases` probes here
+remain the way to attribute time *inside* a phase (self times by function) offline.
+
 ## Files
 
 - `packages/server/src/loadtest/searchprof.ts`, `search-phases.ts`: the probe (phases, bare, record, CPU profile).

@@ -154,6 +154,14 @@ export class Ambience {
   /** the cost of the 250 ms tick, ms: the last, the worst steady one, the number run, and the first (which builds the beds and the noise) */
   stats = { last: 0, max: 0, ticks: 0, setup: 0 };
   private recent = new Float32Array(64);
+  /** when each of the last 64 ticks ran (performance.now) and what it cost, for the frame trace; `recentAt[i]` pairs with `recent[i]` */
+  readonly recentAt = new Float64Array(64);
+  /** the last 64 ticks as (at, ms), oldest first */
+  ticks(): { at: number; ms: number }[] {
+    const n = Math.min(this.stats.ticks - 1, 64), out: { at: number; ms: number }[] = [];
+    for (let k = n; k > 0; k--) { const i = (this.stats.ticks - 1 - k) & 63; out.push({ at: this.recentAt[i], ms: this.recent[i] }); }
+    return out;
+  }
   /** the median and 95th percentile of the last 64 steady ticks, ms (read once a second by the perf readout, never per frame) */
   get cost() {
     const n = Math.min(this.stats.ticks - 1, 64);
@@ -206,7 +214,7 @@ export class Ambience {
     const ms = performance.now() - t0, s = this.stats;
     s.last = ms;
     if (s.ticks === 0) s.setup = ms; // the first tick makes the beds and the noise buffers: counted apart
-    else { this.recent[(s.ticks - 1) & 63] = ms; if (ms > s.max) s.max = ms; }
+    else { this.recent[(s.ticks - 1) & 63] = ms; this.recentAt[(s.ticks - 1) & 63] = t0; if (ms > s.max) s.max = ms; }
     s.ticks++;
   }
 
