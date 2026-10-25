@@ -73,6 +73,44 @@ const goldenGateOps = (): Op[] => {
   return ops;
 };
 
+const goldenGateOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(1, 4, 'pond')];
+  const bar = (x: number, z0: number, y0: number, z1: number, y1: number): Op => {
+    const [zl, zh] = y0 < y1 ? [z0, z1] : [z1, z0];
+    return ['taper', 0.022, 0.022, 0.022, 0.022, Math.abs(y1 - y0) + 0.006, x, Math.min(y0, y1) - 0.003, zl, INTL_ORANGE, { shift: [0, zh - zl] }];
+  };
+  ops.push(['box', 0.43, 0.07, 3.94, 0, 0.3, 0, INTL_ORANGE]);
+  ops.push(['box', 0.36, 0.025, 3.94, 0, 0.37, 0, ASPHALT]);
+  for (const x of [-0.205, 0.205]) ops.push(['box', 0.025, 0.09, 3.94, x, 0.37, 0, INTL_ORANGE]);
+  for (const z of [-0.82, 0.82]) {
+    for (const x of [-0.16, 0.16]) {
+      ops.push(['box', 0.13, 0.12, 0.2, x, 0.02, z, ORANGE_DK]);
+      ops.push(['taper', 0.075, 0.1, 0.045, 0.065, 1.28, x, 0.14, z, INTL_ORANGE]);
+      ops.push(['box', 0.075, 0.035, 0.095, x, 1.42, z, INTL_ORANGE]);
+    }
+    for (const y of [0.48, 0.87, 1.24]) ops.push(['box', 0.37, 0.055, 0.075, 0, y, z, INTL_ORANGE]);
+  }
+  const mainSag = (z: number) => 0.58 + 0.86 * (z / 0.82) ** 2;
+  const sideSag = (z: number) => 0.48 + 0.96 * (1 - (Math.abs(z) - 0.82) / 1.13) ** 2;
+  const cableY = (z: number) => Math.abs(z) <= 0.82 ? mainSag(z) : sideSag(z);
+  const points = [-1.95, -1.67, -1.39, -1.11, -0.82, -0.615, -0.41, -0.205, 0, 0.205, 0.41, 0.615, 0.82, 1.11, 1.39, 1.67, 1.95];
+  for (const x of [-0.235, 0.235]) {
+    for (let i = 0; i < points.length - 1; i++) ops.push(bar(x, points[i], cableY(points[i]), points[i + 1], cableY(points[i + 1])));
+    for (let z = -1.8; z <= 1.81; z += 0.2) {
+      if (Math.abs(Math.abs(z) - 0.82) < 0.1) continue;
+      ops.push(['box', 0.012, cableY(z) - 0.42, 0.012, x, 0.4, z, ORANGE_DK]);
+    }
+  }
+  for (const [x, z, color] of [[-0.09, -1.35, 'white'], [0.09, -0.42, 'yellow'], [-0.09, 0.28, 'navy'], [0.09, 1.3, 'white']] as const) {
+    ops.push(['box', 0.055, 0.035, 0.12, x, 0.395, z, color]);
+  }
+  for (const z of [-1.88, 1.88]) {
+    ops.push(['box', 0.48, 0.1, 0.22, 0, 0.01, z, 'stone']);
+    ops.push(['box', 0.46, 0.025, 0.2, 0, 0.11, z, 'lawn']);
+  }
+  return ops;
+};
+
 export const goldenGate: KindDef = {
   id: 'golden-gate', name: 'the Golden Gate Bridge', code: library.code, kindId: 192, family: 'leisure', tier: 1,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'san-francisco',
@@ -89,6 +127,7 @@ export const goldenGate: KindDef = {
   levels: [{
     capacity: 24, wage: 16, cost: 14000, upkeep: 65, work: 3200, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'tall art-deco towers, continuous side-span cables, separate suspenders and tiny traffic above the water', height: 1.46, ops: goldenGateOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the orange towers and the great cables over the strait', height: 0.74, ops: goldenGateOps() },
       { author: 'claude-fable-5-1', draft: true, name: 'the orange towers tall over the strait between the two headlands, the cables sagging to the deck and the hangers dropping from them', height: 2.0, ops: fableGoldenGateOps() },
     ],
