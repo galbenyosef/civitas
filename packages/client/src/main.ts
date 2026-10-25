@@ -12,6 +12,8 @@ import { FinancePanel } from './finance';
 import { ClientWorld } from './world';
 import { CameraRig, parseShot, urlShot, type CameraShot } from './camera';
 import { ChunkView } from './render/chunkView';
+import { RebuildStats } from './render/chunkWork';
+import { DIRTY_CAUSES } from './world';
 import { ParcelsView } from './render/parcels';
 import { EduHeat } from './render/eduHeat';
 import { CitizensView } from './render/citizens';
@@ -91,6 +93,8 @@ atlas.anisotropy = renderer.capabilities.getMaxAnisotropy();
 const groundMaterial = makeGroundMaterial(atlas);
 const buildings = new Buildings(buildingMaterial());
 const views = new Map<string, ChunkView>();
+/** every chunk rebuild timed pass by pass (render/chunkWork.ts), and the dirty marks by cause (world.ts DirtyStats): msc.chunkStats */
+const rebuildStats = new RebuildStats();
 const parcelsView = new ParcelsView();
 const citizens = new CitizensView();
 const lights = new TrafficLights();
@@ -1389,7 +1393,14 @@ function frame(now: number) {
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { roads.scanChunk(key, c, getTile, auxAt); v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile, auxAt); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
+    if (c?.dirty && budget-- > 0) {
+      const t0 = performance.now(), ps: number[] = [];
+      let t = t0;
+      const lap = () => { const n = performance.now(); ps.push(n - t); t = n; };
+      roads.scanChunk(key, c, getTile, auxAt); lap(); v.rebuild(c, key, getTile, buildings, auxAt); lap(); lights.scanChunk(key, c, getTile, auxAt); lap(); parks.scanChunk(key, c, getTile); lap(); airfield.scanChunk(key, c, world); lap(); helis.scanChunk(key, c, world); lap(); boatMock?.scanChunk(key, c); lap(); trains.scanChunk(key, c); lap(); junctions.scanChunk(key, c); lap(); bridges.scanChunk(key, c); lap(); landmarks.scanChunk(key, c, getTile); lap(); underground.scanChunk(key, c); lap(); power.scanChunk(key, c); lap(); c.dirty = false;
+      const cp = rig.camera.position, cx = (c.cx + 0.5) * CHUNK_SIZE, cz = (c.cy + 0.5) * CHUNK_SIZE;
+      rebuildStats.push({ at: t0, key, ms: t - t0, passes: ps, items: buildings.countOf(key), dist: Math.hypot(cp.x - cx, cp.z - cz) });
+    }
   }
   perf.lap('chunks');
   if (airfield.update(world)) planes.setAirports(airfield.airports());
@@ -1546,6 +1557,18 @@ const audio = new Audio({
 ui.onSound = (id) => audio.ui(id);
 fireworks.onShell = (x, z, at, size) => audio.firework(x, z, at, size);
 Object.assign((window as any).msc, { perf, lines, audio });
+/** the chunk rebuild accounting over a window: dirty marks a second by cause (and the tiles the messages carried, and changed), rebuilds a second, their cost by pass */
+(window as any).msc.chunkStats = {
+  rebuilds: (s = 30) => rebuildStats.summary(s),
+  watch: async (seconds = 30) => {
+    const st = world.dirtyStats, snap = () => JSON.parse(JSON.stringify({ marks: st.marks, sets: st.sets, tiles: st.tiles, changed: st.changed }));
+    const a = snap(), roads0 = roads.buildCount(), t0 = performance.now();
+    await new Promise((r) => setTimeout(r, seconds * 1000));
+    const b = snap(), dt = (performance.now() - t0) / 1000, r2 = (v: number) => Math.round(v * 100) / 100;
+    const rate = (k: 'marks' | 'sets' | 'tiles' | 'changed') => Object.fromEntries(DIRTY_CAUSES.map((c) => [c, r2((b[k][c] - a[k][c]) / dt)]));
+    return { seconds: r2(dt), marksPerSecond: rate('marks'), setsPerSecond: rate('sets'), tilesPerSecond: rate('tiles'), changedPerSecond: rate('changed'), roadBuildsPerSecond: r2((roads.buildCount() - roads0) / dt), rebuilds: rebuildStats.summary(seconds) };
+  },
+};
 const localUi = local ? mountLocalUi(local, (kind, msg) => ui.toast(kind, msg), () => world.myPlayer?.name ?? localStorage.getItem('msimcity.name') ?? 'Mayor') : null;
 if (local) {
   (window as any).msc.local = local;

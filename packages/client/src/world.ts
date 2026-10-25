@@ -2,9 +2,28 @@ import { CHUNK_SIZE, b64ToU16, b64ToI32, b64ToU8, chunkKey, chunkOf, localIndex,
 
 export interface ClientChunk { cx: number; cy: number; tiles: Uint16Array; parcel: Int32Array; aux: Uint8Array; /** kind ids of sub-kinds (docs/sub-kinds.md) */ sub: Uint8Array; /** tunnels and platforms (docs/underground.md) */ under: Uint8Array; dirty: boolean }
 
+/**
+ * What marks chunks dirty, counted by cause (docs/perf.md, "What the jitter is: chunk rebuilds"): `marks` are clean-to-dirty
+ * transitions (each one a rebuild owed), `sets` every write of the flag, `tiles` the tile entries the messages carried and
+ * `changed` those whose value actually differed. `msc.perf.dirty()` reads them as rates.
+ */
+export const DIRTY_CAUSES = ['chunk', 'chunk-edge', 'tiles', 'tiles-edge', 'aux', 'aux-edge', 'sub', 'under'] as const;
+export type DirtyCause = (typeof DIRTY_CAUSES)[number];
+export class DirtyStats {
+  marks: Record<DirtyCause, number> = Object.fromEntries(DIRTY_CAUSES.map((c) => [c, 0])) as Record<DirtyCause, number>;
+  sets: Record<DirtyCause, number> = { ...this.marks };
+  tiles: Record<DirtyCause, number> = { ...this.marks };
+  changed: Record<DirtyCause, number> = { ...this.marks };
+  mark(c: { dirty: boolean }, cause: DirtyCause) {
+    this.sets[cause]++;
+    if (!c.dirty) { this.marks[cause]++; c.dirty = true; }
+  }
+}
+
 /** Client-side mirror of the part of the world we are subscribed to. */
 export class ClientWorld {
   chunks = new Map<string, ClientChunk>();
+  readonly dirtyStats = new DirtyStats();
   parcels = new Map<number, ParcelDTO>();
   players = new Map<string, PlayerDTO>();
   me = '';
@@ -62,8 +81,9 @@ export class ClientWorld {
       under: under && under.length === N ? under : new Uint8Array(N), dirty: true,
     };
     this.chunks.set(chunkKey(dto.cx, dto.cy), c);
+    this.dirtyStats.marks.chunk++; this.dirtyStats.sets.chunk++;
     // road tiling along our edges depends on neighbours, and theirs on us
-    this.touch(dto.cx - 1, dto.cy); this.touch(dto.cx + 1, dto.cy); this.touch(dto.cx, dto.cy - 1); this.touch(dto.cx, dto.cy + 1);
+    this.touch(dto.cx - 1, dto.cy, 'chunk-edge'); this.touch(dto.cx + 1, dto.cy, 'chunk-edge'); this.touch(dto.cx, dto.cy - 1, 'chunk-edge'); this.touch(dto.cx, dto.cy + 1, 'chunk-edge');
     return c;
   }
   dropChunk(key: string) {
@@ -156,12 +176,13 @@ export class ClientWorld {
       const c = this.chunks.get(chunkKey(chunkOf(u[i]), chunkOf(u[i + 1])));
       if (!c) continue;
       const li = localIndex(u[i], u[i + 1]);
+      const st = this.dirtyStats; st.tiles.aux++; if (c.aux[li] !== u[i + 2]) st.changed.aux++;
       c.aux[li] = u[i + 2];
-      c.dirty = true;
+      st.mark(c, 'aux');
       // runway ends are drawn from the neighbours' bytes, so a change on a chunk edge redraws the chunk next door
       const lx = li % CHUNK_SIZE, ly = Math.floor(li / CHUNK_SIZE);
-      if (lx === 0) this.touch(c.cx - 1, c.cy); else if (lx === CHUNK_SIZE - 1) this.touch(c.cx + 1, c.cy);
-      if (ly === 0) this.touch(c.cx, c.cy - 1); else if (ly === CHUNK_SIZE - 1) this.touch(c.cx, c.cy + 1);
+      if (lx === 0) this.touch(c.cx - 1, c.cy, 'aux-edge'); else if (lx === CHUNK_SIZE - 1) this.touch(c.cx + 1, c.cy, 'aux-edge');
+      if (ly === 0) this.touch(c.cx, c.cy - 1, 'aux-edge'); else if (ly === CHUNK_SIZE - 1) this.touch(c.cx, c.cy + 1, 'aux-edge');
     }
   }
 
@@ -170,8 +191,10 @@ export class ClientWorld {
     for (let i = 0; i < u.length; i += 3) {
       const c = this.chunks.get(chunkKey(chunkOf(u[i]), chunkOf(u[i + 1])));
       if (!c) continue;
-      c.sub[localIndex(u[i], u[i + 1])] = u[i + 2];
-      c.dirty = true;
+      const li = localIndex(u[i], u[i + 1]), st = this.dirtyStats;
+      st.tiles.sub++; if (c.sub[li] !== u[i + 2]) st.changed.sub++;
+      c.sub[li] = u[i + 2];
+      st.mark(c, 'sub');
     }
   }
 
@@ -180,8 +203,10 @@ export class ClientWorld {
     for (let i = 0; i < u.length; i += 3) {
       const c = this.chunks.get(chunkKey(chunkOf(u[i]), chunkOf(u[i + 1])));
       if (!c) continue;
-      c.under[localIndex(u[i], u[i + 1])] = u[i + 2];
-      c.dirty = true;
+      const li = localIndex(u[i], u[i + 1]), st = this.dirtyStats;
+      st.tiles.under++; if (c.under[li] !== u[i + 2]) st.changed.under++;
+      c.under[li] = u[i + 2];
+      st.mark(c, 'under');
     }
   }
 
@@ -191,15 +216,16 @@ export class ClientWorld {
       const c = this.chunks.get(chunkKey(chunkOf(x), chunkOf(y)));
       if (!c) continue;
       const li = localIndex(x, y);
-      c.tiles[li] = u[i + 2]; c.parcel[li] = u[i + 3]; c.dirty = true;
+      const st = this.dirtyStats; st.tiles.tiles++; if (c.tiles[li] !== u[i + 2] || c.parcel[li] !== u[i + 3]) st.changed.tiles++;
+      c.tiles[li] = u[i + 2]; c.parcel[li] = u[i + 3]; st.mark(c, 'tiles');
       const lx = li % CHUNK_SIZE, ly = Math.floor(li / CHUNK_SIZE);
-      if (lx === 0) this.touch(c.cx - 1, c.cy); else if (lx === CHUNK_SIZE - 1) this.touch(c.cx + 1, c.cy);
-      if (ly === 0) this.touch(c.cx, c.cy - 1); else if (ly === CHUNK_SIZE - 1) this.touch(c.cx, c.cy + 1);
+      if (lx === 0) this.touch(c.cx - 1, c.cy, 'tiles-edge'); else if (lx === CHUNK_SIZE - 1) this.touch(c.cx + 1, c.cy, 'tiles-edge');
+      if (ly === 0) this.touch(c.cx, c.cy - 1, 'tiles-edge'); else if (ly === CHUNK_SIZE - 1) this.touch(c.cx, c.cy + 1, 'tiles-edge');
     }
   }
-  private touch(cx: number, cy: number) {
+  private touch(cx: number, cy: number, cause: DirtyCause) {
     const n = this.chunks.get(chunkKey(cx, cy));
-    if (n) n.dirty = true;
+    if (n) this.dirtyStats.mark(n, cause);
   }
   applyParcels(parcels: ParcelDTO[], removed?: number[]) {
     for (const p of parcels) this.parcels.set(p.id, p);

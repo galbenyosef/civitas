@@ -382,6 +382,9 @@ export class RoadLayer {
 
   /** the last chunk builds: time (ms), tiles described, tiles built afresh (the rest reused) */
   private builds: { ms: number; tiles: number; fresh: number }[] = [];
+  private nBuilds = 0;
+  /** street meshes finished since the page opened (the rebuild accounting, render/chunkWork.ts) */
+  buildCount() { return this.nBuilds; }
 
   /**
    * Carry a chunk's build on until `deadline` (performance.now ms): its tiles a few at a time, then the mesh. True when
@@ -454,6 +457,7 @@ export class RoadLayer {
     }
     e.furn = furn;
     this.furnDirty = true;
+    this.nBuilds++;
     if (job.described) this.builds.push({ ms: job.ms + performance.now() - t0, tiles: job.described, fresh: job.fresh });
     if (this.builds.length > 64) this.builds.shift();
     return true;
