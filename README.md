@@ -636,4 +636,4 @@ its source code to the players who use it. The official multiplayer servers are 
 
 Contributions, especially new buildings and landmarks, are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for the ten-minute
 building workflow, the one-hour landmark workflow and the terms contributions are made under. "Civitas" is the project's name; please rename forks you
-publish or host.
+publish or host. The community page is the subreddit [r/civitas_game](https://www.reddit.com/r/civitas_game/).

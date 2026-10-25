@@ -322,7 +322,8 @@ async function main() {
     h('a', { href: '/viewer.html' }, 'Building viewer'),
     h('a', { href: '/compare.html' }, 'Landmark comparison'),
     h('span', { class: 'dim' }, 'Recordings from Freesound, all CC0: '), h('a', { href: 'https://github.com/reneodlt/civitas/blob/main/packages/client/src/audio/CREDITS.md' }, 'credits'),
-    h('a', { href: 'https://github.com/reneodlt/civitas/blob/main/CONTRIBUTING.md' }, 'Contributing'));
+    h('a', { href: 'https://github.com/reneodlt/civitas/blob/main/CONTRIBUTING.md' }, 'Contributing'),
+    h('a', { href: 'https://www.reddit.com/r/civitas_game/', rel: 'noopener' }, 'Reddit r/civitas_game'));
   root.replaceChildren(
     h('header', {}, h('a', { class: 'brand', href: '/' }, 'civitas')),
     h('div', { class: 'intro' }, h('h1', {}, 'Build a city. Watch it live.'),
