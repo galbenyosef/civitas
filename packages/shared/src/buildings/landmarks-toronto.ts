@@ -59,6 +59,31 @@ const cnTowerOps = (): Op[] => {
   return ops;
 };
 
+const cnTowerOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  ops.push(['cyl', 0.72, 0.72, 0.025, 0, 0.01, 0, 'gravel', 24]);
+  ops.push(['taper', 0.34, 0.34, 0.12, 0.12, 4.55, 0, 0.035, 0, CN_CONCRETE]);
+  for (let i = 0; i < 3; i++) {
+    const a = i * Math.PI * 2 / 3 + Math.PI / 6;
+    const x = Math.cos(a) * 0.32, z = Math.sin(a) * 0.32;
+    ops.push(['taper', 0.17, 0.17, 0.09, 0.09, 1.45, x, 0.035, z, CN_CONCRETE, { shift: [-x * 0.72, -z * 0.72] }]);
+  }
+  ops.push(['lathe', 0, 3.15, 0, CN_POD, [0.16, 0, 0.34, 0.08, 0.5, 0.18, 0.54, 0.24, 0.54, 0.29], { seg: 24 }]);
+  ops.push(['cyl', 0.535, 0.535, 0.16, 0, 3.44, 0, 'dark', 24]);
+  ops.push(['cyl', 0.55, 0.55, 0.04, 0, 3.6, 0, CN_POD, 24]);
+  ops.push(['lathe', 0, 3.64, 0, CN_POD, [0.5, 0, 0.48, 0.07, 0.26, 0.18, 0.16, 0.25], { seg: 24 }]);
+  ops.push(['lathe', 0, 4.15, 0, CN_POD, [0.12, 0, 0.22, 0.06, 0.25, 0.13, 0.22, 0.21, 0.13, 0.25], { seg: 20 }]);
+  ops.push(['cyl', 0.22, 0.22, 0.09, 0, 4.28, 0, 'dark', 20]);
+  for (let i = 0; i < 5; i++) ops.push(['taper', 0.075 - i * 0.011, 0.075 - i * 0.011, 0.064 - i * 0.011, 0.064 - i * 0.011, 0.18, 0, 4.4 + i * 0.18, 0, i % 2 ? 'red' : 'white']);
+  ops.push(['cyl', 0.018, 0.018, 0.08, 0, 5.3, 0, 'red', 6]);
+  ops.push(['box', 0.9, 0.14, 0.42, 0, 0.035, 0.5, CN_POD]);
+  for (const x of [-0.28, 0, 0.28]) ops.push(['box', 0.18, 0.09, 0.02, x, 0.055, 0.72, 'dark']);
+  for (const x of [-0.65, -0.52]) ops.push(['box', 0.025, 0.018, 1.5, x, 0.035, -0.05, 'steel']);
+  ops.push(...flags(0.2, 0.72, 2, 0.48, ['red', 'white'], 0.02));
+  ops.push(...tree(-0.8, 0.72, 0.45), ...tree(0.82, -0.68, 0.45));
+  return ops;
+};
+
 export const cnTower: KindDef = {
   ...towerBase, id: 'cn-tower', name: 'the CN Tower', kindId: 205, tier: 1,
   footprint: { w: 2, h: 2, door: [1, 1] },
@@ -68,6 +93,7 @@ export const cnTower: KindDef = {
   levels: [{
     capacity: 320, wage: 45, cost: 20000, upkeep: 130, work: 4400, parking: { surface: 0, underground: 70 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'three concrete buttresses, two dark glazing bands and a separate SkyPod below the striped antenna', height: 5.38, ops: cnTowerOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the concrete needle with its pod in the sky over the harbour', height: 5.25, ops: cnTowerOps() },
     ],
   }],
