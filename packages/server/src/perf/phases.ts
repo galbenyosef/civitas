@@ -132,6 +132,8 @@ export class PhaseStats {
       counters: Array.from(this.cring.subarray(i * N_COUNTERS, (i + 1) * N_COUNTERS)),
     };
   }
+  /** the tick just closed (probes and perf-check accumulate from it); null before the first */
+  last(): TickRecord | null { return this.n ? this.record((this.i - 1 + WINDOW) % WINDOW) : null; }
   /** the last `count` ticks' times, oldest first, with their game ticks */
   recent(count = WINDOW): { ms: number[]; ticks: number[]; at: number[] } {
     const n = Math.min(count, this.n), ms: number[] = [], ticks: number[] = [], at: number[] = [];
