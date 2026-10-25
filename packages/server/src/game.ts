@@ -15,6 +15,7 @@ import { Utilities } from './sim/utilities';
 import { Net, type GameConfig } from './net';
 import type { ConnSource } from './transport';
 import { TickWindow } from './tickstats';
+import type { PhaseStats } from './perf/phases';
 import { historyOf } from './history';
 
 export type { GameConfig };
@@ -52,6 +53,8 @@ export interface Game {
   net: Net;
   /** tick time over the last minute (300 loops), for the stats message, /healthz and the client's perf readout */
   tickWin: TickWindow;
+  /** the tick's phase timings, work counters, worst ticks and long-tick traces (perf/phases.ts; the same object as sim.perf) */
+  perf: PhaseStats;
   /** simulation ticks per loop (SIM_STEPS on the server: fast-forward; local mode's speed later) */
   steps: number;
   /** one simulation tick and its frame to clients, without the loop's bookkeeping (fast-fills) */
@@ -131,15 +134,25 @@ export function createGame(world: World, source: ConnSource, cfg: GameConfig, st
   const hist = historyOf(world);
   hist.power = () => utilities.hourly;
   const sampleHistory = () => { if (hist.sample(world, sim, net.tickStats?.avg ?? 0, net.tickStats?.p95 ?? 0)) net.historySample(hist); };
+  const perf = sim.perf;
+  net.perf = perf;
+  const systems = () => { airports.tick(); harbours.tick(); finance.tick(); issues.tick(); fires.tick(); adverts.tick(); perf.lap('systems'); };
   const game: Game = {
-    world, sim, airports, rail, metro, ferry, harbours, finance, issues, fires, adverts, news, utilities, net, tickWin, steps,
-    step() { sim.tick(); airports.tick(); harbours.tick(); finance.tick(); issues.tick(); fires.tick(); adverts.tick(); net.flush(); sampleHistory(); },
+    world, sim, airports, rail, metro, ferry, harbours, finance, issues, fires, adverts, news, utilities, net, tickWin, perf, steps,
+    step() {
+      const t0 = performance.now();
+      sim.tick(); systems(); net.flush(); perf.lap('flush'); sampleHistory(); perf.lap('history');
+      perf.endTick(performance.now() - t0, world.tick);
+    },
     loop() {
       const t0 = performance.now();
-      for (let i = 0; i < game.steps; i++) { sim.tick(); airports.tick(); harbours.tick(); finance.tick(); issues.tick(); fires.tick(); adverts.tick(); }
+      for (let i = 0; i < game.steps; i++) { sim.tick(); systems(); }
       net.flush();
+      perf.lap('flush');
       sampleHistory();
+      perf.lap('history');
       const dt = performance.now() - t0;
+      perf.endTick(dt, world.tick);
       tickWin.push(dt);
       if (++loops % 5 === 0) net.tickStats = tickWin.summary(); // once a second; sent with the next stats message
       if (dt > TICK_MS * 0.8 && ++slow % 25 === 1) console.warn(`slow tick: ${dt.toFixed(1)}ms with ${world.citizens.size} citizens`);

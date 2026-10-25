@@ -16,6 +16,7 @@ import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, sto
 import { fillCity } from './fill';
 import { seedDemoTown, seedDemoNetwork, seedDemoStudents, seedDemoGraves, fillDemo, seededRandom, worldHash } from './demo/seed';
 import { seedDemoAdverts } from './demo/adverts';
+import { PerfMonitor } from './perf/monitor';
 import { demoFireDrills, demoFireRows, demoFireBlasts, demoBlackouts, demoFunerals } from '@msimcity/shared';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -135,6 +136,15 @@ const testCities = worldLauncherAvailable() // demos on every main server, test 
   ? new TestCities({ entry: fileURLToPath(import.meta.url), staticDir: STATIC, dataDir: join(dirname(DATA), 'test-cities'), cwd: join(here, '..'), cities: testCitiesAvailable(), demoDir: join(dirname(DATA), 'demos'), spectate: SPECTATE, warm: WARM_DEMOS, keep: KEEP_DEMOS, ...(SPECTATE && DEFAULT_DEMO ? { allowed: new Set(WARM_DEMOS) } : {}) })
   : null;
 
+/** the performance monitor (docs/perf.md): /api/perf, POST /api/perf/profile, /metrics; long ticks are logged as they happen */
+const monitor = new PerfMonitor({
+  perf: game.perf, dataDir: dirname(DATA),
+  world: () => ({ label: DEMO ?? (CITY ? String(CITY) : 'live'), kind: DEMO ? 'demo' : CITY ? 'city' : 'live', citizens: world!.citizens.size, vehicles: sim.traffic.lastVehicles, clients: net.connections, day: world!.day, tick: world!.tick, ready }),
+  ...(testCities ? { children: () => testCities.running() } : {}),
+});
+let longLogged = 0;
+game.perf.onLong = (line) => { if (++longLogged % 10 === 1 || longLogged <= 3) console.warn(line + (longLogged > 3 ? ` (${longLogged} long ticks so far; /api/perf has the last 50)` : '')); };
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
   '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json', '.webmanifest': 'application/manifest+json', '.opus': 'audio/ogg; codecs=opus',
@@ -146,6 +156,7 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
       ok: true, chunks: world!.chunks.size, citizens: world!.citizens.size, clients: net.connections,
       pid: process.pid, rss: process.memoryUsage().rss, day: world!.day, dayFrac: sim.dayFrac, ready, ...(CITY ? { districts: CITY } : {}), ...(DEMO ? { demo: DEMO, startHash } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(fillProgress && !ready ? { fill: fillProgress } : {}),
       ...(net.tickStats ? { tickAvg: net.tickStats.avg, tickP95: net.tickStats.p95, tickMax: net.tickStats.max } : {}),
+      longTicks: game.perf.longTotal, heapUsed: process.memoryUsage().heapUsed, // the full picture is on /api/perf (docs/perf.md)
     }));
   }
   if (req.url?.split('?')[0] === '/api/config') {
@@ -160,6 +171,7 @@ async function serve(req: IncomingMessage, res: ServerResponse) {
       return res.end(JSON.stringify({ servers: Array.isArray(j.servers) ? j.servers : [] }));
     } catch { return res.end('{"servers":[]}'); } // no file, or one that does not parse: an empty list, which the page says in words
   }
+  if (monitor.handle(req, res)) return;
   if (testCities?.handle(req, res)) return;
   if (['/api/test-cities', '/api/demos'].includes(req.url?.split('?')[0] ?? '')) { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); return res.end('{"available":false}'); }
   if (!existsSync(STATIC)) { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('msimcity server running. Build the client (npm run build) or use the Vite dev server.\n'); }
@@ -204,7 +216,7 @@ function startLoop() {
   if (!CHILD) setInterval(() => save('autosave'), SAVE_EVERY_MS);
 }
 function save(reason: string) {
-  try { saveWorld(world!, DATA); console.log(`saved (${reason}): ${world!.citizens.size} citizens, day ${world!.day}`); }
+  try { monitor.timeSave(() => saveWorld(world!, DATA)); console.log(`saved (${reason}): ${world!.citizens.size} citizens, day ${world!.day}, ${monitor.save.lastMs.toFixed(0)} ms`); }
   catch (e) { console.error('save failed', e); }
 }
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => {

@@ -23,7 +23,8 @@ import {
   noteIncome, noteSpend, week, today, happinessParts, happinessOf,
   LEISURE, leisureTier, leisureNeed, noteLeisureVisit, leisureDay,
 } from './life';
-import { findPath, findPaths, findBest, findRoute, pathBetween, pathStillValid } from '../pathfinding';
+import { findPath, findPaths, findBest, findRoute, pathBetween, pathStillValid, SEARCH } from '../pathfinding';
+import { PhaseStats, CI } from '../perf/phases';
 import { Traffic, crossMask, dirBetween, hypot } from './traffic';
 import { indicatorOf } from './indicators';
 import { Transit, BusService, isMechanic } from './transit';
@@ -147,6 +148,9 @@ export class Simulation {
   /** the entries are motorway connections (sim/gateways.ts): inter-city freight runs through them */
   private motorway = false;
   private routeBudget = 0;
+  /** tick phase timings and work counters (perf/phases.ts, docs/perf.md); game.ts closes each tick */
+  readonly perf = new PhaseStats();
+  private searchSeen = { routes: 0, nodes: 0 };
   /**
    * Per-driver re-route bookkeeping (trip and day counts, and the leg's expected time at departure for the cumulative-delay
    * re-route). A WeakMap so a removed mover takes its record with it; a mover with no record (loaded mid-leg) is never "late".
@@ -283,7 +287,8 @@ export class Simulation {
   }
 
   tick() {
-    const w = this.w;
+    const w = this.w, perf = this.perf;
+    perf.begin();
     w.tick++;
     if (w.tick % DAY === 0) this.newDay();
     this.schools.tick();
@@ -294,17 +299,31 @@ export class Simulation {
     if (w.tick % GROWTH_EVERY === 19) plantGardens(w); // homes all round a block's middle plant a communal garden there (sim/blocks.ts)
     if (w.tick % SPAWN_EVERY === 3) this.spawn();
     if (w.tick % ENTRIES_EVERY === 7) this.findEntries();
+    perf.lap('plan');
     this.gateways.tick((g, hx, hy, tag) => this.arriveVia(g, hx, hy, tag));
     this.start.tick(); // a camp's settlers coming up the road (sim/firstfive.ts)
+    perf.lap('gateways');
     if (w.tick % SWEEP_EVERY === 11) this.traffic.sweep();
     this.traffic.beginTick();
+    perf.lap('traffic0');
     this.routeBudget = ROUTE_BUDGET;
     this.moveCitizens();
+    perf.lap('citizens');
     this.moveVehicles();
+    perf.lap('vehicles');
     this.transit.tick();
+    perf.lap('transit');
     this.mobile.tick();
+    perf.lap('mobile');
     this.dispatch();
+    perf.lap('dispatch');
     this.traffic.endTick();
+    perf.lap('traffic1');
+    // the tick's work: route searches and the nodes they expanded (pathfinding.ts SEARCH), who moved
+    const seen = this.searchSeen, cur = perf.cur;
+    cur[CI.routes] += SEARCH.routes - seen.routes; cur[CI.nodes] += SEARCH.nodes - seen.nodes;
+    seen.routes = SEARCH.routes; seen.nodes = SEARCH.nodes;
+    cur[CI.moving] = this.moving; cur[CI.driving] = this.driving;
   }
 
   get dayFrac() { return (this.w.tick % DAY) / DAY; }
