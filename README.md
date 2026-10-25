@@ -26,6 +26,8 @@ Open `http://<your-lan-ip>:5173/` (the Vite banner lists the addresses). The pag
 2. **Play**: your own city in this browser, no server and no account: **Continue**, **New game from zero** or **Sandbox**. The game server serves the offline build at `/play/`, saves live in this browser (docs/local-mode.md).
 3. **Multiplayer**: the public servers in `packages/server/servers.json` (ours is listed as closed until sign-in exists), and on a dev or UAT server "This server's live world" with the mayor-name join form, folded.
 
+Above these sits a **showreel** strip: ten building thumbnails, three short clips of the Showcase and three lines on how it plays, all pre-rendered (so the page has no WebGL) by `node packages/client/scripts/showreel.mjs` into `packages/client/src/showreel/` (docs/demo.md, "Showreel").
+
 Every browser that joins a live world shares it. A link with any query (`?demo=london`, `?name=Ana`, `?ws=host:port`, `?local`, `?at=x,y`) skips the home page and opens the game as before; `/?go` is the game's bare page (the join form, or `DEFAULT_DEMO`).
 
 Buildings are data: `packages/shared/src/buildings/` holds one file per kind family, and

@@ -2,12 +2,14 @@ import './landing.css';
 import { apiBase, serverConfig } from './serverApi';
 import type { DemoInfo } from './tour'; // a type: nothing of the game is loaded for it
 import type { ServerConfig } from '@msimcity/shared';
+import reelManifest from './showreel/manifest.json'; // names and captions, written by scripts/showreel.mjs beside the files
 
 /**
  * The home page (docs/demo.md, "The home page"): plain DOM, no WebGL, and nothing of the game loaded (entry.ts imports this OR main.ts).
  * Three ways in, read from the server it is served by:
  *   Explore  one card per demo city in GET /api/demos (so a city added to DEMOS appears with no change here), live status and fill
  *   Play     the offline build at /play/ (cfg.play), or ?local on a build that has none; "Continue" when this browser holds a save
+ *   Showreel  a strip of pre-rendered building thumbnails, three short clips of the Showcase and three lines on how it plays (below, "Showreel")
  *   Multiplayer  GET /api/servers (packages/server/servers.json), and on a server that is not a read-only showcase its own live world
  * Server-supplied text is only ever set as text, never as markup.
  */
@@ -137,6 +139,100 @@ async function explore(root: HTMLElement, cfg: ServerConfig) {
   setInterval(() => { if (!document.hidden) void tick(); }, 2500);
 }
 
+// ---- Showreel -------------------------------------------------------------------------------------------------------------
+
+/**
+ * The strip between the intro and Explore (docs/demo.md, "Showreel"): ten building thumbnails, three clips of the Showcase and the three ways to play. All of it is
+ * made ahead of time by scripts/showreel.mjs and lives in src/showreel/ as hashed assets, so the page stays free of WebGL. Thumbnails are lazy images; a clip gets
+ * its src only when it scrolls into view and pauses when it leaves; with prefers-reduced-motion the clips stay as their poster.
+ */
+const reelFiles = import.meta.glob('./showreel/*.{webp,webm}', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
+const reelUrl = (file: string) => reelFiles[`./showreel/${file}`] ?? '';
+
+/** small line icons, constant markup (nothing from the server is in them) */
+const ICONS: Record<string, string> = {
+  zone: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18M12 3v18"/><path d="M5.5 9.5 7.5 7.5l2 2M14 20v-5h4v5M16 13l-3 2.5h6z" stroke-linejoin="round"/>',
+  roads: '<path d="M4 21 11 3M20 21 13 3M3 12h18"/><path d="M7.5 21.5h9" stroke-dasharray="2 2"/>',
+  watch: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+};
+function icon(name: keyof typeof ICONS): HTMLElement {
+  const wrap = h('span', { class: 'ico', 'aria-hidden': 'true' });
+  wrap.innerHTML = `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">${ICONS[name]}</svg>`;
+  return wrap;
+}
+
+const PLAYSTYLES: { icon: keyof typeof ICONS; title: string; text: string }[] = [
+  { icon: 'zone', title: 'Buy and zone', text: 'Buy land, zone it for homes, shops, works and offices, and builders turn up to put them up.' },
+  { icon: 'roads', title: 'Lay the city\'s bones', text: 'Roads of six classes, junctions, rail, tube, buses, river boats and power, all on the same map.' },
+  { icon: 'watch', title: 'Watch it live and tune it', text: 'Follow a citizen, ride a bus in first person, read the overlays and the Traffic panel, set street rules, take the tour.' },
+];
+
+/** runs `fn` once the page has loaded and the browser is idle (at the latest two seconds after) */
+function afterLoad(fn: () => void) {
+  const go = () => { if ('requestIdleCallback' in window) requestIdleCallback(fn, { timeout: 2000 }); else setTimeout(fn, 500); };
+  if (document.readyState === 'complete') go(); else addEventListener('load', go, { once: true });
+}
+
+/** the heading now, the pictures after the page's first paint: the body holds its place (landing.css) so Explore does not jump, and nothing of the strip is built or fetched in the first frame's way */
+function showreel(): HTMLElement {
+  const body = h('div', { class: 'reel-body' });
+  const sec = h('section', { id: 'showreel', class: 'reel' }, h('h2', {}, 'A small city builder with a big simulation'),
+    h('p', { class: 'sub' }, 'Every picture here is the game itself: the models from the building viewer, and the Showcase running.'), body);
+  requestAnimationFrame(() => setTimeout(() => fillShowreel(body), 0)); // the frame after this one is the first paint
+  return sec;
+}
+
+function fillShowreel(sec: HTMLElement) {
+
+  const thumbs = h('ul', { class: 'thumbs' });
+  for (const t of reelManifest.thumbs) {
+    const src = reelUrl(`t-${t.name}.webp`);
+    if (src) thumbs.append(h('li', {}, h('figure', {}, h('img', { src, alt: t.caption, width: '160', height: '160', loading: 'lazy', decoding: 'async', fetchpriority: 'low' }), h('figcaption', {}, t.caption))));
+  }
+  if (thumbs.childElementCount) sec.append(thumbs);
+
+  // a clip starts as its poster, a plain image: a <video> element is slow to create, so none exists until the card scrolls into view
+  const clips = h('div', { class: 'clips' });
+  const cards: { box: HTMLElement; src: string; poster: string; label: string }[] = [];
+  for (const c of reelManifest.clips) {
+    const src = reelUrl(`c-${c.name}.webm`), poster = reelUrl(`c-${c.name}.webp`);
+    if (!src) continue;
+    const box = h('div', { class: 'clip' }, poster ? h('img', { src: poster, alt: c.caption, width: '640', height: '360', loading: 'lazy', decoding: 'async', fetchpriority: 'low' }) : null);
+    cards.push({ box, src, poster, label: c.caption });
+    clips.append(h('figure', {}, box, h('figcaption', {}, c.caption)));
+  }
+  if (cards.length) {
+    sec.append(clips);
+    // a clip is fetched when its card comes into view, plays while it is in view and pauses when it leaves; reduced motion keeps the poster and never fetches it.
+    // Nothing is watched until the page has loaded and gone idle, so the clips never compete with the page's own first paint
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) afterLoad(() => {
+      const videos = new Map<Element, HTMLVideoElement>();
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          let v = videos.get(e.target);
+          if (e.isIntersecting) {
+            if (!v) {
+              const card = cards.find((c) => c.box === e.target)!;
+              v = h('video', { muted: true, loop: true, playsinline: true, preload: 'none', 'aria-label': card.label, width: '960', height: '540', ...(card.poster ? { poster: card.poster } : {}) });
+              v.muted = true; // the attribute alone is not always enough for autoplay
+              v.src = card.src;
+              videos.set(e.target, v);
+              card.box.append(v);
+            }
+            void v.play().catch(() => { /* autoplay refused: the poster stays */ });
+          } else v?.pause();
+        }
+      }, { rootMargin: '120px', threshold: 0.25 });
+      for (const c of cards) io.observe(c.box);
+    });
+  }
+
+  const how = h('ul', { class: 'how' });
+  for (const p of PLAYSTYLES) how.append(h('li', {}, icon(p.icon), h('div', {}, h('h3', {}, p.title), h('p', {}, p.text))));
+  sec.append(how);
+  sec.classList.add('filled');
+}
+
 // ---- Play -----------------------------------------------------------------------------------------------------------------
 
 /** the newest autosave this browser holds (the Continue button), read without ever creating the database: opening a missing one would leave it without its stores */
@@ -231,7 +327,7 @@ async function main() {
     h('header', {}, h('a', { class: 'brand', href: '/' }, 'civitas')),
     h('div', { class: 'intro' }, h('h1', {}, 'Build a city. Watch it live.'),
       h('p', {}, 'Civitas is a city builder in your browser. Buy land, zone it, lay roads and rail, and your citizens go wherever the jobs are and sit in whatever traffic you leave them.')),
-    ex, pl, mp, foot);
+    showreel(), ex, pl, mp, foot);
   const cfg = await serverConfig();
   document.title = 'Civitas';
   await Promise.all([explore(ex, cfg), play(pl, cfg), multiplayer(mp, cfg)]);

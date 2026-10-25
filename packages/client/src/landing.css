@@ -58,10 +58,38 @@
 #landing .join input { flex: 1 1 160px; min-width: 0; padding: 9px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); font: inherit; }
 #landing footer { box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 40px; padding-top: 18px; padding-bottom: 36px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 
+/* the showreel strip (landing.ts, "Showreel"): thumbnails, three clips, three lines on how it plays */
+#landing .reel { padding-top: 30px; }
+/* the strip's body is filled after the page's first paint (landing.ts); this holds its place, measured at the widths below, so Explore does not jump when it arrives */
+#landing .reel-body { min-height: 430px; }
+#landing .thumbs { list-style: none; margin: 14px 0 18px; padding: 0; display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 10px; }
+#landing .thumbs figure, #landing .clips figure { margin: 0; }
+#landing .thumbs img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); background: #0f2b24; }
+#landing figcaption { margin-top: 5px; font-size: 12px; line-height: 1.25; color: var(--muted); }
+#landing .thumbs figcaption { text-align: center; }
+#landing .clips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0 0 22px; }
+#landing .clip { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px solid var(--line); background: #0f2b24; overflow: hidden; }
+#landing .clip img, #landing .clip video { display: block; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#landing .how { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 22px; }
+#landing .how li { display: flex; gap: 12px; align-items: flex-start; }
+#landing .how .ico { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--accent-text); }
+#landing .how h3 { margin: 0 0 2px; font-size: 15px; }
+#landing .how p { margin: 0; font-size: 13.5px; color: var(--muted); }
+
 @media (max-width: 700px) {
   #landing .cards { grid-template-columns: 1fr; }
   #landing .intro { padding-top: 24px; }
   #landing .servers li { flex-direction: column; }
   #landing .actions .btn { flex: 1 1 100%; }
+  /* a phone: the thumbnails scroll sideways, the clips stack, the lines stack */
+  #landing .thumbs { display: flex; overflow-x: auto; scroll-snap-type: x proximity; scroll-padding-inline: 16px; margin-inline: -16px; padding: 0 16px 6px; gap: 10px; -webkit-overflow-scrolling: touch; }
+  #landing .thumbs li { flex: none; width: 112px; scroll-snap-align: start; }
+  #landing .clips, #landing .how { grid-template-columns: 1fr; }
+  #landing .reel-body { min-height: calc(149vw + 528px); }
+}
+@media (min-width: 701px) and (max-width: 940px) {
+  #landing .thumbs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  #landing .how { grid-template-columns: 1fr; }
+  #landing .reel-body { min-height: calc(50vw + 309px); }
 }
 @media (prefers-reduced-motion: reduce) { #landing .bar i { transition: none; } }

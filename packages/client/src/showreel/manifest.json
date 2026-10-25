@@ -1,0 +1,58 @@
+{
+ "thumbs": [
+  {
+   "name": "shard",
+   "caption": "The Shard"
+  },
+  {
+   "name": "parliament",
+   "caption": "Big Ben"
+  },
+  {
+   "name": "eye",
+   "caption": "London Eye"
+  },
+  {
+   "name": "eiffel",
+   "caption": "Eiffel Tower"
+  },
+  {
+   "name": "golden-gate",
+   "caption": "Golden Gate"
+  },
+  {
+   "name": "shop",
+   "caption": "Corner shop"
+  },
+  {
+   "name": "terrace",
+   "caption": "Terrace"
+  },
+  {
+   "name": "tube",
+   "caption": "Tube"
+  },
+  {
+   "name": "depot",
+   "caption": "Bus depot"
+  },
+  {
+   "name": "power",
+   "caption": "Power"
+  }
+ ],
+ "clips": [
+  {
+   "name": "street",
+   "caption": "The High Street at dusk"
+  },
+  {
+   "name": "buses",
+   "caption": "A bus route, riders at the stop"
+  },
+  {
+   "name": "river",
+   "caption": "River buses and boats"
+  }
+ ]
+}
