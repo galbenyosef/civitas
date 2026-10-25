@@ -167,49 +167,70 @@ const PLAYSTYLES: { icon: keyof typeof ICONS; title: string; text: string }[] = 
   { icon: 'watch', title: 'Watch it live and tune it', text: 'Follow a citizen, ride a bus in first person, read the overlays and the Traffic panel, set street rules, take the tour.' },
 ];
 
+/** runs `fn` once the page has loaded and the browser is idle (at the latest two seconds after) */
+function afterLoad(fn: () => void) {
+  const go = () => { if ('requestIdleCallback' in window) requestIdleCallback(fn, { timeout: 2000 }); else setTimeout(fn, 500); };
+  if (document.readyState === 'complete') go(); else addEventListener('load', go, { once: true });
+}
+
+/** the heading now, the pictures after the page's first paint: the body holds its place (landing.css) so Explore does not jump, and nothing of the strip is built or fetched in the first frame's way */
 function showreel(): HTMLElement {
+  const body = h('div', { class: 'reel-body' });
   const sec = h('section', { id: 'showreel', class: 'reel' }, h('h2', {}, 'A small city builder with a big simulation'),
-    h('p', { class: 'sub' }, 'Every picture here is the game itself: the models from the building viewer, and the Showcase running.'));
+    h('p', { class: 'sub' }, 'Every picture here is the game itself: the models from the building viewer, and the Showcase running.'), body);
+  requestAnimationFrame(() => setTimeout(() => fillShowreel(body), 0)); // the frame after this one is the first paint
+  return sec;
+}
+
+function fillShowreel(sec: HTMLElement) {
 
   const thumbs = h('ul', { class: 'thumbs' });
   for (const t of reelManifest.thumbs) {
     const src = reelUrl(`t-${t.name}.webp`);
-    if (src) thumbs.append(h('li', {}, h('figure', {}, h('img', { src, alt: t.caption, width: '160', height: '160', loading: 'lazy', decoding: 'async' }), h('figcaption', {}, t.caption))));
+    if (src) thumbs.append(h('li', {}, h('figure', {}, h('img', { src, alt: t.caption, width: '160', height: '160', loading: 'lazy', decoding: 'async', fetchpriority: 'low' }), h('figcaption', {}, t.caption))));
   }
   if (thumbs.childElementCount) sec.append(thumbs);
 
+  // a clip starts as its poster, a plain image: a <video> element is slow to create, so none exists until the card scrolls into view
   const clips = h('div', { class: 'clips' });
-  const videos: HTMLVideoElement[] = [];
+  const cards: { box: HTMLElement; src: string; poster: string; label: string }[] = [];
   for (const c of reelManifest.clips) {
-    const webm = reelUrl(`c-${c.name}.webm`), poster = reelUrl(`c-${c.name}.webp`);
-    if (!webm) continue;
-    const v = h('video', { muted: true, loop: true, playsinline: true, preload: 'none', 'aria-label': c.caption, width: '960', height: '540', ...(poster ? { poster } : {}) });
-    v.muted = true; // the attribute alone is not always enough for autoplay
-    v.dataset.src = webm;
-    videos.push(v);
-    clips.append(h('figure', {}, v, h('figcaption', {}, c.caption)));
+    const src = reelUrl(`c-${c.name}.webm`), poster = reelUrl(`c-${c.name}.webp`);
+    if (!src) continue;
+    const box = h('div', { class: 'clip' }, poster ? h('img', { src: poster, alt: c.caption, width: '640', height: '360', loading: 'lazy', decoding: 'async', fetchpriority: 'low' }) : null);
+    cards.push({ box, src, poster, label: c.caption });
+    clips.append(h('figure', {}, box, h('figcaption', {}, c.caption)));
   }
-  if (videos.length) {
+  if (cards.length) {
     sec.append(clips);
-    // a clip is fetched when its card comes into view, plays while it is in view and pauses when it leaves; reduced motion keeps the poster and never fetches it
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
+    // a clip is fetched when its card comes into view, plays while it is in view and pauses when it leaves; reduced motion keeps the poster and never fetches it.
+    // Nothing is watched until the page has loaded and gone idle, so the clips never compete with the page's own first paint
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) afterLoad(() => {
+      const videos = new Map<Element, HTMLVideoElement>();
       const io = new IntersectionObserver((entries) => {
         for (const e of entries) {
-          const v = e.target as HTMLVideoElement;
+          let v = videos.get(e.target);
           if (e.isIntersecting) {
-            if (!v.src && v.dataset.src) v.src = v.dataset.src;
+            if (!v) {
+              const card = cards.find((c) => c.box === e.target)!;
+              v = h('video', { muted: true, loop: true, playsinline: true, preload: 'none', 'aria-label': card.label, width: '960', height: '540', ...(card.poster ? { poster: card.poster } : {}) });
+              v.muted = true; // the attribute alone is not always enough for autoplay
+              v.src = card.src;
+              videos.set(e.target, v);
+              card.box.append(v);
+            }
             void v.play().catch(() => { /* autoplay refused: the poster stays */ });
-          } else v.pause();
+          } else v?.pause();
         }
       }, { rootMargin: '120px', threshold: 0.25 });
-      for (const v of videos) io.observe(v);
-    }
+      for (const c of cards) io.observe(c.box);
+    });
   }
 
   const how = h('ul', { class: 'how' });
   for (const p of PLAYSTYLES) how.append(h('li', {}, icon(p.icon), h('div', {}, h('h3', {}, p.title), h('p', {}, p.text))));
   sec.append(how);
-  return sec;
+  sec.classList.add('filled');
 }
 
 // ---- Play -----------------------------------------------------------------------------------------------------------------
