@@ -43,15 +43,15 @@
  ],
  "clips": [
   {
-   "name": "avenue",
-   "caption": "Traffic at dusk, lights changing"
+   "name": "street",
+   "caption": "The High Street at dusk"
   },
   {
-   "name": "station",
-   "caption": "A train in, riders on the platform"
+   "name": "buses",
+   "caption": "A bus route, riders at the stop"
   },
   {
-   "name": "harbour",
+   "name": "river",
    "caption": "River buses and boats"
   }
  ]

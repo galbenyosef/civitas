@@ -7,7 +7,7 @@
 //   --server  the game server whose Showcase is filmed (POST /api/demos/showcase/start; it starts the demo and waits). Default http://localhost:9003.
 //   --client  where the pages come from: /viewer.html and the game. Default the server (a built client), or a Vite dev server such as
 //             http://localhost:5999 started with VITE_WS_URL=ws://localhost:9003.
-//   --only    thumbs | clips: only that half (the other half's files are kept). --name: only the asset with that name (t-shard -> shard).
+//   --only    thumbs | clips | posters (the clips' first frames again, from the files, without filming): only that half (the other half's files are kept). --name: only the asset with that name (t-shard -> shard).
 //   --min-fps the least the page may draw while filming a clip (default 10); the capture is refused below it. 24 fps is what is encoded.
 //
 // Needs: playwright-core (already in node_modules; PLAYWRIGHT=<path> to use another copy), Google Chrome or Playwright's Chromium (CHROME_CHANNEL=chromium
@@ -44,12 +44,14 @@ export const SHOWREEL = {
    * Each is filmed for `SECONDS` after a settle, with the last half second crossfaded into the first so it loops without a jump.
    */
   clips: [
-    { name: 'avenue',  caption: 'Traffic at dusk, lights changing', at: '-49.5,-5', dist: 24, yaw: 26, pitch: 38, hour: 18.6 },
-    { name: 'station', caption: 'A train in, riders on the platform', at: '21,-36.5', dist: 26, yaw: 26, pitch: 40, hour: 16 },
-    { name: 'harbour', caption: 'River buses and boats', at: '40,44', dist: 52, yaw: 200, pitch: 42, hour: 15 },
+    { name: 'street', caption: 'The High Street at dusk', at: '-47,-14.5', dist: 18, yaw: 26, pitch: 40, hour: 18.6 },
+    { name: 'buses',  caption: 'A bus route, riders at the stop', at: '-32.5,-1.5', dist: 13, yaw: 26, pitch: 30, hour: 14 },
+    { name: 'river',  caption: 'River buses and boats', at: '31,48', dist: 20, yaw: 26, pitch: 32, hour: 15 },
   ],
 };
 const SECONDS = 9, XFADE = 0.5, FPS = 24, CLIP_W = 960, CLIP_H = 540;
+const POSTER_W = 640, POSTER_H = 360; // shown at most 340 CSS px wide, so 2x
+const SETTLE_FPS = 30, SETTLE_MS = 8 * 60 * 1000; // film once the page draws this many frames a second, waiting at most this long
 export const BUDGET = { thumb: 25 * 1024, clip: 1024 * 1024, poster: 80 * 1024, total: 3.5 * 1024 * 1024 };
 
 // ---- arguments, paths ------------------------------------------------------------------------------------------------------------
@@ -144,9 +146,13 @@ async function film(c) {
   const q = new URLSearchParams({ demo: 'showcase', name: 'Showreel', at: c.at, dist: String(c.dist), yaw: String(c.yaw), pitch: String(c.pitch), hour: String(c.hour), fx: '2' });
   await page.goto(`${CLIENT}/?${q}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => window.msc?.net?.connected && window.msc.world.me, null, { timeout: 180000, polling: 1000 });
-  await page.addStyleTag({ content: '#ui > *, #perf, #banner, .toast { visibility: hidden !important; }' });
+  await page.addStyleTag({ content: '#ui > *, #perf, #markLabels, #roadChip, #roadChip2 { visibility: hidden !important; }' });
   await page.waitForTimeout(2000);
-  await page.waitForFunction(() => !window.msc.tour?.flying, null, { timeout: 60000, polling: 500 }).catch(() => {});
+  await page.evaluate(() => {
+    window.msc.tour?.setOpen(false); // the card, the outlines and the stop labels
+    const g = window.msc.issuesView?.group; // the need and problem pins, which the frame loop shows again every frame unless told it cannot
+    if (g) Object.defineProperty(g, 'visible', { get: () => false, set: () => {} });
+  });
   const place = () => page.evaluate(({ at, dist, yaw, pitch, hour }) => {
     const m = window.msc, [x, y] = at.split(',').map(Number);
     m.rig.setShot({ x, y, dist, yaw, pitch });
@@ -154,10 +160,20 @@ async function film(c) {
     m.streamChunks();
   }, c);
   await place();
-  await page.waitForTimeout(1500);
-  await page.waitForFunction(() => { const m = window.msc; for (const ch of m.world.chunks.values()) if (ch.dirty) return false; return m.views.size >= m.subscribed.size && m.subscribed.size > 0; }, null, { timeout: 120000, polling: 500 }).catch(() => console.log('  chunks not all ready'));
-  await place();
-  await page.waitForTimeout(5000); // streaming, the vehicles and riders settle
+  // a fresh page spends its first minute or so building road, bridge and chunk geometry and the boat and helicopter timetables, drawing one frame in several seconds
+  // (a busy machine makes it longer); film only once it draws smoothly, and say how long that took
+  await page.evaluate(() => { window.__n = 0; const f = () => { window.__n++; requestAnimationFrame(f); }; requestAnimationFrame(f); });
+  const t0w = Date.now();
+  for (let calm = 0; calm < 3;) {
+    const n0 = await page.evaluate(() => window.__n);
+    await page.waitForTimeout(3000);
+    const fpsNow = ((await page.evaluate(() => window.__n)) - n0) / 3;
+    calm = fpsNow >= SETTLE_FPS ? calm + 1 : 0;
+    if (Date.now() - t0w > SETTLE_MS) throw new Error(`clip ${c.name}: the page still draws ${fpsNow.toFixed(1)} fps after ${SETTLE_MS / 1000} s (needs ${SETTLE_FPS}); the machine is too busy, or the city has got heavier`);
+  }
+  console.log(`  settled after ${Math.round((Date.now() - t0w) / 1000)} s`);
+  await place(); // the tour or a welcome may have moved the camera
+  await page.waitForTimeout(2500);
   const cdp = await page.context().newCDPSession(page);
   const frames = [];
   cdp.on('Page.screencastFrame', (f) => { frames.push({ t: f.metadata.timestamp, data: f.data }); void cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {}); });
@@ -188,14 +204,20 @@ async function film(c) {
     if (bytes <= BUDGET.clip) break;
   }
   if (bytes > BUDGET.clip) { rmSync(webm, { force: true }); throw new Error(`clip ${c.name} stays over ${kb(BUDGET.clip)} (${kb(bytes)} at crf 46)`); }
-  const first = join(TMP, `c-${c.name}-first.png`);
-  run('ffmpeg', ['-y', '-loglevel', 'error', '-i', webm, '-frames:v', '1', first]);
-  const p = toWebp(first, `${OUT}c-${c.name}.webp`, CLIP_W, CLIP_H, BUDGET.poster, 75);
   report.push({ file: `c-${c.name}.webm`, what: `showcase at ${c.at} dist ${c.dist} yaw ${c.yaw} pitch ${c.pitch} ${c.hour}:00; ${frames.length} frames captured (${fps.toFixed(0)} fps), ${FPS} fps out, crf ${crf}`, bytes });
-  report.push({ file: `c-${c.name}.webp`, what: 'poster', bytes: p.bytes, q: p.q });
+  poster(c);
+}
+
+/** the poster: the clip's first frame, from the file already written (so `--only posters` can redo them without filming again) */
+function poster(c) {
+  const first = join(TMP, `c-${c.name}-first.png`);
+  run('ffmpeg', ['-y', '-loglevel', 'error', '-i', `${OUT}c-${c.name}.webm`, '-frames:v', '1', first]);
+  const p = toWebp(first, `${OUT}c-${c.name}.webp`, POSTER_W, POSTER_H, BUDGET.poster, 75);
+  report.push({ file: `c-${c.name}.webp`, what: `poster, ${POSTER_W}x${POSTER_H}`, bytes: p.bytes, q: p.q });
 }
 
 async function clips() {
+  if (ONLY === 'posters') { for (const c of SHOWREEL.clips) if (!NAME || NAME === c.name) poster(c); return; }
   console.log('starting the showcase');
   await showcaseReady();
   for (const c of SHOWREEL.clips) {
@@ -208,7 +230,7 @@ async function clips() {
 // ---- go --------------------------------------------------------------------------------------------------------------------------
 
 try {
-  if (ONLY !== 'clips') await thumbs();
+  if (ONLY === '' || ONLY === 'thumbs') await thumbs();
   if (ONLY !== 'thumbs') await clips();
   writeFileSync(`${OUT}manifest.json`, JSON.stringify({
     thumbs: SHOWREEL.thumbs.map(({ name, caption }) => ({ name, caption })),
