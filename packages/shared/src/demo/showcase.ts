@@ -217,17 +217,19 @@ export interface DemoDef {
   sections: SectionId[];
   /**
    * the town under the sections: the 3×3 districts of DEMO_TOWN (the default), the London map (london.ts), or a sample
-   * city on the city-map kit ('city', with `city` its data: citydemo.ts, docs/demo.md "Sample cities and the city-map kit")
+   * city on the city-map kit, named by its id (with `city` its data: citydemo.ts, docs/demo.md "Sample cities and the
+   * city-map kit"); set, the home page shows the demo as a city card
    */
-  town?: 'london' | 'city';
-  /** a sample city's map and scenario (citydemo.ts), with `town: 'city'` */
+  town?: 'london' | 'paris' | 'new-york' | 'san-francisco';
+  /** a sample city's map and scenario (citydemo.ts); `town` is its id */
   city?: CityDemo;
   /** tour order, when not TOUR */
   tour?: string[];
   /** the welcome stop's camera, when not the 3×3 town's */
   view?: Pick<TourStop, 'focus' | 'dist' | 'yaw' | 'pitch'>;
   /** The card picture on the home page (client landing.ts), a URL the page can load. Usually leave it out: a file named after the id in packages/client/src/heroes/
-   *  (paris.webp, london.jpg; png, svg too; about 960×540) is found by the build. With neither, the page draws a placeholder card from the name and blurb (docs/demo.md, "The home page") */
+   *  (paris.webp, london.jpg; png, svg too; about 960×540) is found by the build. With neither, the page draws a placeholder card from the name and blurb (docs/demo.md, "The home page").
+   *  The sample cities and London leave it out: their pictures are heroes/<id>.jpg, 960×540 JPEGs of their opening views (docs/demo.md, "Sample cities and the city-map kit") */
   hero?: string;
 }
 
@@ -856,11 +858,11 @@ export const DEMOS: DemoDef[] = [
   { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-education', 'london-kinds', 'london-rail', 'london-buses', 'london-river', 'london-roads', 'london-tube'], town: 'london', tour: withKindsTour(LONDON_TOUR), view: LONDON_VIEW,
     blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, the Central, Northern and Jubilee lines underneath, and on the river the RB1 river buses, yachts through Tower Bridge and ships from the estuary.' },
   // the sample cities on the city-map kit (citydemo.ts): each a CityDemo, its sections built on first use
-  { id: 'paris', name: 'Paris', slot: 95, sections: CITY_SECTIONS, town: 'city', city: PARIS, tour: PARIS_TOUR, view: PARIS_VIEW,
+  { id: 'paris', name: 'Paris', slot: 95, sections: CITY_SECTIONS, town: 'paris', city: PARIS, tour: PARIS_TOUR, view: PARIS_VIEW,
     blurb: PARIS.blurb },
-  { id: 'new-york', name: 'New York', slot: 96, sections: CITY_SECTIONS, town: 'city', city: NEW_YORK, tour: NEW_YORK_TOUR, view: NEW_YORK_VIEW,
+  { id: 'new-york', name: 'New York', slot: 96, sections: CITY_SECTIONS, town: 'new-york', city: NEW_YORK, tour: NEW_YORK_TOUR, view: NEW_YORK_VIEW,
     blurb: NEW_YORK.blurb },
-  { id: 'san-francisco', name: 'San Francisco', slot: 97, sections: CITY_SECTIONS, town: 'city', city: SAN_FRANCISCO, tour: SAN_FRANCISCO_TOUR, view: SAN_FRANCISCO_VIEW,
+  { id: 'san-francisco', name: 'San Francisco', slot: 97, sections: CITY_SECTIONS, town: 'san-francisco', city: SAN_FRANCISCO, tour: SAN_FRANCISCO_TOUR, view: SAN_FRANCISCO_VIEW,
     blurb: SAN_FRANCISCO.blurb },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
