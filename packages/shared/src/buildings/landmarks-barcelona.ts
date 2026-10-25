@@ -64,6 +64,38 @@ const sagradaOps = (): Op[] => {
   return ops;
 };
 
+const sagradaOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  ops.push(['box', 1.02, 0.35, 0.82, 0, 0.02, -0.12, SAGRADA_ST]);
+  ops.push(['roof', 0.92, 0.2, 0.72, 0, 0.37, -0.12, SAGRADA_DK, true]);
+  ops.push(['cyl', 0.33, 0.36, 0.3, 0, 0.02, -0.53, SAGRADA_ST, 16]);
+  for (const x of [-0.3, 0, 0.3]) {
+    ops.push(['box', 0.17, 0.24, 0.025, x, 0.02, 0.303, 'dark']);
+    ops.push(['taper', 0.24, 0.08, 0.04, 0.04, 0.22, x, 0.26, 0.29, SAGRADA_DK]);
+  }
+  const tips = ['red', 'gold', 'green', 'marquee'] as const;
+  const tower = (x: number, z: number, y: number, h: number, r: number, tip: number): void => {
+    for (let i = 0; i < 5; i++) {
+      const rb = r * (1 - i * 0.12), rt = r * (1 - (i + 1) * 0.12);
+      ops.push(['taper', rb * 2, rb * 2, rt * 2, rt * 2, h / 5 - 0.012, x, y + h * i / 5, z, i % 2 ? SAGRADA_DK : SAGRADA_ST]);
+      ops.push(['cyl', rt * 0.92, rt * 0.92, 0.014, x, y + h * (i + 1) / 5 - 0.014, z, 'dark', 10]);
+    }
+    ops.push(['lathe', x, y + h, z, tips[tip % tips.length], [r * 0.5, 0, r * 0.65, 0.035, r * 0.35, 0.09, 0, 0.13], { seg: 10 }]);
+  };
+  const facadeTowers = [[-0.4, 0.16, 0.72], [-0.15, 0.2, 0.86], [0.15, 0.2, 0.86], [0.4, 0.16, 0.72], [-0.4, -0.34, 0.8], [0.4, -0.34, 0.8], [-0.4, -0.62, 0.68], [0.4, -0.62, 0.68]] as const;
+  facadeTowers.forEach(([x, z, h], i) => tower(x, z, 0.37, h, 0.065, i));
+  for (const [x, z] of [[-0.18, -0.08], [0.18, -0.08], [-0.18, -0.4], [0.18, -0.4]] as const) tower(x, z, 0.5, 0.83, 0.07, 1);
+  tower(0, -0.24, 0.52, 1.04, 0.1, 1);
+  ops.push(['box', 0.035, 0.2, 0.035, 0, 1.69, -0.24, 'gold']);
+  ops.push(['box', 0.16, 0.035, 0.035, 0, 1.76, -0.24, 'gold']);
+  ops.push(['taper', 0.035, 0.035, 0.025, 0.025, 0.75, 0.72, 0.02, -0.42, 'yellow']);
+  ops.push(['box', 0.62, 0.025, 0.025, 0.44, 0.77, -0.42, 'yellow']);
+  ops.push(['box', 0.018, 0.28, 0.018, 0.15, 0.49, -0.42, 'dark']);
+  ops.push(...tree(-0.78, 0.68, 0.5), ...tree(0.78, 0.68, 0.5));
+  ops.push(...lampPost(-0.52, 0.82, 0.28, 'marquee', 0.02), ...lampPost(0.52, 0.82, 0.28, 'marquee', 0.02));
+  return ops;
+};
+
 export const sagradaFamilia: KindDef = {
   id: 'sagrada-familia', name: 'the Sagrada Familia', code: library.code, kindId: 197, family: 'leisure', tier: 1,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'barcelona',
@@ -80,6 +112,7 @@ export const sagradaFamilia: KindDef = {
   levels: [{
     capacity: 52, wage: 17, cost: 16000, upkeep: 70, work: 3400, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'thirteen perforated towers with mosaic tips around the central cross, plus the perennial crane', height: 1.9, ops: sagradaOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the spires of the unfinished basilica with their crane still on the job', height: 1.1, ops: sagradaOps() },
     ],
   }],
