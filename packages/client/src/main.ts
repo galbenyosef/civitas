@@ -1537,7 +1537,7 @@ const perfUrl = () => {
   if (viaWs) return `http://${params.get('ws')}/api/perf`;
   return `${apiBase()}/api/perf${demoParam ? `?demo=${demoParam}` : cityParam ? `?city=${cityParam}` : ''}`;
 };
-const perf = new PerfHud({ net, renderer, agentsDrawn: () => citizens.count, chunksLoaded: () => views.size, audio: () => audio.stats, perfUrl }, hud, document.getElementById('perfBtn'), { forceOn: cityParam > 0 });
+const perf = new PerfHud({ net, renderer, agentsDrawn: () => citizens.count, chunksLoaded: () => views.size, audio: () => audio.stats, perfUrl, chunks: () => ({ marks: world.dirtyStats.marks, rebuilds: chunkWork.stats.count, rebuildMs: chunkWork.stats.totalMs, pending: chunkWork.pending }) }, hud, document.getElementById('perfBtn'), { forceOn: cityParam > 0 });
 /** Sound (audio/, docs/audio.md): what the client already knows, read every 250 ms; nothing starts before the first click or key */
 const rideNow = (): RideNow | null => {
   if (fpv.mode === 'off') return null;

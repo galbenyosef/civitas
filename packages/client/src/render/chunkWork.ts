@@ -22,15 +22,17 @@ export type RebuildPass = (typeof REBUILD_PASSES)[number];
 /** one renderer's part of a chunk rebuild, and the DIRTY_* bits it reads */
 export interface Pass { name: RebuildPass; reads: number; run: (key: string, c: ClientChunk) => void }
 
-export interface RebuildRecord { at: number; key: string; ms: number; passes: number[]; items: number; dist: number; mask: number; frames: number; visible: boolean; under: boolean }
+export interface RebuildRecord { at: number; key: string; ms: number; /** from the first mark to the rebuild done (ms): how long the drawing was stale */ lag: number; passes: number[]; items: number; dist: number; mask: number; frames: number; visible: boolean; under: boolean }
 
 const RING = 1024;
 
 export class RebuildStats {
   readonly ring: RebuildRecord[] = [];
   count = 0;
+  /** ms spent in rebuilds since the page opened */
+  totalMs = 0;
   push(r: RebuildRecord) {
-    this.ring.push(r); this.count++;
+    this.ring.push(r); this.count++; this.totalMs += r.ms;
     if (this.ring.length > RING) this.ring.shift();
   }
   /** rebuilds in the last `seconds`: how many a second, their cost, the cost split by pass, and how many were the road shape's */
@@ -44,6 +46,7 @@ export class RebuildStats {
       rebuilds: rs.length, perSecond: r1(rs.length / seconds), totalMs: r1(tot), meanMs: r1(tot / (rs.length || 1)),
       p50: r1(ms[ms.length >> 1] ?? 0), max: r1(ms[ms.length - 1] ?? 0),
       shape: rs.filter((r) => r.mask & DIRTY_SHAPE).length, buildOnly: rs.filter((r) => !(r.mask & DIRTY_SHAPE) && r.mask & DIRTY_BUILD).length,
+      lag: lagOf(rs), lagVisible: lagOf(rs.filter((r) => r.visible)), lagUnder: lagOf(rs.filter((r) => r.under)),
       framesMax: rs.reduce((m, r) => Math.max(m, r.frames), 0), underFramesMax: rs.filter((r) => r.under).reduce((m, r) => Math.max(m, r.frames), 0),
       passes: Object.fromEntries(REBUILD_PASSES.map((p, i) => [p, { ms: r1(sum[i] / (rs.length || 1)), share: Math.round((100 * sum[i]) / tot) }])),
       chunks: new Set(rs.map((r) => r.key)).size,
@@ -51,7 +54,13 @@ export class RebuildStats {
   }
 }
 
-interface Job { key: string; c: ClientChunk; mask: number; i: number; at: number; frames: number; ms: number; passes: number[]; dist: number; visible: boolean; under: boolean }
+/** the staleness of a set of rebuilds: median, p95 and worst ms from the first mark to the rebuild done */
+function lagOf(rs: RebuildRecord[]) {
+  const l = rs.map((r) => r.lag).sort((a, b) => a - b), q = (p: number) => Math.round(l[Math.min(l.length - 1, Math.floor(p * l.length))] ?? 0);
+  return { p50: q(0.5), p95: q(0.95), max: Math.round(l[l.length - 1] ?? 0) };
+}
+
+interface Job { markedAt: number; key: string; c: ClientChunk; mask: number; i: number; at: number; frames: number; ms: number; passes: number[]; dist: number; visible: boolean; under: boolean }
 /** a chunk whose centre is within this of the camera's focus is "under the camera": finished within two frames */
 const UNDER = CHUNK_SIZE * 0.9;
 
@@ -103,7 +112,7 @@ export class ChunkWork {
       j.passes[this.order[k]] += d; j.ms += d;
       if (!finish && j.i < this.passes.length && performance.now() - t0 >= budget) return;
     }
-    this.stats.push({ at: j.at, key: j.key, ms: j.ms, passes: j.passes, items: this.items(j.key), dist: j.dist, mask: j.mask, frames: j.frames, visible: j.visible, under: j.under });
+    this.stats.push({ at: j.at, lag: performance.now() - j.markedAt, key: j.key, ms: j.ms, passes: j.passes, items: this.items(j.key), dist: j.dist, mask: j.mask, frames: j.frames, visible: j.visible, under: j.under });
     this.job = null;
   }
 
@@ -127,7 +136,7 @@ export class ChunkWork {
     q.delete(best);
     const mask = best.mask;
     best.mask = 0; best.dirty = false;
-    return { key: chunkKey(best.cx, best.cy), c: best, mask, i: 0, at: performance.now(), frames: 0, ms: 0, passes: REBUILD_PASSES.map(() => 0), dist: bestDist, visible: bestVis, under: bestVis && bestDist < UNDER };
+    return { markedAt: best.markedAt ?? performance.now(), key: chunkKey(best.cx, best.cy), c: best, mask, i: 0, at: performance.now(), frames: 0, ms: 0, passes: REBUILD_PASSES.map(() => 0), dist: bestDist, visible: bestVis, under: bestVis && bestDist < UNDER };
   }
 
   private legacyFrame(focus: { x: number; z: number }) {
@@ -138,7 +147,7 @@ export class ChunkWork {
       q.delete(c);
       const key = chunkKey(c.cx, c.cy);
       if (!this.hasView(key) || this.world.chunks.get(key) !== c) continue;
-      const mask = c.mask;
+      const mask = c.mask, markedAt = c.markedAt ?? performance.now();
       c.mask = 0; c.dirty = false;
       const at = performance.now(), passes = REBUILD_PASSES.map(() => 0);
       let ms = 0;
@@ -148,7 +157,7 @@ export class ChunkWork {
         const d = performance.now() - s;
         passes[this.order[k]] += d; ms += d;
       }
-      this.stats.push({ at, key, ms, passes, items: this.items(key), dist: Math.hypot((c.cx + 0.5) * CHUNK_SIZE - focus.x, (c.cy + 0.5) * CHUNK_SIZE - focus.z), mask, frames: 1, visible: true, under: false });
+      this.stats.push({ at, lag: performance.now() - markedAt, key, ms, passes, items: this.items(key), dist: Math.hypot((c.cx + 0.5) * CHUNK_SIZE - focus.x, (c.cy + 0.5) * CHUNK_SIZE - focus.z), mask, frames: 1, visible: true, under: false });
     }
   }
 }

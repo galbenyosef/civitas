@@ -2,7 +2,9 @@ import { CHUNK_SIZE, b64ToU16, b64ToI32, b64ToU8, chunkKey, chunkOf, localIndex,
 
 export interface ClientChunk { cx: number; cy: number; tiles: Uint16Array; parcel: Int32Array; aux: Uint8Array; /** kind ids of sub-kinds (docs/sub-kinds.md) */ sub: Uint8Array; /** tunnels and platforms (docs/underground.md) */ under: Uint8Array; dirty: boolean;
   /** what changed since the chunk was last rebuilt (DIRTY_* bits): render/chunkWork.ts runs only the passes that read it */
-  mask: number }
+  mask: number;
+  /** when it was first marked since its last rebuild began (performance.now ms): how stale its drawing can be */
+  markedAt?: number }
 
 /**
  * What a change touches, so a rebuild runs only the passes that read it (render/chunkWork.ts PASSES): the road shape (a
@@ -28,7 +30,7 @@ export class DirtyStats {
   mark(c: ClientChunk, cause: DirtyCause, bits: number) {
     this.sets[cause]++;
     c.mask |= bits;
-    if (!c.dirty) { this.marks[cause]++; c.dirty = true; }
+    if (!c.dirty) { this.marks[cause]++; c.dirty = true; c.markedAt = performance.now(); }
     this.queue.add(c);
   }
 }
