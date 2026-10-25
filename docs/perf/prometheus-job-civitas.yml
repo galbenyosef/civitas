@@ -1,0 +1,22 @@
+# Civitas (swarm-108, 10.8.1.108) — Prometheus scrape job (docs/perf.md).
+#
+# MERGE INTO:  /home/rich/swarm/monitor/prometheus.yml on the monitor VM (10.8.1.104),
+#              at the end of `scrape_configs:` (two-space list indentation as that file uses), then
+#              `cd ~/swarm/monitor && docker kill -s HUP prometheus` (no --web.enable-lifecycle there).
+# The game server's /metrics is written by hand (packages/server/src/perf/monitor.ts): one `world` label per
+# process (live, demo:london, city:2); the main server appends every running demo child's metrics to its own, so
+# one target covers them all. No token: the endpoint carries aggregate figures only and is on the LAN publish
+# (host-mode 8290), not the public site.
+# Dashboard: ~/infrastructure/grafana/dashboards/civitas-perf.json (from the repo's docs/perf/civitas-grafana.json),
+# applied with ~/infrastructure/grafana/apply-dashboards.sh civitas-perf.json → https://grafana.reneo/d/civitas-perf
+# Check: curl -s 'http://10.8.1.104:9200/api/v1/targets?state=active' | grep -o '"job":"civitas"[^}]*'
+
+  - job_name: civitas
+    # The Civitas game server and its London demo child: tick time against the 200 ms budget by phase, long ticks,
+    # memory, event-loop lag, GC, the stream to clients. 15 s: the figures are already minute windows, a scrape
+    # every 15 s draws the rush hours (a game day is 8 minutes) with enough points.
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["10.8.1.108:8290"]
+        labels: {app: "civitas", vm: "swarm-108"}

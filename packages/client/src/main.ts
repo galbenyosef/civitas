@@ -3,7 +3,7 @@ import { junctionArmAt, nextArmState, armState, JAM_WHY_STRIDE, VehicleClass } f
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, classDef, auxClass, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
+  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, demoLandmarkSpans, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, classDef, auxClass, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
@@ -32,7 +32,7 @@ import { StreetRuleTool, StreetRulePicker } from './streetrules';
 import { TrafficPanel } from './trafficpanel';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
-import { BridgeView } from './render/bridges';
+import { BridgeView, setLandmarkSpans } from './render/bridges';
 import { RoadLayer } from './render/roads';
 import { LandmarkMotion } from './render/landmarks';
 import { UndergroundView } from './render/underground';
@@ -61,6 +61,7 @@ import { AdPanel } from './adverts';
 import { PerfHud } from './render/perfhud';
 import { Audio, type RideNow } from './audio';
 import { WorldPicker, startCity, showCityBanner, reviveCity, testCityOf, cityWsHost, remembered, serverConfig } from './worlds';
+import { apiBase } from './serverApi';
 import { demoOf, demoWsUrl, startDemo, reviveDemo, showDemoBanner, TourPanel, type DemoInfo } from './tour';
 import { MapMode } from './mapmode';
 import { IssuesView } from './render/issues';
@@ -1367,10 +1368,11 @@ function frame(now: number) {
   flyFrame(now); // a problem's show-me flight
   mapMode.frameCamera(dt);
   rig.update();
+  perf.lap('input');
   // zooming out past the 3D limit opens the map; zooming in below the map's returns to 3D
   if (!mapMode.on && rig.overZoom > 0.3 && !tour?.flying) mapMode.set(true);
   else if (mapMode.on && rig.underZoom > 0.15) mapMode.set(false);
-  if (mapMode.on) { mapMode.frame(now); renderer.render(mapMode.view.scene, rig.camera); return; }
+  if (mapMode.on) { mapMode.frame(now); renderer.render(mapMode.view.scene, rig.camera); perf.lap('render'); return; }
   adaptQuality(dt);
 
   underground.frame(dt, renderer);
@@ -1382,12 +1384,14 @@ function frame(now: number) {
   // fog thickens with zoom-out, but never reaches past the loaded chunks when looking toward the horizon
   fog.far = fogFar();
   fog.near = Math.min(rig.dist * 1.6 + 30, fog.far * 0.45);
+  perf.lap('light');
 
   let budget = 4;
   for (const [key, v] of views) {
     const c = world.chunks.get(key);
     if (c?.dirty && budget-- > 0) { roads.scanChunk(key, c, getTile, auxAt); v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile, auxAt); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
   }
+  perf.lap('chunks');
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (eduDirty && eduHeat.on) { eduHeat.rebuild(world.parcels.values()); eduDirty = false; }
   if (world.parcelsDirty) { parcelsView.rebuild(world.parcels.values(), world.players, world.me, selectedParcel); world.parcelsDirty = false; }
@@ -1400,10 +1404,12 @@ function frame(now: number) {
   firesView.frame(liveTickF());
   gravesView.group.visible = underground.level < 0.5;
   gravesView.frame(liveTick(), now);
+  perf.lap('world');
   citizens.frame(now, dt);
   lines.frame();
   if (routeView.active) routeView.frame(citizens.positionOf(selectedCitizen), now);
   lights.frame(liveTick(), signalled);
+  perf.lap('agents');
   // trains and planes run on a tick that follows the server's but never steps back or jumps when a stats message lands,
   // so a cab view along the track stays perfectly smooth
   const live = liveTickF(), rdt = ((now - vehAt) / TICK_MS) * clock.rate;
@@ -1427,7 +1433,9 @@ function frame(now: number) {
   if (fireworks.active) fireworks.frame(dt);
   bridges.frame(landmarks.fixedHours ?? (vehTick * 24) / TICKS_PER_DAY); // Tower Bridge's gates, on the lift schedule the leaves keep
   fpv.update(now, dt, routeInfo?.id === selectedCitizen ? routeInfo.route ?? null : null);
+  perf.lap('vehicles');
   audio.frame(now); // the ambient mix every 250 ms and the ridden vehicle's sound every 100 (audio/)
+  perf.lap('audio');
   if ((following || fpv.mode === 'full') && selectedCitizen) {
     const pos = citizens.positionOf(selectedCitizen);
     if (pos) { rig.target.x += (pos[0] - rig.target.x) * Math.min(1, dt * 6); rig.target.z += (pos[1] - rig.target.z) * Math.min(1, dt * 6); }
@@ -1471,15 +1479,18 @@ function frame(now: number) {
     updateStatus();
   }
   // the live TV feed's camera (render/tv.ts): asked for by a set on screen in the FPV, or by a big screen near the camera
+  perf.lap('hover');
   const feedCam = tv.prepare(fpv.mode !== 'full' && rig.dist < 90 && buildings.adverts.bigScreenNear(rig.target.x, rig.target.z, 40));
   const cams = fpv.mode === 'off' ? [rig.camera] : [rig.camera, fpv.camera];
   if (feedCam) cams.push(feedCam);
   buildings.updateLod(cams, lighting.sun); // detail tiers and culling (render/buildings.ts)
   roads.frame(cams, signalled); // road geometry near the cameras, its furniture, the lamp map (render/roads.ts)
+  perf.lap('lod');
   const overheadOnly = [hoverMesh, rectMesh, footprint.group, routeView.group, parcelsView.group, issuesView.group, roadTool.group, streetRules.group];
   // the feed leaves out what is under a pixel at 160×90 from the helicopter: people, parked cars, signal heads
   tv.render(renderer, scene, [...overheadOnly, citizens.group, parked.group, junctions.group]);
   fpv.render(renderer, scene, rig.camera, overheadOnly);
+  perf.lap('render');
 }
 requestAnimationFrame(frame);
 
@@ -1497,7 +1508,13 @@ const autoName = params.get('name') || rejoin || (showcase.spectate ? `Visitor $
 const cityParam = testCityOf(params);
 const viaWs = !!params.get('ws');
 const hud = document.getElementById('worldHud')!;
-const perf = new PerfHud({ net, renderer, agentsDrawn: () => citizens.count, chunksLoaded: () => views.size, audio: () => audio.stats }, hud, document.getElementById('perfBtn'), { forceOn: cityParam > 0 });
+/** the server's /api/perf for this world (docs/perf.md): a demo or test city through its parent (?demo=, ?city=), a direct ?ws= server at its own origin; none in local mode */
+const perfUrl = () => {
+  if (local) return null;
+  if (viaWs) return `http://${params.get('ws')}/api/perf`;
+  return `${apiBase()}/api/perf${demoParam ? `?demo=${demoParam}` : cityParam ? `?city=${cityParam}` : ''}`;
+};
+const perf = new PerfHud({ net, renderer, agentsDrawn: () => citizens.count, chunksLoaded: () => views.size, audio: () => audio.stats, perfUrl }, hud, document.getElementById('perfBtn'), { forceOn: cityParam > 0 });
 /** Sound (audio/, docs/audio.md): what the client already knows, read every 250 ms; nothing starts before the first click or key */
 const rideNow = (): RideNow | null => {
   if (fpv.mode === 'off') return null;
@@ -1538,6 +1555,7 @@ if (local) {
 }
 if (cityParam) { showCityBanner(cityParam, params, hud); reviveCity(cityParam, net); }
 if (demoParam) {
+  setLandmarkSpans(demoLandmarkSpans(demoParam)); // the Brooklyn Bridge and the Golden Gate over their spans (render/bridges.ts)
   showDemoBanner(demoParam, params, hud, !!showcase.spectate, !showcase.defaultDemo);
   reviveDemo(demoParam, net);
   tour = new TourPanel({

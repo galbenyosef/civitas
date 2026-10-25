@@ -440,6 +440,13 @@ export class TestCities {
     };
   }
 
+  /** the children running now, for the perf monitor's proxy and the aggregated /metrics (perf/monitor.ts) */
+  running(): { id: string; kind: 'demo' | 'city'; port: number }[] {
+    const out: { id: string; kind: 'demo' | 'city'; port: number }[] = [];
+    for (const e of this.entries.values()) if (e.status === 'running' || e.status === 'starting') out.push({ id: e.demo ?? String(e.n), kind: e.demo ? 'demo' : 'city', port: TEST_CITY_BASE_PORT + e.n });
+    return out;
+  }
+
   /** Answers /api/test-cities and /api/demos requests; returns false for any other URL. */
   handle(req: IncomingMessage, res: ServerResponse): boolean {
     const path = (req.url ?? '').split('?')[0];

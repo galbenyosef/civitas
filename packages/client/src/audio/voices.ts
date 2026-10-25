@@ -92,6 +92,7 @@ export function makeBed(eng: AudioEngine, id: BedId, seed: number): Bed | null {
   if (def.synth === false && !hasTakes) return null;
   if (!eng.take()) return null;
   const rec = eng.sample(id, r(seed, 6));
+  eng.note('bed', id);
   if (rec) return sampleBed(eng, id, rec, seed, dest);
   let cur: Bed | null = def.synth === false ? null : synthBed(eng, id, seed, dest);
   if (!hasTakes) return cur;
@@ -99,6 +100,7 @@ export function makeBed(eng: AudioEngine, id: BedId, seed: number): Bed | null {
   eng.whenSample(id, (buf) => {
     if (stopped || !eng.ctx) return;
     if (cur && !eng.take()) return; // no voice to spare for the recording: keep the synthesis
+    eng.note('crossfade', id);
     const next = sampleBed(eng, id, buf, seed, dest);
     next.tune(last.lv, last.tone, 0.7);
     const old = cur; cur = next;
@@ -107,7 +109,7 @@ export function makeBed(eng: AudioEngine, id: BedId, seed: number): Bed | null {
   return {
     get out() { return cur?.out ?? (null as unknown as GainNode); },
     tune: (lv, tone, tc) => { last = { lv, tone, tc }; cur?.tune(lv, tone, tc); },
-    stop: () => { stopped = true; if (cur) cur.stop(); else eng.give(); },
+    stop: () => { stopped = true; eng.note('stop', id); if (cur) cur.stop(); else eng.give(); },
   } as Bed;
 }
 

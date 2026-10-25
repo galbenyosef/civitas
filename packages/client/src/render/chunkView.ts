@@ -4,11 +4,12 @@ import {
   isPartAux, isAnchorAux, partDx, partDy, auxOrientation, isMultiTile, placedFromAnchor, footprintOf, type Placed,
   isAirfieldAux, airfieldOrientation, airfieldRow, FRONT, isRailAux, railMask,
   isRingAux, ringPos, isArmPos, isIslandAux, isFlyoverAux, deckEW, RING_POS,
-  isBridgeAux, bridgeNS, bridgeStyle, BridgeStyle, KIND_ID, isClassAux, auxClass, oneWayDir, RoadCls, isMotorwayAux, isMiniAux, isRingClassAux, bigRingAt, isPedestrianAux,
+  isBridgeAux, bridgeNS, bridgeStyle, bridgeDeckH, BridgeStyle, KIND_ID, isClassAux, auxClass, oneWayDir, RoadCls, isMotorwayAux, isMiniAux, isRingClassAux, bigRingAt, isPedestrianAux,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
 import { Cell, cellUV } from './atlas';
 import { variant } from './models';
+import { landmarkSpanAt } from './bridges';
 import type { Buildings, Placement } from './buildings';
 
 const N = CHUNK_SIZE * CHUNK_SIZE;
@@ -23,6 +24,8 @@ const CRANE_TINT = [new Color(0x55596a), new Color(0xb5aa88), new Color(0xffffff
 const UP = new Vector3(0, 1, 0);
 /** a bascule bridge span is drawn as the Tower Bridge landmark (render/bridges.ts draws its ramps) */
 const TOWER_BRIDGE_KIND = KIND_ID['tower-bridge'];
+/** the top of each bridge landmark's own road deck in its model (landmarks-new-york.ts, landmarks-san-francisco.ts), so the model sits with it at the road's height */
+const MODEL_DECK: Record<number, number> = { [KIND_ID['brooklyn-bridge']]: 0.25, [KIND_ID['golden-gate']]: 0.365 };
 
 const tmpC = new Color();
 let heatEnabled = false;
@@ -168,7 +171,11 @@ export class ChunkView {
         cell = Cell.Water;
         tmpC.setScalar(0.96 + 0.08 * h);
         const ba = chunk.aux[i];
-        if (isBridgeAux(ba) && bridgeStyle(ba) === BridgeStyle.Bascule && auxAt(x - (bridgeNS(ba) ? 0 : 1), z - (bridgeNS(ba) ? 1 : 0)) !== ba) this.bascule(items, x, z, ba, auxAt);
+        if (isBridgeAux(ba) && auxAt(x - (bridgeNS(ba) ? 0 : 1), z - (bridgeNS(ba) ? 1 : 0)) !== ba) {
+          const lk = landmarkSpanAt(x, z);
+          if (bridgeStyle(ba) === BridgeStyle.Bascule) this.bascule(items, x, z, ba, auxAt);
+          else if (lk) this.bascule(items, x, z, ba, auxAt, lk);
+        }
       } else if (road) {
         cell = Cell.Road + mask;
         tmpC.setScalar(0.97 + 0.06 * h);
@@ -295,15 +302,18 @@ export class ChunkView {
 
   /**
    * Tower Bridge over a bascule span starting at (x, z): the landmark's model (shared/src/buildings/landmarks-london-2.ts,
-   * one tile wide and four long along its z) centred on the span, turned along it and stretched to its length.
+   * one tile wide and four long along its z) centred on the span, turned along it and stretched to its length. With
+   * `kind`, another landmark drawn over its span the same way (render/bridges.ts LANDMARK_SPANS: the Brooklyn Bridge,
+   * the Golden Gate), raised or lowered so its own deck meets the road's (bridgeDeckH of the span's style).
    */
-  private bascule(items: Placement[], x: number, z: number, a: number, auxAt: (x: number, y: number) => number) {
+  private bascule(items: Placement[], x: number, z: number, a: number, auxAt: (x: number, y: number) => number, kind: number = TOWER_BRIDGE_KIND) {
     const ns = bridgeNS(a), dx = ns ? 0 : 1, dz = ns ? 1 : 0;
     let len = 1;
     while (len < 24 && auxAt(x + dx * len, z + dz * len) === a) len++;
-    const v = variant(TOWER_BRIDGE_KIND, 1, 0);
+    const v = variant(kind, 1, 0);
     if (!v) return;
-    tmpP.set(x + (ns ? 0.5 : len / 2), 0, z + (ns ? len / 2 : 0.5));
+    const deck = MODEL_DECK[kind];
+    tmpP.set(x + (ns ? 0.5 : len / 2), deck ? bridgeDeckH(bridgeStyle(a)) - deck : 0, z + (ns ? len / 2 : 0.5));
     tmpQ.setFromAxisAngle(UP, ns ? 0 : Math.PI / 2); tmpS.set(1, 1, len / 4);
     items.push({ key: v.key, matrix: new Matrix4().compose(tmpP, tmpQ, tmpS), color: WHITE });
   }

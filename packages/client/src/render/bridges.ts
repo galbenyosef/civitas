@@ -40,6 +40,17 @@ const WARM = 0xffd9a0, COOL = 0xf2f6ff;
 const ease = (t: number) => t * t * (3 - 2 * t);
 const e01 = (t: number) => ease(Math.min(1, Math.max(0, t)));
 const tkey = (x: number, z: number) => (x + 0x8000) * 65536 + (z + 0x8000);
+/**
+ * Spans drawn as a landmark's model (shared/src/demo/showcase.ts demoLandmarkSpans: the Brooklyn Bridge, the Golden
+ * Gate), keyed by the first deck tile, the landmark's kind id: like a bascule's, the span gets its ramps here and its
+ * deck, towers and cables are the model's (chunkView.ts landmarkSpan). Set once a demo is known (main.ts).
+ */
+export const LANDMARK_SPANS = new Map<number, number>();
+export const landmarkSpanAt = (x: number, z: number) => LANDMARK_SPANS.get(tkey(x, z));
+export function setLandmarkSpans(spans: readonly { x: number; y: number; kind: number }[]) {
+  LANDMARK_SPANS.clear();
+  for (const s of spans) LANDMARK_SPANS.set(tkey(s.x, s.y), s.kind);
+}
 
 /**
  * The deck's height along a bridge: u runs along it from the far edge of the low landing (so the first deck tile is
@@ -259,7 +270,8 @@ export class BridgeView {
       const side = (s: number) => { const q = this.world.getTile(lx + dz * s, lz + dx * s); return q !== undefined && isRoad(q); };
       return !side(1) && !side(-1);
     };
-    const bascule = style === BridgeStyle.Bascule;
+    // a bascule span is Tower Bridge's model, a landmark span (LANDMARK_SPANS) its landmark's: the deck is the model's
+    const bascule = style === BridgeStyle.Bascule || LANDMARK_SPANS.has(tkey(x, z));
     const lowPlain = bascule || plain(x - dx, z - dz), highPlain = bascule || plain(x + dx * L, z + dz * L);
     const O = (ns ? z : x) - 1, across = ns ? x : z;
     const l: Lift = { ns, o: O, a: lowPlain ? 0 : 1, b: highPlain ? L + 2 : L + 1, h: H, land: false };
@@ -326,10 +338,10 @@ export class BridgeView {
     for (const [u0, u1] of landRamps) for (const s of [-1, 1]) ribbon(u0, u1, s * W, () => 0, walk, wallTone);
 
     // ---- by style
-    if (style === BridgeStyle.Arch) this.arch(r, L, y, box, put, ribbon, head, pool, lampOn, wallTone, l);
+    if (bascule) for (const [u0, u1] of landRamps) for (const s of [-1, 1]) ribbon(u0, u1, s * (W + 0.012), walk, (u) => walk(u) + 0.05, 0xd8d0bf);
+    else if (style === BridgeStyle.Arch) this.arch(r, L, y, box, put, ribbon, head, pool, lampOn, wallTone, l);
     else if (style === BridgeStyle.Girder) this.girder(r, L, y, box, strut, ribbon, sheet, head, pool, lampOn, l);
     else if (style === BridgeStyle.Suspension) this.suspension(r, L, y, H, box, strut, ribbon, sheet, head, pool, lampOn, l);
-    else for (const [u0, u1] of landRamps) for (const s of [-1, 1]) ribbon(u0, u1, s * (W + 0.012), walk, (u) => walk(u) + 0.05, 0xd8d0bf);
   }
 
   /** Stone arches on cutwater piers, a solid parapet or a balustrade, ornamental lamps over the piers. */

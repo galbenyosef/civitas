@@ -1,4 +1,5 @@
 import type { Conn, ConnSource } from './transport';
+import { CI, type PhaseStats } from './perf/phases';
 import {
   CHUNK_SIZE, START_MONEY, FRONTIER_MONEY, LAND_PRICE_PER_TILE, MAX_PARCEL_EDGE, ZONE_COST,
   BULLDOZE_COST, MAX_SUBS, MAX_TAX, DEFAULT_TAX, Zone, CitizenState, CIVIC_COST, workOf, KIND_NAMES, TRAFFIC_EVERY,
@@ -139,6 +140,8 @@ export class Net {
   rate = 1;
   /** flushes so far: which tenth of the stationary agents is re-sent this time (keeps them alive on clients) */
   private flushes = 0;
+  /** the tick's work counters (perf/phases.ts): messages and bytes sent, agents streamed; set by game.ts */
+  perf: PhaseStats | null = null;
   /** false while a test city is still being filled: new sockets are closed so nobody joins a half-grown world */
   accepting = true;
   /** onboarding goals and advisor hints (goals.ts); none in test cities and demos */
@@ -154,8 +157,9 @@ export class Net {
     this.onboarding = this.cfg.sandbox || this.cfg.spectate ? null : new Onboarding(w, sim.traffic);
     this.ranks = this.cfg.sandbox || this.cfg.spectate ? null : new Ranks(w);
     this.map = new MapSummaries(w);
-    source.onConnection((conn) => {
-      if (!this.accepting) { conn.close(1013, 'starting'); return; }
+    source.onConnection((raw) => {
+      if (!this.accepting) { raw.close(1013, 'starting'); return; }
+      const conn = this.counting(raw);
       const c: Client = { conn, player: null, subs: new Set(), lastHint: 0, builderHint: -Infinity, builtSeen: -1, builtMoved: 0 };
       this.clients.add(c);
       conn.onMessage((data) => {
@@ -167,6 +171,17 @@ export class Net {
     });
   }
 
+  /** every frame to a client passes through here, whatever sends it: the tick's messages and bytes are counted for the perf readout */
+  private counting(raw: Conn): Conn {
+    const self = this;
+    return {
+      get open() { return raw.open; },
+      send(data: string) { const p = self.perf; if (p) { p.cur[CI.msgs]++; p.cur[CI.bytes] += data.length; } raw.send(data); },
+      close: (code, reason) => raw.close(code, reason),
+      onMessage: (fn) => raw.onMessage(fn),
+      onClose: (fn) => raw.onClose(fn),
+    };
+  }
   private send(c: Client, m: ServerMsg) {
     if (c.conn.open) c.conn.send(JSON.stringify(m));
   }
@@ -1576,7 +1591,7 @@ export class Net {
         const arr = buckets.get(chunkNum(cx, cy));
         if (arr) for (const v of arr) out.push(v);
       }
-      if (out.length) this.send(c, { t: 'citizens', c: out });
+      if (out.length) { if (this.perf) this.perf.cur[CI.agents] += out.length >> 2; this.send(c, { t: 'citizens', c: out }); }
     }
   }
 

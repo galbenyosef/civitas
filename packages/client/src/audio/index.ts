@@ -74,6 +74,6 @@ export class Audio {
     this.fpv.frame(now);
   }
 
-  /** for the perf readout */
-  get stats() { const c = this.ambience.cost; return { tickMs: c.median, maxMs: c.p95, voices: this.engine.active, started: this.engine.started, muted: this.engine.muted }; }
+  /** for the perf readout (render/perfhud.ts): the 250 ms tick's cost, the voices, and the engine's event log and tick times for the trace and the jitter finder */
+  get stats() { const c = this.ambience.cost; return { tickMs: c.median, maxMs: c.p95, voices: this.engine.active, started: this.engine.started, muted: this.engine.muted, events: this.engine.events, ticks: () => this.ambience.ticks() }; }
 }

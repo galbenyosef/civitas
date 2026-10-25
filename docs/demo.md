@@ -11,6 +11,9 @@ teaching it.
 | Leisure demo | 8192 | Downtown, Leisure | 27 |
 | Civic demo | 8193 | Downtown, Civic services | 32 |
 | **London** | 8194 | Areas, Landmarks, Schools, The rest of London, Rail and Heathrow, Buses, The Thames, Roads, The Underground (its own map, below) | 137 |
+| **Paris** | 8195 | Areas, Landmarks, Getting about, Roads (a sample city on the kit, below) | 43 |
+| **New York** | 8196 | Areas, Landmarks, Getting about, Roads | 45 |
+| **San Francisco** | 8197 | Areas, Landmarks, Getting about, Roads | 35 |
 
 Code:
 
@@ -158,6 +161,16 @@ branch). Any query at all means the game, as before (`?demo=`, `?city=`, `?ws=`,
 The card **picture** is `DemoDef.hero` (a URL), else a file named after the demo in `packages/client/src/heroes/` (`paris.webp`, `london.jpg`; png, svg too; about 960×540), which
 the build finds by itself; with neither, the page draws a placeholder skyline from the id (same colours every visit). The footer has the build's git sha (`GIT_SHA` from the
 environment, else `git rev-parse`; the Dockerfile has a `GIT_SHA` build arg), the building viewer and the comparison page, and the credits.
+
+#### Showreel
+
+Between the intro and Explore the page shows a **showreel** strip: a heading ("A small city builder with a big simulation"), a row of ten building thumbnails with one-word captions, three short clips of the Showcase running side by side with a caption each, and three lines with a small line icon on how the game plays (**Buy and zone**, **Lay the city's bones**, **Watch it live and tune it**). The home page stays free of three.js because none of it is rendered at runtime: `packages/client/scripts/showreel.mjs` makes every picture ahead of time and the files are committed in `packages/client/src/showreel/`.
+
+- **The table.** `SHOWREEL` at the top of the script is the whole list. A thumbnail is a viewer design key (`kind:level:design`, the `#d=` of `/viewer.html`), the hour (11:00 by day, 21:00 for the Shard and the tube entrance so their windows glow), a turntable yaw and pitch and a zoom, so the ten frames differ a little and are not ten identical cards. A clip is a Showcase view in the same numbers as a `?demo=showcase&at=x,y&dist=&yaw=&pitch=&hour=` link (yaw and pitch in degrees). Each carries the caption the page shows. The script writes `manifest.json` (names and captions) beside the files, and `landing.ts` reads it.
+- **Shooting.** `node packages/client/scripts/showreel.mjs [--server http://localhost:9003] [--client <url>] [--only thumbs|clips] [--name <asset>] [--min-fps n]`. It needs `playwright-core` (`npm i --no-save playwright-core`, or `PLAYWRIGHT=<path to its index.js>`), Google Chrome (`CHROME_CHANNEL=chromium` for Playwright's own), `ffmpeg` with libvpx-vp9 and `cwebp` (`brew install webp`). Thumbnails open the viewer (the dev server, or a built client from `--client`; default the server), freeze the turntable, set the design, hour, yaw, pitch and zoom through `window.viewer`, screenshot the canvas at 2x (a 1400 px square) and write `t-<name>.webp` at 320 px, quality 80 stepping down until it fits. Clips start the Showcase (`POST /api/demos/showcase/start`, then wait for `running`), open the game at the view with the tour card, the HUD and the need pins hidden, and **wait until the page draws 30 frames a second**: a fresh page spends its first minute or more building road and bridge geometry and the boat and helicopter timetables, drawing a frame in several seconds, and a clip shot too early is a slideshow (the script measures this and gives up after 8 minutes, and refuses a capture under `--min-fps`, default 10). It then records nine seconds with the browser's screencast, resamples them to 24 fps, fades the last half second into the first so the clip loops without a jump (the file is 8.5 s), and encodes VP9 (`-crf 36`, raised in steps of 2 if the file would be over budget) to `c-<name>.webm` with the first frame as `c-<name>.webp`, the poster.
+- **Budgets.** The script refuses to write over them: a thumbnail 25 KB, a clip 1 MB, a poster 80 KB and the whole strip 3.5 MB.
+- **Serving.** The files are imported by `landing.ts` with `import.meta.glob`, so Vite hashes them (`/assets/c-street-<hash>.webm`) and serves them from the dev server, UAT, production and the Docker build alike; `publicDir` stays off and `/play/`, which has no home page, never loads them. The heading is part of the first paint; the pictures are not. `landing.ts` builds the strip's body in the frame after the first paint (a `requestAnimationFrame` then a timeout) into a box whose `min-height` (landing.css, measured at three width ranges) holds its place, so Explore does not jump. Thumbnails are lazy, low-priority images with their size set. A clip starts as its poster, a plain image, because a `<video>` element is slow to create. Once the page has loaded and gone idle, an observer watches the cards: when one scrolls into view (120 px margin) a muted, looping `<video playsinline preload="none" poster>` with its `src` is put over the poster and played, and it pauses when the card leaves. With `prefers-reduced-motion` no video is ever created or fetched. Measured on a production build at 1280x720 (nothing cached): the first paint is the same 6 requests, 57.6 KB before the strip and 64.0 KB with it (the strip's script and style), at the same time (about 1.0 s on a busy dev Mac). The thumbnails and posters (about 220 KB) follow it, and the clips (about 640 KB each) stream when in view.
+- **Re-shooting.** Re-run it after a building in the table changes, or after the Showcase gets a new look; commit the files with the change. `--only thumbs` and `--only clips` leave the other half alone, and `--name shard` redoes one asset.
 
 The Dockerfile also builds the offline build, and the server serves it under `/play/` from `packages/client/dist-local` (`PLAY_DIR` overrides; `/play` redirects; no fallback to the online
 page; the service worker's scope is `/play/`). On dev the Vite server has no `/play/`: the home page links to `?local` there. The page's data comes from the server it is loaded from
@@ -429,6 +442,163 @@ The tour runs west to east along the river and then round the rings: Westminster
 Great Eastern line to Stratford, Waterloo and the line to Clapham Junction, Canary Wharf, the Isle of Dogs and Greenwich,
 the docks and the Thames Gateway freight line, Hackney, Islington and King's Cross, Camden, Kensington, Paddington and the
 Heathrow line, Wembley, Kew and Heathrow. Area stops are `blocks` with a `blurb` of their own.
+
+## Sample cities and the city-map kit
+
+Paris, New York and San Francisco are sample cities like London, each built from a small **city-map kit** so the city
+is one data file rather than a bespoke map and scenario. They are `DEMOS` entries with `town` their id and `city` their
+data (slots 95, 96 and 97, ports 8195-8197, `?demo=paris`, `?demo=new-york`, `?demo=san-francisco`), read-only showcases
+like London on a spectate server, each with a tour, a welcome view and a hero picture on the home page (below).
+
+Code:
+
+- `shared/src/demo/citymap.ts` is the map: `CityMapData` (the geography, below), `CityGrid` (the tile grid and `geoF`),
+  `cityBase` (water, parks, railways, land masses), `cityBridges`, `cityRoads` (the avenues' skeleton and the roundabouts'
+  boxes) and `cityPlan` (the streets).
+- `shared/src/demo/citydemo.ts` is the scenario: `CityDemo` (a `CityMapData` plus what stands on it) and
+  `cityScenario`, which fits it, plans the streets and returns the four sections every city seeds: `city-areas`,
+  `city-landmarks`, `city-transit` and `city-roads`. Built on first use, once per city.
+- `shared/src/demo/city-paris.ts`, `city-new-york.ts`, `city-san-francisco.ts` are the cities.
+- `server/src/demo/citymap.ts` (`seedCityMap`) paints a plan into the world as `seedLondon` paints London's, the districts
+  as players and parcels; `seed.ts` calls it for a demo with `city`.
+- `cityProblems` (showcase.ts) is the cities' completeness check in `demo:check`; `citymap-ascii.ts` prints a city's
+  plan as text while a map is being drawn (`npx tsx packages/server/src/demo/citymap-ascii.ts paris [x0 y0 x1 y1]`).
+
+### What a city is
+
+A `CityDemo` is plain data, latitudes and longitudes throughout:
+
+| Field | What |
+| --- | --- |
+| `geo` | where the grid sits: the tile `at` (default 0, 0) is (`lat`, `lon`), `scale` tiles a kilometre; `rotate`, the bearing that points up the map (New York's 29°, so Manhattan's avenues run straight up it); `squeeze`, longitude bands drawn narrower than life (San Francisco's bay east of Yerba Buena Island, a third of its width) |
+| `rect`, `margin` | the map in tiles, all of it the districts' land, and the ring of plain country round it the water runs on out of |
+| `rivers` | centre lines with a width at each point (Catmull-Rom, as London's Thames) |
+| `waters`, `lands` | polygons of water (a bay, the sea) and of land drawn back over it (an island; New York and San Francisco are a water polygon over the whole map with the land drawn back) |
+| `bridges` | named crossings: each on the shortest run of water along a row or column near `at` (`ns` forces the direction) with dry land at both ends, in a `style`; `landmark` draws a span as that landmark (Tower Bridge's way, below) |
+| `places` | name, `at`, character (London's set: city, westend, civic, inner, outer, suburb, industry), reach; `grid` lays a regular grid of streets there in place of London's staggered blocks; `homes` makes every block nearest it homes with no services (Alcatraz's islanders) |
+| `parks` | a box or a polygon, `heath` for more open grass |
+| `rails` | railway corridors as waypoints: each leg along its longer axis, then across, as the track tool drags |
+| `arterials` | main roads as waypoints, laid as avenues where the twin row has room (London's way); `label` names their avenue legs (the tooltip's "Fifth Avenue") |
+| `roundabouts` | 5×5 two-lane rings at the avenue crossing nearest each `at`, with the tour's words |
+| `districts` | the parcels' owners: a polygon (`poly`, or `tiles` on a rotated map), `on` to keep it to one land mass (Manhattan's districts, not the shore across the river), `lowRise` for an owner without Steel frame and High-rise, whose lots grow no taller than level 2 |
+| `heights`, `lotLevels`, `mix` | the skyline: the tallest level a merged building is seeded at per character, the tallest a 1×1 lot is seeded at per zone outside the 'city' character, and a character's zone shares in place of London's (Paris) |
+| `structures` | landmarks and multi-tile kinds by `at` and the side their door faces, fitted before the streets (London's `STRUCTURES`); `on` for an island; `hour`, `aside`, `zoom`, `name` for the tour |
+| `venues` | 1×1 kinds on frontage lots near `at` |
+| `stations`, `railLines` | rail stations fitted along their railway (the platform's back row on straight track) and the lines between them |
+| `metro` | metro lines: each stop a place or a rail station's id (its entrance then within the change walk), `hall` for a station hall |
+| `buses` | bus lines: stops by place and side, loop or there and back |
+| `harbours`, `ferries` | piers and harbours on the water near `at` (London's rules: open water behind, a channel past), the ferry lines between piers |
+| `seaGates` | where the water leaves the margin: the margin-edge water tile nearest each `at` |
+| `areas`, `spots`, `words` | the tour's area stops (15×15 tiles round a place), spots in the city's own words, and the section blurbs |
+
+`DEMOS` takes the city with its `tour` (stop ids in order: placements, `area-*`, `bridge-<name>`, `metro-<line>-<stop>`,
+lines, roundabouts, spots) and `view`.
+
+### What the kit does
+
+In order (`cityScenario`): the water, parks, railways and land masses (4-connected dry land: the banks of a river, an
+island); the bridges, chosen from the water alone; the rail stations along their railways; the avenues' skeleton round
+them; the structures, as near their real places as fits, on their place's land mass, off the water, railways, avenue rows
+and bridge landings and decks, a tile clear of each other; the harbours and piers; then the streets (`cityPlan`, London's
+`londonPlan` taking the map as data). Every cell of land left between the main roads is filled with the grain of its
+nearest place's character, staggered blocks as in London, or a regular grid anchored to the map where the place says
+`grid` (Manhattan above Houston Street: streets every four or five tiles, avenues every five to seven). Every road joins
+its land mass's network, and the largest network of a mass no bridge reaches (Liberty Island, Alcatraz) stands on its
+own. Then the bus stops, metro entrances and venues on the frontage left, the avenues as class roads, the roundabouts and
+a mini-roundabout on about one suburban crossroads in twelve, the tracks and every line. The server paints it with
+London's zoning by character (`MIX`, `DENSE`, `lotLevel`, shared from london.ts), merged towers in dense blocks, the
+block middles settled, services on a 25-tile grid and the districts' parcels.
+
+What it does not do: motorways and interchanges (the Périphérique is an avenue ring), pedestrian streets, street rules and
+turn bans (London's are hand-placed), relief (Montmartre is as flat as the rest), schools and families (the cities seed
+none), freight, airports (none of the three reaches one: SFO, JFK and Orly are off their maps). A railway cannot cross
+water, so every rail line stays on one land mass.
+
+Shared with London, untouched: the grain table (`STREETS`), the staircase of arterial legs, the plan's tile codes (`LT`)
+and marks (`RM`), `AVENUE_MIN`, and the server's zoning tables (exported from london.ts, which is otherwise unchanged).
+London stays on its own code path (londonMap.ts, london.ts); moving it onto the kit would need its motorways, street rules,
+schools and `KIND_SPOTS` added to the kit first.
+
+### Adding a fourth city
+
+1. Write `shared/src/demo/city-<id>.ts`: a `CityDemo` (copy Paris, the simplest), its tour and view. Draw the water first
+   (rivers with widths, or a water polygon over the map and the land drawn back), then the places, parks, arterials,
+   rails and districts, then the structures, stations, lines and areas.
+2. Add it to `DEMOS` (a free slot, `town` its id, `city`, `tour`, `view`), its picture as `packages/client/src/heroes/<id>.jpg`, and its landmark group to
+   `CITY_DEMO_GROUPS` (london-kinds.ts), so its landmarks leave the world-landmark exemption and must stand in it.
+3. Print the plan (`citymap-ascii.ts <id>`) and fix what it lists: a bridge with no run of water short enough, a
+   roundabout with no clear avenue crossing (an arterial's step, another arterial or the water inside its 7×7), a
+   structure with no room, a pier with no water.
+4. Run `npm run demo:check` until it passes (`cityProblems`: every landmark of the city's group placed, every placement
+   framed by a tour stop, every line's stops of its kind), then `npx tsx packages/server/src/demo/check.ts --demo <id> --fill --run 1`.
+
+### Bridges drawn as landmarks
+
+A bridge's `landmark` counts as that landmark placed. Tower Bridge is drawn over every bascule span (render/chunkView.ts);
+the Brooklyn Bridge and the Golden Gate are suspension spans, so their cities list them (`demoLandmarkSpans`) and the
+client (render/bridges.ts `LANDMARK_SPANS`, set in main.ts once the demo is known) draws the landmark's model over the
+span, stretched to its length and set at the road's height, with the span's ramps; the traffic drives over it.
+
+### The cities
+
+Measured with `check.ts --demo <id> --fill --run 1` (2026-10-25, the dev Mac shared with other agents). The load moved a
+lot that night: New York took 101 s and 25.4 ms at a load average of 6, and 124 s and 28.1 ms at 9-12; Paris's last run
+started at a load of 64 (20 over five minutes), which puts it near 105 s and 26 ms at New York's quieter load.
+
+| | Paris | New York | San Francisco |
+| --- | --- | --- | --- |
+| Map | 144×105 tiles, 7 a kilometre | 84×196, 8 a kilometre, turned 29° | 150×150, 6 a kilometre, the east bay squeezed |
+| Fill | 132 s, 23,078 citizens | 101 s, 23,557 citizens | 60 s, 16,488 citizens |
+| After a day | 23,909 citizens, 41,034 jobs | 24,392 citizens, 39,538 jobs | 17,149 citizens, 33,955 jobs |
+| Tick (last day) | 29.2 ms (p95 47.0) | 25.4 ms (p95 41.1) | 14.7 ms (p95 25.5) |
+| Lines | 6, all running | 7, all running | 6, all running |
+| Landmarks | all six staffed, 44-201 visits a day | all seven buildings staffed (the Statue 30/30 over its bridge) | all four staffed (Alcatraz 20/20 by its islanders) |
+
+- **Paris.** The Seine from Ivry past the Île de la Cité and round the Boulogne loop to Saint-Denis, drawn four to five
+  tiles wide (three or four times the real width) and eleven round the island, whose arms are three tiles each, so the
+  Batobus has its channel; the Île Saint-Louis is left out. Notre-Dame on the island, reached over the Pont Neuf, the
+  Pont d'Arcole and the Petit-Pont; the Louvre on the Rue de Rivoli; the Opéra on the Grands Boulevards; the Arc de
+  Triomphe beside the Étoile's two-lane roundabout (a ring's island is planted, so the Arc stands at its edge, facing the
+  Champs-Élysées); the Eiffel Tower on the Champ de Mars facing the Pont d'Iéna and the Trocadéro; the Sacré-Cœur on
+  Montmartre, shown at dusk (the map has no hills). Twenty bridges in the real ones' styles. Gare du Nord with a line to
+  the Stade de France and Gare de Lyon with one to Maisons-Alfort (two short lines out of the termini, as London's);
+  Métro 1 from La Défense to the Bastille and 4 from the Porte de Clignancourt to the Porte d'Orléans, changing at
+  Châtelet and with the rail at Gare du Nord; the 69 bus; the Batobus between four piers. The Périphérique is an avenue
+  ring (a motorway would need an interchange at every porte), the Bastille's roundabout a few hundred metres north of the
+  real place. Paris is held to mid-rise, as the real city is: every district but La Défense (a district of its own) is
+  `lowRise`, its lots seeded no taller than offices and shops at level 2 and homes at 3 (`lotLevels`; a level-3 office
+  is a glass tower), its merges at 4 (`heights`), with more shops and homes and fewer offices in the centre than London's
+  West End (`mix`); the towers stand at La Défense. Held low, Paris's jobs are further from its homes than London's,
+  which makes a tick dearer per citizen; the map is 144×105 (the brief's 160×110 less the outer suburbs) to keep the
+  fill and the tick to London's.
+- **New York.** The map is turned so Manhattan's avenues run up it, and Manhattan above Houston Street is a regular grid.
+  Broadway runs as a grid avenue with one jog at Madison Square, where the Flatiron stands, not as the diagonal it is.
+  Fifth, First and Eighth Avenues and 14th, 23rd, 34th, 42nd, 57th, 86th and 125th Streets are avenues, Columbus Circle
+  a roundabout. The Brooklyn Bridge is a real crossing drawn as the landmark; the Manhattan, Williamsburg and Queensboro
+  Bridges cross the East River, the George Washington Bridge the Hudson, four bridges the Harlem River. The Statue of
+  Liberty is on its island with a short service bridge to Liberty State Park (the real island is reached only by ferry,
+  and a building no road reaches is never staffed). Grand Central's Park Avenue line to Harlem and Penn Station's West
+  Side line to Inwood run in the open with level crossings (the real ones are in tunnels and on viaducts). The 1 runs
+  from South Ferry up the West Side; the 7 starts at Grand Central (at this scale Times Square is four tiles from it and
+  the 1's platforms leave no row to cross under) and calls at First Avenue by the UN, where the real line does not
+  stop, so its tunnel under the East River is two the boring search can find. The Statue ferry runs from the Battery to
+  Liberty Island and Liberty State Park, the East River ferry from Wall Street to Hunters Point, and container ships come
+  up the bay from the Narrows to Red Hook. JFK is twenty kilometres east, far off the map.
+- **San Francisco.** The bay east of Yerba Buena Island is drawn at a third of its width so the Bay Bridge's east span
+  (from Treasure Island to Oakland) is one the road tool can lay; the island is drawn a little south and west of life and
+  the west span leaves the Embarcadero north of the Ferry Building, along a row. The Golden Gate Bridge spans the strait to
+  the Marin headlands, drawn as the landmark. Market Street is a staircase of avenue legs, not a diagonal. BART runs from
+  West Oakland through a tube under the bay (it bores under water as London's lines do) and under Market and Mission
+  Streets to Balboa Park. The cable car runs as a bus line (there is no cable-car or tram kind). Alcatraz is drawn larger
+  than life, with the homes of the guards' families who run it (`homes`: no road reaches it), and the Alcatraz ferry from
+  Pier 33; the Bay ferry runs from Sausalito by the Ferry Building to Oakland. Fisherman's Wharf is a fish quay whose
+  trawlers go out under the Golden Gate Bridge; Oakland has no container port, as a container ship is too tall for any
+  suspension span. SFO is off the map.
+
+Hero pictures (the home page's cards, "The home page" above): `packages/client/src/heroes/<id>.jpg`, found by the
+build by demo id, so the cities set no `hero`. Each is a 960×540 JPEG under 200 KB of the city's welcome view (Paris,
+New York, San Francisco), London's of its public opening shot (`DEFAULT_VIEW`), since its tour's welcome is the whole
+map from far out.
 
 ## The scenario
 

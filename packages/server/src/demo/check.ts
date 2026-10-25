@@ -21,7 +21,7 @@
  *    London without its Underground section, for the tick cost without the metro.
  */
 import {
-  KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, isRoad, DEMOS, demoSections, showcaseProblems, londonProblems, demoTour, tourSoundProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
+  KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, isRoad, DEMOS, demoSections, showcaseProblems, londonProblems, cityProblems, demoTour, tourSoundProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
   isBridgeAux, bridgeStyle, BridgeStyle, basculeSeed, basculeLiftAt, isCrossing, isTunnel, isPlatform, underMask, boatTimetable, boatLifts, HARBOUR_OF,
   SCHOOL_SPECS, Study, LifeStage, STUDY_NAMES, EduLevel, AD_SIZES, AD_STRIDE, adHostAt, adSlotOpen, adWear, adAge, adSeed, type DemoId, type SeededDemo, type AdSize,
 } from '@msimcity/shared';
@@ -139,6 +139,13 @@ console.log('tour sound (London)');
 const soundMissing = [...tourSoundProblems('london', demoTour('london')), ...tourSoundProblems('showcase', demoTour('showcase'))];
 for (const m of soundMissing) fail(m);
 if (!soundMissing.length) console.log(`  ok: every London tour stop has a sound cue or says ambience (${demoTour('london').length} stops, shared/src/demo/tourSound.ts)`);
+
+for (const d of DEMOS.filter((q) => q.city)) {
+  console.log(`completeness (${d.name}, a sample city on the kit)`);
+  const cityMissing = cityProblems(d.id);
+  for (const m of cityMissing) fail(m);
+  if (!cityMissing.length) console.log(`  ok: every ${d.name} landmark stands, every placement is framed by a tour stop, every line's stops are its kind`);
+}
 
 for (const d of DEMOS) {
   console.log(`seeding ${d.id}`);

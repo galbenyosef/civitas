@@ -81,8 +81,13 @@ export class NetClient {
   private factory: () => ClientSocket;
   private wsUrl = '';
   onStatus: (connected: boolean) => void = () => {};
-  /** what this client has received, for the perf readout (render/perfhud.ts): characters of JSON (about bytes), messages, moving agents */
-  rx = { bytes: 0, msgs: 0, agents: 0 };
+  /** what this client has received, for the perf readout (render/perfhud.ts): characters of JSON (about bytes), messages, moving agents,
+   *  and what handling them cost on the main thread: JSON.parse (decodeMs) and the handlers (handlerMs, by message type in byType) */
+  rx = { bytes: 0, msgs: 0, agents: 0, decodeMs: 0, handlerMs: 0, byType: new Map<string, number>() };
+  /** the last 2048 messages: when each was handled (performance.now), how long it took (parse and handler) and its type; for the frame trace */
+  readonly log = { at: new Float64Array(2048), ms: new Float32Array(2048), type: new Array<string>(2048).fill(''), n: 0 };
+  /** when the last stats messages arrived (performance.now), newest last: a gap over the server's second says its ticks were late */
+  statsAt: number[] = [];
   private taps: ((m: ServerMsg) => void)[] = [];
 
   /** a server's WebSocket URL, or a factory for any other transport (WorkerSocket in local mode) */
@@ -107,11 +112,19 @@ export class NetClient {
     this.sock = sock;
     sock.onopen = () => { this.onStatus(true); this.send({ t: 'hello', name: this.name }); };
     sock.onmessage = (data) => {
+      const t0 = performance.now();
       const m = JSON.parse(data) as ServerMsg;
-      this.rx.bytes += data.length; this.rx.msgs++;
-      if (m.t === 'citizens') this.rx.agents += m.c.length >> 2; // quads of id, x, y, flags
+      const t1 = performance.now();
+      const rx = this.rx;
+      rx.bytes += data.length; rx.msgs++; rx.decodeMs += t1 - t0;
+      if (m.t === 'citizens') rx.agents += m.c.length >> 2; // quads of id, x, y, flags
+      else if (m.t === 'stats') { this.statsAt.push(t1); if (this.statsAt.length > 120) this.statsAt.shift(); }
       for (const fn of this.taps) fn(m);
       this.handlers.get(m.t)?.(m);
+      const t2 = performance.now(), ms = t2 - t1;
+      rx.handlerMs += ms; rx.byType.set(m.t, (rx.byType.get(m.t) ?? 0) + ms);
+      const l = this.log, i = l.n++ & 2047;
+      l.at[i] = t0; l.ms[i] = t2 - t0; l.type[i] = m.t;
     };
     sock.onclose = () => {
       this.onStatus(false);
