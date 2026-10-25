@@ -276,6 +276,44 @@ const notreDameOps = (): Op[] => {
   return ops;
 };
 
+const notreDameOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  ops.push(['box', 0.58, 0.64, 1.28, 0, 0.02, -0.12, LIME_ST]);
+  ops.push(['roof', 0.6, 0.25, 1.3, 0, 0.66, -0.12, LEAD, true]);
+  for (const sx of [-1, 1]) {
+    ops.push(['box', 0.3, 0.38, 1.18, sx * 0.43, 0.02, -0.1, LIME_ST]);
+    ops.push(['roof', 0.31, 0.12, 1.2, sx * 0.43, 0.4, -0.1, LEAD, true]);
+    for (const z of [0.3, -0.05, -0.4, -0.68]) {
+      ops.push(['box', 0.075, 0.43, 0.09, sx * 0.68, 0.02, z, LIME_ST]);
+      ops.push(['taper', 0.065, 0.075, 0.045, 0.06, 0.29, sx * 0.66, 0.34, z, LIME_ST, { shift: [-sx * 0.19, 0] }]);
+      ops.push(['box', 0.018, 0.18, 0.1, sx * 0.586, 0.13, z, 'dark']);
+    }
+  }
+  ops.push(['cyl', 0.3, 0.3, 0.54, 0, 0.02, -0.65, LIME_ST, 20]);
+  ops.push(['lathe', 0, 0.56, -0.65, LEAD, [0.31, 0, 0.27, 0.12, 0.12, 0.24, 0, 0.28], { seg: 20 }]);
+  ops.push(['box', 1.0, 0.61, 0.18, 0, 0.02, 0.6, LIME_ST]);
+  for (const x of [-0.31, 0.31]) {
+    ops.push(['box', 0.36, 0.88, 0.38, x, 0.02, 0.57, LIME_ST]);
+    for (const dx of [-0.085, 0.085]) {
+      ops.push(['box', 0.075, 0.24, 0.018, x + dx, 0.53, 0.77, 'dark']);
+      ops.push(['box', 0.075, 0.17, 0.018, x + dx, 0.91, 0.77, 'dark']);
+    }
+    ops.push(['box', 0.4, 0.045, 0.42, x, 0.88, 0.57, LIME_ST]);
+    ops.push(['box', 0.38, 0.2, 0.38, x, 0.925, 0.57, 'dark']);
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) ops.push(['box', 0.055, 0.23, 0.055, x + sx * 0.17, 0.9, 0.57 + sz * 0.17, LIME_ST]);
+    ops.push(['box', 0.43, 0.055, 0.43, x, 1.125, 0.57, LIME_ST]);
+  }
+  ops.push(['lathe', 0, 0.4, 0.702, 'navy', [0, 0, 0.14, 0, 0.14, 0.012], { seg: 24, axis: 'z' }]);
+  ops.push(['lathe', 0, 0.4, 0.716, LIME_ST, [0, 0, 0.035, 0, 0.035, 0.008], { seg: 16, axis: 'z' }]);
+  for (const x of [-0.18, 0, 0.18]) ops.push(['box', x === 0 ? 0.15 : 0.12, 0.23, 0.02, x, 0.02, 0.71, 'dark']);
+  ops.push(['box', 1.4, 0.48, 0.3, 0, 0.02, -0.22, LIME_ST]);
+  ops.push(['roof', 1.42, 0.2, 0.32, 0, 0.5, -0.22, LEAD]);
+  ops.push(['lathe', 0, 0.78, -0.22, LEAD, [0.13, 0, 0.11, 0.12, 0.065, 0.35, 0.025, 0.68, 0, 0.79], { seg: 16 }]);
+  ops.push(['cyl', 0.008, 0.012, 0.12, 0, 1.57, -0.22, 'gold', 6]);
+  ops.push(...lampPost(-0.5, 0.9, 0.3, 'marquee', 0.02), ...lampPost(0.5, 0.9, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
 export const notreDame: KindDef = {
   id: 'notre-dame', name: 'Notre-Dame', code: library.code, kindId: 135, family: 'leisure', tier: 3,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'paris',
@@ -292,6 +330,7 @@ export const notreDame: KindDef = {
   levels: [{
     capacity: 30, wage: 15, cost: 12000, upkeep: 50, work: 2600, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'double aisles and a transept, open belfries, a round rose and eight flying buttresses under the flèche', height: 1.69, ops: notreDameOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the twin-towered west front with the rose window, the lead spire over the crossing, the flying buttresses of the apse', height: 1.4, ops: notreDameOps() },
       { author: 'claude-haiku-5-5', draft: true, name: 'the nave under its slate roof, the west front with two towers and the rose window, the lead spire at the crossing', height: 1.25, ops: haikuNotreDameOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the high nave with aisles and flying buttresses, the flat-topped west towers and rose window, the lead flèche', height: 1.31, ops: sonnetNotreDameOps() },
