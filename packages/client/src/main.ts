@@ -3,7 +3,7 @@ import { junctionArmAt, nextArmState, armState, JAM_WHY_STRIDE, VehicleClass } f
 import { type Material, WebGLRenderer, Scene, Mesh, PlaneGeometry, MeshBasicMaterial, Fog, PCFSoftShadowMap, ACESFilmicToneMapping, Quaternion, Vector3 } from 'three';
 import {
   OVERLAY_TEXT, ZONE_TOOLS, CHUNK_SIZE, LAND_PRICE_PER_TILE, spendableMoney, TICKS_PER_DAY, TICK_MS, Terrain, KIND_NAMES, Zone, isCivicId, stopModeOf, kindIdOf, kindManifest, hasFeature,
-  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, classDef, auxClass, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
+  terrainOf, isRoad, zoneOf, isDemoId, DEMO_BY_ID, demoLandmarkSpans, levelOf, underConstruction, checkPurchase, planStructure, FRONT_NAMES, planRunway, isAirfieldAux, isRailAux, hash2, planPlatform, isMetroStationKind, classDef, auxClass, AD_RENTAL, lineSides, underMask, type StationStop, trainCrew, flightManifest, flightPassengers, TRAIN_VMAX, type Flight, type FlightManifest, type TrainInfo, type PlaceVerdict, type Placed, type RunwayPlan, type LandRect, chunkKey, parseKey, localIndex, type Tool, type BuildingInfo, type CitizenInfo, type MetroLineDTO, type FerryLineDTO, type BoatInfo, channelName,
 } from '@msimcity/shared';
 import { NetClient } from './net';
 import { LocalGame, AUTOJOIN } from './local/client';
@@ -32,7 +32,7 @@ import { StreetRuleTool, StreetRulePicker } from './streetrules';
 import { TrafficPanel } from './trafficpanel';
 import { RouteView } from './render/route';
 import { JunctionView } from './render/junctions';
-import { BridgeView } from './render/bridges';
+import { BridgeView, setLandmarkSpans } from './render/bridges';
 import { RoadLayer } from './render/roads';
 import { LandmarkMotion } from './render/landmarks';
 import { UndergroundView } from './render/underground';
@@ -1536,6 +1536,7 @@ if (cityParam) { showCityBanner(cityParam, params, hud); reviveCity(cityParam, n
 /** the light as the player had it before a tour stop pinned an hour (TourPanel setHour) */
 let tourLight: { mode: typeof lighting.mode; hour: number } | null = null;
 if (demoParam) {
+  setLandmarkSpans(demoLandmarkSpans(demoParam)); // the Brooklyn Bridge and the Golden Gate over their spans (render/bridges.ts)
   showDemoBanner(demoParam, params, hud, !!showcase.spectate, !showcase.defaultDemo);
   reviveDemo(demoParam, net);
   tour = new TourPanel({

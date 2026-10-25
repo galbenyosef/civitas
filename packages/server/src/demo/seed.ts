@@ -13,6 +13,7 @@ import { inheritValues } from '../sim/motivation';
 import { seedCity } from '../loadtest/cities';
 import { settleInteriors, GARDEN_KIND } from '../sim/blocks';
 import { seedLondon } from './london';
+import { seedCityMap } from './citymap';
 import { fillCity, yieldNow } from '../fill';
 import type { Simulation } from '../sim/simulation';
 import type { Rail } from '../sim/rail';
@@ -70,6 +71,7 @@ export function seedDemoTown(w: World, id: DemoId): string[] {
   const problems: string[] = [];
   const sections = demoSections(id);
   if (demo.town === 'london') problems.push(...seedLondon(w, DEMO_OWNER, keptLand(sections)).problems);
+  else if (demo.city) problems.push(...seedCityMap(w, DEMO_OWNER, demo.city, keptLand(sections)).problems); // a sample city on the kit (citymap.ts)
   else seedCity(w, { districts: DEMO_TOWN.districts, built: DEMO_TOWN.built, gap: DEMO_TOWN.gap });
   const owner = w.players.get(DEMO_OWNER)!;
   owner.name = demo.name;

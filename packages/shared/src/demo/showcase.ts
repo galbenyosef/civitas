@@ -29,7 +29,8 @@ import { FERRY } from '../ferry';
 import { HARBOUR_OF, type HarbourRole } from '../harbours';
 import type { SeaGate } from '../waterways';
 import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
-import { withKindsTour, KIND_TOUR_IDS, LONDON_EXEMPT } from './london-kinds';
+import { cityScenario, type CityDemo } from './citydemo';
+import { withKindsTour, KIND_TOUR_IDS, LONDON_EXEMPT, CITY_DEMO_GROUPS } from './london-kinds';
 import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
 import { zoneOf, levelOf, Zone, isRoad } from '../tile';
 import { isMarkedJunction, mouthCrossing, MouthCrossing, boxJunction, sandboxSignalled, streetTreeAt, midZebraAt } from '../roadlook';
@@ -61,7 +62,9 @@ import { AD } from '../adverts';
  */
 
 export type SectionId = 'downtown' | 'roads' | 'transport' | 'civic' | 'rail' | 'leisure' | 'airport' | 'industry' | 'riverside' | 'harbour' | 'education' | 'high-street' | 'media' | 'power' | 'remembrance'
-  | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-kinds' | 'london-rail' | 'london-buses' | 'london-river' | 'london-roads' | 'london-tube';
+  | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-kinds' | 'london-rail' | 'london-buses' | 'london-river' | 'london-roads' | 'london-tube'
+  // a sample city on the city-map kit (citydemo.ts): each city's own, built from its CityDemo
+  | 'city-areas' | 'city-landmarks' | 'city-transit' | 'city-roads';
 export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
 export type DemoXY = readonly [number, number];
 /** x, y, width, height in tiles */
@@ -209,8 +212,18 @@ export interface DemoDef {
   /** world-launcher slot: the child server listens on TEST_CITY_BASE_PORT + slot (8190 for the showcase) */
   slot: number;
   sections: SectionId[];
-  /** the town under the sections: the 3×3 districts of DEMO_TOWN (the default), or the London map (london.ts) */
-  town?: 'london';
+  /**
+   * the town under the sections: the 3×3 districts of DEMO_TOWN (the default), the London map (london.ts), or a sample
+   * city on the city-map kit ('city', with `city` its data: citydemo.ts, docs/demo.md "Sample cities and the city-map kit")
+   */
+  town?: 'london' | 'city';
+  /** a sample city's map and scenario (citydemo.ts), with `town: 'city'` */
+  city?: CityDemo;
+  /**
+   * the demo's hero image for the landing page: a path under packages/client/src (a 1600×900 JPEG of the welcome
+   * view, 'heroes/paris.jpg'); none, a placeholder card
+   */
+  hero?: string;
   /** tour order, when not TOUR */
   tour?: string[];
   /** the welcome stop's camera, when not the 3×3 town's */
@@ -845,7 +858,7 @@ export const isDemoId = (s: unknown): s is DemoId => typeof s === 'string' && DE
 export const demoSections = (id: DemoId): DemoSection[] => {
   const d = DEMO_BY_ID.get(id), want = new Set(d?.sections ?? []);
   // London's sections are planned with its streets, on first use (london.ts)
-  return (d?.town === 'london' ? londonSections() : SECTIONS).filter((s) => want.has(s.id));
+  return (d?.town === 'london' ? londonSections() : d?.city ? cityScenario(d.city).sections : SECTIONS).filter((s) => want.has(s.id));
 };
 /** Land a demo's owners hold: the town's owner, and London's boroughs (`sys:<borough>`, server/src/demo/london.ts). */
 export const isDemoOwner = (owner: string | undefined) => owner === DEMO_OWNER || !!owner?.startsWith(`${DEMO_OWNER}:`);
@@ -1973,12 +1986,61 @@ export function londonProblems(manifest: readonly KindManifest[] = MANIFEST): st
   for (const id of Object.keys(LONDON_EXEMPT)) if (!known.has(id)) out.push(`LONDON_EXEMPT names ${id}, which is not a catalogue kind`);
   for (const k of manifest) {
     if (k.draft || !k.tool || k.flags.growable || placed.has(k.id) || LONDON_EXEMPT[k.id]) continue;
+    if (k.landmark && CITY_DEMO_GROUPS.has(k.group ?? '')) continue; // a sample city's own landmark stands there (cityProblems)
     const why = k.group ? `a rung of the ${k.group} ladder (tier ${k.tier})` : k.footprint && k.footprint.w * k.footprint.h > 1 ? `a ${k.footprint.w}×${k.footprint.h} structure` : 'a placeable kind';
     out.push(`${k.id} (${why}) has no home in London: place it where its real counterpart stands (london-kinds.ts) or exempt it with a reason`);
   }
   const stops = new Set(demoTour('london').map((t) => t.id));
   for (const id of KIND_TOUR_IDS) if (!stops.has(id)) out.push(`London's tour stop ${id} (london-kinds.ts) names nothing in the scenario`);
   return out;
+}
+
+/**
+ * What a sample city on the kit is missing, as messages (docs/demo.md "Sample cities and the city-map kit"): its
+ * scenario planned without a problem (every landmark, station, harbour and stop fitted, every bridge found); every
+ * landmark of its city's collection (the landmark group named by its id) standing, placed or as a bridge's span; ids
+ * unique and every tour stop resolving; every placement framed by a tour stop (on the tour by its id, or inside the
+ * area, line or spot a stop frames); and each line's stops placements of the right kind.
+ */
+export function cityProblems(id: DemoId, manifest: readonly KindManifest[] = MANIFEST): string[] {
+  const d = DEMO_BY_ID.get(id);
+  if (!d?.city) return [`${id} is not a sample city`];
+  const out = cityScenario(d.city).problems.map((p) => `${d.name}: ${p}`);
+  const sections = demoSections(id), placed = new Set<string>(), ids = new Set<string>();
+  const dup = (q: string) => { if (ids.has(q)) out.push(`${d.name}: id ${q} is used twice`); ids.add(q); };
+  for (const s of sections) {
+    for (const p of s.placements ?? []) { placed.add(p.kind); dup(p.id ?? p.kind); }
+    for (const b of s.bridges ?? []) { dup(b.id); if (b.landmark) placed.add(b.landmark); }
+    for (const x of [...(s.blocks ?? []), ...(s.tracks ?? []), ...(s.junctions ?? []), ...(s.lines ?? []), ...(s.spots ?? [])]) dup(x.id);
+  }
+  for (const k of manifest) if (k.landmark && !k.draft && k.group === d.city.id && !placed.has(k.id)) out.push(`${d.name}: its landmark ${k.id} is not placed`);
+  const tour = demoTour(id), onTour = new Set(tour.map((t) => t.id));
+  for (const q of d.tour ?? []) if (q !== 'welcome' && !ids.has(q)) out.push(`${d.name}: tour stop ${q} names nothing in the scenario`);
+  if (new Set(d.tour).size !== d.tour?.length) out.push(`${d.name}: the tour lists an id twice`);
+  const frames = tour.filter((t) => t.id !== 'welcome').map((t) => t.rect ?? (t.placed ? [t.placed.ax, t.placed.ay, t.placed.w, t.placed.h] as const : null)).filter((r): r is DemoRect => !!r);
+  const inside = ([x, y]: DemoXY) => frames.some(([rx, ry, rw, rh]) => x >= rx && y >= ry && x < rx + rw && y < ry + rh);
+  for (const s of sections) for (const p of s.placements ?? []) if (!onTour.has(p.id ?? p.kind) && !inside(p.door)) out.push(`${d.name}: ${p.id ?? p.kind} is placed but no tour stop frames it`);
+  const all = sections.flatMap((q) => q.placements ?? []);
+  for (const s of sections) for (const l of s.lines ?? []) {
+    const want = l.mode === 'bus' ? ['bus-stop'] : l.freight ? ['freight-yard'] : l.mode === 'metro' ? ['metro-entrance', 'metro-station'] : l.mode === 'ferry' ? ['ferry-pier'] : ['rail-halt', 'rail-station'];
+    if (l.stops.length < 2) out.push(`${d.name}: ${l.id} has fewer than two stops`);
+    for (const st of l.stops) {
+      const p = all.find((q) => q.door[0] === st[0] && q.door[1] === st[1]);
+      if (!p || !want.includes(p.kind)) out.push(`${d.name}: ${l.id} stops at (${st[0]}, ${st[1]}), which is not a ${want.join(' or ')} placement`);
+    }
+  }
+  return out;
+}
+
+/**
+ * A demo's bridges drawn as a landmark that are not bascules (Tower Bridge is drawn over every bascule span): the
+ * Brooklyn Bridge and the Golden Gate in their cities, each its first deck tile (lowest x or y) and the landmark's kind
+ * id. The client draws the landmark's model over the span (render/chunkView.ts) in place of the style's towers.
+ */
+export function demoLandmarkSpans(id: DemoId): { x: number; y: number; kind: number }[] {
+  return demoSections(id).flatMap((s) => (s.bridges ?? []).filter((b) => b.landmark && b.style !== 'Bascule' && kindIdOf(b.landmark)).map((b) => ({
+    x: Math.min(b.from[0], b.to[0]), y: Math.min(b.from[1], b.to[1]), kind: kindIdOf(b.landmark!),
+  })));
 }
 
 /** The substations a demo's blackout drill faults every few game hours (server sim/utilities.ts `drills`, set by index.ts): its 'blackout' spots' doors. */

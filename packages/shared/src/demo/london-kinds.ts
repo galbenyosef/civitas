@@ -208,10 +208,13 @@ export function withKindsTour(tour: readonly string[]): string[] {
  * Placeable kinds London does not show, with the reason (showcase.ts `londonProblems`). A kind needs a home in London
  * or a line here: the check fails for a kind with neither.
  */
+/** The landmark groups (cities) with a sample city demo of their own (showcase.ts DEMOS, citydemo.ts): their landmarks stand there. */
+export const CITY_DEMO_GROUPS = new Set<string>([]);
 export const LONDON_EXEMPT: Record<string, string> = {
   camp: 'the pioneer camp is a new player\'s first settlers, one per player, on a frontier start; London is a built city',
-  // world landmarks (docs/buildings.md "Landmarks", landmarks-world.ts): their own cities have no demos yet, so none
-  // can stand in one; each places only in sandboxes and ?dev clients behind the locked tech node wld1
-  ...Object.fromEntries(WORLD_LANDMARKS.map((k) => [k.id,
+  // world landmarks (docs/buildings.md "Landmarks", landmarks-world.ts) whose own cities have no demos yet, so none
+  // can stand in one; each places only in sandboxes and ?dev clients behind the locked tech node wld1. The sample
+  // cities' landmarks (CITY_DEMO_GROUPS) stand in their own cities' demos instead (showcase.ts cityProblems)
+  ...Object.fromEntries(WORLD_LANDMARKS.filter((k) => !CITY_DEMO_GROUPS.has(k.group ?? '')).map((k) => [k.id,
     'a world landmark behind the locked wld1 node: its own city has no demo yet, so it cannot stand in one'])),
 };

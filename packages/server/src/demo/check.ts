@@ -21,7 +21,7 @@
  *    London without its Underground section, for the tick cost without the metro.
  */
 import {
-  KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, isRoad, DEMOS, demoSections, showcaseProblems, londonProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
+  KIND_NAMES, TICKS_PER_DAY, CHUNK_SIZE, isRoad, DEMOS, demoSections, showcaseProblems, londonProblems, cityProblems, seededFeatureProblems, isDemoId, KIND_ID, timetable, heliTimetable,
   isBridgeAux, bridgeStyle, BridgeStyle, basculeSeed, basculeLiftAt, isCrossing, isTunnel, isPlatform, underMask, boatTimetable, boatLifts, HARBOUR_OF,
   SCHOOL_SPECS, Study, LifeStage, STUDY_NAMES, EduLevel, AD_SIZES, AD_STRIDE, adHostAt, adSlotOpen, adWear, adAge, adSeed, type DemoId, type SeededDemo, type AdSize,
 } from '@msimcity/shared';
@@ -134,6 +134,13 @@ console.log('completeness (London)');
 const londonMissing = londonProblems();
 for (const m of londonMissing) fail(m);
 if (!londonMissing.length) console.log('  ok: every placeable kind stands in London or is exempt with a reason');
+
+for (const d of DEMOS.filter((q) => q.city)) {
+  console.log(`completeness (${d.name}, a sample city on the kit)`);
+  const cityMissing = cityProblems(d.id);
+  for (const m of cityMissing) fail(m);
+  if (!cityMissing.length) console.log(`  ok: every ${d.name} landmark stands, every placement is framed by a tour stop, every line's stops are its kind`);
+}
 
 for (const d of DEMOS) {
   console.log(`seeding ${d.id}`);
