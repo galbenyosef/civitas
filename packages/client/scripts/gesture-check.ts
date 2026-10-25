@@ -12,6 +12,7 @@ Object.assign(globalThis, {
   window: { addEventListener: (t: string, f: any) => winHandlers.set(t, f) },
 });
 const { Input } = await import('../src/input');
+const { bindReadoutKey } = await import('../src/audio/controls');
 
 let fails = 0;
 const ok = (cond: boolean, what: string) => { if (!cond) { fails++; console.log('FAIL', what); } else console.log('ok  ', what); };
@@ -145,6 +146,21 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
   const zin = m.rig.dist;
   kd('Minus'); for (let i = 0; i < 60; i++) m.input.update(1 / 60); ku('Minus'); m.settle();
   ok(zin < 48 && m.rig.dist > zin, '+ zooms in, - zooms out');
+}
+{ // Shift+S opens the audio readout and does not pan the camera; S alone still pans back (docs/audio.md "Readout")
+  const m = make();
+  const down = (o: Record<string, unknown>) => ({ code: 'KeyS', key: 'S', target: null, repeat: false, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, preventDefault() {}, ...o });
+  // the readout's listener is in the capture phase on window, so it runs before the Input's and can stop the press reaching it
+  let toggled = 0; let capture: ((e: any) => void) | null = null;
+  bindReadoutKey({ addEventListener: (_t: 'keydown', f: (e: any) => void, c?: boolean) => { if (c) capture = f; } }, () => toggled++);
+  const dispatch = (o: Record<string, unknown>) => { let stopped = false; const e = { ...down(o), stopPropagation() { stopped = true; } }; capture!(e); if (!stopped) m.win.get('keydown')!(e); };
+  const before = snap(m.rig);
+  dispatch({ shiftKey: true }); for (let i = 0; i < 90; i++) m.input.update(1 / 60); m.win.get('keyup')!({ code: 'KeyS' }); m.settle();
+  const after = snap(m.rig);
+  ok(toggled === 1 && Math.hypot(after.x - before.x, after.z - before.z) < 1e-6, 'Shift+S toggles the audio readout and the camera does not move');
+  dispatch({}); for (let i = 0; i < 90; i++) m.input.update(1 / 60); m.win.get('keyup')!({ code: 'KeyS' }); m.settle();
+  const panned = snap(m.rig);
+  ok(toggled === 1 && Math.hypot(panned.x - after.x, panned.z - after.z) > 0.5, 'S alone still pans the camera back and leaves the readout shut');
 }
 { // Safari gestures
   const m = make(); const a = snap(m.rig);

@@ -8,7 +8,10 @@ import { fire, makeBed, makeRide, ringBell, BEDS, type EventId, type RideKind } 
 import { Ambience, mixFor, newMix, newScan, birdRate, owlRate, scanAround, type AmbSources } from '../src/audio/ambience';
 import { FpvSound, type RideNow } from '../src/audio/fpv';
 import { TourCues, DEFAULT_DUCK_DB } from '../src/audio/tourcue';
-import { applyHint, HINT_CEIL } from '../src/audio/ambience';
+import { applyHint, HINT_CEIL, bedWhy } from '../src/audio/ambience';
+import { rowsOf, rowText, rowHtml, headerText, headerHtml, journalText, journalHtml, stateText, type AudioState, type VoiceRow } from '../src/audio/readout';
+import { JOURNAL, toDb } from '../src/audio/engine';
+import { bindReadoutKey } from '../src/audio/controls';
 import { demoTour, tourSoundProblems, LONDON_SOUND, SCENES, resolveStopSound, type TourSound } from '@msimcity/shared';
 
 let fails = 0;
@@ -346,6 +349,90 @@ for (const mode of ['synthesised', 'recorded'] as const) {
   // the duck is a layer of its own: the tour's dip and the ridden vehicle's add and release separately
   log.length = 0; e.duckAmbience(-6, 0.4); e.duckAmbience(-4, 0.2, 'tour'); const both = log.filter((l) => /setTargetAtTime/.test(l)).length; e.duckAmbience(0, 0.2, 'tour'); e.duckAmbience(0, 0.6);
   ok(both >= 2 && DEFAULT_DUCK_DB === 4, `the duck layers add (the tour's ${DEFAULT_DUCK_DB} dB beside the vehicle's 6 dB)`);
+}
+
+// ---- the audio readout (docs/audio.md "Readout"): rows built from a snapshot, the journal, and the engine's own state feeding it ----
+{
+  // a fake snapshot: a traffic bed with its inputs, a tour cue with its stop, a ride, a ui click, a quiet bed
+  const sc = newScan(); sc.cars = 212; sc.road = 0.18; sc.walkers = 86; sc.com = 0.3;
+  const trafficWhy = bedWhy('traffic', sc, 24, 8, 0.252, null, false);
+  const rows: VoiceRow[] = [
+    { id: 'click', cls: 'ui', bus: 'ui', db: -20, cents: 12, take: 'synth', age: 100, left: 0.2, why: 'ui: place' },
+    { id: 'wind', cls: 'bed', bus: 'ambience', db: -52, cents: null, take: 'wind.opus', age: 9000, why: bedWhy('wind', sc, 24, 8, 0.1, null, false) },
+    { id: 'traffic', cls: 'bed', bus: 'ambience', db: -18.4, cents: 21, take: 'traffic.opus', age: 62000, why: trafficWhy },
+    { id: 'big-ben', cls: 'cue', bus: 'ambience', db: -14, cents: -30, take: 'big-ben.opus', age: 800, left: 11.2, why: 'tour stop parliament, cue 1 of 2, at +0.8 s, gain x1.30' },
+    { id: 'veh-bus', cls: 'ride', bus: 'vehicles', db: -16, cents: 0, take: 'veh-bus.opus', age: 4000, why: 'riding c12: a bus at 60% of its top speed' },
+  ];
+  const journal = [
+    { t: 1000, ev: 'start' as const, cls: 'bed' as const, id: 'traffic', why: 'always on: the ambience started' },
+    { t: 5000, ev: 'start' as const, cls: 'cue' as const, id: 'big-ben', why: 'tour stop parliament, cue 1 of 2', n: 3 },
+    { t: 7000, ev: 'skip' as const, cls: 'cue' as const, id: 'bridge-bell', why: 'tower-bridge: silent: muted' },
+  ];
+  const st: AudioState = { at: 70000, context: 'suspended', muted: true, volume: 0.6, masterDb: -Infinity, voices: 5, cap: 24, loading: 2, ducks: [['tour', -4], ['ride', -6]], hour: 8.25, hourSource: 'clock', stop: 'parliament', rows, journal };
+  const sorted = rowsOf(st);
+  ok(sorted.map((r) => r.id).join() === 'traffic,wind,big-ben,veh-bus,click' || sorted.map((r) => r.id).join() === 'big-ben,traffic,wind,veh-bus,click', `rows sort by bus then loudest first (${sorted.map((r) => r.id).join(' ')})`);
+  ok(sorted[0].bus === 'ambience' && sorted[sorted.length - 1].bus === 'ui' && sorted.findIndex((r) => r.bus === 'vehicles') > sorted.findIndex((r) => r.id === 'wind'), 'ambience first, then vehicles, then ui');
+  const bed = sorted.find((r) => r.id === 'traffic')!;
+  ok(/cars near 212/.test(bed.why) && /zoom 24/.test(bed.why) && /hour 08:00/.test(bed.why) && /of its ceiling/.test(bed.why), `a bed row carries its inputs: ${bed.why}`);
+  ok(rowText(bed).includes('212') && rowHtml(bed).includes('cars near 212') && rowHtml(bed).includes('-18.4 dB') && rowHtml(bed).includes('traffic.opus'), 'the bed row shows its level, take and inputs in the text and the HTML');
+  const cue = sorted.find((r) => r.id === 'big-ben')!;
+  ok(cue.cls === 'cue' && /stop parliament, cue 1 of 2, at \+0\.8 s/.test(cue.why) && rowHtml(cue).includes('11.2 s left'), 'a cue row carries its stop, its index and its moment');
+  ok(/riding c12: a bus/.test(sorted.find((r) => r.cls === 'ride')!.why) && /ui: place/.test(rowHtml(sorted.find((r) => r.cls === 'ui')!)), 'a ride row names the vehicle, a ui row its name');
+  const head = headerText(st);
+  ok(/context suspended/.test(head) && /MUTED/.test(head) && /voices 5\/24/.test(head) && /decodes in flight 2/.test(head) && /tour -4 dB, ride -6 dB/.test(head) && /hour 08:15 from the clock/.test(head) && /tour stop parliament/.test(head), `the header says the context, mute, voices, decodes, ducks and the hour: ${head}`);
+  ok(/suspended/.test(headerHtml(st)) && /muted/.test(headerHtml(st)) && /class="aro-head warn"/.test(headerHtml(st)), 'a suspended or muted context is flagged in the header');
+  ok(/class="aro-head "/.test(headerHtml({ ...st, context: 'running', muted: false })), 'a running, unmuted context is not');
+  const txt = stateText(st);
+  ok(txt.includes('cars near 212') && txt.includes('stop parliament') && txt.includes('skip cue bridge-bell') && txt.includes('big-ben ×3') && txt.includes('+5.0 s'), 'Copy text has the header, every voice with its why and the log with times and counts');
+  ok(journalHtml(journal, 70000).split('aro-log ').length - 1 === 3 && journalText(journal[1], 70000).startsWith('-65.0 s'), 'the log lists every row, newest first, as "-65.0 s" ago');
+  ok(rowText({ ...bed, db: -Infinity }).includes('-∞ dB'), 'silence reads -∞ dB');
+
+  // the engine side: one-shots list themselves, the journal is a ring of JOURNAL rows with repeats counted
+  const e = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: okFetch });
+  e.start(); await tick();
+  const tag = { id: 'bird', cls: 'event' as const, bus: 'ambience' as const, why: 'dawn chorus 05:10', db: -30, cents: 14, take: 'synth' };
+  ok(e.take(0.2, tag) && e.shots.length === 1 && e.shots[0].why === 'dawn chorus 05:10' && e.shots[0].until > e.shots[0].at, 'a tagged one-shot is listed with its why while it sounds');
+  ok(e.journal.length === 1 && e.journal[0].ev === 'start' && e.journal[0].id === 'bird', 'and starting it is a journal row');
+  e.take(0.2, tag); e.take(0.2, tag);
+  ok(e.journal.length === 1 && e.journal[0].n === 3, 'the same start repeated inside two seconds is one row with a count');
+  ok(e.take(0) && e.shots.length === 3 && e.active === 4, 'a held voice (no seconds) is not a one-shot row');
+  for (let i = 0; i < 60; i++) e.log('start', 'bed', `b${i}`, 'x');
+  ok(e.journal.length === JOURNAL && e.journal[JOURNAL - 1].id === 'b59', `the journal keeps the last ${JOURNAL} rows`);
+  ok(toDb(0.5) > -6.1 && toDb(0.5) < -5.9 && toDb(0) === -Infinity, 'gain to dB');
+
+  // the real engine feeding it: fire tags the one-shot, a bed's inputs are in words, a cue carries its stop
+  const e2 = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: okFetch });
+  e2.start(); await tick();
+  fire(e2, 'beep', { seed: 3, gain: 0.8, why: 'crossing red at 12,40, 6 tiles off' });
+  ok(e2.shots.some((x) => x.id === 'beep' && x.why === 'crossing red at 12,40, 6 tiles off' && x.cls === 'event' && x.bus === 'ambience' && typeof x.db === 'number'), 'fire() hands the trigger to the readout');
+  fire(e2, 'ui-place', { seed: 4, why: 'ui: place' });
+  ok(e2.shots.some((x) => x.id === 'ui-place' && x.cls === 'ui' && x.why === 'ui: place'), 'an interface click is class ui');
+  const src2: AmbSources = { hour: () => 8, hourSource: () => 'pinned light (a tour stop sets the hour)', camera: () => ({ x: 20, z: 20, dist: 24, map: false, rightX: 1, rightZ: 0 }), tileAt: () => 0, kindIdAt: () => 0, agents: () => Array.from({ length: 30 }, (_, i) => ({ rx: 20 + i * 0.3, rz: 20, car: true, trav: false })) };
+  const amb2 = new Ambience(e2, src2, 9);
+  amb2.frame(1000); amb2.frame(1300);
+  const beds = amb2.bedList();
+  ok(beds.length >= 5 && beds.every((b) => b.born > 0), `the ambience lists its beds (${beds.map((b) => b.id).join(' ')})`);
+  const tr = beds.find((b) => b.id === 'traffic')!;
+  ok(/cars near 30/.test(tr.why) && /zoom 24/.test(tr.why) && /hour 08:00/.test(tr.why), `the traffic bed's why is the tick's own numbers (${tr.why})`);
+  ok(amb2.hourInfo().source === 'pinned light (a tour stop sets the hour)' && amb2.hourInfo().hour === 8, 'the hour source comes through');
+  ok(e2.journal.some((j) => j.ev === 'start' && j.cls === 'bed' && j.id === 'traffic'), 'a bed starting is a journal row');
+  const tc2 = new TourCues(e2, amb2);
+  tc2.show('parliament', { cues: [{ voice: 'big-ben', at: 0.01 }, { voice: 'tube-hall', at: 0.01, loop: true }], ambience: { water: 0.5 } }, 0);
+  await new Promise((r) => setTimeout(r, 600));
+  ok(e2.shots.some((x) => x.id === 'big-ben' && x.cls === 'cue' && /tour stop parliament, cue 1 of 2/.test(x.why)), 'a one-shot cue carries its stop and index');
+  const loops = tc2.loopList();
+  ok(loops.length === 1 && loops[0].voice === 'tube-hall' && loops[0].stop === 'parliament' && loops[0].index === 2 && tc2.shown === 'parliament', 'a looping cue is listed with its stop and index');
+  ok(e2.journal.some((j) => j.cls === 'engine' && j.id === 'tour parliament') && e2.journal.some((j) => j.cls === 'cue' && j.id === 'tube-hall' && /loop/.test(j.why)), 'the stop and the loop are journal rows');
+  tc2.show('next', 'ambience');
+  ok(e2.journal.some((j) => j.ev === 'stop' && j.id === 'tube-hall' && /stop was left/.test(j.why)), 'leaving the stop journals the loop ending');
+  tc2.clear();
+  // the Shift+S key: a capture-phase listener that swallows the press, ignores typing and repeat
+  const hs: { f: (e: any) => void; capture?: boolean }[] = []; let toggled = 0;
+  bindReadoutKey({ addEventListener: (_t: 'keydown', f: (e: any) => void, c?: boolean) => void hs.push({ f, capture: c }) }, () => toggled++);
+  const press = (o: Record<string, unknown>) => { let stopped = false; hs[0].f({ code: 'KeyS', shiftKey: true, metaKey: false, ctrlKey: false, altKey: false, repeat: false, target: null, stopPropagation() { stopped = true; }, ...o }); return stopped; };
+  ok(hs[0].capture === true && press({}) === true && toggled === 1, 'Shift+S toggles, in the capture phase, and the camera never sees it');
+  ok(!press({ shiftKey: false }) && !press({ ctrlKey: true }) && !press({ metaKey: true }) && !press({ target: { tagName: 'INPUT' } }) && !press({ code: 'KeyM' }) && toggled === 1, 'S alone, Ctrl or Cmd+S, typing and other keys do not');
+  press({ repeat: true }); ok(toggled === 1, 'key repeat does not flicker it');
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\naudio check passed');

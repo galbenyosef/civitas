@@ -1,7 +1,7 @@
 import type { AudioEngine } from './engine';
 
 /**
- * The player's controls for sound (docs/audio.md): key M mutes (Shift+M is the perf readout), a toggle and a volume
+ * The player's controls for sound (docs/audio.md): key M mutes (Shift+M is the perf readout, Shift+S the audio readout), a toggle and a volume
  * slider in the help line at the bottom, a chip in the top bar, and a small "sound on" note the first time sound
  * starts. The keys and elements are bound here; the engine holds the state and keeps it in localStorage.
  */
