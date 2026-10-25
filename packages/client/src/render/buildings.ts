@@ -157,6 +157,9 @@ export class Buildings {
     (this.mesh as unknown as { _visibilityChanged: boolean })._visibilityChanged = true;
   }
 
+  /** buildings placed for a chunk (the rebuild accounting, render/chunkWork.ts) */
+  countOf(key: string): number { return this.perChunk.get(key)?.ids.length ?? 0; }
+
   clear(key: string) {
     const c = this.perChunk.get(key);
     this.signs.clear(key);

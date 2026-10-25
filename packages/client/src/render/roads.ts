@@ -166,6 +166,8 @@ interface Entry {
   chunk: ClientChunk;
   dirty: boolean; near: boolean;
   mesh: Mesh | null;
+  /** built since it came near (a chunk with no road tiles has no mesh, and must not be built again every frame for it) */
+  built: boolean;
   tiles: Map<number, TileCache>;
   /** per tile in the mesh: local index, first vertex, vertex count (heat updates) */
   ranges: number[];
@@ -231,7 +233,7 @@ export class RoadLayer {
     else { this.ctx.tile = getTile; this.ctx.aux = auxAt; }
     let e = this.byKey.get(key);
     if (!e) {
-      e = { key, cx: chunk.cx, cy: chunk.cy, chunk, dirty: true, near: false, mesh: null, tiles: new Map(), ranges: [], heat: undefined,
+      e = { key, cx: chunk.cx, cy: chunk.cy, chunk, dirty: true, near: false, mesh: null, built: false, tiles: new Map(), ranges: [], heat: undefined,
         wear: new Float32Array(N), wearAt: new Uint8Array(N), wearSeen: false, wearBuilt: 0, junctions: [], furn: [], job: null };
       this.byKey.set(key, e); this.entries.set(ckey(chunk.cx, chunk.cy), e);
     }
@@ -296,9 +298,9 @@ export class RoadLayer {
         e.near = near;
         if (e.mesh) e.mesh.visible = near;
         if (e.furn.length) this.furnDirty = true;
-        if (!near) { this.dropMesh(e); e.tiles = new Map(); e.ranges = []; e.job = null; } // far: the flat cells; free the cached tiles too
+        if (!near) { this.dropMesh(e); e.tiles = new Map(); e.ranges = []; e.job = null; e.built = false; } // far: the flat cells; free the cached tiles too
       }
-      if (near && (e.dirty || e.job || !e.mesh)) todo.push([d, e]);
+      if (near && (e.dirty || e.job || !e.built)) todo.push([d, e]);
     }
     todo.sort((a, b) => a[0] - b[0]);
     for (const [, e] of todo) if (!this.build(e, deadline)) break;
@@ -382,6 +384,9 @@ export class RoadLayer {
 
   /** the last chunk builds: time (ms), tiles described, tiles built afresh (the rest reused) */
   private builds: { ms: number; tiles: number; fresh: number }[] = [];
+  private nBuilds = 0;
+  /** street meshes finished since the page opened (the rebuild accounting, render/chunkWork.ts) */
+  buildCount() { return this.nBuilds; }
 
   /**
    * Carry a chunk's build on until `deadline` (performance.now ms): its tiles a few at a time, then the mesh. True when
@@ -452,8 +457,10 @@ export class RoadLayer {
       this.group.add(mesh);
       this.tint(e);
     }
+    if (furn.length || e.furn.length) this.furnDirty = true; // (a chunk with no streets has none, before or after)
     e.furn = furn;
-    this.furnDirty = true;
+    e.built = true;
+    this.nBuilds++;
     if (job.described) this.builds.push({ ms: job.ms + performance.now() - t0, tiles: job.described, fresh: job.fresh });
     if (this.builds.length > 64) this.builds.shift();
     return true;

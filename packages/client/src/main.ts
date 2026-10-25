@@ -12,6 +12,8 @@ import { FinancePanel } from './finance';
 import { ClientWorld } from './world';
 import { CameraRig, parseShot, urlShot, type CameraShot } from './camera';
 import { ChunkView } from './render/chunkView';
+import { ChunkWork } from './render/chunkWork';
+import { DIRTY_CAUSES, DIRTY_SHAPE, DIRTY_BUILD, DIRTY_UNDER } from './world';
 import { ParcelsView } from './render/parcels';
 import { EduHeat } from './render/eduHeat';
 import { CitizensView } from './render/citizens';
@@ -91,6 +93,29 @@ atlas.anisotropy = renderer.capabilities.getMaxAnisotropy();
 const groundMaterial = makeGroundMaterial(atlas);
 const buildings = new Buildings(buildingMaterial());
 const views = new Map<string, ChunkView>();
+/**
+ * Chunk rebuilds (render/chunkWork.ts, docs/perf.md): one chunk at a time, the most urgent first, its passes within a
+ * time box a frame, and only the passes that read what changed (world.ts DIRTY_*). The closures run at frame time.
+ */
+const SB = DIRTY_SHAPE | DIRTY_BUILD;
+const chunkWork = new ChunkWork(world, [
+  { name: 'view', reads: SB, run: (k, c) => views.get(k)!.rebuild(c, k, getTile, buildings, auxAt) },
+  { name: 'roads', reads: SB, run: (k, c) => roads.scanChunk(k, c, getTile, auxAt) }, // streets read the lots beside them (leafy sides, motorway aprons)
+  { name: 'lights', reads: DIRTY_SHAPE, run: (k, c) => lights.scanChunk(k, c, getTile, auxAt) },
+  { name: 'parks', reads: SB, run: (k, c) => parks.scanChunk(k, c, getTile) },
+  { name: 'airfield', reads: SB, run: (k, c) => airfield.scanChunk(k, c, world) },
+  { name: 'helis', reads: SB, run: (k, c) => helis.scanChunk(k, c, world) },
+  { name: 'boats', reads: SB, run: (k, c) => boatMock?.scanChunk(k, c) },
+  { name: 'trains', reads: DIRTY_SHAPE, run: (k, c) => trains.scanChunk(k, c) },
+  { name: 'junctions', reads: DIRTY_SHAPE, run: (k, c) => junctions.scanChunk(k, c) },
+  { name: 'bridges', reads: DIRTY_SHAPE, run: (k, c) => bridges.scanChunk(k, c) },
+  { name: 'landmarks', reads: SB, run: (k, c) => landmarks.scanChunk(k, c, getTile) },
+  { name: 'underground', reads: DIRTY_SHAPE | DIRTY_UNDER, run: (k, c) => underground.scanChunk(k, c) },
+  { name: 'power', reads: SB, run: (k, c) => power.scanChunk(k, c) },
+], (k) => views.has(k), (k) => buildings.countOf(k));
+/** ?chunkwork=legacy: the old invalidation and rebuild loop from the first frame (paired warm-up measurements, docs/perf.md) */
+const LEGACY_CHUNKS = new URLSearchParams(location.search).get('chunkwork') === 'legacy';
+chunkWork.legacy = world.legacyDirty = LEGACY_CHUNKS;
 const parcelsView = new ParcelsView();
 const citizens = new CitizensView();
 const lights = new TrafficLights();
@@ -208,7 +233,7 @@ trains.underAt = (x, y) => world.underAt(x, y); // tube trains follow a crossove
 scene.add(citizens.under);
 setPlatformCrowd((x0, y0, x1, y1) => citizens.platformCrowd(x0, y0, x1, y1));
 citizens.platformAlongX = (x, y) => underMask(world.underAt(x, y)) === 10; // a platform tile's axis (docs/underground.md section 1)
-const junctions = new JunctionView(world); scene.add(junctions.group); // roundabout islands, flyover decks and ramps
+const junctions = new JunctionView(world); junctions.legacySigns = LEGACY_CHUNKS; scene.add(junctions.group); // roundabout islands, flyover decks and ramps
 const junctionTools = new JunctionTools(world); // the junction tools' ghost, cost and reasons (R4)
 // utilities (utilities.ts, docs/utilities.md): reach from the tiles, the hourly node states, blackouts, the power overlay, pylons
 const power = new PowerClient(world, (k) => views.get(k)); scene.add(power.group);
@@ -648,12 +673,14 @@ function dropView(key: string) {
   helis.dropChunk(key);
   boatMock?.dropChunk(key);
   trains.dropChunk(key);
-  junctions.dropChunk(key);
   bridges.dropChunk(key);
   roads.dropChunk(key);
   landmarks.dropChunk(key);
   power.dropChunk(key);
+  chunkWork.dropChunk(key);
+  const c = world.chunks.get(key);
   world.dropChunk(key);
+  if (c) junctions.unloadChunk(key, c.cx, c.cy); else junctions.dropChunk(key); // after the world forgets it: the neighbours' signs are drawn without its tiles
 }
 setInterval(streamChunks, 300);
 
@@ -1386,11 +1413,7 @@ function frame(now: number) {
   fog.near = Math.min(rig.dist * 1.6 + 30, fog.far * 0.45);
   perf.lap('light');
 
-  let budget = 4;
-  for (const [key, v] of views) {
-    const c = world.chunks.get(key);
-    if (c?.dirty && budget-- > 0) { roads.scanChunk(key, c, getTile, auxAt); v.rebuild(c, key, getTile, buildings, auxAt); lights.scanChunk(key, c, getTile, auxAt); parks.scanChunk(key, c, getTile); airfield.scanChunk(key, c, world); helis.scanChunk(key, c, world); boatMock?.scanChunk(key, c); trains.scanChunk(key, c); junctions.scanChunk(key, c); bridges.scanChunk(key, c); landmarks.scanChunk(key, c, getTile); underground.scanChunk(key, c); power.scanChunk(key, c); c.dirty = false; }
-  }
+  chunkWork.frame(rig.camera, rig.target, dt * 1000);
   perf.lap('chunks');
   if (airfield.update(world)) planes.setAirports(airfield.airports());
   if (eduDirty && eduHeat.on) { eduHeat.rebuild(world.parcels.values()); eduDirty = false; }
@@ -1514,7 +1537,7 @@ const perfUrl = () => {
   if (viaWs) return `http://${params.get('ws')}/api/perf`;
   return `${apiBase()}/api/perf${demoParam ? `?demo=${demoParam}` : cityParam ? `?city=${cityParam}` : ''}`;
 };
-const perf = new PerfHud({ net, renderer, agentsDrawn: () => citizens.count, chunksLoaded: () => views.size, audio: () => audio.stats, perfUrl }, hud, document.getElementById('perfBtn'), { forceOn: cityParam > 0 });
+const perf = new PerfHud({ net, renderer, agentsDrawn: () => citizens.count, chunksLoaded: () => views.size, audio: () => audio.stats, perfUrl, chunks: () => ({ marks: world.dirtyStats.marks, rebuilds: chunkWork.stats.count, rebuildMs: chunkWork.stats.totalMs, pending: chunkWork.pending }) }, hud, document.getElementById('perfBtn'), { forceOn: cityParam > 0 });
 /** Sound (audio/, docs/audio.md): what the client already knows, read every 250 ms; nothing starts before the first click or key */
 const rideNow = (): RideNow | null => {
   if (fpv.mode === 'off') return null;
@@ -1546,6 +1569,22 @@ const audio = new Audio({
 ui.onSound = (id) => audio.ui(id);
 fireworks.onShell = (x, z, at, size) => audio.firework(x, z, at, size);
 Object.assign((window as any).msc, { perf, lines, audio });
+/** the chunk rebuild scheduler (render/chunkWork.ts); setLegacy(true) brings back the old invalidation and loop for paired measurements */
+(window as any).msc.chunkWork = Object.assign(chunkWork, {
+  setLegacy(on: boolean) { chunkWork.legacy = on; world.legacyDirty = on; if (junctions.legacySigns !== on) { junctions.legacySigns = on; if (!on) junctions.signs.rebuild(); } },
+});
+/** the chunk rebuild accounting over a window: dirty marks a second by cause (and the tiles the messages carried, and changed), rebuilds a second, their cost by pass */
+(window as any).msc.chunkStats = {
+  rebuilds: (s = 30) => chunkWork.stats.summary(s),
+  watch: async (seconds = 30) => {
+    const st = world.dirtyStats, snap = () => JSON.parse(JSON.stringify({ marks: st.marks, sets: st.sets, tiles: st.tiles, changed: st.changed }));
+    const a = snap(), roads0 = roads.buildCount(), t0 = performance.now();
+    await new Promise((r) => setTimeout(r, seconds * 1000));
+    const b = snap(), dt = (performance.now() - t0) / 1000, r2 = (v: number) => Math.round(v * 100) / 100;
+    const rate = (k: 'marks' | 'sets' | 'tiles' | 'changed') => Object.fromEntries(DIRTY_CAUSES.map((c) => [c, r2((b[k][c] - a[k][c]) / dt)]));
+    return { seconds: r2(dt), marksPerSecond: rate('marks'), setsPerSecond: rate('sets'), tilesPerSecond: rate('tiles'), changedPerSecond: rate('changed'), roadBuildsPerSecond: r2((roads.buildCount() - roads0) / dt), rebuilds: chunkWork.stats.summary(seconds) };
+  },
+};
 const localUi = local ? mountLocalUi(local, (kind, msg) => ui.toast(kind, msg), () => world.myPlayer?.name ?? localStorage.getItem('msimcity.name') ?? 'Mayor') : null;
 if (local) {
   (window as any).msc.local = local;

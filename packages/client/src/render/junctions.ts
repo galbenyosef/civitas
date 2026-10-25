@@ -131,7 +131,8 @@ export class JunctionView {
       }
     }
     if (lifts.length) this.liftByChunk.set(key, lifts);
-    if (this.world.roadRules.size) this.signs.rebuild(); // a sign's tiles may have just arrived
+    // a sign's tiles may have just arrived or changed: this chunk's signs and its neighbours' (the old way rebuilt every sign in the world, for paired measurements)
+    if (this.legacySigns) { if (this.world.roadRules.size) this.signs.rebuildAllUncached(); } else this.signs.chunkChanged(chunk.cx, chunk.cy);
     if (!any) return;
     const m = new Mesh(k.build(), this.mat);
     m.castShadow = true; m.receiveShadow = true;
@@ -139,6 +140,10 @@ export class JunctionView {
     this.meshes.set(key, m);
     this.group.add(m);
   }
+  /** rebuild every sign on each chunk scan, as before the jitter fix (msc.chunkWork.setLegacy) */
+  legacySigns = false;
+  /** A chunk left the view: its signs go, and its neighbours' are drawn again without its tiles. */
+  unloadChunk(key: string, cx: number, cy: number) { this.dropChunk(key); if (!this.legacySigns) this.signs.chunkChanged(cx, cy); }
   dropChunk(key: string) {
     const m = this.meshes.get(key);
     if (m) { this.group.remove(m); m.geometry.dispose(); this.meshes.delete(key); }

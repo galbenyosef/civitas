@@ -38,7 +38,12 @@ export interface PerfSources {
   audio?: () => { tickMs: number; maxMs: number; voices: number; started: boolean; muted: boolean; events?: AudioEvent[]; ticks?: () => { at: number; ms: number }[] };
   /** where the server's /api/perf is (with ?demo= or ?city= for a child world); null when there is none (local mode) */
   perfUrl?: () => string | null;
+  /** the chunk rebuild counters since the page opened (render/chunkWork.ts, world.ts DirtyStats): dirty marks by cause, rebuilds and their ms, chunks waiting */
+  chunks?: () => { marks: Record<string, number>; rebuilds: number; rebuildMs: number; pending: number };
 }
+
+/** one second's chunk rebuild figures (PerfSources.chunks): dirty marks by cause, rebuilds, their ms, chunks waiting at the end */
+export interface ChunkSecond { marks: Record<string, number>; rebuilds: number; ms: number; pending: number }
 
 /** one second of the readout: what the frame loop did and what else happened */
 export interface Second {
@@ -48,6 +53,7 @@ export interface Second {
   msgs: number; decodeMs: number; longTasks: number; longWorst: number; measures: number;
   heapUsed?: number; heapTotal?: number;
   calls: number; triangles: number;
+  chunks?: ChunkSecond;
 }
 
 export interface FrameRecord { at: number; dt: number; phases: number[]; net: number }
@@ -59,6 +65,8 @@ export interface JitterReport {
   server: { statsGaps: number; worstGapMs: number; late: boolean; tick: { avg: number; p95: number; max: number } | null };
   audio: { started: boolean; muted: boolean; ticks: number; tickMedianMs: number; tickWorstMs: number; decodes: number; crossfades: number; slowFramesNearAudio: number; slowFramesNearAudioEvent: number };
   longTasks: { count: number; worstMs: number };
+  /** chunk rebuilds over the window (docs/perf.md): a second, their ms a second, dirty marks a second by cause, the most chunks waiting */
+  chunks?: { rebuildsPerSecond: number; rebuildMsPerSecond: number; marksPerSecond: Record<string, number>; pendingMax: number };
   verdict: string;
 }
 
@@ -110,6 +118,7 @@ export class PerfHud {
   private measures = 0;
   private tracing = false;
   private netAtFrame = 0;
+  private chunks0: { marks: Record<string, number>; rebuilds: number; rebuildMs: number } | null = null;
 
   constructor(private src: PerfSources, mount: HTMLElement, private chip: HTMLElement | null, opts: { forceOn?: boolean } = {}) {
     this.el = document.createElement('div');
@@ -191,6 +200,7 @@ export class PerfHud {
       at: now, fps: rate.fps, ms: rate.ms, worst: rate.worst, over20: this.over20, over33: this.over33, over50: this.over50, causes,
       msgs: rx.msgs - this.rx0.msgs, decodeMs: (rx.decodeMs - this.rx0.decodeMs) / perFrame, longTasks: lt.length, longWorst: lt.reduce((m, t) => Math.max(m, t.ms), 0), measures: this.measures,
       ...(mem ? { heapUsed: mem.usedJSHeapSize, heapTotal: mem.totalJSHeapSize } : {}), calls: this.calls, triangles: this.triangles,
+      ...(this.src.chunks ? { chunks: this.chunkSecond(span) } : {}),
     };
     this.seconds.push(sec);
     if (this.seconds.length > SECONDS) this.seconds.shift();
@@ -198,6 +208,15 @@ export class PerfHud {
     this.readout = { ...rate, calls: this.calls, agents: this.src.agentsDrawn(), chunks: this.src.chunksLoaded(), tick: this.tick, causes: Object.fromEntries(CAUSES.map((c, i) => [c, causes[i]])) as Record<Cause, number>, over20: this.over20, over50: this.over50, longTasks: lt.length };
     this.last = now; this.frames = 0; this.frameSum = 0; this.frameWorst = 0; this.over20 = this.over33 = this.over50 = 0; this.secSum.fill(0); this.measures = 0;
     if (this.on) this.render(rate, sec);
+  }
+
+  /** this second's chunk rebuild figures, from the counters' change since the last (per second of `span` ms) */
+  private chunkSecond(span: number): ChunkSecond {
+    const c = this.src.chunks!(), p = this.chunks0 ?? c, per = 1000 / span;
+    const marks: Record<string, number> = {};
+    for (const k of Object.keys(c.marks)) marks[k] = (c.marks[k] - (p.marks[k] ?? 0)) * per;
+    this.chunks0 = { marks: { ...c.marks }, rebuilds: c.rebuilds, rebuildMs: c.rebuildMs };
+    return { marks, rebuilds: (c.rebuilds - p.rebuilds) * per, ms: (c.rebuildMs - p.rebuildMs) * per, pending: c.pending };
   }
 
   /** Attribute the time since the last lap (or the top of the frame) to `phase`; main.ts calls this after each stage of the frame. */
@@ -235,6 +254,7 @@ export class PerfHud {
       row('client', `<span class="${fpsCls}"><b>${r.fps.toFixed(0)}</b> fps · <b>${r.ms.toFixed(1)}</b> ms/frame <i>(worst ${r.worst.toFixed(0)})</i></span>`) +
       (hist ? row('frames this second', hist) : '') +
       budget +
+      (sec?.chunks ? row('chunk rebuilds', `<b>${sec.chunks.rebuilds.toFixed(0)}</b>/s · <b>${sec.chunks.ms.toFixed(1)}</b> ms · ${sec.chunks.pending} waiting${marksText(sec.chunks.marks) ? ` · <i>dirty marks/s</i> ${marksText(sec.chunks.marks)}` : ''}`, sec.chunks.ms > 100 ? ' warn' : '') : '') +
       heap +
       row('drawn', `<b>${this.src.agentsDrawn().toLocaleString()}</b> agents · <b>${this.src.chunksLoaded()}</b> chunks · <b>${this.calls.toLocaleString()}</b> draw calls · ${(this.triangles / 1000).toFixed(0)}k tris`) +
       (a ? row('sound', a.started ? (a.muted ? 'muted' : `<b>${a.tickMs.toFixed(2)}</b> ms/tick <i>(p95 ${a.maxMs.toFixed(2)})</i> · <b>${a.voices}</b> voices${decodes || fades ? ` · <i>last minute</i> ${decodes} decodes, ${fades} beds/fades` : ''}`) : 'waiting for a click') : '');
@@ -326,16 +346,27 @@ export class PerfHud {
     const fps = frames.length ? (frames.length * 1000) / (to - from) : 0;
     const worst = frames.reduce((m, f) => Math.max(m, f.dt), 0);
     const top = causes[0];
+    // the chunk rebuilds over the window, from the per-second figures
+    const cs = this.seconds.filter((s) => s.chunks && s.at > from + 500 && s.at <= to + 500);
+    let chunks: JitterReport['chunks'];
+    if (cs.length) {
+      const marks: Record<string, number> = {};
+      for (const s of cs) for (const [k, v] of Object.entries(s.chunks!.marks)) marks[k] = (marks[k] ?? 0) + v / cs.length;
+      for (const k of Object.keys(marks)) marks[k] = Math.round(marks[k] * 100) / 100;
+      chunks = { rebuildsPerSecond: Math.round((cs.reduce((a, s) => a + s.chunks!.rebuilds, 0) / cs.length) * 10) / 10, rebuildMsPerSecond: Math.round((cs.reduce((a, s) => a + s.chunks!.ms, 0) / cs.length) * 10) / 10, marksPerSecond: marks, pendingMax: cs.reduce((a, s) => Math.max(a, s.chunks!.pending), 0) };
+    }
+    const chunkLine = chunks ? ` Chunks: ${chunks.rebuildsPerSecond} rebuilds/s (${chunks.rebuildMsPerSecond} ms/s, up to ${chunks.pendingMax} waiting)${marksText(chunks.marksPerSecond) ? `, dirty marks/s ${marksText(chunks.marksPerSecond)}` : ''}.` : '';
     const audioShare = slow.length ? Math.round((100 * (slowNearAudio + slowNearEvent)) / slow.length) : 0;
     const verdict = !slow.length
-      ? `No frames over ${SLOW_MS} ms in ${seconds.toFixed(0)} s (${fps.toFixed(0)} fps, worst ${worst.toFixed(0)} ms).`
-      : `${slow.length} of ${frames.length} frames over ${SLOW_MS} ms (worst ${worst.toFixed(0)} ms, ${fps.toFixed(0)} fps). Top cause: ${top.cause} (${top.share}% of slow frames, ${top.excessMs} ms excess)${causes[1] ? `, then ${causes[1].cause} (${causes[1].share}%)` : ''}${causes[2] ? `, ${causes[2].cause} (${causes[2].share}%)` : ''}. Server ticks ${gaps ? `were late (${gaps} stats gaps over 1.5 s, worst ${(worstGap / 1000).toFixed(1)} s)` : 'arrived on time'}. Audio ${a?.started ? (a.muted ? 'muted' : `on: ${slowNearAudio + slowNearEvent} slow frames (${audioShare}%) coincided with an audio tick over 1 ms or a decode/bed change`) : 'never started'}. ${lt.length} long tasks (worst ${ltWorst.toFixed(0)} ms).`;
+      ? `No frames over ${SLOW_MS} ms in ${seconds.toFixed(0)} s (${fps.toFixed(0)} fps, worst ${worst.toFixed(0)} ms).${chunkLine}`
+      : `${slow.length} of ${frames.length} frames over ${SLOW_MS} ms (worst ${worst.toFixed(0)} ms, ${fps.toFixed(0)} fps). Top cause: ${top.cause} (${top.share}% of slow frames, ${top.excessMs} ms excess)${causes[1] ? `, then ${causes[1].cause} (${causes[1].share}%)` : ''}${causes[2] ? `, ${causes[2].cause} (${causes[2].share}%)` : ''}. Server ticks ${gaps ? `were late (${gaps} stats gaps over 1.5 s, worst ${(worstGap / 1000).toFixed(1)} s)` : 'arrived on time'}. Audio ${a?.started ? (a.muted ? 'muted' : `on: ${slowNearAudio + slowNearEvent} slow frames (${audioShare}%) coincided with an audio tick over 1 ms or a decode/bed change`) : 'never started'}. ${lt.length} long tasks (worst ${ltWorst.toFixed(0)} ms).${chunkLine}`;
     this.note(verdict);
     return {
       seconds, frames: frames.length, slow: slow.length, worstMs: Math.round(worst * 10) / 10, fps: Math.round(fps * 10) / 10, causes,
       server: { statsGaps: gaps, worstGapMs: Math.round(worstGap), late: gaps > 0, tick: this.tick },
       audio: { started: !!a?.started, muted: !!a?.muted, ticks: ticks.length, tickMedianMs: med(ticks.map((t) => t.ms)), tickWorstMs: ticks.reduce((m, t) => Math.max(m, t.ms), 0), decodes: events.filter((e) => e.kind === 'decode').length, crossfades: events.filter((e) => e.kind === 'crossfade').length, slowFramesNearAudio: slowNearAudio, slowFramesNearAudioEvent: slowNearEvent },
       longTasks: { count: lt.length, worstMs: Math.round(ltWorst * 10) / 10 },
+      ...(chunks ? { chunks } : {}),
       verdict,
     };
   }
@@ -356,6 +387,11 @@ export class PerfHud {
       longTasks: this.longTasks.filter((t) => t.at >= from && t.at <= to).length,
     };
   }
+}
+
+/** dirty marks a second by cause, the ones over 0.05, largest first: "tiles 10.0, tiles-edge 1.0" */
+function marksText(m: Record<string, number>): string {
+  return Object.entries(m).filter(([, v]) => v >= 0.05).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', ');
 }
 
 /** a frame's time split by cause (CAUSES order): its phases, the net handlers before it, and what is left to the browser */

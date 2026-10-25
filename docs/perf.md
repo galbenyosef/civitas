@@ -119,7 +119,8 @@ once the phases and the handlers are taken off: the browser's compositing and la
 The readout shows, once a second: the server tick line and the stream as before; fps, ms/frame and the worst frame;
 frames over 20 and 50 ms this second and the long tasks (`PerformanceObserver` on `longtask`, with the worst); **one row
 per cause** with its ms per frame and share, largest first (a cause over 8 ms is amber); the JS heap when
-`performance.memory` exists (Chrome); agents, chunks, draw calls and triangles; and the sound line with the ambience
+`performance.memory` exists (Chrome); **chunk rebuilds** (rebuilds a second, their ms, chunks waiting, and dirty marks a
+second by cause, from `render/chunkWork.ts` and `world.ts DirtyStats`); agents, chunks, draw calls and triangles; and the sound line with the ambience
 tick's median and p95, the voices, and the last minute's decodes and bed changes. `msc.perf.readout` has the last
 second, `msc.perf.seconds` the last sixty, `msc.perf.distribution(30)` the frame-time distribution (mean, p50, p95, p99,
 max, frames over 20/33/50 ms, mean ms per cause) over the last 30 s.
@@ -145,7 +146,8 @@ the same time shows the phases in its Timings track.
 three causes** (for each slow frame, the cause with the largest excess over its own median across the window; the
 causes ranked by the slow frames they take and the excess ms they add); whether the **server's ticks were late** (gaps
 over 1.5 s between stats messages, which come once a second); whether the **audio coincided** (slow frames within an
-ambience tick over 1 ms, or a decode, bed start, cross-fade or context start); and the long tasks. The verdict is one
+ambience tick over 1 ms, or a decode, bed start, cross-fade or context start); the long tasks; and the **chunk rebuilds**
+(rebuilds a second, their ms a second, the most chunks waiting, dirty marks a second by cause: `report.chunks`). The verdict is one
 paragraph, shown under the readout and returned with the figures. `msc.perf.jitterBetween(t0, t1)` runs it over frames
 already recorded.
 
@@ -166,12 +168,129 @@ with the committed baseline `packages/server/perf-baseline.json`:
 the change and say in the commit why the figures moved. The baseline records the node version, the date and the load
 average it was taken under. `--ticks N` and `--json FILE` for probes; `--cost` for the laps' own cost.
 
-A client headless frame check was not added. `render-smooth.ts` measures the drawing's smoothness offline, not frame time;
+A client headless frame check was not added (the chunk rebuilds have an offline one: `chunk-check.ts`, below). `render-smooth.ts` measures the drawing's smoothness offline, not frame time;
 the only frame measurement is a real browser, and headless Chrome (Playwright, Chrome 155, with and without the GPU) could not
 run the client on this Mac at all (the page's main thread blocked for 90 s after load, then the target closed) while the
 real Chrome ran it at 120 fps. In the real Chrome the frame times moved by more between two windows a minute apart than
 any regression would (machine load, game hour, the tab hidden by other tabs), so a threshold would only hold against a
 same-session control: `msc.perf.distribution()` before and after, in the same page, as the jitter study below did.
+
+## Chunk rebuilds: the cause and the fix (2026-10-25, card be3cf1c6)
+
+The finding below ("What the jitter is") named the chunk rebuilds. This is why they were slow and frequent, and what changed.
+Measured in the real Chrome on London (27,728 citizens) at the welcome view (143 chunks), the counters added for it:
+`msc.chunkStats.watch(30)` (dirty marks a second by cause, the tile entries received and how many changed, rebuilds a second,
+their cost pass by pass) and `msc.chunkStats.rebuilds(30)`.
+
+### The cause
+
+Game 11:07 to 12:36, 30 s, before the change:
+
+| | |
+| --- | --- |
+| frames over 33 ms | 142 of 953 (32 fps, p95 175 ms, p99 250, worst 308), 99% attributed to `chunks` (19.4 ms a frame) |
+| chunk rebuilds | 10.9 a second, mean 56 ms (p50 54, worst 94): 18.4 s of the 30 |
+| dirty marks a second | `tiles` 10.0, `tiles-edge` 1.0; `chunk`, `aux`, `sub`, `under` 0 |
+| tile entries received | 11.8 a second, every one a real change: construction progress (a shell rising a quarter) 70%, a building finishing (level, site flag, progress) 24%, a site starting 6%. None touched a road bit, terrain, aux byte or parcel id |
+| cost of one rebuild by pass | junctions 51.4 ms (91%), bridges 2.2, lights 0.9, ground and buildings (`chunkView.rebuild`) 0.8, roads 0.5, the other eight 0.3 together |
+
+Two things multiplied. **What a rebuild cost**: `JunctionView.scanChunk` ended with `signs.rebuild()`, which built every
+turn-ban, no-entry, HGV and 20 zone sign in the world as one merged mesh: London's 199 road rule records, 126k vertices, 54 ms
+timed alone, on every chunk scan whatever had changed (and for each of the 143 chunks at page load). **How often**: a growing
+London sends about ten building changes a second to a page at the welcome view, each marking its whole chunk for all thirteen
+passes, and an edge tile its neighbour too. Not the cause: `parcels` (5 a second) and `traffic` messages mark no chunk (parcels
+redraw the parcel layer and re-check the lights, 0.2 ms; traffic only retints the ground's heat attribute). At 03:58 the same
+page had no marks and no rebuilds.
+
+### The fix (client only; the wire and the sim are untouched)
+
+- **Signs per chunk** (`render/junctionSigns.ts`): one mesh per chunk for the records anchored in it. A chunk whose road shape
+  changes, or that arrives or leaves, redraws its own signs and its eight neighbours'. Each record's signs are kept as built, with a
+  key of everything they read (the rules version, the record, the road and class bytes within three tiles of its junction), and
+  built again only when the key changes, so redrawing a chunk is a merge of kept parts. A rule changing rebuilds them all, as
+  before. Chunk (-1,-1) holds 116 of London's records: its first build is about 40 ms, a redraw with nothing changed about 1 ms.
+  `chunk-check.ts` checks that the per-chunk meshes hold exactly the vertices of the old all-London build.
+- **A dirty mask per chunk** (`world.ts`, `DIRTY_SHAPE`, `DIRTY_BUILD`, `DIRTY_UNDER`): a tile entry whose road bit or terrain
+  changed, and any aux byte, is the road shape; any other change to a tile word, a sub byte or a parcel id is the buildings; an
+  under byte is the underground. An entry that changes nothing marks nothing. Only a road-shape change on an edge tile marks the
+  chunk next door (buildings there face roads, not lots). Each pass declares what it reads (`main.ts`, the `ChunkWork` pass list):
+  junctions, bridges, signals and rails read the road shape only; the ground and buildings, streets, parks, the airfield,
+  helipads, harbours, landmarks and power read both; the underground reads the road shape and the under bytes. A building rising
+  in a lot now redraws the ground, buildings, streets (they read the lots beside them) and the cheap scans: 1.5 to 2 ms.
+- **One time-boxed, prioritised rebuild a frame** (`render/chunkWork.ts`): the marked chunks wait in a set (a chunk marked
+  several times while it waits is rebuilt once). Each frame the scheduler carries on the chunk under way, or takes the most urgent
+  one: on screen first (the camera's frustum against the chunk's box), then nearest the camera's focus. It runs that chunk's
+  passes one after another until the frame's box is spent, **6 ms, or 3 ms when the frame before took over 25 ms**; a pass is never
+  split, at least one runs a frame, and only one chunk is rebuilt at a time. The chunk **under the camera** (its centre within 0.9
+  of a chunk of the focus) finishes within two frames whatever its passes cost. A chunk marked again while its rebuild is under
+  way goes back in the queue and is rebuilt again after; one dropped mid-rebuild is abandoned. Off-screen chunks keep their mark
+  and wait while anything on screen is pending, and come first when they come into view; the queue holds each loaded chunk at
+  most once, so it needs no cap. The streets were already sliced this way (R1, `roads.ts`, 6 ms a frame) and still are.
+- **Streets with nothing to draw** (`render/roads.ts`): a near chunk with no road tiles (the river) has no mesh, which read as
+  "not built", so it was rebuilt every frame and the street furniture (7,330 pieces at one street view) refilled each time: 846
+  street builds a second by the Thames at street zoom. Built once now: 4.9 a second, the `lod` phase 1.6 to 0.5 ms a frame.
+
+`msc.chunkWork.setLegacy(true)` (or `?chunkwork=legacy` from load) brings back the old marks, the old loop (up to four whole
+rebuilds a frame, every pass) and the old all-London sign rebuild in the same page, for paired measurements.
+
+### Before and after
+
+Paired in one page at the welcome view: 12 s windows alternating old and new from game 10:00 to 17:40, six of each, the
+Mac at load average 5 to 23:
+
+| | old | new |
+| --- | --- | --- |
+| frames, fps | 3,184, 44.5 | 4,642, 64.6 |
+| frames over 33 ms | 257 | 273 |
+| of which a chunk rebuild was the cause | **216** | **0** |
+| frames over 50 ms | 214 | 80 |
+| p99 in the midday windows | 225 to 254 ms | 34 to 76 ms |
+| worst frame | 274 ms | 82 ms |
+| `chunks` ms a frame | 12.2 | 0.19 |
+| rebuilds a second | 7.2 | 7.2 |
+| ms in rebuilds a second | 397 | 11.9 |
+| mean rebuild | 53 to 56 ms | 1.5 to 2.0 ms |
+| dirty marks a second (`tiles`, `tiles-edge`) | 6.5, 0.7 | 7.3, 0 |
+
+Every slow frame the rebuilds caused is gone. The count of frames over 33 ms did not fall, because what is left is the
+machine: frames of 41.7 ms (two and a half vsyncs) in `render` and `outside` while other agents' processes held the CPU and
+the GPU (7.3 ms of `render` a frame in the new windows), the same floor the night baseline showed with no rebuild at all
+(105 of 1,798 frames over 33 ms at 03:58, all `outside`). The frames over 50 ms fell by 63%, the p99 by about four fifths.
+An earlier paired run (07:30 to 12:50, load 16 to 23) gave the same picture: 32 to 57 chunk-caused slow frames a window
+before, none after.
+
+At street zoom over a growing district (`?demo=london&at=-16,-48&dist=28&yaw=30&pitch=40`), new code, game
+09:00 to 11:05 (42 s): 5 of 4,095 frames over 33 ms (worst 34 ms, 109 fps, all `outside`); 3.3 rebuilds a second, every one
+for the buildings only, mean 2.0 ms, worst 5 ms; a chunk on screen was stale for 7 ms at the median, 28 ms at p95 and
+35 ms at worst from its first mark to its rebuild done (`rebuilds().lagVisible`). Shots of the old and new paths at the same spot
+seconds apart are on the card: the same city.
+
+**The warm-up** (a fresh page until it draws 30 frames a second), paired loads at the welcome view, load average about 5:
+
+| | old | new |
+| --- | --- | --- |
+| to 30 fps | 10.9 s, 10.6 s (12.1 s before the change) | 2.1 s, 2.1 s (the first second the readout reports) |
+| every chunk drawn | 13.5 s, 9.9 s | about 5.5 s |
+| on the way | 4 to 5 fps for six seconds, `chunks` 200 to 230 ms a frame | 58 to 90 fps, `chunks` 1 to 3 ms a frame |
+
+Nine tenths of the old warm-up were the 143 first rebuilds at 56 ms each, four a frame. Now the chunk under the camera is
+drawn in the first frames and the rest follow one a frame, nearest first (a far chunk can show unbuilt for up to two seconds
+while the page opens: the visible lag's p95 at load). The first frame is about 250 ms in both paths. The boat and helicopter
+timetables did not show in the warm-up's phases (`vehicles` 0 to 4 ms a frame), so they were left as they are. The showreel
+script's 60 to 110 s was measured under Playwright; its `SETTLE` wait can be shortened once it has been run again.
+
+**Guard.** `npx tsx packages/client/scripts/chunk-check.ts` checks the bits each message sets, that an unchanged entry or a
+building on an edge marks nothing more, the scheduler's order (under the camera, on screen, nearest), one chunk a frame, the
+time box after short and long frames, a chunk marked mid-rebuild rebuilt again after, building-only rebuilds skipping the
+road-shape passes, and the signs (identical to the old build, reused when nothing changed, a road beside a junction rebuilding
+only the records within three tiles). A threshold on marks a second in a browser would not be stable on this Mac (it moves with
+the game hour and the machine); the manual check is the readout's **chunk rebuilds** row or the jitter finder's chunk sentence
+on London at midday: about 10 dirty marks and rebuilds a second at the welcome view, **a few ms of rebuilds a second, and no
+slow frame attributed to `chunks`**. More than about 100 ms of rebuilds a second turns the row amber.
+
+Checks on the branch (2026-10-25), all passing: `npm run typecheck`, `npm run demo:check`, `npm run perf:check` (the server is
+untouched: the same game, shares within their limits, no baseline update), `gesture-check`, `tv-check`, `audio-check`,
+`chunk-check`, `npm run build`. No server file changed, so `ab.ts` was not rerun.
 
 ## Checks
 
@@ -209,6 +328,8 @@ states was the machine and the game hour (other agents' tabs in the same Chrome 
 fix: the cheap part (the tick) is already cheap, and decodes are off the main thread.
 
 ### What the jitter is: chunk rebuilds
+
+(Fixed the same day: see "Chunk rebuilds: the cause and the fix" above.)
 
 Nearly every frame over 33 ms is one in which a dirty chunk was rebuilt: `chunkView.rebuild` plus the eleven
 `scanChunk` passes (roads, lights, parks, airfield, helipads, trains, junctions, bridges, landmarks, underground, power),

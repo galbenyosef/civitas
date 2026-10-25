@@ -1,7 +1,8 @@
 import { Group, Mesh, MeshLambertMaterial, Matrix4, Quaternion, Vector3, CylinderGeometry, BoxGeometry, Shape, ShapeGeometry, Color, type BufferGeometry } from 'three';
 import {
-  hash2, isRoad, isClassAux, isPedestrianAux, junctionGroup, carStepOk, inGroup, armState, Turn, StreetRule, humpAt, signalArms, armCount, type ArmState, type JunctionGroup, type RoadRule,
+  CHUNK_SIZE, chunkKey, hash2, isRoad, isClassAux, isPedestrianAux, junctionGroup, carStepOk, inGroup, armState, Turn, StreetRule, humpAt, signalArms, armCount, type ArmState, type JunctionGroup, type RoadRule,
 } from '@msimcity/shared';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Kit } from './kit';
 
 /** DIRS order (E, W, S, N) as steps, and the opposite way */
@@ -14,6 +15,8 @@ export interface SignsWorld {
   getTile(x: number, y: number): number | undefined;
   auxAt(x: number, y: number): number;
   roadRules: Map<string, RoadRule>;
+  /** bumps whenever the records change (client world.ts) */
+  rulesVersion?: number;
 }
 
 /**
@@ -24,12 +27,24 @@ export interface SignsWorld {
  * into it: a red disc with a white bar, on both kerbs (now and then one of the pair is missing). Each sign its own
  * height, size, lean, turn and fading (organic rule).
  *
- * All the signs are one merged mesh (one draw call, none without signs), rebuilt when a rule changes or a chunk comes
- * or goes. The Turn rules tool's ghost: `preview` shows the sign the next click would put up, translucent.
+ * One merged mesh per chunk, for the records anchored in it (a chunk without signs draws nothing): a chunk's road shape
+ * changing redraws its own signs and its neighbours' (a sign reads the tiles round its junction, which may be next
+ * door), and a rule changing redraws them all. Each record's signs are kept as built, with a key of everything they
+ * read (the records, the record, and the road and class bytes within three tiles of its junction), and built again
+ * only when that key changes; a chunk's mesh is the kept parts merged. Rebuilding every sign in London for each chunk
+ * was 54 ms (docs/perf.md, "Chunk rebuilds: the cause and the fix").
+ * The Turn rules tool's ghost: `preview` shows the sign the next click would put up, translucent.
  */
 export class JunctionSigns {
   group = new Group();
-  private mesh: Mesh | null = null;
+  private meshes = new Map<string, Mesh>();
+  /** the records by the chunk of their anchor tile, for the rules version `byChunkAt` */
+  private byChunk = new Map<string, [number, number, RoadRule][]>();
+  private byChunkAt = -1;
+  /** each record's signs as last built (by anchor "x,y"), and the key of what they read then */
+  private kept = new Map<string, { key: string; geo: BufferGeometry | null }>();
+  /** records whose signs were built afresh, and reused, since the page opened (msc.junctions.signs.counts) */
+  counts = { built: 0, reused: 0 };
   private ghost: Mesh | null = null;
   private ghostKey = '';
   private mat = new MeshLambertMaterial({ vertexColors: true, flatShading: true });
@@ -39,24 +54,100 @@ export class JunctionSigns {
 
   constructor(private world: SignsWorld) { this.group.name = 'junction signs'; }
 
-  /** Build every sign again (a rule changed, or a chunk with one came or went). */
+  /** Build every sign again (a rule changed). */
   rebuild() {
-    if (this.mesh) { this.group.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh = null; }
+    this.index();
+    for (const [at, v] of this.kept) if (!this.world.roadRules.has(at)) { v.geo?.dispose(); this.kept.delete(at); } // records taken away
+    for (const key of [...this.meshes.keys()]) this.drop(key);
+    for (const key of this.byChunk.keys()) this.buildChunk(key);
+  }
+
+  /** The old way, for paired measurements (msc.chunkWork.setLegacy): every sign in the world built afresh as one mesh. */
+  rebuildAllUncached() {
+    for (const key of [...this.meshes.keys()]) this.drop(key);
     const k = new Kit();
     let any = false;
     for (const [key, r] of this.world.roadRules) {
-      if (r.st) { const [x, y] = key.split(',').map(Number); any = this.streetSigns(k, x, y, r.st) || any; }
-      if (!r.ban && !r.noEntry) continue;
       const [x, y] = key.split(',').map(Number);
+      if (r.st) any = this.streetSigns(k, x, y, r.st) || any;
+      if (!r.ban && !r.noEntry) continue;
       const g = this.groupAt(x, y);
       if (!g) continue;
       for (let arm = 0; arm < 4; arm++) any = this.arm(k, g, arm, r, 1) || any;
     }
     if (!any) return;
     const m = new Mesh(k.build(), this.mat);
-    m.matrixAutoUpdate = false; // (a sign's shadow is a sliver: no shadow pass for them)
-    this.mesh = m;
+    m.matrixAutoUpdate = false;
+    this.meshes.set('*', m);
     this.group.add(m);
+  }
+
+  /** Chunk (cx, cy)'s road shape changed, or it came or went: its signs and those of its eight neighbours go up again. */
+  chunkChanged(cx: number, cy: number) {
+    this.index();
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const key = chunkKey(cx + dx, cy + dy);
+      if (this.byChunk.has(key) || this.meshes.has(key)) this.buildChunk(key);
+    }
+  }
+
+  /** the records grouped by chunk, again when the rules have changed since */
+  private index() {
+    const v = this.world.rulesVersion ?? 0;
+    if (v === this.byChunkAt && this.byChunk.size) return;
+    this.byChunkAt = v;
+    this.byChunk.clear();
+    for (const [key, r] of this.world.roadRules) {
+      if (!r.st && !r.ban && !r.noEntry) continue;
+      const [x, y] = key.split(',').map(Number), ck = chunkKey(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE));
+      let list = this.byChunk.get(ck);
+      if (!list) this.byChunk.set(ck, list = []);
+      list.push([x, y, r]);
+    }
+  }
+
+  private drop(key: string) {
+    const m = this.meshes.get(key);
+    if (m) { this.group.remove(m); m.geometry.dispose(); this.meshes.delete(key); }
+  }
+
+  /** the signs of the records anchored in one chunk (a sign whose tiles are not loaded is left out until they are) */
+  private buildChunk(key: string) {
+    this.drop(key);
+    const geos: BufferGeometry[] = [];
+    for (const [x, y, r] of this.byChunk.get(key) ?? []) {
+      if (this.world.getTile(x, y) === undefined) continue; // its chunk is not loaded
+      const g = this.recordSigns(x, y, r);
+      if (g) geos.push(g);
+    }
+    if (!geos.length) return;
+    const m = new Mesh(mergeGeometries(geos, false)!, this.mat);
+    m.matrixAutoUpdate = false; // (a sign's shadow is a sliver: no shadow pass for them)
+    this.meshes.set(key, m);
+    this.group.add(m);
+  }
+
+  /** One record's signs, kept from the last build while nothing they read has changed. */
+  private recordSigns(x: number, y: number, r: RoadRule): BufferGeometry | null {
+    const at = `${x},${y}`, g = r.ban || r.noEntry ? this.groupAt(x, y) : null;
+    // what the signs read: the records (a 20 zone's humps run along its street), this record, and the road and class
+    // bytes round the junction (its group, the arms, their neighbours: three tiles is the farthest any of them looks)
+    let x0 = x - 3, y0 = y - 3, x1 = x + 3, y1 = y + 3;
+    if (g) { x0 = Math.min(x0, g.x - 3); y0 = Math.min(y0, g.y - 3); x1 = Math.max(x1, g.x + g.w + 2); y1 = Math.max(y1, g.y + g.h + 2); }
+    const parts: (string | number)[] = [this.world.rulesVersion ?? 0, r.st ?? 0, r.ban ?? 0, r.noEntry ?? 0, r.pelican ? 1 : 0];
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) { const t = this.world.getTile(tx, ty); parts.push(t === undefined ? -1 : isRoad(t) ? this.ca(tx, ty) + 1 : 0); }
+    const key = parts.join(',');
+    const was = this.kept.get(at);
+    if (was && was.key === key) { this.counts.reused++; return was.geo; }
+    this.counts.built++;
+    was?.geo?.dispose();
+    const k = new Kit();
+    let any = false;
+    if (r.st) any = this.streetSigns(k, x, y, r.st) || any;
+    if (g) for (let arm = 0; arm < 4; arm++) any = this.arm(k, g, arm, r, 1) || any;
+    const geo = any ? k.build() : null;
+    this.kept.set(at, { key, geo });
+    return geo;
   }
 
   /**

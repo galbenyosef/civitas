@@ -97,7 +97,8 @@ FPS and frame time, the frames over 20 and 50 ms and the long tasks, and the **f
 phases, the network handlers, and what is left to the browser) with its ms and share; agents drawn, chunks loaded, draw calls, the JS
 heap and the sound engine's cost per 250 ms tick. **trace 10 s** downloads a trace (ours and a Chrome/Perfetto one, with the server's
 `/api/perf`); **jitter 10 s** (`msc.perf.jitter(10)`) names the causes of the frames over 33 ms and says whether the server was late or
-the audio coincided. The server has `/api/perf` (tick phases, worst ticks, long-tick traces, GC, lag, memory), `POST /api/perf/profile`
+the audio coincided; a **chunk rebuilds** row and sentence say how many chunks were rebuilt, their ms and what marked them (one
+chunk at a time, about 6 ms a frame, `client/src/render/chunkWork.ts`). The server has `/api/perf` (tick phases, worst ticks, long-tick traces, GC, lag, memory), `POST /api/perf/profile`
 (an inspector CPU profile, summarised) and `/metrics` for Prometheus; `npm run perf:check` guards the tick against a committed
 baseline. All in [docs/perf.md](docs/perf.md).
 Load tests: `nice -n 10 npx tsx packages/server/src/loadtest/run.ts --districts 2 --days 3`
