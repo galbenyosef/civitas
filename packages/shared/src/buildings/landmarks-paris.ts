@@ -1,6 +1,6 @@
 import type { KindDef, Op } from './schema';
 import { library, theatre } from './leisure';
-import { slab, tree, lampPost, flags, PAVING } from './tierkit';
+import { slab, tree, lampPost, flags, PAVING, ASPHALT } from './tierkit';
 import { haikuEiffelOps, haikuArcOps, haikuNotreDameOps, haikuLouvreOps, haikuOperaOps, haikuSacreCoeurOps } from './landmarks-paris-haiku';
 import { sonnetEiffelOps, sonnetArcOps, sonnetNotreDameOps, sonnetLouvreOps, sonnetOperaOps, sonnetSacreCoeurOps } from './landmarks-paris-sonnet';
 import { opusEiffelOps, opusArcOps, opusNotreDameOps, opusLouvreOps, opusOperaOps, opusSacreCoeurOps } from './landmarks-paris-opus';
@@ -172,6 +172,40 @@ const arcOps = (): Op[] => {
   return ops;
 };
 
+const arcOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  ops.push(['cyl', 0.94, 0.94, 0.012, 0, 0.01, 0, ASPHALT, 32]);
+  ops.push(['cyl', 0.73, 0.73, 0.018, 0, 0.022, 0, PAVING, 32]);
+  for (const sx of [-1, 1]) {
+    ops.push(['box', 0.38, 0.96, 0.62, sx * 0.47, 0.04, 0, STONE]);
+    ops.push(['box', 0.43, 0.08, 0.67, sx * 0.47, 0.04, 0, STONE_DK]);
+    for (const sz of [-1, 1]) {
+      ops.push(['box', 0.25, 0.38, 0.025, sx * 0.47, 0.4, sz * 0.323, STONE_DK]);
+      ops.push(['box', 0.08, 0.22, 0.035, sx * 0.47, 0.48, sz * 0.34, STONE]);
+      ops.push(['box', 0.2, 0.045, 0.035, sx * 0.47, 0.73, sz * 0.34, STONE]);
+    }
+  }
+  for (let i = 0; i <= 10; i++) {
+    const a = i * Math.PI / 10;
+    const x = Math.cos(a) * 0.31, y = 0.66 + Math.sin(a) * 0.31;
+    ops.push(['box', 0.115, 0.115, 0.64, x, y - 0.0575, 0, i === 5 ? STONE_DK : STONE]);
+  }
+  ops.push(['box', 1.3, 0.09, 0.68, 0, 1.0, 0, STONE_DK]);
+  ops.push(['box', 1.24, 0.3, 0.62, 0, 1.09, 0, STONE]);
+  for (const z of [-0.323, 0.323]) {
+    for (let i = 0; i < 12; i++) ops.push(['box', 0.055, 0.12, 0.025, -0.55 + i * 0.1, 1.17, z, STONE_DK]);
+    ops.push(['box', 1.1, 0.035, 0.035, 0, 1.32, z, STONE_DK]);
+  }
+  ops.push(['box', 1.34, 0.065, 0.72, 0, 1.39, 0, STONE_DK]);
+  ops.push(['box', 1.18, 0.045, 0.56, 0, 1.455, 0, STONE]);
+  for (const x of [-0.52, -0.26, 0, 0.26, 0.52]) ops.push(['box', 0.12, 0.1, 0.025, x, 1.22, 0.337, STONE_DK]);
+  ops.push(['box', 0.32, 0.025, 0.18, 0, 0.045, 0.45, 'stone']);
+  ops.push(['cyl', 0.035, 0.045, 0.025, 0, 0.07, 0.45, 'gold', 12]);
+  ops.push(['lathe', 0, 0.095, 0.45, 'marquee', [0.018, 0, 0.035, 0.03, 0.012, 0.07, 0, 0.09], { seg: 8 }]);
+  ops.push(...tree(-0.8, -0.78, 0.48), ...tree(0.8, -0.78, 0.48));
+  return ops;
+};
+
 export const arcDeTriomphe: KindDef = {
   id: 'arc-de-triomphe', name: 'the Arc de Triomphe', code: library.code, kindId: 134, family: 'leisure', tier: 2,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'paris',
@@ -188,6 +222,7 @@ export const arcDeTriomphe: KindDef = {
   levels: [{
     capacity: 26, wage: 16, cost: 11000, upkeep: 55, work: 2800, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'an open stepped vault with eleven voussoirs, sculpted piers and a friezed attic over the eternal flame', height: 1.5, ops: arcOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the great arch on its roundabout, the vault over the unknown soldier, the friezes of the attic above', height: 1.66, ops: arcOps() },
       { author: 'claude-haiku-5-5', draft: true, name: 'the arch on its roundabout, two piers and the dark archway, the attic and stepped roof above', height: 1.34, ops: haikuArcOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the great arch on its roundabout, two sculpted piers around the dark vault, the friezed attic and stepped crown', height: 1.27, ops: sonnetArcOps() },
