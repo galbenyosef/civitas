@@ -86,6 +86,7 @@ export class TourCues {
     if (!def) { this.note({ voice: cue.voice, kind, at, gain, result: 'NO SUCH VOICE' }); return; }
     if (!eng.ready) { this.note({ voice: cue.voice, kind, at, gain, result: 'silent: no gesture yet' }); return; }
     if (eng.muted) { this.note({ voice: cue.voice, kind, at, gain, result: 'silent: muted' }); return; }
+    if (eng.ctx && eng.ctx.state !== 'running') { this.note({ voice: cue.voice, kind, at, gain, result: `silent: the audio context is ${eng.ctx.state} (a hidden tab suspends it)` }); return; }
     if (!def.takes?.length) { this.note({ voice: cue.voice, kind, at, gain, result: 'silent: no recording' }); return; }
     const born = performance.now();
     const go = () => {

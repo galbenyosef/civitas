@@ -122,8 +122,8 @@ export const SCENES = {
   // the street over a tube station, with a train heard below
   'tube-entrance': s([c('tube-arrive', 0.9, 0.5), c('fx-chime', 5, 0.5), c('bike-bell', 3, 0.4)], { crowd: 0.6, traffic: 0.4 }),
   // underground: nothing of the street, the hall and the trains (the timings follow the arrival clip: tube-arrive, doors open, chime, the gap)
-  'tube-line': s([loop('tube-hall', 0.8), c('tube-arrive', 0.5, 1), c('fx-hiss', 7, 0.8), c('fx-chime', 8, 0.8), c('tube-gap', 9.4, 0.7)], { traffic: 0, crowd: 0.05, wind: 0.1, water: 0, industry: 0 }, 3),
-  'tube-crossover': s([loop('tube-hall', 0.8), c('tube-arrive', 0.5, 1), c('tube-arrive', 5.5, 0.8), c('fx-chime', 8, 0.7), c('fx-hiss', 8.8, 0.7)], { traffic: 0, crowd: 0.05, wind: 0.1, water: 0, industry: 0 }, 3),
+  'tube-line': s([loop('tube-hall', 0.8), c('tube-arrive', 0.5, 1), c('fx-hiss', 10, 0.8), c('fx-chime', 11, 0.8), c('tube-gap', 12.2, 0.7)], { traffic: 0, crowd: 0.05, wind: 0.1, water: 0, industry: 0 }, 3),
+  'tube-crossover': s([loop('tube-hall', 0.8), c('tube-arrive', 0.5, 1), c('tube-arrive', 5.5, 0.8), c('fx-hiss', 11, 0.7), c('fx-chime', 12, 0.7)], { traffic: 0, crowd: 0.05, wind: 0.1, water: 0, industry: 0 }, 3),
   'tube-station': s([loop('tube-hall', 0.7), c('fx-chime', 0.8, 0.8), c('tube-arrive', 2, 0.9), c('tube-gap', 8, 0.6)], { traffic: 0.1, crowd: 0.4, wind: 0.1 }),
   // ---- the airport
   airport: s([c('station-chime', 0.4, 0.8), c('jet-takeoff', 1.2, 0.9), c('plane-over', 6, 0.7)], { traffic: 0.3, crowd: 0.45, wind: 0.25 }),
