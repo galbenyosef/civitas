@@ -151,6 +151,65 @@ const palaceOfWestminster = (): Op[] => {
   return ops;
 };
 
+const palaceOfWestminsterK31 = (): Op[] => {
+  const ops: Op[] = [slab(4, 4, PAVING)];
+  ops.push(['box', 1.25, 0.78, 3.55, -1.15, 0.02, -0.05, LIME]);
+  ops.push(['roof', 1.18, 0.25, 3.48, -1.15, 0.8, -0.05, LEAD, true]);
+  for (const z of [-1.5, -1.05, -0.6, -0.15, 0.3, 0.75, 1.2]) {
+    for (const y of [0.16, 0.43]) {
+      ops.push(['box', 0.018, 0.19, 0.16, -1.784, y, z, 'dark']);
+      ops.push(['box', 0.018, 0.19, 0.16, -0.516, y, z, 'dark']);
+    }
+    ops.push(...pinnacles(2, z - 0.12, z + 0.12, -1.75, 0.83, false, LIME_DK, 1.3));
+  }
+  ops.push(['box', 1.4, 0.68, 0.65, 0.1, 0.02, -0.25, LIME]);
+  ops.push(['roof', 1.38, 0.35, 0.63, 0.1, 0.7, -0.25, LEAD]);
+  ops.push(['box', 0.65, 0.65, 1.4, 0.95, 0.02, 0.6, LIME_DK]);
+  ops.push(['roof', 0.67, 0.48, 1.42, 0.95, 0.67, 0.6, LEAD, true]);
+  ops.push(['lathe', 0, 0.7, -0.25, LIME, [0.24, 0, 0.24, 0.45, 0.19, 0.48, 0.19, 0.55], { seg: 8 }]);
+  ops.push(['lathe', 0, 1.25, -0.25, LEAD, [0.2, 0, 0.13, 0.32, 0.03, 0.8, 0, 0.9], { seg: 8 }]);
+  const vx = 0.9, vz = -1.42;
+  ops.push(['box', 0.82, 2.3, 0.82, vx, 0.02, vz, LIME]);
+  for (const x of [vx - 0.24, vx, vx + 0.24]) {
+    for (const y of [0.25, 0.65, 1.05, 1.45, 1.85]) ops.push(['box', 0.12, 0.24, 0.018, x, y, vz + 0.42, 'dark']);
+  }
+  ops.push(['box', 0.9, 0.08, 0.9, vx, 2.32, vz, LIME_DK]);
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    ops.push(['taper', 0.11, 0.11, 0.015, 0.015, 0.58, vx + sx * 0.36, 2.4, vz + sz * 0.36, LIME_DK]);
+  }
+  ops.push(...unionFlag(vx, 2.4, vz, 0.42));
+  const x = BB.x, z = BB.z;
+  ops.push(['box', 0.43, 1.5, 0.43, x, 0.02, z, LIME_DK]);
+  for (const dx of [-0.11, 0.11]) {
+    for (const y of [0.16, 0.46, 0.76, 1.06]) {
+      ops.push(['box', 0.07, 0.22, 0.015, x + dx, y, z + 0.223, 'dark']);
+      ops.push(['box', 0.07, 0.22, 0.015, x + dx, y, z - 0.223, 'dark']);
+    }
+  }
+  for (const dz of [-0.11, 0.11]) {
+    for (const y of [0.16, 0.46, 0.76, 1.06]) {
+      ops.push(['box', 0.015, 0.22, 0.07, x + 0.223, y, z + dz, 'dark']);
+      ops.push(['box', 0.015, 0.22, 0.07, x - 0.223, y, z + dz, 'dark']);
+    }
+  }
+  ops.push(['box', 0.5, 0.46, 0.5, x, 1.52, z, LIME]);
+  for (const dz of [-1, 1]) {
+    ops.push(['box', 0.35, 0.35, 0.018, x, 1.575, z + dz * 0.251, 'gold']);
+    ops.push(['lathe', x, BB.y, z + dz * 0.262, 'white', [0, 0, 0.145, 0, 0.145, 0.008], { seg: 24, axis: 'z' }]);
+  }
+  for (const dx of [-1, 1]) {
+    ops.push(['box', 0.018, 0.35, 0.35, x + dx * 0.251, 1.575, z, 'gold']);
+    ops.push(['lathe', x + dx * 0.262, BB.y, z, 'white', [0, 0, 0.145, 0, 0.145, 0.008], { seg: 24, axis: 'x' }]);
+  }
+  ops.push(['box', 0.43, 0.25, 0.43, x, 1.98, z, 'dark']);
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) ops.push(['box', 0.075, 0.29, 0.075, x + sx * 0.19, 1.96, z + sz * 0.19, LIME]);
+  ops.push(['taper', 0.5, 0.5, 0.26, 0.26, 0.18, x, 2.25, z, LEAD]);
+  ops.push(['taper', 0.27, 0.27, 0.015, 0.015, 0.65, x, 2.43, z, LEAD]);
+  ops.push(['cyl', 0.012, 0.02, 0.12, x, 3.08, z, 'gold', 6]);
+  ops.push(...tree(0.25, 1.55, 0.7), ...tree(1.65, 1.65, 0.65));
+  return ops;
+};
+
 export const parliament: KindDef = {
   id: 'parliament', name: 'the Houses of Parliament', code: Zone.Office, kindId: 96, family: 'office', tier: 6,
   flags: { civic: true, workplace: true }, windows: 'civic', ...landmark,
@@ -162,6 +221,7 @@ export const parliament: KindDef = {
   levels: [{
     capacity: 260, wage: 30, cost: 24000, upkeep: 120, work: 4200, parking: { surface: 0, underground: 40 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'a clockmaker’s Gothic palace with lancet pairs, oversized four-face dials and a forest of pinnacles', height: 3.2, ops: palaceOfWestminsterK31() },
       { name: 'Gothic river front with the Victoria Tower, Westminster Hall and Elizabeth Tower', height: 3.21, ops: palaceOfWestminster() },
     ],
   }],
