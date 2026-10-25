@@ -1,0 +1,11 @@
+{
+  "servers": [
+    {
+      "name": "Civitas public showcase",
+      "url": "https://civitas.reneo.app",
+      "region": "UK",
+      "status": "closed",
+      "note": "Accounts first: the public server opens for play when sign-in lands. Until then it is the read-only showcase."
+    }
+  ]
+}

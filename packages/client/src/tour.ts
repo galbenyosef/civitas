@@ -23,7 +23,11 @@ export const demoWsUrl = (id: DemoId) => `${apiBase().replace(/^http/, 'ws')}/de
 
 export interface DemoInfo {
   id: DemoId; name: string; blurb: string; port: number; status: 'stopped' | 'starting' | 'running' | 'stopping' | 'resetting';
+  /** `town`: a sample city on its own map (London), not the 3×3 showcase town; `hero`: its card picture on the home page (DemoDef.hero) */
+  town?: string; hero?: string;
   saved: boolean; snapshot: boolean; citizens?: number; clients?: number; fill?: number; fillPopulation?: number; startHash?: string; error?: string;
+  /** the warm run (server testcities.ts): `saveCurrent` the save was built from today's scenario; `queue` 0 building now, 1 next, -1 not waiting; `kept` left running */
+  saveCurrent?: boolean; warming?: boolean; queue?: number; kept?: boolean; scenarioHash?: string;
 }
 export async function demoList(): Promise<DemoInfo[] | null> {
   try {
@@ -69,7 +73,7 @@ export function showDemoBanner(id: DemoId, params: URLSearchParams, mount: HTMLE
   el.id = 'cityBanner';
   el.className = 'demo';
   el.innerHTML = `${DEMO_BY_ID.get(id)?.name ?? 'Demo'}: ${readOnly ? 'a read-only showcase · look around, follow anyone, take the tour' : 'a sandbox, not the live world'}`
-    + (home ? ` · <a href="${location.pathname}?${back.toString()}">back to the live world</a>` : '');
+    + (home ? ` · <a href="${location.pathname}?${back.toString() || 'go'}">back to the live world</a>` : '');
   mount.appendChild(el);
 }
 

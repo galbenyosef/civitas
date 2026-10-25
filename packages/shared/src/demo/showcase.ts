@@ -231,6 +231,9 @@ export interface DemoDef {
   tour?: string[];
   /** the welcome stop's camera, when not the 3×3 town's */
   view?: Pick<TourStop, 'focus' | 'dist' | 'yaw' | 'pitch'>;
+  /** The card picture on the home page (client landing.ts), a URL the page can load. Usually leave it out: a file named after the id in packages/client/src/heroes/
+   *  (paris.webp, london.jpg; png, svg too; about 960×540) is found by the build. With neither, the page draws a placeholder card from the name and blurb (docs/demo.md, "The home page") */
+  hero?: string;
 }
 
 /** The town under every demo: seedCity options. Deterministic: same seed, same districts, same town. */

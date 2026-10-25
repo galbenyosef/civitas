@@ -6,7 +6,7 @@ are done (card f8c2a1d5), **E** (build) and **C** (worker host + persistence) ar
 
 ## Done so far (phases D and F)
 
-Try it: online build, join form, **Play offline** (reloads into `?local`); or `npm run build:local` and serve `packages/client/dist-local/`
+Try it: the online server's home page (`/`, **Play**, docs/demo.md "The home page") links to the offline build, which the game server serves itself at **`/play/`** (the Dockerfile builds it too; `PLAY_DIR` moves it, `/api/config` says `play`), with **Continue**, **New game from zero** (`/play/?new=zero`) and **Sandbox** (`?new=sandbox`) opening the saves screen's New game fold; the same saves are used on `?local` of the online build (one origin, one IndexedDB database). The static build still works on any host; the brand in its top bar leads back to `/` only when it finds the online server's `/api/config` beside it. Or: online build, join form, **Play offline** (reloads into `?local`); or `npm run build:local` and serve `packages/client/dist-local/`
 (`cd packages/client && npx vite preview --mode offline --host 0.0.0.0 --port 4174`; the PWA part needs https or `http://localhost`, see below).
 
 * **Join form (`local/ui.ts`).** Online page: a **Play offline** button under Join world (not on `?ws=`, `?city=` or demo pages); it reloads into `?local`

@@ -18,8 +18,15 @@ npm install
 npm run dev          # server on :8080 and Vite client on :5173, both bound to 0.0.0.0
 ```
 
-Open `http://<your-lan-ip>:5173/` (the Vite banner lists the addresses), pick a
-name, and you are in. Every browser that joins shares the same world.
+### Opening the game
+
+Open `http://<your-lan-ip>:5173/` (the Vite banner lists the addresses). The page is a home page with three ways in (docs/demo.md, "The home page"):
+
+1. **Explore a city**: a card for every demo the server lists (London, the showcase, the focused demos), live status while one is built; **Open** goes to `?demo=<id>`, read-only on a public showcase.
+2. **Play**: your own city in this browser, no server and no account: **Continue**, **New game from zero** or **Sandbox**. The game server serves the offline build at `/play/`, saves live in this browser (docs/local-mode.md).
+3. **Multiplayer**: the public servers in `packages/server/servers.json` (ours is listed as closed until sign-in exists), and on a dev or UAT server "This server's live world" with the mayor-name join form, folded.
+
+Every browser that joins a live world shares it. A link with any query (`?demo=london`, `?name=Ana`, `?ws=host:port`, `?local`, `?at=x,y`) skips the home page and opens the game as before; `/?go` is the game's bare page (the join form, or `DEFAULT_DEMO`).
 
 Buildings are data: `packages/shared/src/buildings/` holds one file per kind family, and
 `npm run buildings:compile` (run automatically by dev and build) turns it into the tables the
@@ -27,11 +34,11 @@ game reads. `/viewer.html` shows every kind, level and design on a turntable by 
 Format and a worked example: `docs/buildings.md`. `npm run buildings:check` is its snapshot test.
 Landmarks (a famous building, a town hall, a monument): `docs/landmarks.md` is a brief a person or a model can follow on its own, with a template, a worked example and a draft path (`landmark-drafts.ts`, viewer tag `draft`); `npm run landmarks:check` checks them.
 
-Production: `npm run build` then `npm start`. The server then serves the built
-client and the WebSocket on one port (default 8080). A `Dockerfile` is included;
+Production: `npm run build` (add `npm run build:local` for `/play/`) then `npm start`. The server then serves the built
+client, the offline build under `/play/` and the WebSocket on one port (default 8080). A `Dockerfile` is included;
 mount `/data` to keep the world across restarts.
 
-Environment: `PORT`, `HOST`, `SEED` (new worlds only), `WORLD_FILE`, `STATIC_DIR`.
+Environment: `PORT`, `HOST`, `SEED` (new worlds only), `WORLD_FILE`, `STATIC_DIR`, `PLAY_DIR` (the offline build), `SERVERS_FILE` (the Multiplayer list), `GIT_SHA` (the home page footer's build id; a Docker build arg).
 Dev knobs: `SIM_STEPS=10` fast-forwards (ten simulation ticks per interval),
 `SEED_BUILT=3` starts a new world with the Commons already built to that level,
 and a file named `RESET` next to the world file makes the next start discard it.
@@ -43,8 +50,9 @@ the HTTP API refuses demo stop and reset and test-city start and stop (403); sta
 visitor gets in. The page hides the tool bar, the treasury, the tech tree, Reset demo and the context menu's changes, and joins
 at once as a made-up "Visitor 1234" instead of showing the join form. `DEFAULT_DEMO=<id>` (e.g. `london`) sends a page opened
 without `?demo=`, `?ws=` or `?city=` to that demo instead of the live world, and the server starts it as it starts; with
-`SPECTATE` it is then the only demo the server lists, starts or joins (a `?demo=<other>` link opens it instead). The page
+`SPECTATE` the server lists, starts and joins only the default, the warmed and the kept demos (a `?demo=<other>` link opens the default instead). The page
 reads both from `GET /api/config`; each world also says `spectate` in its welcome. Without them nothing changes.
+On a showcase the server also builds its sample cities itself (`WARM_DEMOS`, default all, one at a time; `KEEP_DEMOS`, default `DEFAULT_DEMO`, stay running) and builds again any whose scenario changed since its save (`docs/demo.md`, "Warming and rebuilding").
 `DEFAULT_VIEW="x,y,dist,yaw,pitch[,hour]"` (yaw and pitch in degrees, the hour freezes the lighting) is the camera's opening
 shot on a bare page (no camera parameters, no `?demo=` or `?city=`: the `DEFAULT_DEMO` or the live world), also through
 `/api/config`, so it can be retuned on a running deployment by changing the env and restarting. `msc.viewString()` in the

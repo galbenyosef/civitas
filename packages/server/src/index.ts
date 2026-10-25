@@ -5,14 +5,14 @@ import { existsSync, renameSync, unlinkSync, readFileSync, copyFileSync } from '
 import { networkInterfaces } from 'node:os';
 import { join, extname, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TICK_MS, DEMO_TOWN, isDemoId, type ServerConfig } from '@msimcity/shared';
+import { TICK_MS, DEMO_TOWN, DEMOS, isDemoId, type DemoId, type ServerConfig } from '@msimcity/shared';
 import { World } from './world';
 import { createGame, tuneEconomy } from './game';
 import { WsSource } from './transport-ws';
 import { loadWorld, saveWorld } from './store';
 import { seedCommons, seedFrontier } from './seed';
 import { seedCity } from './loadtest/cities';
-import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, stopsChildrenOn } from './testcities';
+import { TestCities, testCitiesAvailable, worldLauncherAvailable, watchIdle, stopsChildrenOn, writeDemoMeta } from './testcities';
 import { fillCity } from './fill';
 import { seedDemoTown, seedDemoNetwork, seedDemoStudents, seedDemoGraves, fillDemo, seededRandom, worldHash } from './demo/seed';
 import { seedDemoAdverts } from './demo/adverts';
@@ -23,6 +23,11 @@ const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const DATA = resolve(process.env.WORLD_FILE ?? join(here, '../../../data/world.json'));
 const STATIC = resolve(process.env.STATIC_DIR ?? join(here, '../../client/dist'));
+/** The offline build (npm run build:local, relative paths) served under /play/ so the home page can offer the in-browser game from this very site (docs/local-mode.md) */
+const PLAY = resolve(process.env.PLAY_DIR ?? join(here, '../../client/dist-local'));
+const playAvailable = () => existsSync(join(PLAY, 'index.html'));
+/** The public servers the home page lists under Multiplayer (`GET /api/servers`): name, url, region, status 'open' | 'closed' | 'coming', note; read on each request */
+const SERVERS_FILE = resolve(process.env.SERVERS_FILE ?? join(here, '../servers.json'));
 const SAVE_EVERY_MS = 30_000;
 /** Dev knobs: SIM_STEPS runs several simulation ticks per interval (fast-forward); a RESET marker next to the
  *  world file makes the next start discard the world and reseed; SEED_BUILT pre-builds the Commons at that level. */
@@ -51,6 +56,21 @@ const DEFAULT_DEMO = isDemoId(process.env.DEFAULT_DEMO) ? process.env.DEFAULT_DE
  *  the hour freezes the lighting; client camera.ts CameraShot), through /api/config, so a deployment can retune it without a rebuild */
 const DEFAULT_VIEW = /^\s*-?[\d.]+(\s*,\s*-?[\d.]+){4,5}\s*$/.test(process.env.DEFAULT_VIEW ?? '') ? process.env.DEFAULT_VIEW!.replace(/\s+/g, '') : null;
 if (process.env.DEFAULT_VIEW && !DEFAULT_VIEW) console.error(`DEFAULT_VIEW=${process.env.DEFAULT_VIEW} is not x,y,dist,yaw,pitch[,hour]; ignored`);
+/** WARM_DEMOS=all | <id>,<id>: the demos this server builds at start, one after another, so a visitor finds them ready (testcities.ts warm). `all` is every
+ *  demo with a `town` (the sample cities); the default is `all` on a SPECTATE showcase and none elsewhere. KEEP_DEMOS=<ids> (default: DEFAULT_DEMO only,
+ *  which is always kept) are left running and never idle-stop; the other warmed demos save and stop (they resume in seconds on Open). DEFAULT_DEMO is
+ *  warmed first and the kept demos are warmed too. On a showcase with a DEFAULT_DEMO the allowed demos are the union of the three. */
+const demoIds = (name: string, v: string): DemoId[] => {
+  const out: DemoId[] = [];
+  for (const tok of v.split(/[\s,]+/).map((t) => t.trim().toLowerCase()).filter((t) => t && t !== 'none')) {
+    if (tok === 'all') out.push(...DEMOS.filter((d) => d.town).map((d) => d.id));
+    else if (isDemoId(tok)) out.push(tok);
+    else console.error(`${name}: ${tok} is not a demo; ignored`);
+  }
+  return out;
+};
+const KEEP_DEMOS = new Set<DemoId>([...(DEFAULT_DEMO ? [DEFAULT_DEMO] : []), ...demoIds('KEEP_DEMOS', process.env.KEEP_DEMOS ?? '')]);
+const WARM_DEMOS = [...new Set<DemoId>([...(DEFAULT_DEMO ? [DEFAULT_DEMO] : []), ...demoIds('WARM_DEMOS', process.env.WARM_DEMOS ?? (SPECTATE ? 'all' : '')), ...KEEP_DEMOS])];
 if (process.env.DEFAULT_DEMO && !DEFAULT_DEMO) console.error(`DEFAULT_DEMO=${process.env.DEFAULT_DEMO} is not a demo; the page opens the live world`);
 
 // ---- world ---------------------------------------------------------------------
@@ -112,31 +132,50 @@ let ready = !needsFill;
 let fillProgress: { tick: number; of: number; pop: number } | undefined;
 /** the live server's test-city launcher (dev only; a test city itself has none) */
 const testCities = worldLauncherAvailable() // demos on every main server, test cities on dev servers only
-  ? new TestCities({ entry: fileURLToPath(import.meta.url), staticDir: STATIC, dataDir: join(dirname(DATA), 'test-cities'), cwd: join(here, '..'), cities: testCitiesAvailable(), demoDir: join(dirname(DATA), 'demos'), spectate: SPECTATE, ...(SPECTATE && DEFAULT_DEMO ? { onlyDemo: DEFAULT_DEMO } : {}) })
+  ? new TestCities({ entry: fileURLToPath(import.meta.url), staticDir: STATIC, dataDir: join(dirname(DATA), 'test-cities'), cwd: join(here, '..'), cities: testCitiesAvailable(), demoDir: join(dirname(DATA), 'demos'), spectate: SPECTATE, warm: WARM_DEMOS, keep: KEEP_DEMOS, ...(SPECTATE && DEFAULT_DEMO ? { allowed: new Set(WARM_DEMOS) } : {}) })
   : null;
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
-  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json', '.opus': 'audio/ogg; codecs=opus',
+  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json', '.webmanifest': 'application/manifest+json', '.opus': 'audio/ogg; codecs=opus',
 };
 async function serve(req: IncomingMessage, res: ServerResponse) {
   if (req.url === '/healthz') {
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify({
       ok: true, chunks: world!.chunks.size, citizens: world!.citizens.size, clients: net.connections,
-      pid: process.pid, day: world!.day, dayFrac: sim.dayFrac, ready, ...(CITY ? { districts: CITY } : {}), ...(DEMO ? { demo: DEMO, startHash } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(fillProgress && !ready ? { fill: fillProgress } : {}),
+      pid: process.pid, rss: process.memoryUsage().rss, day: world!.day, dayFrac: sim.dayFrac, ready, ...(CITY ? { districts: CITY } : {}), ...(DEMO ? { demo: DEMO, startHash } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(fillProgress && !ready ? { fill: fillProgress } : {}),
       ...(net.tickStats ? { tickAvg: net.tickStats.avg, tickP95: net.tickStats.p95, tickMax: net.tickStats.max } : {}),
     }));
   }
   if (req.url?.split('?')[0] === '/api/config') {
-    const cfg: ServerConfig = { ...(SPECTATE ? { spectate: true } : {}), ...(DEFAULT_DEMO && !CHILD ? { defaultDemo: DEFAULT_DEMO } : {}), ...(DEFAULT_VIEW && !CHILD ? { defaultView: DEFAULT_VIEW } : {}) };
+    const cfg: ServerConfig = { ...(playAvailable() ? { play: true } : {}), ...(SPECTATE ? { spectate: true } : {}), ...(DEFAULT_DEMO && !CHILD ? { defaultDemo: DEFAULT_DEMO, ...(SPECTATE ? { demos: WARM_DEMOS } : {}) } : {}), ...(DEFAULT_VIEW && !CHILD ? { defaultView: DEFAULT_VIEW } : {}) };
     res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
     return res.end(JSON.stringify(cfg));
+  }
+  if (req.url?.split('?')[0] === '/api/servers') {
+    res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
+    try {
+      const j = JSON.parse(readFileSync(SERVERS_FILE, 'utf8')) as { servers?: unknown };
+      return res.end(JSON.stringify({ servers: Array.isArray(j.servers) ? j.servers : [] }));
+    } catch { return res.end('{"servers":[]}'); } // no file, or one that does not parse: an empty list, which the page says in words
   }
   if (testCities?.handle(req, res)) return;
   if (['/api/test-cities', '/api/demos'].includes(req.url?.split('?')[0] ?? '')) { res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' }); return res.end('{"available":false}'); }
   if (!existsSync(STATIC)) { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('msimcity server running. Build the client (npm run build) or use the Vite dev server.\n'); }
   const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
+  if (urlPath === '/play' || urlPath.startsWith('/play/')) { // the offline build: its own root, no fallback to the online page (it has a service worker and a scope of its own)
+    if (!playAvailable()) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('The offline build is not on this server (npm run build:local).\n'); }
+    if (urlPath === '/play') { res.writeHead(302, { location: '/play/' + (req.url?.includes('?') ? req.url.slice(req.url.indexOf('?')) : '') }); return res.end(); }
+    let f = join(PLAY, urlPath.slice('/play/'.length) || 'index.html');
+    if (!f.startsWith(PLAY)) { res.writeHead(403); return res.end(); }
+    try {
+      if ((await stat(f)).isDirectory()) f = join(f, 'index.html');
+      const body = await readFile(f);
+      res.writeHead(200, { 'content-type': MIME[extname(f)] ?? 'application/octet-stream', ...(f.endsWith('sw.js') ? { 'cache-control': 'no-cache' } : {}) }); // the service worker script is always revalidated
+      return res.end(body);
+    } catch { res.writeHead(404); return res.end(); }
+  }
   let file = join(STATIC, urlPath === '/' ? 'index.html' : urlPath);
   if (!file.startsWith(STATIC)) { res.writeHead(403); return res.end(); }
   try {
@@ -179,7 +218,7 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => {
 http.listen(PORT, HOST, async () => {
   const lan = Object.values(networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal && !i.address.startsWith('169.254.'))?.address;
   console.log(`civitas server listening on http://${lan ?? HOST}:${PORT}  (ws same port)${SPECTATE ? ', read-only (SPECTATE)' : ''}${DEFAULT_DEMO && !CHILD ? `, default demo ${DEFAULT_DEMO}` : ''}`);
-  if (DEFAULT_DEMO && testCities) void testCities.startDemo(DEFAULT_DEMO);
+  if (testCities && WARM_DEMOS.length) void testCities.warm(); // the default demo first, then the rest, one child at a time
   if (needsFill && DEMO) {
     net.accepting = false;
     const t0 = performance.now();
@@ -197,6 +236,7 @@ http.listen(PORT, HOST, async () => {
     console.log(`demo ${DEMO} filled: ${r.pop} citizens after ${(r.ticks / 2400).toFixed(2)} days in ${((performance.now() - t0) / 1000).toFixed(1)} s, hash ${startHash}${students ? `, ${students} students enrolled` : ''}`);
     save('fill');
     if (DEMO_SNAPSHOT) try { copyFileSync(DATA, DEMO_SNAPSHOT); } catch (e) { console.error('demo snapshot failed', e); }
+    try { const m = writeDemoMeta(DATA, DEMO, world!.citizens.size); console.log(`demo ${DEMO}: recorded scenario ${m.scenarioHash}`); } catch (e) { console.error('demo meta failed', e); } // last: a save without it is treated as out of date
   } else if (needsFill) {
     net.accepting = false;
     const fires = game.fires.enabled; game.fires.enabled = false;
@@ -208,6 +248,6 @@ http.listen(PORT, HOST, async () => {
     save('fill');
   }
   // a child world looks after itself: no clients for TEST_CITY_IDLE_MS and it saves and exits, parent or no parent
-  if (CHILD) watchIdle(() => net.connections, () => { console.log(`${DEMO ? `demo ${DEMO}` : 'test city'} idle, stopping`); save('idle'); process.exit(0); });
+  if (CHILD && !process.env.DEMO_KEEP) watchIdle(() => net.connections, () => { console.log(`${DEMO ? `demo ${DEMO}` : 'test city'} idle, stopping`); save('idle'); process.exit(0); });
   startLoop();
 });
