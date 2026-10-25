@@ -45,6 +45,7 @@ import { DEATH } from '../remembrance';
 import { AD_SIZE, AD_SIZES, type AdSize } from '../buildings/adslot';
 import { UTIL, type LinkMode } from '../utilities';
 import { AD } from '../adverts';
+import { withTourSound, tourSoundProblems, type TourSound } from './tourSound';
 
 /**
  * Demo maps (docs/demo.md): a planned, lived-in town where every large object in the catalogue is placed once and
@@ -1108,7 +1109,7 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
   },
   sound: {
     title: 'Sound',
-    what: 'The city is heard as well as seen, from real recordings (Freesound, CC0) with the old synthesis as the fallback, and every instance varies in pitch, level and start. Each thing on screen has a bed: traffic rumbles louder with the cars drawn, wind rises as you zoom out, a crowd murmurs by the shops, works and power stations hum, water laps; a market by day, a pub in the evening, children at a school, a stadium crowd, a fountain. Birds sing by the hour, with a dawn chorus from half past four over parks and homes; owls call at night; gulls over water, pigeons in the squares, a dog now and then, footsteps close in. A church or Parliament in view rings the hour (a peal at ten), a siren sounds from a police or fire station, builders hammer and drill, fireworks bang over a celebration, and a signal crossing beeps while it holds the cars. Ride a vehicle in first person and it takes over while the city drops 6 dB: a bus is a diesel with its doors hissing, a train a rumble over rail joints, a tube train a boom, a boat a chug.',
+    what: 'The city is heard as well as seen, from real recordings (Freesound, CC0) with the old synthesis as the fallback, and every instance varies in pitch, level and start. Each thing on screen has a bed: traffic rumbles louder with the cars drawn, wind rises as you zoom out, a crowd murmurs by the shops, works and power stations hum, water laps; a market by day, a pub in the evening, children at a school, a stadium crowd, a fountain. Birds sing by the hour, with a dawn chorus from half past four over parks and homes; owls call at night; gulls over water, pigeons in the squares, a dog now and then, footsteps close in. A church or Parliament in view rings the hour (a peal at ten), a siren sounds from a police or fire station, builders hammer and drill, fireworks bang over a celebration, and a signal crossing beeps while it holds the cars. Ride a vehicle in first person and it takes over while the city drops 6 dB: a bus is a diesel with its doors hissing, a train a rumble over rail joints, a tube train a boom, a boat a chug. On the London tour every stop has a sound of its own, played when the camera arrives: Big Ben striking at Parliament, gulls and a boat horn on the river, a train arriving under Waterloo, a crowd at Wembley, ravens at the Tower. The beds follow the place and dip under each cue.',
     how: 'Nothing to build. Sound starts on your first click or key press. M mutes and unmutes, Shift+M is the perf readout; the sound switch and volume slider are in the line at the bottom left, and the choice is kept in this browser.',
     facts: [['Mute', 'M, or the sound chip in the top bar'], ['Volume', 'slider at the bottom left, kept in this browser'], ['Made of', 'Freesound CC0 recordings (audio/CREDITS.md), loaded the first time each is wanted, over Web Audio synthesis as the fallback'], ['Cost', 'about 0.3 ms every quarter second'], ['Credits', 'Recordings from Freesound.org, all CC0; see client/src/audio/CREDITS.md']],
   },
@@ -1234,6 +1235,8 @@ export interface TourStop {
   view?: 'under' | 'map' | 'ranks' | 'tv' | 'traffic';
   /** the hour of the day the stop is shown at (client tour.ts pins the light until the next stop), from its placement */
   hour?: number;
+  /** what the stop sounds like (demo/tourSound.ts): cues played when the camera arrives, a bias on the ambient beds, or 'ambience' for the beds alone; the client tour plays it */
+  sound?: TourSound;
 }
 
 const kindIdOf = (s: string): number => (KIND_ID as Record<string, number>)[s] ?? 0;
@@ -1393,7 +1396,7 @@ export function demoTour(id: DemoId): TourStop[] {
       }
     }
   }
-  return out;
+  return withTourSound(id, out);
 }
 
 // ---------------------------------------------------------------- keeping the showcase complete
@@ -1867,6 +1870,10 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   { id: 'london-pedestrian', caption: 'pedestrian streets in London (Carnaby Street, the Barbican)', tour: 'carnaby-street', demo: 'london',
     rule: 'the showcase has its own (road-class-pedestrian); these are London\'s',
     scenario: classRoad(RoadCls.Pedestrian), seeded: (d) => londonRoads(d).n[RoadCls.Pedestrian] >= 4 },
+  // ---- tour sound (docs/audio.md "Tour cues"): every London tour stop plays a cue on arrival, or says on purpose that the beds are enough
+  { id: 'london-tour-sound', caption: 'a sound cue (or an explicit ambience) at every London tour stop', tour: 'parliament', demo: 'london',
+    rule: 'the showcase takes a few cues of its own (the Sound stop plays what it describes); the full table is London\'s, because the tour there runs through the city\'s places',
+    scenario: () => tourSoundProblems('london', demoTour('london')).length === 0 },
   { id: 'london-street-rules', caption: 'London\'s street rules: bus lanes on Oxford Street and the Euston Road, 20 zones round the schools, double yellows in the City, turn bans', tour: 'zone20-islington', demo: 'london',
     rule: 'the showcase has one of each rule; these are London\'s',
     scenario: (ss) => ss.some((s) => (s.streetRules ?? []).length >= 10), seeded: (d) => { const r = londonRoads(d).rules; return (r.bus ?? 0) >= 10 && (r.zone20 ?? 0) >= 50 && (r.yellow ?? 0) >= 30 && (r.ban ?? 0) >= 2; } },

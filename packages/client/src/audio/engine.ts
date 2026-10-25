@@ -143,11 +143,18 @@ export class AudioEngine {
     if (immediate) this.master.gain.value = g;
     else this.master.gain.setTargetAtTime(g, this.ctx.currentTime, 0.05);
   }
-  /** lower the ambience bus by `db` (negative), eased over about a second; 0 restores it */
-  duckAmbience(db: number, tc = 0.35) {
+  /**
+   * Lower the ambience bus by `db` (negative), eased over about a second; 0 restores it. Each caller keeps a `layer` of its own
+   * (the ridden vehicle, the tour's cues) and the layers add, so one letting go does not undo another.
+   */
+  duckAmbience(db: number, tc = 0.35, layer = 'ride') {
+    if (db === 0) this.ducks.delete(layer); else this.ducks.set(layer, db);
     if (!this.ctx) return;
-    this.buses.ambience.gain.setTargetAtTime(0.9 * Math.pow(10, db / 20), this.ctx.currentTime, tc);
+    let sum = 0;
+    for (const v of this.ducks.values()) sum += v;
+    this.buses.ambience.gain.setTargetAtTime(0.9 * Math.pow(10, sum / 20), this.ctx.currentTime, tc);
   }
+  private ducks = new Map<string, number>();
 
   private save() {
     try { this.store?.setItem(AUDIO_KEY, JSON.stringify({ volume: Math.round(this.volume * 1000) / 1000, muted: this.muted, chipSeen: this.chipSeen })); } catch { /* not remembered */ }

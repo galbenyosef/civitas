@@ -101,6 +101,8 @@ interface Deps {
   setHour?: (hour: number | null) => void;
   /** a stop with `view: 'tv'`: the first-person view of someone at home in the rect watching TV (main.ts); null ends it */
   watchTv?: (rect: [number, number, number, number] | null) => void;
+  /** a stop is shown (or the tour closed: stop undefined): what it sounds like, `settle` seconds from now (audio/tourcue.ts); the sound itself is the stop's `sound` */
+  sound?: (stop: TourStop | undefined, settle: number) => void;
   /** a stop with `view: 'traffic'` (R5): the congestion overlay and the Traffic panel, on at the stop and off after it */
   setTrafficView?: (on: boolean) => void;
 }
@@ -181,12 +183,12 @@ export class TourPanel {
   get index() { return this.i; }
   get flying() { return !!this.fly; }
 
-  setOpen(open: boolean) {
+  setOpen(open: boolean, replay = true) {
     this.open = open;
     this.el.classList.toggle('hidden', !open);
     this.labels.style.display = open ? '' : 'none';
     this.chip.classList.toggle('on', open);
-    if (!open) { this.auto = false; this.footprint.hide(); this.marks.visible = false; } else this.show();
+    if (!open) { this.auto = false; this.footprint.hide(); this.marks.visible = false; this.d.sound?.(undefined, 0); } else { this.show(); if (replay) this.d.sound?.(this.current, 0.4); }
   }
 
   /** Fly to stop i (wrapping), show its card, outline and live stats. */
@@ -208,8 +210,9 @@ export class TourPanel {
     if (traffic !== this.traffic) { this.d.setTrafficView?.(traffic); this.traffic = traffic; }
     if (s.view === 'tv' && s.rect) { const r = s.rect, at = this.i; this.tv = true; setTimeout(() => { if (this.i === at) this.d.watchTv?.([r[0], r[1], r[2], r[3]]); }, instant ? 0 : FLY_S * 1000); }
     this.live = null;
+    this.d.sound?.(s, instant ? 0 : FLY_S); // its cues play once the camera has settled, on a click or on autoplay alike
     this.autoAt = performance.now() + (instant ? 0 : FLY_S * 1000) + DWELL_S * 1000;
-    if (!this.open) this.setOpen(true); else this.show();
+    if (!this.open) this.setOpen(true, false); else this.show();
     this.ask();
   }
 

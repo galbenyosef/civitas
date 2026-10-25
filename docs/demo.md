@@ -812,6 +812,11 @@ the client pins the light at that hour while the stop is up and gives the player
 one, and the card's facts say "Shown at 21:30, after dark". The Piccadilly Lights (London, 21:30, from the front-left
 where the curve faces) and the showcase's big screens corner (21:00) use it.
 
+**A stop with a sound.** A stop may carry `sound` (shared/src/demo/tourSound.ts): some cues (recordings played shortly
+after the camera settles), a bias on the ambient beds while the stop is up, or `'ambience'` to leave it to the beds. Every
+London stop has one (demo:check fails on a stop with no row), the Showcase takes a few (its Sound stop plays what it
+describes). The cue model, the scenes and how to give a stop a cue are in docs/audio.md "Tour cues".
+
 `window.msc.tour` exposes `go(i)`, `stops`, `current` and `flying` for scripted checks.
 
 ## Adding an object to the showcase
