@@ -372,7 +372,7 @@ export class TestCities {
    * origin (the same port in production). Returns false for any other path, leaving it to the game's own socket.
    */
   upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
-    const m = /^\/demo-ws\/([a-z]+)$/.exec((req.url ?? '').split('?')[0]);
+    const m = /^\/demo-ws\/([a-z-]+)$/.exec((req.url ?? '').split('?')[0]);
     if (!m) return false;
     const d = DEMO_BY_ID.get(m[1] as DemoId);
     const e = d && (!this.opts.allowed || this.opts.allowed.has(d.id)) ? this.entries.get(d.slot) : undefined;
@@ -460,7 +460,7 @@ export class TestCities {
     if (demos) {
       const list = [...this.entries.values()].filter((e) => e.demo && (!this.opts.allowed || this.opts.allowed.has(e.demo)));
       if (path === '/api/demos') { send(200, { available: true, idleMinutes: IDLE_MS / 60_000, demos: list.map((e) => this.demoView(e)) }); return true; }
-      const dm = /^\/api\/demos\/([a-z]+)\/(start|stop|reset)$/.exec(path);
+      const dm = /^\/api\/demos\/([a-z-]+)\/(start|stop|reset)$/.exec(path);
       const e = dm ? list.find((x) => x.demo === dm[1]) : undefined;
       if (!dm || req.method !== 'POST') { send(404, { error: 'POST /api/demos/<id>/start, /stop or /reset' }); return true; }
       if (!e && this.opts.allowed && DEMO_BY_ID.has(dm[1] as DemoId)) { send(403, { error: ONLY_DEMO_REFUSAL }); return true; }
