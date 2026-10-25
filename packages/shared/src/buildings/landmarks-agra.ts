@@ -63,6 +63,31 @@ const tajMahalOps = (): Op[] => {
   return ops;
 };
 
+const tajMahalOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  ops.push(['box', 1.5, 0.1, 1.14, 0, 0.02, -0.25, TAJ_WHITE]);
+  ops.push(['box', 0.56, 0.4, 0.56, 0, 0.12, -0.28, TAJ_WHITE]);
+  ops.push(['box', 0.18, 0.28, 0.025, 0, 0.17, 0.012, TAJ_DK]);
+  for (const x of [-0.292, 0.292]) ops.push(['box', 0.025, 0.24, 0.16, x, 0.19, -0.28, TAJ_DK]);
+  ops.push(['cyl', 0.21, 0.21, 0.06, 0, 0.52, -0.28, TAJ_WHITE, 20]);
+  ops.push(['lathe', 0, 0.58, -0.28, TAJ_WHITE, [0.2, 0, 0.25, 0.07, 0.22, 0.17, 0.14, 0.25, 0.035, 0.31, 0.012, 0.36, 0, 0.38], { seg: 20 }]);
+  for (const [x, z] of [[-0.2, -0.48], [0.2, -0.48], [-0.2, -0.08], [0.2, -0.08]] as const) {
+    ops.push(['cyl', 0.045, 0.045, 0.1, x, 0.52, z, TAJ_WHITE, 8]);
+    ops.push(['lathe', x, 0.62, z, TAJ_WHITE, [0.05, 0, 0.065, 0.025, 0.035, 0.065, 0, 0.09], { seg: 12 }]);
+  }
+  for (const [x, z] of [[-0.65, -0.72], [0.65, -0.72], [-0.65, 0.22], [0.65, 0.22]] as const) {
+    ops.push(['taper', 0.065, 0.065, 0.04, 0.04, 0.68, x, 0.12, z, TAJ_WHITE]);
+    ops.push(['box', 0.1, 0.025, 0.1, x, 0.65, z, TAJ_WHITE]);
+    ops.push(['lathe', x, 0.8, z, TAJ_WHITE, [0.045, 0, 0.06, 0.025, 0.025, 0.07, 0, 0.1], { seg: 12 }]);
+  }
+  ops.push(['box', 1.65, 0.025, 0.12, 0, 0.02, 0.4, 'sand']);
+  ops.push(['box', 0.14, 0.015, 0.54, 0, 0.035, 0.68, 'pond']);
+  for (const x of [-0.35, 0.35]) {
+    for (const z of [0.52, 0.82]) ops.push(...tree(x, z, 0.42, 'dark'));
+  }
+  return ops;
+};
+
 export const tajMahal: KindDef = {
   id: 'taj-mahal', name: 'the Taj Mahal', code: library.code, kindId: 213, family: 'leisure', tier: 1,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'agra',
@@ -79,6 +104,7 @@ export const tajMahal: KindDef = {
   levels: [{
     capacity: 55, wage: 17, cost: 20000, upkeep: 80, work: 3600, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', name: 'the marble crown: rooftop chhatris, banded minarets and a charbagh reflecting pool', height: 0.96, ops: tajMahalOpsK31(), draft: true },
       { author: 'kimi-2.8-preview', name: 'the white marble mausoleum with its dome, minarets and reflecting pool', height: 1.0, ops: tajMahalOps() },
     ],
   }],
