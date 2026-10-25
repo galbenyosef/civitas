@@ -533,6 +533,45 @@ const sacreCoeurOps = (): Op[] => {
   return ops;
 };
 
+const sacreCoeurOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  ops.push(['box', 1.72, 0.12, 1.5, 0, 0.02, -0.16, CHALK_DK]);
+  ops.push(['box', 1.5, 0.1, 1.28, 0, 0.14, -0.24, CHALK]);
+  for (let i = 0; i < 6; i++) ops.push(['box', 0.7, 0.035, 0.12, 0, 0.02 + i * 0.035, 0.91 - i * 0.09, CHALK_DK]);
+  ops.push(['box', 0.82, 0.46, 0.92, 0, 0.24, -0.2, CHALK]);
+  ops.push(['roof', 0.86, 0.13, 0.96, 0, 0.7, -0.2, CHALK_DK, true]);
+  ops.push(['box', 1.0, 0.4, 0.24, 0, 0.24, 0.25, CHALK]);
+  for (const x of [-0.29, 0, 0.29]) {
+    ops.push(['box', 0.19, 0.25, 0.018, x, 0.25, 0.38, 'dark']);
+    ops.push(['lathe', x, 0.5, 0.39, 'dark', [0, 0, 0.095, 0, 0.095, 0.008], { axis: 'z', seg: 16 }]);
+    ops.push(['cyl', 0.025, 0.03, 0.32, x - 0.115, 0.24, 0.41, CHALK_DK, 8]);
+  }
+  ops.push(['roof', 1.04, 0.18, 0.29, 0, 0.64, 0.25, CHALK_DK, false]);
+  for (const sx of [-1, 1]) {
+    ops.push(['box', 0.24, 0.38, 0.74, sx * 0.47, 0.24, -0.23, CHALK]);
+    for (const z of [-0.46, -0.14]) {
+      ops.push(['cyl', 0.13, 0.14, 0.09, sx * 0.47, 0.62, z, CHALK, 12]);
+      ops.push(['lathe', sx * 0.47, 0.71, z, CHALK, [0.14, 0, 0.145, 0.035, 0.1, 0.15, 0.035, 0.23, 0, 0.26], { seg: 14 }]);
+    }
+  }
+  ops.push(['cyl', 0.26, 0.28, 0.2, 0, 0.82, -0.25, CHALK, 20]);
+  for (let i = 0; i < 12; i++) {
+    const a = i * Math.PI / 6;
+    ops.push(['box', 0.035, 0.14, 0.035, Math.sin(a) * 0.275, 0.85, -0.25 + Math.cos(a) * 0.275, CHALK_DK]);
+  }
+  ops.push(['lathe', 0, 1.02, -0.25, CHALK, [0.28, 0, 0.29, 0.06, 0.255, 0.19, 0.18, 0.34, 0.085, 0.43, 0.025, 0.47], { seg: 24 }]);
+  ops.push(['cyl', 0.035, 0.045, 0.1, 0, 1.49, -0.25, CHALK, 10]);
+  ops.push(['cone', 0.045, 0.1, 0, 1.59, -0.25, CHALK, 10]);
+  ops.push(['cyl', 0.007, 0.007, 0.09, 0, 1.69, -0.25, 'gold', 6]);
+  ops.push(['box', 0.25, 0.92, 0.25, 0, 0.24, -0.73, CHALK]);
+  ops.push(['box', 0.29, 0.06, 0.29, 0, 1.16, -0.73, CHALK_DK]);
+  for (const sx of [-1, 1]) ops.push(['box', 0.06, 0.2, 0.018, sx * 0.065, 0.91, -0.595, 'dark']);
+  ops.push(['lathe', 0, 1.22, -0.73, CHALK, [0.16, 0, 0.165, 0.035, 0.1, 0.18, 0.025, 0.28, 0, 0.31], { seg: 16 }]);
+  ops.push(['cyl', 0.006, 0.006, 0.07, 0, 1.53, -0.73, 'gold', 6]);
+  ops.push(...tree(-0.82, 0.5, 0.48), ...tree(0.82, 0.5, 0.48));
+  return ops;
+};
+
 export const sacreCoeur: KindDef = {
   id: 'sacre-coeur', name: 'the Sacré-Cœur', code: library.code, kindId: 138, family: 'leisure', tier: 6,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'paris',
@@ -549,6 +588,7 @@ export const sacreCoeur: KindDef = {
   levels: [{
     capacity: 24, wage: 15, cost: 10000, upkeep: 45, work: 2200, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'a triple-arched portico and ribbed central dome above the Montmartre stair, with four small domes and a rear campanile', height: 1.78, ops: sacreCoeurOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the white basilica on its terrace above the steps, the great dome and the bell tower over the city', height: 1.13, ops: sacreCoeurOps() },
       { author: 'claude-haiku-5-5', draft: true, name: 'the white basilica on its terrace over the steps, the great dome and the square bell tower', height: 1.27, ops: haikuSacreCoeurOps() },
       { author: 'claude-sonnet-5-5', draft: true, name: 'the white basilica on its terrace, the portico, the great ovoid dome with four lesser domes, the campanile', height: 1.37, ops: sonnetSacreCoeurOps() },
