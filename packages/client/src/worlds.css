@@ -31,3 +31,37 @@
 #perf .pbar button:hover { background: var(--line); }
 #perf .pnote { margin-top: 4px; max-width: 420px; color: var(--muted); font-size: 11px; line-height: 1.35; white-space: normal; }
 #perf .pnote:empty { display: none; }
+
+/* audio readout (audio/readout.ts): the perf readout's look, one block a voice with its reason under it */
+#audioRo { width: min(560px, calc(100vw - 24px)); max-height: min(70vh, 640px); overflow: auto; padding: 7px 11px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(8px); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+#audioRo.hidden { display: none; }
+#audioRo b { font-weight: 600; color: var(--fg); }
+#audioRo i { color: var(--muted); font-style: normal; }
+#audioRo .aro-head { display: flex; flex-wrap: wrap; gap: 2px 14px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }
+#audioRo .aro-head.warn, #audioRo .aro-muted { color: #ffbe5a; }
+#audioRo .aro-head.warn b { color: #ffbe5a; }
+#audioRo .aro-row { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+#audioRo .aro-top { display: flex; flex-wrap: wrap; gap: 0 9px; align-items: baseline; color: var(--fg); }
+#audioRo .aro-cls { min-width: 38px; padding: 0 5px; border-radius: 4px; background: rgba(255,255,255,0.08); color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; text-align: center; }
+#audioRo .aro-row.bed .aro-cls { color: #7fd6a0; }
+#audioRo .aro-row.cue .aro-cls { color: #ffbe5a; }
+#audioRo .aro-row.ride .aro-cls { color: #8cc4ff; }
+#audioRo .aro-row.ui .aro-cls { color: #d9a8ff; }
+#audioRo .aro-db { min-width: 62px; text-align: right; }
+#audioRo .aro-age { margin-left: auto; color: var(--muted); }
+#audioRo .aro-row.quiet .aro-top { opacity: 0.55; }
+#audioRo .aro-why { padding-left: 2px; color: var(--muted); font-size: 11px; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
+#audioRo .aro-none { padding: 6px 0; color: var(--muted); }
+#audioRo .aro-title { margin-top: 7px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+#audioRo .aro-logs { max-height: 190px; overflow: auto; margin-top: 2px; font-size: 11px; line-height: 1.4; }
+#audioRo .aro-log { white-space: normal; overflow-wrap: anywhere; }
+#audioRo .aro-log .aro-t { display: inline-block; min-width: 54px; color: var(--muted); }
+#audioRo .aro-log.start .aro-ev { color: #7fd6a0; }
+#audioRo .aro-log.stop .aro-ev { color: #ff9a8a; }
+#audioRo .aro-log.skip .aro-ev { color: #ffbe5a; }
+#audioRo .aro-lw { color: var(--muted); }
+#audioRo .pbar { display: flex; gap: 6px; margin-top: 6px; }
+#audioRo .pbar button { font: inherit; font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
+#audioRo .pbar button:hover { background: var(--line); }
+#audioRo .pnote { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+@media (max-width: 640px) { #audioRo { max-height: 36vh; font-size: 11px; } #audioRo .aro-age { margin-left: 0; } #audioRo .aro-logs { max-height: 120px; } }

@@ -1,5 +1,5 @@
 import { hash2 } from '@msimcity/shared';
-import type { AudioEngine } from './engine';
+import { toDb, type AudioEngine, type VoiceClass, type VoiceTag } from './engine';
 import { VOICES, type BusId } from './manifest';
 
 /**
@@ -17,12 +17,16 @@ const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 /** What an ambience bed gives its controller: a level (0..1), a tone (0..1, each bed maps it to its own filter) and how fast to move. */
 export interface Bed {
   out: GainNode;
+  /** which recording it plays and its pitch offset in cents, for the audio readout (no `info`: the synthesis) */
+  info?(): { take: string; cents: number | null };
   tune(level: number, tone: number, tc: number): void;
   stop(): void;
 }
 /** The ridden vehicle's sound: speed 0..1. */
 export interface Ride {
   out: GainNode;
+  /** the recording it plays, for the audio readout (no `info`: the synthesis) */
+  info?(): { take: string };
   set(speed: number): void;
   stop(): void;
 }
@@ -70,11 +74,12 @@ function finish(eng: AudioEngine, rack: Rack, out: GainNode, fade = 1.2) {
 /** A recording as a bed: looped from a random point at a slightly different rate, through the same level and a tone filter. */
 function sampleBed(eng: AudioEngine, id: string, buf: AudioBuffer, seed: number, dest: AudioNode): Bed {
   const c = eng.ctx!, rack = new Rack(), level = VOICES[id]?.level ?? 1;
-  const s = c.createBufferSource(); s.buffer = buf; s.loop = true; s.playbackRate.value = vary(1, 0.03, r(seed, 3));
+  const rate = vary(1, 0.03, r(seed, 3));
+  const s = c.createBufferSource(); s.buffer = buf; s.loop = true; s.playbackRate.value = rate;
   s.start(0, r(seed, 4) * buf.duration); rack.nodes.push(s);
   const out = gainNode(c, 0), f = filt(c, 'lowpass', 18000, 0.5);
   s.connect(f); f.connect(out); out.connect(dest);
-  return { out, tune: (lv, tone, tc) => { out.gain.setTargetAtTime(lv * level, c.currentTime, tc); f.frequency.setTargetAtTime(lerp(2500, 18000, tone), c.currentTime, tc); }, stop: () => finish(eng, rack, out) };
+  return { out, info: () => ({ take: eng.fileOf(id, buf), cents: 1200 * Math.log2(rate) }), tune: (lv, tone, tc) => { out.gain.setTargetAtTime(lv * level, c.currentTime, tc); f.frequency.setTargetAtTime(lerp(2500, 18000, tone), c.currentTime, tc); }, stop: () => finish(eng, rack, out) };
 }
 
 /** every voice that is a bed: the five with a synthesised recipe, and the second pass's recordings */
@@ -108,6 +113,7 @@ export function makeBed(eng: AudioEngine, id: BedId, seed: number): Bed | null {
   });
   return {
     get out() { return cur?.out ?? (null as unknown as GainNode); },
+    info: () => cur?.info?.() ?? { take: 'synth', cents: null },
     tune: (lv, tone, tc) => { last = { lv, tone, tc }; cur?.tune(lv, tone, tc); },
     stop: () => { stopped = true; eng.note('stop', id); if (cur) cur.stop(); else eng.give(); },
   } as Bed;
@@ -180,7 +186,12 @@ export interface Shot {
   pan?: number;
   /** seconds from now */
   delay?: number;
+  /** what asked for it, in plain words, for the audio readout (readout.ts): "crossing red at 12,40", "ui: place" */
+  why?: string;
+  /** the readout's class for it: a tour cue says 'cue'; otherwise 'ui' for the interface clicks and 'event' */
+  cls?: VoiceClass;
 }
+const clsOf = (id: string, o: Shot): VoiceClass => o.cls ?? (id.startsWith('ui-') ? 'ui' : 'event');
 
 /** The node an event connects its output to: a panner into the voice's bus. */
 function sink(eng: AudioEngine, bus: BusId, pan = 0): AudioNode {
@@ -199,10 +210,10 @@ function playSample(eng: AudioEngine, id: string, o: Shot): boolean {
 /** play a decoded take once, varied (pitch, gain, pan, take); returns the seconds it sounds for, 0 when the voice budget was spent */
 function startSample(eng: AudioEngine, id: string, buf: AudioBuffer, o: Shot): number {
   const c = eng.ctx!, def = VOICES[id];
-  if (!eng.take(buf.duration)) return 0;
-  const rate = vary(1, 0.05, r(o.seed, 3));
+  const rate = vary(1, 0.05, r(o.seed, 3)), level = (o.gain ?? 1) * (def.level ?? 1) * vary(1, 0.1, r(o.seed, 4));
+  if (!eng.take(buf.duration, { id, cls: clsOf(id, o), bus: def.bus, why: o.why ?? '', db: toDb(level * eng.busGain(def.bus)), cents: 1200 * Math.log2(rate), take: eng.fileOf(id, buf) })) return 0;
   const s = c.createBufferSource(); s.buffer = buf; s.playbackRate.value = rate;
-  const g = gainNode(c, (o.gain ?? 1) * (def.level ?? 1) * vary(1, 0.1, r(o.seed, 4)));
+  const g = gainNode(c, level);
   s.connect(g); g.connect(sink(eng, def.bus, o.pan ?? (def.bus === 'ui' ? 0 : r(o.seed, 21) * 1.2 - 0.6)));
   s.start(c.currentTime + (o.delay ?? 0));
   return buf.duration / rate;
@@ -256,9 +267,11 @@ export function fire(eng: AudioEngine, id: EventId, o: Shot): void {
   const t = c.currentTime + (o.delay ?? 0);
   const gain = p.gain * k * vary(1, 0.15, r(sd, 4));
   const pitch = vary(1, 0.06, r(sd, 3)); // 3 to 8%: the spread each voice below keeps
+  const tag: VoiceTag = { id, cls: clsOf(id, o), bus: def.bus, why: o.why ?? '', db: toDb(gain * eng.busGain(def.bus)), cents: 1200 * Math.log2(pitch), take: 'synth' };
+  const take = (sec: number) => eng.take(sec, tag);
   switch (id) {
     case 'bird': {
-      if (!eng.take(1.2)) return;
+      if (!take(1.2)) return;
       const dest = sink(eng, def.bus, o.pan ?? r(sd, 20) * 1.6 - 0.8);
       const car = c.createOscillator(), mod = c.createOscillator(), md = c.createGain(), g = c.createGain();
       const base = lerp(p.fMin, p.fMax, r(sd, 5)), n = Math.round(lerp(p.sylMin, p.sylMax, r(sd, 6)));
@@ -281,7 +294,7 @@ export function fire(eng: AudioEngine, id: EventId, o: Shot): void {
       return;
     }
     case 'owl': {
-      if (!eng.take(2)) return;
+      if (!take(2)) return;
       const dest = sink(eng, def.bus, o.pan ?? r(sd, 20) * 1.4 - 0.7);
       const f = p.f * pitch, gap = lerp(0.4, 0.6, r(sd, 5));
       for (let i = 0; i < 2; i++) {
@@ -298,7 +311,7 @@ export function fire(eng: AudioEngine, id: EventId, o: Shot): void {
     }
     case 'bell': case 'bell-deep': return; // rung by ringBell, which takes a count
     case 'horn': {
-      if (!eng.take(0.8)) return;
+      if (!take(0.8)) return;
       const dest = sink(eng, def.bus, o.pan ?? r(sd, 20) * 1.8 - 0.9);
       const f = p.f * pitch * lerp(0.8, 1.15, r(sd, 5)), len = lerp(0.18, 0.45, r(sd, 6));
       const g = c.createGain(), lp = filt(c, 'lowpass', vary(1900, 0.25, r(sd, 7)), 0.6);
@@ -313,28 +326,28 @@ export function fire(eng: AudioEngine, id: EventId, o: Shot): void {
       return;
     }
     case 'beep': {
-      if (!eng.take(0.6)) return;
+      if (!take(0.6)) return;
       const dest = sink(eng, def.bus, o.pan ?? 0);
       const f = p.f * pitch, pulses = 2;
       for (let i = 0; i < pulses; i++) tone(c, dest, 'sine', f, f, t + i * (p.pulse + p.gap), p.pulse, gain);
       return;
     }
     case 'ui-click': {
-      if (!eng.take(0.1)) return;
+      if (!take(0.1)) return;
       const dest = sink(eng, def.bus);
       burst(eng, dest, 'bandpass', 3200 * pitch, 1.2, t, 0.012, p.gain * k * 0.9, 0.001, sd);
       tone(c, dest, 'sine', p.f * pitch, p.f * pitch * 0.8, t, p.len, p.gain * k * vary(1, 0.12, r(sd, 4)));
       return;
     }
     case 'ui-place': {
-      if (!eng.take(0.3)) return;
+      if (!take(0.3)) return;
       const dest = sink(eng, def.bus);
       tone(c, dest, 'sine', p.f * pitch, 60 * pitch, t, p.len, p.gain * k * vary(1, 0.12, r(sd, 4)));
       burst(eng, dest, 'bandpass', vary(1400, 0.2, r(sd, 5)), 0.8, t, 0.03, p.gain * k * 0.5, 0.002, sd);
       return;
     }
     case 'ui-refuse': {
-      if (!eng.take(0.5)) return;
+      if (!take(0.5)) return;
       const dest = sink(eng, def.bus);
       const f = p.f * pitch;
       tone(c, dest, 'triangle', f, f * 0.93, t, p.len * 0.5, p.gain * k, 1200);
@@ -342,13 +355,13 @@ export function fire(eng: AudioEngine, id: EventId, o: Shot): void {
       return;
     }
     case 'ui-undo': {
-      if (!eng.take(0.3)) return;
+      if (!take(0.3)) return;
       const dest = sink(eng, def.bus);
       tone(c, dest, 'sine', p.f * pitch, p.f * pitch * 1.8, t, p.len, p.gain * k * vary(1, 0.1, r(sd, 4)));
       return;
     }
     case 'fx-hiss': {
-      if (!eng.take(1.2)) return;
+      if (!take(1.2)) return;
       const dest = sink(eng, def.bus, o.pan ?? 0);
       const len = p.len * vary(1, 0.2, r(sd, 5));
       burst(eng, dest, 'highpass', vary(2800, 0.15, r(sd, 6)), 0.7, t, len, gain, len * 0.18, sd);
@@ -356,21 +369,21 @@ export function fire(eng: AudioEngine, id: EventId, o: Shot): void {
       return;
     }
     case 'fx-stopbell': {
-      if (!eng.take(1)) return;
+      if (!take(1)) return;
       const dest = sink(eng, def.bus, o.pan ?? 0);
       const f = p.f * pitch;
       tone(c, dest, 'sine', f, f, t, p.len, gain); tone(c, dest, 'sine', f * 2.76, f * 2.76, t, p.len * 0.5, gain * 0.35);
       return;
     }
     case 'fx-chime': {
-      if (!eng.take(1.2)) return;
+      if (!take(1.2)) return;
       const dest = sink(eng, def.bus, o.pan ?? 0);
       const f = p.f * pitch;
       tone(c, dest, 'sine', f, f, t, p.len, gain); tone(c, dest, 'sine', f * 0.75, f * 0.75, t + 0.28, p.len * 1.1, gain);
       return;
     }
     case 'fx-joint': {
-      if (!eng.take(0.4)) return;
+      if (!take(0.4)) return;
       const dest = sink(eng, def.bus, o.pan ?? 0);
       const f = p.f * pitch * lerp(0.8, 1.2, r(sd, 5)), gap = p.gap * vary(1, 0.12, r(sd, 6));
       burst(eng, dest, 'bandpass', f, 2.5, t, 0.05, gain, 0.001, sd);
@@ -382,12 +395,12 @@ export function fire(eng: AudioEngine, id: EventId, o: Shot): void {
 }
 
 /** Ring a bell `strikes` times (1 to 6): five or six inharmonic partials a strike, the low ones ringing longest, every strike a little different. */
-export function ringBell(eng: AudioEngine, deep: boolean, seed: number, strikes: number, k = 1, pan = 0) {
+export function ringBell(eng: AudioEngine, deep: boolean, seed: number, strikes: number, k = 1, pan = 0, why = '') {
   const c = eng.ctx;
   if (!c || !eng.ready || eng.muted || c.state !== 'running') return;
   const id = deep ? 'bell-deep' : 'bell', def = VOICES[id], p = def.params;
   const n = clamp(Math.round(strikes), 1, 6), every = deep ? 3.6 : 2.4;
-  if (!eng.take(n * every + p.decay * 1.4)) return;
+  if (!eng.take(n * every + p.decay * 1.4, { id, cls: 'event', bus: def.bus, why, db: toDb(k * (def.level ?? 1) * eng.busGain(def.bus)), cents: 0, take: `${n} strike${n > 1 ? 's' : ''}` })) return;
   const dest = sink(eng, def.bus, pan);
   if (eng.sample(id, 0.5)) { // recorded strikes: a take for each, at its own pitch and strength, spaced as the synthesis spaces them
     for (let i = 0; i < n; i++) {
@@ -425,7 +438,7 @@ export function makeRide(eng: AudioEngine, kind: RideKind, seed: number): Ride |
     if (!eng.take()) return null;
     const c = eng.ctx!, out = gainNode(c, 0);
     out.connect(eng.buses.vehicles);
-    return recRide(eng, rec, seed, out, VOICES[id].level ?? 1);
+    return recRide(eng, rec, seed, out, VOICES[id].level ?? 1, eng.fileOf(id, rec));
   }
   const synth = synthRide(eng, kind, seed);
   if (!synth || !takes?.length) return synth;
@@ -436,25 +449,27 @@ export function makeRide(eng: AudioEngine, kind: RideKind, seed: number): Ride |
   eng.whenSample(id, (buf) => {
     if (stopped || !eng.ctx || !eng.take()) return; // no voice to spare for the recording: keep the synthesis
     const t = c.currentTime;
-    inner = recRide(eng, buf, seed, rf, VOICES[id].level ?? 1);
+    inner = recRide(eng, buf, seed, rf, VOICES[id].level ?? 1, eng.fileOf(id, buf));
     inner.set(speed);
     sf.gain.setTargetAtTime(0, t, 0.5);
     setTimeout(() => { if (!synthDone) { synthDone = true; synth.stop(); } }, 2500); // the synthesis lets go of its voice
   });
   return {
     out: mix,
+    info: () => inner?.info?.() ?? { take: 'synth' },
     set: (v) => { speed = v; if (!synthDone) synth.set(v); inner?.set(v); },
     stop: () => { stopped = true; inner?.stop(); if (!synthDone) { synthDone = true; synth.stop(); } setTimeout(() => { try { mix.disconnect(); } catch { /* gone */ } }, 2500); },
   };
 }
 
 /** A recording as the ridden vehicle: looped from its own point, its pitch and level following the speed. The caller has taken its voice. */
-function recRide(eng: AudioEngine, buf: AudioBuffer, seed: number, out: GainNode, level: number): Ride {
+function recRide(eng: AudioEngine, buf: AudioBuffer, seed: number, out: GainNode, level: number, take: string): Ride {
   const c = eng.ctx!, rack = new Rack(), now = () => c.currentTime;
   const s = c.createBufferSource(); s.buffer = buf; s.loop = true; s.start(0, r(seed, 4) * buf.duration); rack.nodes.push(s);
   s.connect(out);
   return {
     out,
+    info: () => ({ take }),
     set: (v) => { s.playbackRate.setTargetAtTime(0.8 + 0.5 * v, now(), 0.2); out.gain.setTargetAtTime(level * (0.5 + 0.5 * v), now(), 0.2); },
     stop: () => finish(eng, rack, out, 0.8),
   };

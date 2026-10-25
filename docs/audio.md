@@ -9,7 +9,8 @@ The city is heard as well as seen. Everything lives in `packages/client/src/audi
 - `voices.ts`: the synthesised voices (oscillators and shaped noise), the recordings playing in their place, `fire` for events, `ringBell`, `makeBed`, `makeRide`.
 - `ambience.ts`: every 250 ms (never per frame) reads the tiles round the camera, the cars and walkers drawn, the hour and the zoom, and glides each bed to its target level and tone; draws the events on Poisson clocks.
 - `fpv.ts`: the ridden vehicle's sound (speed from position) and the doors, stop bell and rail joints; the ambience drops 6 dB under it.
-- `controls.ts`: M mutes (Shift+M is the perf readout), the sound switch and slider in the help line, the top-bar chip, the first-time note.
+- `controls.ts`: M mutes (Shift+M is the perf readout, Shift+S the audio readout), the sound switch and slider in the help line, the top-bar chip, the first-time note.
+- `readout.ts`: the audio readout, below.
 
 Organic rule: nothing plays the same way twice. A bed starts at its own point at its own rate (±3%); an event varies its pitch (±5%), gain (±10%), pan and, when it has several, which take it plays.
 
@@ -137,3 +138,42 @@ The weakest matches (listen first): the Tower Bridge bell (a railway-crossing be
 ### The new clips
 
 24 voices, 43 files, about 2 MB: `big-ben`, `bus-pass`, `tube-arrive`, `tube-gap`, `train-pass`, `boat-pass`, `port`, `crowd-roar`, `whistle`, `jet-takeoff`, `shop-bell`, `ducks`, `applause`, `orchestra`, `siren-ambulance`, `school-bell`, `crows`, `fox`, `rigging`, `bridge-bell`, `parakeets` (events) and `station-hall`, `tube-hall`, `flare-roar` (loops). They are recording-only voices fetched and built the same way as the rest ("Re-running the fetch" above); the set is now about 5.4 MB of the 8 MB budget, with a credits row for each in `CREDITS.md`.
+
+## Readout
+
+What is sounding now and why, in the style of the Shift+M perf readout (`src/audio/readout.ts`). It only reads: the engine's output is exactly what it was without it (a recording of every call made to a fake AudioContext, for all events, bells, beds, rides and 400 ambience ticks, is identical with and without the change).
+
+- **Open it** with the **audio** chip beside the sound chip in the top bar, or **Shift+S**. The key listens in the capture phase and swallows the press, because plain S pans the camera back; Shift+S never moves the view. It is ignored while typing and on key repeat. The panel sits under the perf readout in the world HUD and wraps at phone width (the voice list and the log scroll). `msc.audioReadout` is the panel (`msc.audioReadout.cost` is what its refreshes cost).
+- **Closed it costs nothing**: no timer, no snapshot. The engine keeps only what it already needed plus two small things that are always on: a ring of the last 40 starts and stops (the journal) and, for each one-shot, a row kept until its voice is given back.
+- **Open**, it takes a snapshot twice a second (`Audio.state()`) and redraws.
+
+### What it shows
+
+| | |
+|---|---|
+| Header | the context (running, suspended when the tab is hidden, not started before the first gesture), the volume and the master gain it makes, MUTED, voices in use of the 24, recordings being fetched or decoded, the ducking layers (the tour's, the ridden vehicle's) with their dB, the hour the ambience uses and where it comes from (the clock, or the light a tour stop pinned), the tour stop shown |
+| A voice | its class (bed, event, ride, cue, ui), name, bus, level in dB after its bus (a one-shot: at its start), pitch offset in cents, which recording it plays (or `synth`), how long it has been up or how long it has left |
+| **Why** | a **bed**: the numbers the 250 ms tick read, the share of its ceiling it aims at, and the tour stop's hold on it if any ("cars near 212, roads 18% of tiles, zoom 24, hour 08:00 → 0.42 of its ceiling"). A **tour cue**: the stop, the cue's index and its moment ("tour stop parliament, cue 1 of 2, at +0.8 s"); a loop says it runs until the stop is left. A **ride**: the vehicle and its speed. An **event**: the trigger ("crossing red at 12,40, 6 tiles off", "horn: 31 cars near", "bus stop bell: pulling away after 4.1 s at a stop", "fireworks shell at x,z", "ui: place", the rate and inputs of the second pass's Poisson clocks) |
+| Log | the last 40 starts, stops and skipped starts (a cue silenced by a mute, a hidden tab or a full voice budget, with the reason), newest first, with the time ago; the same row repeated inside two seconds (rail joints, footsteps) is one row with a count. Each tour stop shown is a row. **Copy** puts the header, the voices and the log on the clipboard as text |
+
+Rows are sorted by bus (ambience, vehicles, ui), then the loudest first.
+
+### Where the code is
+
+- `engine.ts`: `journal` (the ring), `log()`, `shots` (one-shots still sounding, filled by `take(seconds, tag)`), `loading` (files in flight), `fileOf()` (which recording a decoded take is), `duckLayers`, `busGain()`.
+- `voices.ts`: `Shot.why` and `Shot.cls`; `fire`, `startSample` and `ringBell` tag their voice; a bed's and a ride's `info()` names its recording and pitch.
+- The `why` strings: `ambience.ts` (`bedWhy` for beds, `placeWhy` for the second pass's events, and at the call sites of the bird, owl, horn, bell, peal, crossing beep and fireworks), `fpv.ts` (bus stop bell and doors, train doors, rail joints), `tourcue.ts` (cues and loops), `index.ts` (`ui`).
+- `index.ts` `Audio.state()` assembles the snapshot from the ambience's beds, the tour's loops, the ride and the engine's one-shots.
+- `msc.audio.tour.log` and the `audiodebug` console output are unchanged; the tour's cue rows also go to the journal.
+
+### Cost
+
+Measured in Chrome on the Showcase and London:
+
+| | |
+|---|---|
+| Closed | no timer and no snapshot; each start costs the engine about 0.2 µs for a journal row and 0.04 µs for a one-shot row |
+| Open, one refresh (snapshot, text, DOM) | about 0.01 ms with the page warm, about 0.14 ms when it runs cold after half a second idle (Chrome's timer resolution is 0.1 ms) |
+| Open, a second | two refreshes: 0.02 ms warm, about 0.3 ms cold |
+
+The panel reuses a row's elements while its voice sounds and sets only the text that changed, so a refresh does not parse HTML. `msc.audioReadout.cost` has the last refresh and the running mean.
