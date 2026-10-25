@@ -168,4 +168,12 @@ Rows are sorted by bus (ambience, vehicles, ui), then the loudest first.
 
 ### Cost
 
-Measured with the panel open on the Showcase (see the pull request for the figures). `msc.audioReadout.cost` has the last refresh and the running mean. Closed: none of it runs.
+Measured in Chrome on the Showcase and London:
+
+| | |
+|---|---|
+| Closed | no timer and no snapshot; each start costs the engine about 0.2 µs for a journal row and 0.04 µs for a one-shot row |
+| Open, one refresh (snapshot, text, DOM) | about 0.01 ms with the page warm, about 0.14 ms when it runs cold after half a second idle (Chrome's timer resolution is 0.1 ms) |
+| Open, a second | two refreshes: 0.02 ms warm, about 0.3 ms cold |
+
+The panel reuses a row's elements while its voice sounds and sets only the text that changed, so a refresh does not parse HTML. `msc.audioReadout.cost` has the last refresh and the running mean.

@@ -95,11 +95,11 @@ export class Audio {
     }
     const ride = this.fpv.state();
     if (ride) rows.push({ id: ride.id, cls: 'ride', bus: 'vehicles', db: toDb(ride.gain), cents: 1200 * Math.log2(0.8 + 0.5 * ride.speed), take: ride.take, age: now - ride.born, why: `riding ${ride.key}: a ${ride.kind} at ${Math.round(ride.speed * 100)}% of its top speed (pitch and level follow it); the ambience is down 6 dB` });
-    for (const s of e.shots) if (s.until > now) rows.push({ id: s.id, cls: s.cls, bus: s.bus, db: s.db ?? -Infinity, cents: s.cents ?? null, take: s.take ?? 'synth', age: now - s.at, left: (s.until - now) / 1000, why: s.why });
+    for (const s of e.shots) if (s.until > now) rows.push({ id: s.id, key: `${s.id}@${Math.round(s.at)}`, cls: s.cls, bus: s.bus, db: s.db ?? -Infinity, cents: s.cents ?? null, take: s.take ?? 'synth', age: now - s.at, left: (s.until - now) / 1000, why: s.why });
     const h = this.ambience.hourInfo();
     return {
       at: now, context: e.ctx ? (e.ctx.state as AudioState['context']) : 'not started', muted: e.muted, volume: e.volume, masterDb: toDb(e.gainFor()),
-      voices: e.active, cap: MAX_VOICES, loading: e.loading, ducks: e.duckLayers, hour: h.hour, hourSource: h.source, stop: this.tour.shown, rows, journal: e.journal.map((j) => ({ ...j })),
+      voices: e.active, cap: MAX_VOICES, loading: e.loading, ducks: e.duckLayers, hour: h.hour, hourSource: h.source, stop: this.tour.shown, rows, journal: e.journal,
     };
   }
 

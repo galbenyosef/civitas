@@ -64,4 +64,4 @@
 #audioRo .pbar button { font: inherit; font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
 #audioRo .pbar button:hover { background: var(--line); }
 #audioRo .pnote { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.35; }
-@media (max-width: 640px) { #audioRo { max-height: 56vh; font-size: 11px; } #audioRo .aro-age { margin-left: 0; } }
+@media (max-width: 640px) { #audioRo { max-height: 36vh; font-size: 11px; } #audioRo .aro-age { margin-left: 0; } #audioRo .aro-logs { max-height: 120px; } }
