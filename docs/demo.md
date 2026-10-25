@@ -436,7 +436,7 @@ Heathrow line, Wembley, Kew and Heathrow. Area stops are `blocks` with a `blurb`
 ## Sample cities and the city-map kit
 
 Paris, New York and San Francisco are sample cities like London, each built from a small **city-map kit** so the city
-is one data file rather than a bespoke map and scenario. They are `DEMOS` entries with `town: 'city'` and `city` their
+is one data file rather than a bespoke map and scenario. They are `DEMOS` entries with `town` their id and `city` their
 data (slots 95, 96 and 97, ports 8195-8197, `?demo=paris`, `?demo=new-york`, `?demo=san-francisco`), read-only showcases
 like London on a spectate server, each with a tour, a welcome view and a hero picture on the home page (below).
 
@@ -514,7 +514,7 @@ schools and `KIND_SPOTS` added to the kit first.
 1. Write `shared/src/demo/city-<id>.ts`: a `CityDemo` (copy Paris, the simplest), its tour and view. Draw the water first
    (rivers with widths, or a water polygon over the map and the land drawn back), then the places, parks, arterials,
    rails and districts, then the structures, stations, lines and areas.
-2. Add it to `DEMOS` (a free slot, `town: 'city'`, `city`, `tour`, `view`), its picture as `packages/client/src/heroes/<id>.jpg`, and its landmark group to
+2. Add it to `DEMOS` (a free slot, `town` its id, `city`, `tour`, `view`), its picture as `packages/client/src/heroes/<id>.jpg`, and its landmark group to
    `CITY_DEMO_GROUPS` (london-kinds.ts), so its landmarks leave the world-landmark exemption and must stand in it.
 3. Print the plan (`citymap-ascii.ts <id>`) and fix what it lists: a bridge with no run of water short enough, a
    roundabout with no clear avenue crossing (an arterial's step, another arterial or the water inside its 7×7), a
