@@ -264,6 +264,32 @@ const eyeOps = (): Op[] => {
   ];
 };
 
+const eyeOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(4, 4, 'lawn')];
+  const apexZ = EYE.z - 0.24;
+  ops.push(['cyl', 1.25, 1.25, 0.025, 0, 0.01, 0.7, PAVING, 32]);
+  ops.push(['box', 1.65, 0.22, 0.5, 0, 0.035, EYE.z, 'white']);
+  ops.push(['box', 1.72, 0.035, 0.56, 0, 0.255, EYE.z, 'navy']);
+  for (const sx of [-1, 1]) {
+    for (const footZ of [0.02, 0.5]) {
+      ops.push(['box', 0.28, 0.07, 0.28, sx * 0.9, 0.035, footZ, 'stone']);
+      ops.push(['taper', 0.085, 0.085, 0.05, 0.05, EYE.hubY - 0.13, sx * 0.9, 0.105, footZ, 'white', { shift: [-sx * 0.78, apexZ - footZ] }]);
+    }
+    ops.push(['taper', 0.018, 0.018, 0.018, 0.018, EYE.hubY - 0.06, sx * 0.35, 0.035, -1.7, 'steel', { shift: [-sx * 0.23, apexZ + 1.7] }]);
+  }
+  ops.push(['box', 0.95, 0.09, 0.32, 0, 0.025, -1.7, 'stone']);
+  ops.push(['lathe', 0, EYE.hubY, apexZ - 0.08, 'steel', [0.075, 0, 0.075, EYE.z - apexZ + 0.24], { seg: 16, axis: 'z' }]);
+  ops.push(['lathe', 0, EYE.hubY, EYE.z - 0.12, 'white', [0.14, 0, 0.18, 0.07, 0.18, 0.16, 0.14, 0.23], { seg: 20, axis: 'z' }]);
+  ops.push(['box', 0.8, 0.22, 0.42, 1.25, 0.035, 0.05, 'dark']);
+  ops.push(['box', 0.9, 0.04, 0.52, 1.25, 0.255, 0.05, 'white']);
+  for (const x of [-0.65, -0.35, -0.05, 0.25]) {
+    ops.push(['box', 0.018, 0.08, 0.65, x, 0.035, 1.55, 'steel']);
+  }
+  ops.push(['box', 0.35, 0.015, 1.15, -1.25, 0.035, -0.65, 'pond']);
+  ops.push(...tree(-1.65, -1.55, 0.7), ...tree(-0.85, -1.45, 0.65), ...tree(0.9, -1.45, 0.7), ...tree(1.6, -1.55, 0.65));
+  return ops;
+};
+
 export const londonEye: KindDef = {
   id: 'london-eye', name: 'the London Eye', code: 13, kindId: 97, family: 'leisure', tier: 7,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'venue', ...landmark,
@@ -281,6 +307,7 @@ export const londonEye: KindDef = {
   levels: [{
     capacity: 36, wage: 16, cost: 14000, upkeep: 80, work: 3000, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'a four-leg white cradle over a circular boarding plaza, glass terminal and garden rill', height: 4.2, ops: eyeOpsK31() },
       { name: 'observation wheel on a leaning A-frame over Jubilee Gardens', height: 4.2, ops: eyeOps() },
     ],
   }],
