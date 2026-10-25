@@ -47,6 +47,27 @@ const christOps = (): Op[] => {
   return ops;
 };
 
+const christOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  ops.push(['lathe', 0, 0.02, 0, JUNGLE, [0.96, 0, 0.86, 0.08, 0.58, 0.2, 0.4, 0.29, 0.32, 0.35], { seg: 24 }]);
+  ops.push(['cyl', 0.39, 0.39, 0.045, 0, 0.37, 0, PAVING, 24]);
+  ops.push(['taper', 0.34, 0.34, 0.26, 0.26, 0.17, 0, 0.415, 0, 'stone']);
+  ops.push(['box', 0.3, 0.035, 0.3, 0, 0.585, 0, SOAPSTONE]);
+  ops.push(['lathe', 0, 0.62, 0, SOAPSTONE, [0.16, 0, 0.17, 0.04, 0.135, 0.24, 0.105, 0.43, 0.14, 0.5, 0.1, 0.54, 0, 0.55], { seg: 20 }]);
+  for (const x of [-0.09, -0.045, 0, 0.045, 0.09]) ops.push(['taper', 0.015, 0.018, 0.009, 0.012, 0.35, x, 0.65, 0.135, 'white']);
+  ops.push(['cyl', 0.055, 0.06, 0.08, 0, 1.15, 0, SOAPSTONE, 12]);
+  ops.push(['lathe', 0, 1.23, 0, SOAPSTONE, [0.055, 0, 0.078, 0.04, 0.075, 0.11, 0.045, 0.16, 0, 0.18], { seg: 16 }]);
+  ops.push(['box', 0.36, 0.13, 0.15, 0, 1.04, 0, SOAPSTONE]);
+  for (const sx of [-1, 1]) {
+    ops.push(['taper', 0.2, 0.15, 0.3, 0.1, 0.1, sx * 0.2, 1.055, 0, SOAPSTONE, { shift: [sx * 0.08, 0] }]);
+    ops.push(['box', 0.34, 0.065, 0.09, sx * 0.43, 1.075, 0, SOAPSTONE]);
+    ops.push(['box', 0.09, 0.045, 0.105, sx * 0.645, 1.085, 0, SOAPSTONE]);
+  }
+  for (let i = 0; i < 5; i++) ops.push(['box', 0.22, 0.025, 0.09, 0, 0.31 - i * 0.055, 0.38 + i * 0.09, 'stone']);
+  ops.push(...tree(-0.78, 0.7, 0.5), ...tree(0.78, 0.7, 0.5), ...tree(-0.8, -0.65, 0.45));
+  return ops;
+};
+
 export const christRedeemer: KindDef = {
   id: 'christ-the-redeemer', name: 'Christ the Redeemer', code: library.code, kindId: 183, family: 'leisure', tier: 1,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rio',
@@ -63,6 +84,7 @@ export const christRedeemer: KindDef = {
   levels: [{
     capacity: 36, wage: 16, cost: 14000, upkeep: 60, work: 3000, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'a monumental robed figure with wide sleeves and open hands above the Corcovado lookout', height: 1.41, ops: christOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the soapstone Christ with his outstretched arms on the peak of Corcovado', height: 1.08, ops: christOps() },
     ],
   }],
