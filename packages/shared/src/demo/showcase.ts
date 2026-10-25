@@ -32,6 +32,7 @@ import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
 import { cityScenario, type CityDemo } from './citydemo';
 import { PARIS, PARIS_TOUR, PARIS_VIEW } from './city-paris';
 import { NEW_YORK, NEW_YORK_TOUR, NEW_YORK_VIEW } from './city-new-york';
+import { SAN_FRANCISCO, SAN_FRANCISCO_TOUR, SAN_FRANCISCO_VIEW } from './city-san-francisco';
 import { withKindsTour, KIND_TOUR_IDS, LONDON_EXEMPT, CITY_DEMO_GROUPS } from './london-kinds';
 import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
 import { zoneOf, levelOf, Zone, isRoad } from '../tile';
@@ -67,7 +68,7 @@ export type SectionId = 'downtown' | 'roads' | 'transport' | 'civic' | 'rail' | 
   | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-kinds' | 'london-rail' | 'london-buses' | 'london-river' | 'london-roads' | 'london-tube'
   // a sample city on the city-map kit (citydemo.ts): each city's own, built from its CityDemo
   | 'city-areas' | 'city-landmarks' | 'city-transit' | 'city-roads';
-export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london' | 'paris' | 'new-york';
+export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london' | 'paris' | 'new-york' | 'san-francisco';
 export type DemoXY = readonly [number, number];
 /** x, y, width, height in tiles */
 export type DemoRect = readonly [number, number, number, number];
@@ -861,6 +862,8 @@ export const DEMOS: DemoDef[] = [
     blurb: PARIS.blurb },
   { id: 'new-york', name: 'New York', slot: 96, sections: CITY_SECTIONS, town: 'city', city: NEW_YORK, tour: NEW_YORK_TOUR, view: NEW_YORK_VIEW, hero: 'heroes/new-york.jpg',
     blurb: NEW_YORK.blurb },
+  { id: 'san-francisco', name: 'San Francisco', slot: 97, sections: CITY_SECTIONS, town: 'city', city: SAN_FRANCISCO, tour: SAN_FRANCISCO_TOUR, view: SAN_FRANCISCO_VIEW, hero: 'heroes/san-francisco.jpg',
+    blurb: SAN_FRANCISCO.blurb },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
 export const isDemoId = (s: unknown): s is DemoId => typeof s === 'string' && DEMO_BY_ID.has(s as DemoId);
