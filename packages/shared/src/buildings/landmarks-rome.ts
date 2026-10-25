@@ -143,6 +143,51 @@ const stPetersOps = (): Op[] => {
   return ops;
 };
 
+const stPetersOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, PAVING)];
+  ops.push(['box', 0.76, 0.46, 0.88, 0, 0.03, -0.35, VATICAN]);
+  ops.push(['roof', 0.78, 0.18, 0.9, 0, 0.49, -0.35, DOME, true]);
+  ops.push(['box', 1.14, 0.42, 0.32, 0, 0.03, -0.42, VATICAN]);
+  ops.push(['cyl', 0.31, 0.33, 0.4, 0, 0.03, -0.65, VATICAN, 20]);
+  ops.push(['box', 1.18, 0.48, 0.17, 0, 0.03, 0.15, VATICAN]);
+  for (const x of [-0.42, -0.21, 0, 0.21, 0.42]) ops.push(['box', x === 0 ? 0.15 : 0.11, 0.25, 0.018, x, 0.04, 0.245, 'dark']);
+  for (let i = 0; i < 10; i++) {
+    const x = -0.52 + i * 0.104;
+    ops.push(['cyl', 0.022, 0.026, 0.36, x, 0.05, 0.285, VATICAN, 8]);
+    ops.push(['box', 0.06, 0.03, 0.06, x, 0.41, 0.285, VATICAN]);
+    ops.push(['box', 0.035, 0.075, 0.035, x, 0.57, 0.15, VATICAN]);
+  }
+  ops.push(['box', 1.23, 0.07, 0.26, 0, 0.48, 0.19, VATICAN]);
+  ops.push(['roof', 0.48, 0.17, 0.18, 0, 0.55, 0.19, VATICAN]);
+  ops.push(['cyl', 0.27, 0.29, 0.18, 0, 0.5, -0.43, VATICAN, 24]);
+  for (let i = 0; i < 12; i++) {
+    const a = i * Math.PI * 2 / 12;
+    ops.push(['box', 0.035, 0.13, 0.035, Math.cos(a) * 0.275, 0.525, -0.43 + Math.sin(a) * 0.275, 'dark']);
+  }
+  ops.push(['lathe', 0, 0.68, -0.43, DOME, [0.28, 0, 0.31, 0.06, 0.28, 0.18, 0.2, 0.3, 0.09, 0.39, 0.04, 0.43, 0, 0.45], { seg: 24 }]);
+  ops.push(['cyl', 0.055, 0.065, 0.12, 0, 1.13, -0.43, VATICAN, 12]);
+  ops.push(['lathe', 0, 1.25, -0.43, DOME, [0.065, 0, 0.05, 0.04, 0, 0.07], { seg: 12 }]);
+  ops.push(['box', 0.025, 0.13, 0.025, 0, 1.32, -0.43, 'gold']);
+  ops.push(['box', 0.1, 0.025, 0.025, 0, 1.37, -0.43, 'gold']);
+  for (const x of [-0.38, 0.38]) {
+    ops.push(['cyl', 0.11, 0.13, 0.09, x, 0.45, -0.1, VATICAN, 16]);
+    ops.push(['lathe', x, 0.54, -0.1, DOME, [0.13, 0, 0.14, 0.05, 0.08, 0.13, 0, 0.17], { seg: 16 }]);
+  }
+  for (const sx of [-1, 1]) {
+    for (let i = 0; i < 9; i++) {
+      const a = 0.12 + i * 0.16;
+      const x = sx * Math.sin(a) * 0.88, z = 0.45 + Math.cos(a) * 0.43;
+      ops.push(['cyl', 0.016, 0.02, 0.16, x, 0.03, z, VATICAN, 8]);
+      ops.push(['box', 0.055, 0.025, 0.055, x, 0.19, z, VATICAN]);
+    }
+  }
+  ops.push(['cyl', 0.09, 0.1, 0.035, 0, 0.03, 0.59, 'stone', 16]);
+  ops.push(['taper', 0.055, 0.055, 0.025, 0.025, 0.39, 0, 0.065, 0.59, 'sand']);
+  ops.push(['cyl', 0.012, 0.012, 0.07, 0, 0.455, 0.59, 'gold', 6]);
+  for (const x of [-0.43, 0.43]) ops.push(['cyl', 0.12, 0.15, 0.025, x, 0.03, 0.59, 'pond', 20]);
+  return ops;
+};
+
 export const stPeters: KindDef = {
   id: 'st-peters', name: 'St Peter\'s Basilica', code: library.code, kindId: 142, family: 'leisure', tier: 2,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', landmark: true, tags: TAGS, group: 'rome',
@@ -159,6 +204,7 @@ export const stPeters: KindDef = {
   levels: [{
     capacity: 55, wage: 16, cost: 18000, upkeep: 70, work: 3600, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'a columned facade with rooftop saints, a ribbed great dome and two small domes around the elliptical square', height: 1.45, ops: stPetersOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the great church of the popes, the dome over the crossing, the colonnaded square with the obelisk', height: 1.03, ops: stPetersOps() },
     ],
   }],
