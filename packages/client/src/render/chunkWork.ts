@@ -10,8 +10,9 @@ import { DIRTY_SHAPE, DIRTY_BUILD, type ClientChunk, type ClientWorld } from '..
  * never split, and at least one runs a frame. Only the passes that read what changed run: a building rising in a lot
  * redraws the ground and the buildings, not the junctions, bridges, signals and rails. A chunk marked again while it
  * waits is rebuilt once; one marked again while its rebuild is under way goes back in the queue and is rebuilt after.
- * A chunk on screen finishes within two frames; one off screen waits while anything on screen is pending, keeps its
- * mark, and is rebuilt first when it comes into view (the queue holds at most the loaded chunks, once each).
+ * The chunk under the camera (its centre within 0.9 of a chunk of the focus) finishes within two frames whatever its passes cost; others
+ * on screen go a time box at a time; one off screen waits while anything on screen is pending, keeps its mark, and is
+ * rebuilt first when it comes into view (the queue holds at most the loaded chunks, once each).
  *
  * `legacy` is the old loop, for paired measurements: up to four whole rebuilds a frame, every pass, in queue order.
  */
@@ -21,7 +22,7 @@ export type RebuildPass = (typeof REBUILD_PASSES)[number];
 /** one renderer's part of a chunk rebuild, and the DIRTY_* bits it reads */
 export interface Pass { name: RebuildPass; reads: number; run: (key: string, c: ClientChunk) => void }
 
-export interface RebuildRecord { at: number; key: string; ms: number; passes: number[]; items: number; dist: number; mask: number; frames: number; visible: boolean }
+export interface RebuildRecord { at: number; key: string; ms: number; passes: number[]; items: number; dist: number; mask: number; frames: number; visible: boolean; under: boolean }
 
 const RING = 1024;
 
@@ -43,14 +44,16 @@ export class RebuildStats {
       rebuilds: rs.length, perSecond: r1(rs.length / seconds), totalMs: r1(tot), meanMs: r1(tot / (rs.length || 1)),
       p50: r1(ms[ms.length >> 1] ?? 0), max: r1(ms[ms.length - 1] ?? 0),
       shape: rs.filter((r) => r.mask & DIRTY_SHAPE).length, buildOnly: rs.filter((r) => !(r.mask & DIRTY_SHAPE) && r.mask & DIRTY_BUILD).length,
-      framesMax: rs.reduce((m, r) => Math.max(m, r.frames), 0), visibleFramesMax: rs.filter((r) => r.visible).reduce((m, r) => Math.max(m, r.frames), 0),
+      framesMax: rs.reduce((m, r) => Math.max(m, r.frames), 0), underFramesMax: rs.filter((r) => r.under).reduce((m, r) => Math.max(m, r.frames), 0),
       passes: Object.fromEntries(REBUILD_PASSES.map((p, i) => [p, { ms: r1(sum[i] / (rs.length || 1)), share: Math.round((100 * sum[i]) / tot) }])),
       chunks: new Set(rs.map((r) => r.key)).size,
     };
   }
 }
 
-interface Job { key: string; c: ClientChunk; mask: number; i: number; at: number; frames: number; ms: number; passes: number[]; dist: number; visible: boolean }
+interface Job { key: string; c: ClientChunk; mask: number; i: number; at: number; frames: number; ms: number; passes: number[]; dist: number; visible: boolean; under: boolean }
+/** a chunk whose centre is within this of the camera's focus is "under the camera": finished within two frames */
+const UNDER = CHUNK_SIZE * 0.9;
 
 export class ChunkWork {
   readonly stats = new RebuildStats();
@@ -73,6 +76,8 @@ export class ChunkWork {
   busy(): boolean { return !!this.job || this.world.dirtyStats.queue.size > 0; }
   /** chunks waiting, and the one under way */
   get pending(): number { return this.world.dirtyStats.queue.size + (this.job ? 1 : 0); }
+  /** the chunk being rebuilt, if any */
+  get current(): string | null { return this.job?.key ?? null; }
 
   /** A chunk left the view: a rebuild under way for it stops. */
   dropChunk(key: string) { if (this.job?.key === key) this.job = null; }
@@ -88,7 +93,7 @@ export class ChunkWork {
     const j = this.job;
     if (!j) return;
     j.frames++;
-    const finish = j.frames >= 2 && j.visible; // on screen: done within two frames
+    const finish = j.frames >= 2 && j.under; // under the camera: done within two frames
     while (j.i < this.passes.length) {
       const p = this.passes[j.i], k = j.i++;
       if (!(p.reads & j.mask)) continue;
@@ -98,7 +103,7 @@ export class ChunkWork {
       j.passes[this.order[k]] += d; j.ms += d;
       if (!finish && j.i < this.passes.length && performance.now() - t0 >= budget) return;
     }
-    this.stats.push({ at: j.at, key: j.key, ms: j.ms, passes: j.passes, items: this.items(j.key), dist: j.dist, mask: j.mask, frames: j.frames, visible: j.visible });
+    this.stats.push({ at: j.at, key: j.key, ms: j.ms, passes: j.passes, items: this.items(j.key), dist: j.dist, mask: j.mask, frames: j.frames, visible: j.visible, under: j.under });
     this.job = null;
   }
 
@@ -122,7 +127,7 @@ export class ChunkWork {
     q.delete(best);
     const mask = best.mask;
     best.mask = 0; best.dirty = false;
-    return { key: chunkKey(best.cx, best.cy), c: best, mask, i: 0, at: performance.now(), frames: 0, ms: 0, passes: REBUILD_PASSES.map(() => 0), dist: bestDist, visible: bestVis };
+    return { key: chunkKey(best.cx, best.cy), c: best, mask, i: 0, at: performance.now(), frames: 0, ms: 0, passes: REBUILD_PASSES.map(() => 0), dist: bestDist, visible: bestVis, under: bestVis && bestDist < UNDER };
   }
 
   private legacyFrame(focus: { x: number; z: number }) {
@@ -143,7 +148,7 @@ export class ChunkWork {
         const d = performance.now() - s;
         passes[this.order[k]] += d; ms += d;
       }
-      this.stats.push({ at, key, ms, passes, items: this.items(key), dist: Math.hypot((c.cx + 0.5) * CHUNK_SIZE - focus.x, (c.cy + 0.5) * CHUNK_SIZE - focus.z), mask, frames: 1, visible: true });
+      this.stats.push({ at, key, ms, passes, items: this.items(key), dist: Math.hypot((c.cx + 0.5) * CHUNK_SIZE - focus.x, (c.cy + 0.5) * CHUNK_SIZE - focus.z), mask, frames: 1, visible: true, under: false });
     }
   }
 }
