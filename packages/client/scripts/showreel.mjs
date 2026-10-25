@@ -32,7 +32,7 @@ export const SHOWREEL = {
     { name: 'parliament', caption: 'Big Ben',     key: '96:1:0',  hour: 11, yaw: -0.35, pitch: 0.5, zoom: 1.0 },
     { name: 'eye',       caption: 'London Eye',   key: '97:1:0',  hour: 11, yaw: 0.55, pitch: 0.5, zoom: 0.98 },
     { name: 'eiffel',    caption: 'Eiffel Tower', key: '133:1:0', hour: 11, yaw: -0.7, pitch: 0.5, zoom: 0.85 },
-    { name: 'golden-gate', caption: 'Golden Gate', key: '192:1:1', hour: 11, yaw: -0.25, pitch: 0.5, zoom: 0.95 },
+    { name: 'golden-gate', caption: 'Golden Gate', key: '192:1:2', hour: 11, yaw: -0.25, pitch: 0.5, zoom: 0.95 },
     { name: 'shop',      caption: 'Corner shop',  key: '2:1:4',   hour: 11, yaw: -0.8, pitch: 0.5, zoom: 0.75 },
     { name: 'terrace',   caption: 'Terrace',      key: '70:2:0',  hour: 11, yaw: 0.3, pitch: 0.52, zoom: 0.85 },
     { name: 'tube',      caption: 'Tube',         key: '22:1:0',  hour: 21, yaw: -0.5, pitch: 0.5, zoom: 0.78 },

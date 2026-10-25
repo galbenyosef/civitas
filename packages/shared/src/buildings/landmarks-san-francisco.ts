@@ -128,8 +128,8 @@ export const goldenGate: KindDef = {
     capacity: 24, wage: 16, cost: 14000, upkeep: 65, work: 3200, parking: { surface: 0, underground: 0 },
     designs: [
       { author: 'k3.1-pro', draft: true, name: 'tall art-deco towers, continuous side-span cables, separate suspenders and tiny traffic above the water', height: 1.46, ops: goldenGateOpsK31() },
-      { author: 'kimi-2.8-preview', name: 'the orange towers and the great cables over the strait', height: 0.74, ops: goldenGateOps() },
-      { author: 'claude-fable-5-1', draft: true, name: 'the orange towers tall over the strait between the two headlands, the cables sagging to the deck and the hangers dropping from them', height: 2.0, ops: fableGoldenGateOps() },
+      { author: 'kimi-2.8-preview', draft: true, name: 'the orange towers and the great cables over the strait', height: 0.74, ops: goldenGateOps() },
+      { author: 'claude-fable-5-1', name: 'the orange towers tall over the strait between the two headlands, the cables sagging to the deck and the hangers dropping from them', height: 2.0, ops: fableGoldenGateOps() },
     ],
   }],
 };
