@@ -47,6 +47,36 @@ const operaHouseOps = (): Op[] => {
   return ops;
 };
 
+const operaHouseOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'pond')];
+  ops.push(['box', 1.82, 0.035, 1.58, 0, 0.015, -0.12, PAVING]);
+  ops.push(['box', 1.58, 0.16, 1.18, 0, 0.05, -0.2, PODIUM]);
+  for (let i = 0; i < 3; i++) ops.push(['box', 1.5 - i * 0.12, 0.035, 0.18, 0, 0.05 + i * 0.035, 0.47 - i * 0.06, PODIUM]);
+  const shell = (x: number, z: number, w: number, h: number, lean: number): Op[] => {
+    const parts: Op[] = [];
+    for (let i = 0; i < 5; i++) {
+      const wb = Math.max(0.025, w * (1 - i / 5));
+      const wt = Math.max(0.025, w * (1 - (i + 1) / 5));
+      const db = 0.13 * (1 - i / 5) + 0.015;
+      const dt = 0.13 * (1 - (i + 1) / 5) + 0.015;
+      parts.push(['taper', wb, db, wt, dt, h / 5, x, 0.21 + h * i / 5, z + lean * i / 5, SHELL, { shift: [0, lean / 5] }]);
+    }
+    return parts;
+  };
+  ops.push(...shell(-0.34, -0.57, 0.58, 0.66, 0.24));
+  ops.push(...shell(0.12, -0.52, 0.5, 0.53, 0.21));
+  ops.push(...shell(-0.15, -0.25, 0.43, 0.4, 0.18));
+  ops.push(...shell(0.43, -0.04, 0.35, 0.34, -0.14));
+  ops.push(...shell(0.15, 0.05, 0.3, 0.25, -0.12));
+  ops.push(['box', 1.12, 0.12, 0.035, 0, 0.21, 0.37, 'dark']);
+  ops.push(['box', 0.44, 0.12, 0.3, -0.52, 0.21, 0.14, 'dark']);
+  ops.push(...shell(-0.52, 0.03, 0.3, 0.22, 0.1));
+  ops.push(['box', 0.32, 0.04, 0.13, 0.72, 0.035, 0.74, 'navy']);
+  ops.push(['box', 0.23, 0.09, 0.1, 0.72, 0.075, 0.74, 'white']);
+  ops.push(...lampPost(-0.78, 0.52, 0.28, 'marquee', 0.05), ...lampPost(0.78, 0.52, 0.28, 'marquee', 0.05));
+  return ops;
+};
+
 export const operaHouse: KindDef = {
   id: 'sydney-opera-house', name: 'the Opera House', code: 12, kindId: 188, family: 'leisure', tier: 1,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'venue', landmark: true, tags: TAGS, group: 'sydney',
@@ -63,6 +93,7 @@ export const operaHouse: KindDef = {
   levels: [{
     capacity: 40, wage: 20, cost: 15000, upkeep: 100, work: 3000, parking: { surface: 0, underground: 30 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'six curved shell segments in two clusters over a broad harbour podium and monumental steps', height: 0.9, ops: operaHouseOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the white sails over the harbour on their grand podium', height: 0.6, ops: operaHouseOps() },
     ],
   }],
