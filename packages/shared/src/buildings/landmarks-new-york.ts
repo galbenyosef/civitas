@@ -73,6 +73,28 @@ const empireStateOps = (): Op[] => {
   return ops;
 };
 
+const empireStateOpsK31 = (): Op[] => {
+  const stone = 0xc8c3b8, trim = 0xe1ddd2;
+  const ops: Op[] = [slab(3, 3, PAVING)];
+  ops.push(['box', 2.4, 0.44, 2.0, 0, 0.02, 0, stone]);
+  for (const x of [-0.72, -0.24, 0.24, 0.72]) ops.push(['box', 0.3, 0.24, 0.025, x, 0.08, 1.012, 'dark']);
+  ops.push(['box', 0.52, 0.035, 0.28, 0, 0.34, 1.12, GILT]);
+  ops.push(['taper', 1.82, 1.52, 1.66, 1.38, 2.55, 0, 0.46, 0, stone, { win: 'office' }]);
+  ops.push(['box', 1.7, 0.06, 1.42, 0, 3.01, 0, trim]);
+  ops.push(['taper', 1.34, 1.14, 1.12, 0.94, 1.62, 0, 3.07, 0, stone, { win: 'office' }]);
+  ops.push(['box', 1.16, 0.06, 0.98, 0, 4.69, 0, trim]);
+  ops.push(['taper', 0.88, 0.76, 0.7, 0.6, 0.7, 0, 4.75, 0, stone, { win: 'office' }]);
+  ops.push(['box', 0.72, 0.12, 0.62, 0, 5.45, 0, trim]);
+  for (let i = 0; i < 4; i++) ops.push(['box', 0.58 - i * 0.09, 0.08, 0.5 - i * 0.07, 0, 5.57 + i * 0.08, 0, i % 2 ? 'steel' : trim]);
+  ops.push(['cyl', 0.13, 0.19, 0.4, 0, 5.89, 0, 'steel', 12]);
+  ops.push(['taper', 0.11, 0.11, 0.025, 0.025, 0.85, 0, 6.29, 0, 'silver']);
+  ops.push(['cyl', 0.025, 0.025, 0.06, 0, 7.14, 0, 'red', 6]);
+  ops.push(...flags(-1.1, 1.28, 3, 0.5, ['navy', 'red', 'white'], 0.02));
+  ops.push(...treeLine(-1.25, -1.25, 1.25, -1.25, 4, 0.58));
+  ops.push(...lampPost(-1.3, 1.3, 0.38, 'marquee', 0.02), ...lampPost(1.3, 1.3, 0.38, 'marquee', 0.02));
+  return ops;
+};
+
 export const empireState: KindDef = {
   ...towerBase, id: 'empire-state', name: 'the Empire State Building', kindId: 121, tier: 1,
   footprint: { w: 3, h: 3, door: [1, 2] },
@@ -82,6 +104,7 @@ export const empireState: KindDef = {
   levels: [{
     capacity: 400, wage: 46, cost: 28000, upkeep: 140, work: 5000, parking: { surface: 0, underground: 80 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'cool limestone, a broad storefront podium and three tapering shafts beneath a ribbed mooring mast', height: 7.2, ops: empireStateOpsK31() },
       { author: 'kimi-2.8-preview', name: 'five limestone setbacks under a silver mooring-mast spire', height: 7.3, ops: empireStateOps() },
       { author: 'claude-fable-5-1', draft: true, name: 'a limestone slab narrow to the avenue and long down the block, four setbacks to the art-deco crown, the round mooring mast', height: 6.6, ops: fableEmpireStateOps() },
     ],
