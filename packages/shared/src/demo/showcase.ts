@@ -30,6 +30,7 @@ import { HARBOUR_OF, type HarbourRole } from '../harbours';
 import type { SeaGate } from '../waterways';
 import { londonSections, LONDON_TOUR, LONDON_VIEW } from './london';
 import { cityScenario, type CityDemo } from './citydemo';
+import { PARIS, PARIS_TOUR, PARIS_VIEW } from './city-paris';
 import { withKindsTour, KIND_TOUR_IDS, LONDON_EXEMPT, CITY_DEMO_GROUPS } from './london-kinds';
 import { isCabOffice, isFoodVenue, isWasteDepot, isCourierDepot, TAXI, FOOD, REFUSE, COURIER, MOBILE } from '../fleet';
 import { zoneOf, levelOf, Zone, isRoad } from '../tile';
@@ -65,7 +66,7 @@ export type SectionId = 'downtown' | 'roads' | 'transport' | 'civic' | 'rail' | 
   | 'london-areas' | 'london-landmarks' | 'london-education' | 'london-kinds' | 'london-rail' | 'london-buses' | 'london-river' | 'london-roads' | 'london-tube'
   // a sample city on the city-map kit (citydemo.ts): each city's own, built from its CityDemo
   | 'city-areas' | 'city-landmarks' | 'city-transit' | 'city-roads';
-export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london';
+export type DemoId = 'showcase' | 'transport' | 'leisure' | 'civic' | 'london' | 'paris';
 export type DemoXY = readonly [number, number];
 /** x, y, width, height in tiles */
 export type DemoRect = readonly [number, number, number, number];
@@ -841,6 +842,8 @@ export const TOUR: string[] = [
   'marina', 'jetty', 'ferry-pier', 'line-ferry-1', 'ferry-pier-2', 'fishing-harbour', 'cargo-port', 'sea-gate',
 ];
 
+/** The sections every sample city on the kit seeds (citydemo.ts cityScenario). */
+const CITY_SECTIONS: SectionId[] = ['city-areas', 'city-landmarks', 'city-transit', 'city-roads'];
 export const DEMOS: DemoDef[] = [
   { id: 'showcase', name: 'Showcase', slot: 90, sections: ['downtown', 'roads', 'transport', 'high-street', 'civic', 'rail', 'leisure', 'media', 'power', 'remembrance', 'education', 'airport', 'industry', 'riverside', 'harbour'],
     blurb: 'A lived-in town with one of every large building and every merged lot, buses, trains, an underground and river buses, an airport every plane type flies to, helicopters, a river with every style of bridge, and a harbour with every kind of boat, all running. Take the guided tour.' },
@@ -852,6 +855,9 @@ export const DEMOS: DemoDef[] = [
     blurb: 'Health, police, fire and builders, every size.' },
   { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-education', 'london-kinds', 'london-rail', 'london-buses', 'london-river', 'london-roads', 'london-tube'], town: 'london', tour: withKindsTour(LONDON_TOUR), view: LONDON_VIEW,
     blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, the Central, Northern and Jubilee lines underneath, and on the river the RB1 river buses, yachts through Tower Bridge and ships from the estuary.' },
+  // the sample cities on the city-map kit (citydemo.ts): each a CityDemo, its sections built on first use
+  { id: 'paris', name: 'Paris', slot: 95, sections: CITY_SECTIONS, town: 'city', city: PARIS, tour: PARIS_TOUR, view: PARIS_VIEW, hero: 'heroes/paris.jpg',
+    blurb: PARIS.blurb },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));
 export const isDemoId = (s: unknown): s is DemoId => typeof s === 'string' && DEMO_BY_ID.has(s as DemoId);

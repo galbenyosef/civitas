@@ -209,7 +209,7 @@ export function withKindsTour(tour: readonly string[]): string[] {
  * or a line here: the check fails for a kind with neither.
  */
 /** The landmark groups (cities) with a sample city demo of their own (showcase.ts DEMOS, citydemo.ts): their landmarks stand there. */
-export const CITY_DEMO_GROUPS = new Set<string>([]);
+export const CITY_DEMO_GROUPS = new Set<string>(['paris']);
 export const LONDON_EXEMPT: Record<string, string> = {
   camp: 'the pioneer camp is a new player\'s first settlers, one per player, on a frontier start; London is a built city',
   // world landmarks (docs/buildings.md "Landmarks", landmarks-world.ts) whose own cities have no demos yet, so none
