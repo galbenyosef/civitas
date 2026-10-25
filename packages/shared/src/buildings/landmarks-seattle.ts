@@ -58,6 +58,30 @@ const spaceNeedleOps = (): Op[] => {
   return ops;
 };
 
+const spaceNeedleOpsK31 = (): Op[] => {
+  const ops: Op[] = [slab(2, 2, 'lawn')];
+  ops.push(['cyl', 0.8, 0.8, 0.025, 0, 0.01, 0, PAVING, 24]);
+  ops.push(['cyl', 0.07, 0.09, 2.14, 0, 0.035, 0, 'steel', 12]);
+  for (let i = 0; i < 3; i++) {
+    const a = i * Math.PI * 2 / 3 - Math.PI / 2;
+    for (const side of [-0.11, 0.11]) {
+      const b = a + side;
+      const x = Math.cos(b) * 0.52, z = Math.sin(b) * 0.52;
+      ops.push(['box', 0.14, 0.05, 0.14, x, 0.035, z, NEEDLE_WHITE]);
+      ops.push(['taper', 0.065, 0.065, 0.038, 0.038, 2.08, x, 0.085, z, NEEDLE_WHITE, { shift: [Math.cos(b) * 0.12 - x, Math.sin(b) * 0.12 - z] }]);
+    }
+  }
+  ops.push(['lathe', 0, 2.08, 0, NEEDLE_WHITE, [0.12, 0, 0.25, 0.06, 0.48, 0.15, 0.52, 0.2, 0.5, 0.24], { seg: 24 }]);
+  ops.push(['cyl', 0.49, 0.49, 0.12, 0, 2.31, 0, 'dark', 24]);
+  ops.push(['cyl', 0.52, 0.52, 0.035, 0, 2.43, 0, NEEDLE_WHITE, 24]);
+  ops.push(['lathe', 0, 2.465, 0, NEEDLE_ORANGE, [0.51, 0, 0.46, 0.045, 0.3, 0.13, 0.12, 0.2, 0, 0.23], { seg: 24 }]);
+  ops.push(['cyl', 0.025, 0.07, 0.4, 0, 2.65, 0, 'steel', 10]);
+  ops.push(['cyl', 0.025, 0.025, 0.055, 0, 3.05, 0, 'red', 6]);
+  for (const [x, z] of [[-0.72, 0.62], [0.72, 0.62], [0, -0.82]] as const) ops.push(...tree(x, z, 0.48));
+  ops.push(...lampPost(-0.42, 0.78, 0.3, 'marquee', 0.02), ...lampPost(0.42, 0.78, 0.3, 'marquee', 0.02));
+  return ops;
+};
+
 export const spaceNeedle: KindDef = {
   ...towerBase, id: 'space-needle', name: 'the Space Needle', kindId: 209, tier: 1,
   footprint: { w: 2, h: 2, door: [1, 1] },
@@ -67,6 +91,7 @@ export const spaceNeedle: KindDef = {
   levels: [{
     capacity: 280, wage: 44, cost: 19000, upkeep: 120, work: 4200, parking: { surface: 0, underground: 60 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'six splayed legs around a lift core, a dark observation band and an orange halo roof', height: 3.11, ops: spaceNeedleOpsK31() },
       { author: 'kimi-2.8-preview', name: 'the flying saucer on its tripod legs over the fairground', height: 3.1, ops: spaceNeedleOps() },
     ],
   }],
