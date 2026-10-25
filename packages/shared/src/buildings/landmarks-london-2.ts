@@ -545,6 +545,58 @@ const towerBridgeOps = (): Op[] => {
   return ops;
 };
 
+const towerBridgeOpsK31 = (): Op[] => {
+  const ops: Op[] = [];
+  const d = TBR.deckY;
+  const bar = (x: number, z0: number, y0: number, z1: number, y1: number): Op => {
+    const [zl, zh] = y0 < y1 ? [z0, z1] : [z1, z0];
+    return ['taper', 0.03, 0.03, 0.03, 0.03, Math.abs(y1 - y0) + 0.004, x, Math.min(y0, y1) - 0.002, zl, TB_BLUE, { shift: [0, zh - zl] }];
+  };
+  for (const side of [-1, 1]) {
+    const z = side * TBR.towerZ;
+    ops.push(['box', 0.94, d - 0.02, 0.52, 0, 0, z, 'stone']);
+    for (const sx of [-1, 1]) {
+      ops.push(['cyl', 0.13, 0.15, d - 0.02, sx * 0.34, 0, z, 'stone', 12]);
+      ops.push(['box', 0.25, 1.08, 0.44, sx * 0.34, d, z, TB_STONE]);
+      for (const y of [0.45, 0.7, 0.95]) ops.push(['box', 0.09, 0.16, 0.018, sx * 0.34, y, z + 0.23, 'dark']);
+    }
+    ops.push(['box', 0.48, 0.26, 0.44, 0, 1.08, z, TB_STONE]);
+    ops.push(['roof', 0.5, 0.18, 0.46, 0, 1.0, z, TB_STONE]);
+    ops.push(['box', 0.94, 0.3, 0.48, 0, 1.34, z, TB_STONE]);
+    for (const x of [-0.28, 0, 0.28]) ops.push(['box', 0.11, 0.16, 0.018, x, 1.41, z + 0.25, 'dark']);
+    ops.push(['box', 0.98, 0.045, 0.52, 0, 1.64, z, TB_STONE]);
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      const x = sx * 0.42, tz = z + sz * 0.19;
+      ops.push(['box', 0.1, 1.5, 0.1, x, d, tz, TB_STONE]);
+      ops.push(['cone', 0.07, 0.27, x, 1.75, tz, TB_SLATE, 8]);
+      ops.push(['cyl', 0.006, 0.006, 0.07, x, 2.02, tz, 'gold', 6]);
+    }
+    ops.push(['taper', 0.78, 0.4, 0.06, 0.06, 0.36, 0, 1.685, z, TB_SLATE]);
+    ops.push(['cyl', 0.008, 0.012, 0.1, 0, 2.045, z, 'gold', 6]);
+    const len = 2 - TBR.hinge, mid = side * (TBR.hinge + len / 2);
+    ops.push(['box', TBR.width, 0.04, len, 0, d - 0.04, mid, 'dark']);
+    for (const sx of [-1, 1]) {
+      ops.push(['box', 0.035, 0.1, len, sx * 0.27, d - 0.055, mid, TB_BLUE]);
+      ops.push(['box', 0.015, 0.02, len, sx * 0.27, d + 0.06, mid, 'white']);
+      const points = [[side * 0.81, 1.28], [side * 1.18, 0.68], [side * 1.52, 0.43], [side * 1.9, 0.58]] as const;
+      for (let i = 0; i < points.length - 1; i++) ops.push(bar(sx * 0.31, points[i][0], points[i][1], points[i + 1][0], points[i + 1][1]));
+      for (const zz of [1.02, 1.22, 1.42, 1.62]) {
+        const y = zz < 1.18 ? 1.28 - (zz - 0.81) * 0.6 / 0.37 : zz < 1.52 ? 0.68 - (zz - 1.18) * 0.25 / 0.34 : 0.43 + (zz - 1.52) * 0.15 / 0.38;
+        ops.push(['box', 0.014, y - d, 0.014, sx * 0.31, d, side * zz, 'white']);
+      }
+      ops.push(['box', 0.13, 0.34, 0.2, sx * 0.35, d, side * 1.88, TB_STONE]);
+      ops.push(['cone', 0.1, 0.18, sx * 0.35, d + 0.34, side * 1.88, TB_SLATE, 4]);
+    }
+  }
+  const len = 2 * (TBR.towerZ - 0.21);
+  for (const x of [-0.3, 0.3]) {
+    ops.push(['box', 0.12, 0.2, len, x, 1.15, 0, TB_BLUE]);
+    for (const y of [1.15, 1.35]) ops.push(['box', 0.14, 0.025, len, x, y, 0, 'white']);
+    for (let i = 0; i < 7; i++) ops.push(['box', 0.14, 0.2, 0.018, x, 1.15, -len / 2 + i * len / 6, 'white']);
+  }
+  return ops;
+};
+
 export const towerBridge: KindDef = {
   id: 'tower-bridge', name: 'Tower Bridge', code: library.code, kindId: 100, family: 'leisure', tier: 10,
   flags: { civic: true, workplace: true, leisureReady: true }, windows: 'civic', ...landmark,
@@ -561,6 +613,7 @@ export const towerBridge: KindDef = {
   levels: [{
     capacity: 20, wage: 16, cost: 16000, upkeep: 70, work: 3200, parking: { surface: 0, underground: 0 },
     designs: [
+      { author: 'k3.1-pro', draft: true, name: 'open road portals, eight conical turrets and white-chorded blue walkways over the bascule gap', height: 2.15, ops: towerBridgeOpsK31() },
       { name: 'two Gothic towers with high walkways and blue suspension chains over the river', height: 2.03, ops: towerBridgeOps() },
     ],
   }],
