@@ -608,7 +608,7 @@ export interface LondonRoads {
 }
 
 /** Tiles along straight legs between tile waypoints (each leg along one axis). */
-const legs = (pts: readonly DemoXY[]): [number, number][] => {
+export const legs = (pts: readonly DemoXY[]): [number, number][] => {
   const out: [number, number][] = [[pts[0][0], pts[0][1]]];
   for (let k = 1; k < pts.length; k++) {
     let [x, y] = out[out.length - 1];
@@ -775,7 +775,7 @@ export const LT = { Land: 0, Water: 1, Rail: 2, Airfield: 3, Park: 4, Keep: 5, R
  * that join them, the largest `cell` (tiles) left before a through road splits it, and the share of cross streets
  * that stop short as cul-de-sacs. Fine in the City and the West End, long terraces in the suburbs.
  */
-const STREETS: Record<Character, { depth: [number, number]; len: [number, number]; cell: number; dead: number }> = {
+export const STREETS: Record<Character, { depth: [number, number]; len: [number, number]; cell: number; dead: number }> = {
   city: { depth: [2, 3], len: [2, 4], cell: 14, dead: 0 },
   westend: { depth: [2, 3], len: [3, 5], cell: 16, dead: 0 },
   civic: { depth: [3, 3], len: [3, 5], cell: 16, dead: 0 },

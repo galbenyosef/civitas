@@ -128,7 +128,7 @@ export function londonParcelRects(borough: Int16Array): { x: number; y: number; 
 }
 
 /** Zone shares per character: residential, commercial, office, industrial. */
-const MIX: Record<Character, [number, number, number, number]> = {
+export const MIX: Record<Character, [number, number, number, number]> = {
   city: [0.04, 0.22, 0.74, 0],
   westend: [0.2, 0.55, 0.25, 0],
   civic: [0.2, 0.2, 0.6, 0],
@@ -138,14 +138,14 @@ const MIX: Record<Character, [number, number, number, number]> = {
   industry: [0.08, 0.1, 0.02, 0.8],
 };
 /** Share of a character's blocks left green (commons, playing fields). */
-const GREEN: Partial<Record<Character, number>> = { suburb: 0.12, outer: 0.03 };
-const ZONES = [Zone.Residential, Zone.Commercial, Zone.Office, Zone.Industrial];
+export const GREEN: Partial<Record<Character, number>> = { suburb: 0.12, outer: 0.03 };
+export const ZONES = [Zone.Residential, Zone.Commercial, Zone.Office, Zone.Industrial];
 /**
  * 1×1 level (1-3) for a lot: the character's usual level with a per-lot nudge. Homes thin out towards the suburbs;
  * shops, offices and works stay full size everywhere, so every neighbourhood has jobs near it (a newcomer's job search
  * is a bounded breadth-first search, and one that finds nothing costs its whole budget).
  */
-function lotLevel(c: Character, zone: number, x: number, y: number): number {
+export function lotLevel(c: Character, zone: number, x: number, y: number): number {
   const h = hash2(x * 31 + 7, y * 17 + 3);
   if (zone !== Zone.Residential) return h < 0.1 ? 2 : 3;
   switch (c) {
@@ -157,7 +157,7 @@ function lotLevel(c: Character, zone: number, x: number, y: number): number {
 }
 
 /** Merged buildings a dense block may hold: kind, level range. Tried in order of the block's hash. */
-const DENSE: Partial<Record<Character, Partial<Record<number, [string, number, number][]>>>> = {
+export const DENSE: Partial<Record<Character, Partial<Record<number, [string, number, number][]>>>> = {
   city: {
     [Zone.Office]: [['off-hq', 6, 7], ['off-tower', 4, 5], ['off-tower', 5, 5], ['off-hq', 7, 7]],
     [Zone.Commercial]: [['com-hotel', 6, 7], ['com-store', 4, 5]],
@@ -168,10 +168,10 @@ const DENSE: Partial<Record<Character, Partial<Record<number, [string, number, n
   industry: { [Zone.Industrial]: [['ind-works', 5, 5], ['ind-depot', 3, 4], ['ind-plant', 6, 7]] },
 };
 /** Share of a dense character's blocks that get merged buildings, and how many at most per block (more in a bigger block). */
-const DENSE_SHARE: Partial<Record<Character, number>> = { city: 0.9, westend: 0.35, civic: 0.4, inner: 0.12, industry: 0.45 };
+export const DENSE_SHARE: Partial<Record<Character, number>> = { city: 0.9, westend: 0.35, civic: 0.4, inner: 0.12, industry: 0.45 };
 
 /** Services and car parks per 25×25 cell, as in every seedCity district (local offsets; each moves to the nearest frontage lot). */
-const SERVICES: [number, number, string][] = [
+export const SERVICES: [number, number, string][] = [
   [1, 1, 'police'], [16, 1, 'fire'], [1, 16, 'hospital'], [16, 16, 'yard'],
   [6, 3, 'parking'], [13, 6, 'parking'], [4, 13, 'parking'], [18, 11, 'parking'],
 ];

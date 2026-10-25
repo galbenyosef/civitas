@@ -82,6 +82,13 @@ is missing from the showcase.
 bridges, the City and Canary Wharf as merged towers, the West End, rings of homes, docks and industry down river, the parks,
 four termini with a line each, freight, buses and Heathrow, with a tour by area. The map is data in
 `shared/src/demo/london.ts`, painted by `server/src/demo/london.ts` in place of the 3×3 districts.
+**Paris**, **New York** and **San Francisco** (`?demo=paris`, `?demo=new-york`, `?demo=san-francisco`, ports 8195-8197)
+are sample cities on the city-map kit, each a data file (`shared/src/demo/city-*.ts`): the water, places, parks,
+railways, main roads, districts, landmarks, lines and tour of a city as latitudes and longitudes, planned by
+`shared/src/demo/citymap.ts` and `citydemo.ts` and painted by `server/src/demo/citymap.ts`. Paris has the Seine round the
+Île de la Cité, its six landmarks, Métro 1 and 4 and the Batobus; New York Manhattan's grid between its rivers, the eight
+landmarks, the Brooklyn Bridge as a real crossing, the 1 and the 7; San Francisco the Golden Gate and Bay Bridges,
+Alcatraz, BART under the bay and the ferries (docs/demo.md "Sample cities and the city-map kit").
 The perf readout (top-bar **perf** chip or **Shift+M**, always on in a test city) shows the server tick average, p95 and max
 for the last minute against the 200 ms budget (amber over 50 ms, red over 200 ms), agents and bytes per second received,
 FPS and frame time, agents drawn, chunks loaded and draw calls, and the sound engine's cost per 250 ms tick; `window.msc.perf.readout` has the last second's figures.

@@ -60,3 +60,5 @@ export * from './tv';
 export * from './roadclass';
 export * from './roadtool';
 export * from './streets';
+export * from './demo/citymap';
+export * from './demo/citydemo';
