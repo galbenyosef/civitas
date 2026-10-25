@@ -222,11 +222,6 @@ export interface DemoDef {
   town?: 'london' | 'city';
   /** a sample city's map and scenario (citydemo.ts), with `town: 'city'` */
   city?: CityDemo;
-  /**
-   * the demo's hero image for the landing page: a path under packages/client/src (a 1600×900 JPEG of the welcome
-   * view, 'heroes/paris.jpg'); none, a placeholder card
-   */
-  hero?: string;
   /** tour order, when not TOUR */
   tour?: string[];
   /** the welcome stop's camera, when not the 3×3 town's */
@@ -861,11 +856,11 @@ export const DEMOS: DemoDef[] = [
   { id: 'london', name: 'London', slot: 94, sections: ['london-areas', 'london-landmarks', 'london-education', 'london-kinds', 'london-rail', 'london-buses', 'london-river', 'london-roads', 'london-tube'], town: 'london', tour: withKindsTour(LONDON_TOUR), view: LONDON_VIEW,
     blurb: 'A sample city on the shape of London: the Thames winding past Westminster and round the Isle of Dogs to the estuary, the City and Canary Wharf, the West End, homes from Kensington to Hackney and Brixton, docks and industry down river, the parks, the termini and Heathrow, the Central, Northern and Jubilee lines underneath, and on the river the RB1 river buses, yachts through Tower Bridge and ships from the estuary.' },
   // the sample cities on the city-map kit (citydemo.ts): each a CityDemo, its sections built on first use
-  { id: 'paris', name: 'Paris', slot: 95, sections: CITY_SECTIONS, town: 'city', city: PARIS, tour: PARIS_TOUR, view: PARIS_VIEW, hero: 'heroes/paris.jpg',
+  { id: 'paris', name: 'Paris', slot: 95, sections: CITY_SECTIONS, town: 'city', city: PARIS, tour: PARIS_TOUR, view: PARIS_VIEW,
     blurb: PARIS.blurb },
-  { id: 'new-york', name: 'New York', slot: 96, sections: CITY_SECTIONS, town: 'city', city: NEW_YORK, tour: NEW_YORK_TOUR, view: NEW_YORK_VIEW, hero: 'heroes/new-york.jpg',
+  { id: 'new-york', name: 'New York', slot: 96, sections: CITY_SECTIONS, town: 'city', city: NEW_YORK, tour: NEW_YORK_TOUR, view: NEW_YORK_VIEW,
     blurb: NEW_YORK.blurb },
-  { id: 'san-francisco', name: 'San Francisco', slot: 97, sections: CITY_SECTIONS, town: 'city', city: SAN_FRANCISCO, tour: SAN_FRANCISCO_TOUR, view: SAN_FRANCISCO_VIEW, hero: 'heroes/san-francisco.jpg',
+  { id: 'san-francisco', name: 'San Francisco', slot: 97, sections: CITY_SECTIONS, town: 'city', city: SAN_FRANCISCO, tour: SAN_FRANCISCO_TOUR, view: SAN_FRANCISCO_VIEW,
     blurb: SAN_FRANCISCO.blurb },
 ];
 export const DEMO_BY_ID = new Map(DEMOS.map((d) => [d.id, d]));

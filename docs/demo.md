@@ -438,7 +438,7 @@ Heathrow line, Wembley, Kew and Heathrow. Area stops are `blocks` with a `blurb`
 Paris, New York and San Francisco are sample cities like London, each built from a small **city-map kit** so the city
 is one data file rather than a bespoke map and scenario. They are `DEMOS` entries with `town: 'city'` and `city` their
 data (slots 95, 96 and 97, ports 8195-8197, `?demo=paris`, `?demo=new-york`, `?demo=san-francisco`), read-only showcases
-like London on a spectate server, each with a tour, a welcome view and a hero image (`hero`, below).
+like London on a spectate server, each with a tour, a welcome view and a hero picture on the home page (below).
 
 Code:
 
@@ -514,7 +514,7 @@ schools and `KIND_SPOTS` added to the kit first.
 1. Write `shared/src/demo/city-<id>.ts`: a `CityDemo` (copy Paris, the simplest), its tour and view. Draw the water first
    (rivers with widths, or a water polygon over the map and the land drawn back), then the places, parks, arterials,
    rails and districts, then the structures, stations, lines and areas.
-2. Add it to `DEMOS` (a free slot, `town: 'city'`, `city`, `tour`, `view`, `hero`) and its landmark group to
+2. Add it to `DEMOS` (a free slot, `town: 'city'`, `city`, `tour`, `view`), its picture as `packages/client/src/heroes/<id>.jpg`, and its landmark group to
    `CITY_DEMO_GROUPS` (london-kinds.ts), so its landmarks leave the world-landmark exemption and must stand in it.
 3. Print the plan (`citymap-ascii.ts <id>`) and fix what it lists: a bridge with no run of water short enough, a
    roundabout with no clear avenue crossing (an arterial's step, another arterial or the water inside its 7×7), a
@@ -585,8 +585,10 @@ started at a load of 64 (20 over five minutes), which puts it near 105 s and 26 
   trawlers go out under the Golden Gate Bridge; Oakland has no container port, as a container ship is too tall for any
   suspension span. SFO is off the map.
 
-Hero images (`DemoDef.hero`, the landing page's cards): a 1600×900 JPEG of each city's welcome view under
-`packages/client/src/heroes/`, each under 200 KB.
+Hero pictures (the home page's cards, "The home page" above): `packages/client/src/heroes/<id>.jpg`, found by the
+build by demo id, so the cities set no `hero`. Each is a 960×540 JPEG under 200 KB of the city's welcome view (Paris,
+New York, San Francisco), London's of its public opening shot (`DEFAULT_VIEW`), since its tour's welcome is the whole
+map from far out.
 
 ## The scenario
 
