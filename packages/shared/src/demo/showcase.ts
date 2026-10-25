@@ -41,6 +41,7 @@ import { DEATH } from '../remembrance';
 import { AD_SIZE, AD_SIZES, type AdSize } from '../buildings/adslot';
 import { UTIL, type LinkMode } from '../utilities';
 import { AD } from '../adverts';
+import { withTourSound, tourSoundProblems, type TourSound } from './tourSound';
 
 /**
  * Demo maps (docs/demo.md): a planned, lived-in town where every large object in the catalogue is placed once and
@@ -1212,6 +1213,8 @@ export interface TourStop {
   view?: 'under' | 'map' | 'ranks' | 'tv' | 'traffic';
   /** the hour of the day the stop is shown at (client tour.ts pins the light until the next stop), from its placement */
   hour?: number;
+  /** what the stop sounds like (demo/tourSound.ts): cues played when the camera arrives, a bias on the ambient beds, or 'ambience' for the beds alone; the client tour plays it */
+  sound?: TourSound;
 }
 
 const kindIdOf = (s: string): number => (KIND_ID as Record<string, number>)[s] ?? 0;
@@ -1371,7 +1374,7 @@ export function demoTour(id: DemoId): TourStop[] {
       }
     }
   }
-  return out;
+  return withTourSound(id, out);
 }
 
 // ---------------------------------------------------------------- keeping the showcase complete
@@ -1845,6 +1848,10 @@ export const SHOWCASE_FEATURES: readonly ShowcaseFeature[] = [
   { id: 'london-pedestrian', caption: 'pedestrian streets in London (Carnaby Street, the Barbican)', tour: 'carnaby-street', demo: 'london',
     rule: 'the showcase has its own (road-class-pedestrian); these are London\'s',
     scenario: classRoad(RoadCls.Pedestrian), seeded: (d) => londonRoads(d).n[RoadCls.Pedestrian] >= 4 },
+  // ---- tour sound (docs/audio.md "Tour cues"): every London tour stop plays a cue on arrival, or says on purpose that the beds are enough
+  { id: 'london-tour-sound', caption: 'a sound cue (or an explicit ambience) at every London tour stop', tour: 'parliament', demo: 'london',
+    rule: 'the showcase takes a few cues of its own (the Sound stop plays what it describes); the full table is London\'s, because the tour there runs through the city\'s places',
+    scenario: () => tourSoundProblems('london', demoTour('london')).length === 0 },
   { id: 'london-street-rules', caption: 'London\'s street rules: bus lanes on Oxford Street and the Euston Road, 20 zones round the schools, double yellows in the City, turn bans', tour: 'zone20-islington', demo: 'london',
     rule: 'the showcase has one of each rule; these are London\'s',
     scenario: (ss) => ss.some((s) => (s.streetRules ?? []).length >= 10), seeded: (d) => { const r = londonRoads(d).rules; return (r.bus ?? 0) >= 10 && (r.zone20 ?? 0) >= 50 && (r.yellow ?? 0) >= 30 && (r.ban ?? 0) >= 2; } },

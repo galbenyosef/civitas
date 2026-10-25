@@ -191,13 +191,29 @@ function sink(eng: AudioEngine, bus: BusId, pan = 0): AudioNode {
 function playSample(eng: AudioEngine, id: string, o: Shot): boolean {
   const buf = eng.sample(id, r(o.seed, 5));
   if (!buf) return false;
+  startSample(eng, id, buf, o);
+  return true;
+}
+/** play a decoded take once, varied (pitch, gain, pan, take); returns the seconds it sounds for, 0 when the voice budget was spent */
+function startSample(eng: AudioEngine, id: string, buf: AudioBuffer, o: Shot): number {
   const c = eng.ctx!, def = VOICES[id];
-  if (!eng.take(buf.duration)) return true;
-  const s = c.createBufferSource(); s.buffer = buf; s.playbackRate.value = vary(1, 0.05, r(o.seed, 3));
+  if (!eng.take(buf.duration)) return 0;
+  const rate = vary(1, 0.05, r(o.seed, 3));
+  const s = c.createBufferSource(); s.buffer = buf; s.playbackRate.value = rate;
   const g = gainNode(c, (o.gain ?? 1) * (def.level ?? 1) * vary(1, 0.1, r(o.seed, 4)));
   s.connect(g); g.connect(sink(eng, def.bus, o.pan ?? (def.bus === 'ui' ? 0 : r(o.seed, 21) * 1.2 - 0.6)));
   s.start(c.currentTime + (o.delay ?? 0));
-  return true;
+  return buf.duration / rate;
+}
+/**
+ * Play a voice's recording once, for a tour cue (docs/audio.md "Tour cues"): the seconds it sounds for, or 0 when nothing did
+ * (muted, no context, the recording not decoded yet, the budget spent). Never the synthesis: a cue is a recording.
+ */
+export function playClip(eng: AudioEngine, id: string, o: Shot): number {
+  const c = eng.ctx;
+  if (!c || !eng.ready || eng.muted || c.state !== 'running') return 0;
+  const buf = eng.sample(id, r(o.seed, 5));
+  return buf ? startSample(eng, id, buf, o) : 0;
 }
 
 /** A sine or other tone with an attack/decay envelope, a pitch glide and a filter, connected to `dest`; returns its end time. */
@@ -223,7 +239,10 @@ function burst(eng: AudioEngine, dest: AudioNode, type: BiquadFilterType, freq: 
 }
 
 export type EventId = 'bird' | 'owl' | 'bell' | 'bell-deep' | 'horn' | 'beep' | 'ui-click' | 'ui-place' | 'ui-refuse' | 'ui-undo' | 'fx-hiss' | 'fx-stopbell' | 'fx-chime' | 'fx-joint'
-  | 'gust' | 'thunder' | 'footsteps' | 'siren' | 'siren-fire' | 'seagulls' | 'pigeons' | 'dog' | 'bell-peal' | 'bike-bell' | 'bin-lorry' | 'station-chime' | 'heli-over' | 'plane-over' | 'boat-horn' | 'fireworks' | 'hammer' | 'drill' | 'lawnmower';
+  | 'gust' | 'thunder' | 'footsteps' | 'siren' | 'siren-fire' | 'seagulls' | 'pigeons' | 'dog' | 'bell-peal' | 'bike-bell' | 'bin-lorry' | 'station-chime' | 'heli-over' | 'plane-over' | 'boat-horn' | 'fireworks' | 'hammer' | 'drill' | 'lawnmower'
+  | TourVoice;
+/** the recording-only voices only the tour cues play (manifest.ts, "the tour cues") */
+export type TourVoice = 'big-ben' | 'bus-pass' | 'tube-arrive' | 'tube-gap' | 'train-pass' | 'boat-pass' | 'port' | 'crowd-roar' | 'whistle' | 'jet-takeoff' | 'shop-bell' | 'ducks' | 'applause' | 'orchestra' | 'siren-ambulance' | 'school-bell' | 'crows' | 'fox' | 'rigging' | 'bridge-bell' | 'parakeets';
 
 /** Fire an event voice. Skipped (silently) when the budget is spent or the context is not running. */
 export function fire(eng: AudioEngine, id: EventId, o: Shot): void {

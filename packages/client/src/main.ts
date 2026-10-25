@@ -1511,9 +1511,12 @@ const rideNow = (): RideNow | null => {
   if (!a || !a.car) return null; // on foot: the city's own sound
   return { key: `c${selectedCitizen}`, kind: a.cls === VehicleClass.Bus ? 'bus' : a.cls === VehicleClass.Truck ? 'truck' : 'car', x: a.rx, z: a.rz };
 };
+/** the light as the player had it before a tour stop pinned an hour (TourPanel setHour); declared here because the ambience reads it */
+let tourLight: { mode: typeof lighting.mode; hour: number } | null = null;
 const audio = new Audio({
   ambience: {
-    hour: liveHour,
+    // the sound keeps the hour the eye is shown: a tour stop that pins the light (the Lights at night, a dusk cemetery) pins the beds and the birds to it too
+    hour: () => (tourLight ? lighting.fixedHour : liveHour()),
     camera: () => { const e = rig.camera.matrixWorld.elements; return { x: rig.target.x, z: rig.target.z, dist: rig.dist, map: mapMode.on, rightX: e[0], rightZ: e[2] }; },
     tileAt: (x, y) => world.getTile(x, y),
     kindIdAt: (x, y) => world.kindIdAt(x, y),
@@ -1534,8 +1537,6 @@ if (local) {
   if (__LOCAL_ONLY__) registerServiceWorker((kind, msg) => ui.toast(kind, msg));
 }
 if (cityParam) { showCityBanner(cityParam, params, hud); reviveCity(cityParam, net); }
-/** the light as the player had it before a tour stop pinned an hour (TourPanel setHour) */
-let tourLight: { mode: typeof lighting.mode; hour: number } | null = null;
 if (demoParam) {
   showDemoBanner(demoParam, params, hud, !!showcase.spectate, !showcase.defaultDemo);
   reviveDemo(demoParam, net);
@@ -1543,6 +1544,7 @@ if (demoParam) {
     demo: demoParam, net, rig, scene, buildingHtml: (info) => ui.buildingHtml(info, 'h3'),
     chipMount: document.getElementById('techBtn')!, onFly: () => { following = false; }, setUnder: (on) => setUnder(on), setMap: (on) => mapMode.set(on, false),
     celebrate: (x, y) => ranks.preview(x, y),
+    sound: (st, settle) => { if (st) audio.tourStop(st.id, st.sound, settle); else audio.tourEnd(); },
     watchTv: (r) => watchTv(r),
     setTrafficView: (on) => { overlayMenu.set(on ? 'traffic' : 'off'); trafficPanel.toggle(on); },
     // a stop shown at an hour of its own (the Piccadilly Lights at night): the light is pinned there, and given back after

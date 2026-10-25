@@ -7,6 +7,9 @@ import { CLIPS } from '../src/audio/credits';
 import { fire, makeBed, makeRide, ringBell, BEDS, type EventId, type RideKind } from '../src/audio/voices';
 import { Ambience, mixFor, newMix, newScan, birdRate, owlRate, scanAround, type AmbSources } from '../src/audio/ambience';
 import { FpvSound, type RideNow } from '../src/audio/fpv';
+import { TourCues, DEFAULT_DUCK_DB } from '../src/audio/tourcue';
+import { applyHint, HINT_CEIL } from '../src/audio/ambience';
+import { demoTour, tourSoundProblems, LONDON_SOUND, SCENES, resolveStopSound, type TourSound } from '@msimcity/shared';
 
 let fails = 0;
 const ok = (cond: boolean, what: string) => { if (!cond) { fails++; console.log('FAIL', what); } else console.log('ok  ', what); };
@@ -274,6 +277,75 @@ for (const mode of ['synthesised', 'recorded'] as const) {
   ok(f.riding && f.speed > 0.2, 'riding a bus: the engine runs with its speed');
   ride = null; f.frame(32000);
   ok(!f.riding, 'leaving the vehicle ends its sound');
+}
+
+// ---- tour cues (docs/audio.md "Tour cues"): the table is complete and names real voices; the cues play, bias and duck, and let go ----
+{
+  const london = demoTour('london');
+  ok(london.length >= 130, `the London tour has ${london.length} stops`);
+  const none = london.filter((t) => t.sound === undefined).map((t) => t.id);
+  ok(none.length === 0, `every London stop has a sound or says 'ambience' (${none.join(', ') || 'all do'})`);
+  const probs = [...tourSoundProblems('london', london), ...tourSoundProblems('showcase', demoTour('showcase'))];
+  ok(probs.length === 0, `the tour sound table is well formed (${probs.slice(0, 3).join('; ') || 'no problems'})`);
+  const cues = [...london, ...demoTour('showcase')].flatMap((t) => (t.sound && t.sound !== 'ambience' ? t.sound.cues.map((c) => ({ stop: t.id, ...c })) : []));
+  const unknown = cues.filter((c) => !VOICES[c.voice]).map((c) => `${c.stop}:${c.voice}`);
+  ok(unknown.length === 0, `every cue names a manifest voice (${unknown.join(', ') || `${cues.length} cues`})`);
+  const silent = cues.filter((c) => VOICES[c.voice] && !VOICES[c.voice].takes?.length).map((c) => `${c.stop}:${c.voice}`);
+  ok(silent.length === 0, `every cue's voice has a recording (${silent.join(', ') || 'all do'})`);
+  const loops = cues.filter((c) => c.loop);
+  const shortLoops = loops.filter((c) => (CLIPS.find((k) => k.voice === c.voice)?.seconds ?? 0) < 8).map((c) => c.voice);
+  ok(loops.length > 0 && shortLoops.length === 0, `a looped cue names a bed-length recording (${[...new Set(loops.map((c) => c.voice))].join(', ')})`);
+  const noAt = cues.filter((c) => c.at !== undefined && (c.at < 0 || c.at > 30)).length + cues.filter((c) => c.gain !== undefined && (c.gain <= 0 || c.gain > 2)).length;
+  ok(noAt === 0, 'cue times are 0 to 30 s and gains 0 to 2');
+  ok(Object.values(LONDON_SOUND).every((e) => typeof e !== 'string' || e === 'ambience' || e in SCENES), 'every scene a London row names exists');
+  ok(london.filter((t) => t.sound === 'ambience').length >= 1 && london.filter((t) => t.sound && t.sound !== 'ambience').length > 120, 'most stops have cues; a few say so when they are left to the beds');
+  // a scene with changes laid over it keeps the rest of the scene
+  const merged = resolveStopSound(['hospital', { ambience: { water: 0.3 } }]) as Exclude<TourSound, 'ambience'>;
+  ok(merged.cues.length === (SCENES.hospital.cues.length) && merged.ambience?.water === 0.3 && merged.ambience?.traffic === SCENES.hospital.ambience.traffic, 'a scene with changes keeps its cues and the beds it did not change');
+  ok(Object.values(VOICES).filter((d) => d.kind === 'event' && d.synth === false).length >= 40, 'the tour voices are recording-only events');
+
+  // the bias: named beds are held at their share of the ceiling; the rest follow the scene
+  const base = mixFor(newScan(), 40, 12, false);
+  const held = applyHint(structuredClone(base), { water: 1, traffic: 0 }, 5000, 3);
+  ok(held.water.level > HINT_CEIL.water * 0.9 && held.water.level < HINT_CEIL.water * 1.1 && held.traffic.level === 0 && held.crowd.level === base.crowd.level, 'a tour bias holds the beds it names (with a little breath) and leaves the rest');
+  ok(applyHint(structuredClone(base), null, 0).water.level === base.water.level, 'no bias leaves the mix alone');
+
+  // the cues against a fake engine: they play after the settle, bias, duck, and everything is given back
+  const mkSrc = (): AmbSources => ({ hour: () => 12, camera: () => ({ x: 0, z: 0, dist: 40, map: false, rightX: 1, rightZ: 0 }), tileAt: () => 0, kindIdAt: () => 0, agents: () => [] });
+  const e = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: okFetch });
+  const amb = new Ambience(e, mkSrc(), 5);
+  const tc = new TourCues(e, amb);
+  tc.show('early', { cues: [{ voice: 'seagulls', at: 0 }] });
+  ok(tc.log.length === 0 || tc.log.every((l) => l.kind !== 'cue'), 'before any gesture a cue is not played');
+  await new Promise((r) => setTimeout(r, 450));
+  ok(tc.log.some((l) => /no gesture/.test(l.result)), 'and the log says why (no gesture yet)');
+  e.start(); await tick();
+  const dbg: string[] = []; const was = console.log; console.log = (...a: unknown[]) => { dbg.push(a.join(' ')); };
+  tc.debug = true;
+  log.length = 0;
+  tc.show('river', { cues: [{ voice: 'seagulls', at: 0.01 }, { voice: 'tube-hall', at: 0.01, loop: true }, { voice: 'nothing-here', at: 0.01 }], ambience: { water: 0.9, traffic: 0 }, duck: 6 }, 0);
+  ok(amb.hinted?.water === 0.9, 'the stop biases the beds at once');
+  await new Promise((r) => setTimeout(r, 600));
+  console.log = was; tc.debug = false;
+  ok(tc.log.some((l) => l.voice === 'seagulls' && /^played/.test(l.result)), 'the cue plays once its recording is there');
+  ok(tc.log.some((l) => l.voice === 'tube-hall' && /looping/.test(l.result)) && tc.state.loops === 1, 'a looped cue runs until the stop is left');
+  ok(tc.log.some((l) => l.voice === 'nothing-here' && /NO SUCH VOICE/.test(l.result)), 'a cue naming no voice is reported, not thrown');
+  ok(dbg.some((l) => /\[tour-cue\] river \| cue seagulls/.test(l)), 'the debug flag prints each cue as it starts');
+  ok(log.some((l) => /ambience.*setTargetAtTime|setTargetAtTime/.test(l)), 'the beds duck while a cue sounds');
+  const active = e.active;
+  tc.show('next', 'ambience');
+  ok(amb.hinted === null && tc.state.loops === 0, 'leaving a stop gives the beds back and stops its loops');
+  ok(e.active <= active, 'and frees the voice a loop held');
+  tc.show('quiet', { cues: [{ voice: 'seagulls', at: 0.01 }] }, 0); e.muted = true;
+  await new Promise((r) => setTimeout(r, 400));
+  ok(tc.log.some((l) => l.stop === 'quiet' && /muted/.test(l.result)), 'a muted engine plays no cue (the log says so)');
+  e.muted = false;
+  tc.show('late', { cues: [{ voice: 'seagulls', at: 5 }], ambience: { wind: 0.5 } }); tc.clear();
+  await new Promise((r) => setTimeout(r, 100));
+  ok(amb.hinted === null && !tc.log.some((l) => l.stop === 'late' && l.kind === 'cue'), 'closing the tour cancels the cues not yet played');
+  // the duck is a layer of its own: the tour's dip and the ridden vehicle's add and release separately
+  log.length = 0; e.duckAmbience(-6, 0.4); e.duckAmbience(-4, 0.2, 'tour'); const both = log.filter((l) => /setTargetAtTime/.test(l)).length; e.duckAmbience(0, 0.2, 'tour'); e.duckAmbience(0, 0.6);
+  ok(both >= 2 && DEFAULT_DUCK_DB === 4, `the duck layers add (the tour's ${DEFAULT_DUCK_DB} dB beside the vehicle's 6 dB)`);
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\naudio check passed');

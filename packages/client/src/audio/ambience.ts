@@ -1,4 +1,4 @@
-import { hash2, Terrain, terrainOf, isRoad, zoneOf, familyOf, Zone } from '@msimcity/shared';
+import { hash2, type AmbienceHint, Terrain, terrainOf, isRoad, zoneOf, familyOf, Zone } from '@msimcity/shared';
 import type { AudioEngine } from './engine';
 import { fire, makeBed, ringBell, type Bed, type BedId } from './voices';
 import { VOICES } from './manifest';
@@ -98,6 +98,23 @@ export const newMix = (): Mix => {
   for (const id of ['traffic', 'wind', 'crowd', 'industry', 'water', 'rain-light', 'rain-heavy', 'market', 'pub', 'playground', 'stadium', 'fountain'] as BedId[]) m[id] = { level: 0, tone: 0.5 };
   return m;
 };
+/**
+ * The most each bed is ever driven to by the scene (mixFor's own ceilings), so a tour stop's bias (shared/src/demo/tourSound.ts
+ * AmbienceHint, 0 to 1) is a share of the bed's own range: 1 is as loud as that bed gets, 0.5 half of it.
+ */
+export const HINT_CEIL: Record<keyof AmbienceHint, number> = { traffic: 0.6, wind: 0.57, crowd: 0.4, industry: 0.45, water: 0.4, market: 0.35, pub: 0.3, playground: 0.4, stadium: 0.5, fountain: 0.35 };
+/** Lay a tour stop's bias over a mix: each bed it names is held at its share of the bed's ceiling, with a slow breath of its own (the organic rule). Pure. */
+export function applyHint(mix: Mix, hint: AmbienceHint | null, now: number, salt = 0): Mix {
+  if (!hint) return mix;
+  for (const k of Object.keys(hint) as (keyof AmbienceHint)[]) {
+    const v = hint[k], t = mix[k];
+    if (v === undefined || !t) continue;
+    const ph = hash2(k.length * 31 + k.charCodeAt(0), salt) * 6.28;
+    t.level = v * HINT_CEIL[k] * (1 + 0.07 * Math.sin(now / 1000 * (0.13 + 0.1 * hash2(k.charCodeAt(1), salt)) + ph));
+  }
+  return mix;
+}
+
 /** a window of the day: 1 between `a` and `b` o'clock, easing over an hour at each end (a > b wraps midnight) */
 const during = (h: number, a: number, b: number) => (a <= b ? smooth(a - 0.5, a + 0.5, h) * (1 - smooth(b - 0.5, b + 0.5, h)) : Math.max(smooth(a - 0.5, a + 0.5, h), 1 - smooth(b - 0.5, b + 0.5, h)));
 
@@ -168,6 +185,8 @@ export class Ambience {
   private quiet: Partial<Record<BedId, number>> = {};
   /** the weather hook: rain 0..1. Nothing in the game sets it yet (there is no weather); a future weather system calls setWeather */
   private rain = 0;
+  /** the tour stop's bias on the beds (setHint), or null */
+  private hint: AmbienceHint | null = null;
   private made = false;
   private at = 0;
   private n = 0;
@@ -176,6 +195,10 @@ export class Ambience {
   private beepAt = 0;
 
   constructor(private eng: AudioEngine, private src: AmbSources, private salt = (Math.random() * 1e9) | 0) {}
+
+  /** A tour stop's bias on the beds (client/src/audio/tourcue.ts): the beds it names are held at their share of their ceiling while it is shown; null gives them back to the scene. */
+  setHint(h: AmbienceHint | null) { this.hint = h && Object.keys(h).length ? { ...h } : null; }
+  get hinted() { return this.hint; }
 
   /** The weather hook: rain 0 (dry) to 1 (a downpour). Starts the rain beds and, over 0.6, the thunder. Not called by anything yet. */
   setWeather(rain: number) { this.rain = clamp01(rain); }
@@ -220,7 +243,7 @@ export class Ambience {
       }
     }
     const sc = scanAround(src, cam.x, cam.z, cam.dist, this.scan);
-    const mix = mixFor(sc, cam.dist, hour, cam.map, this.mix, this.rain);
+    const mix = applyHint(mixFor(sc, cam.dist, hour, cam.map, this.mix, this.rain), this.hint, now, this.salt);
     for (const id of Object.keys(mix) as BedId[]) { // the optional beds (recordings only) start when wanted and stop after eight quiet seconds
       if (ALWAYS.includes(id)) continue;
       const lv = mix[id].level;

@@ -34,6 +34,7 @@ export * from './goals';
 export * from './demo/showcase';
 export * from './demo/scenario';
 export * from './demo/london';
+export * from './demo/tourSound';
 export * from './demo/london-kinds';
 export * from './demo/londonMap';
 export * from './helicopters';
