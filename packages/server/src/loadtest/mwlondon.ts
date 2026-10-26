@@ -50,9 +50,9 @@ async function main() {
   const start = (Math.floor(w.tick / DAY) + 1) * DAY + 7 * TPH, end = start + 3 * TPH;
   while (w.tick < start) game.step();
   const s0 = { routes: SEARCH.routes, nodes: SEARCH.nodes }, g0 = { ...traffic.counters };
-  const cars = new Array(8).fill(0), pace = new Array(8).fill(0);
+  const cars = new Array(8).fill(0), pace = new Array(8).fill(0), still = new Array(8).fill(0);
   const last = new Map<Mover, { x: number; y: number; pi: number; v: number; lane: number }>();
-  let maxEdges = 0, over = 0, hard = 0, fastTicks = 0, overlaps = 0, ticks = 0, ms = 0, maxStep = 0, worstDrop = 0;
+  const whyMw = new Map<number, number>(); let maxEdges = 0, over = 0, hard = 0, fastTicks = 0, overlaps = 0, ticks = 0, ms = 0, maxStep = 0, worstDrop = 0;
   const h: [number, number] = [0, 0], g: [number, number] = [0, 0];
   const top = DRIVE_SPEED * 1.12 * classDef(RoadCls.Motorway).speed;
   while (w.tick < end) {
@@ -67,7 +67,7 @@ async function main() {
       seen.add(m);
       let d = 0;
       if (p && p.lane >= 0) d = Math.hypot(m.x - p.x, m.y - p.y);
-      cars[cls]++; pace[cls] += d;
+      cars[cls]++; pace[cls] += d; if (p && d < 0.02) { still[cls]++; if (cls === RoadCls.Motorway || cls === RoadCls.Deck) { const wy = traffic.whyHeld(m); whyMw.set(wy, (whyMw.get(wy) ?? 0) + 1); } }
       if (p && cls === RoadCls.Motorway || cls === RoadCls.Deck) {
         if (p && d < 8) {
           maxStep = Math.max(maxStep, d); maxEdges = Math.max(maxEdges, m.pi - p.pi);
@@ -93,10 +93,12 @@ async function main() {
     }
   }
   const names = ['street', 'country lane', 'one-way', 'avenue', 'motorway', 'pedestrian', 'ring', 'deck'];
-  console.log('\n| class | cars on the road (mean a tick) | share | mean pace (tiles a tick) |');
-  console.log('| --- | --- | --- | --- |');
+  console.log('\n| class | cars on the road (mean a tick) | share | mean pace (tiles a tick) | standing (mean a tick) |');
+  console.log('| --- | --- | --- | --- | --- |');
   const total = cars.reduce((n, v) => n + v, 0);
-  cars.forEach((n, i) => { if (n) console.log(`| ${names[i]} | ${(n / ticks).toFixed(1)} | ${((100 * n) / total).toFixed(1)}% | ${(pace[i] / n).toFixed(2)} |`); });
+  cars.forEach((n, i) => { if (n) console.log(`| ${names[i]} | ${(n / ticks).toFixed(1)} | ${((100 * n) / total).toFixed(1)}% | ${(pace[i] / n).toFixed(2)} | ${(still[i] / ticks).toFixed(1)} |`); });
+  const WHY = ['behind a car', 'a red light', 'waiting for a gap', 'the box ahead blocked', 'getting in', 'a turn', 'not held (a stop of one tick)'];
+  console.log(`standing motorway car-ticks by cause: ${[...whyMw].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${WHY[k] ?? 'other ' + k} ${n}`).join(', ')}`);
   const gc = traffic.counters, d = (k: keyof typeof gc) => (gc[k] as number) - (g0[k] as number);
   const routes = SEARCH.routes - s0.routes, nodes = SEARCH.nodes - s0.nodes;
   console.log(`\nroute searches ${routes}, A* nodes ${nodes} (${(nodes / (routes || 1)).toFixed(0)} a search); tick ${(ms / ticks).toFixed(2)} ms mean; give-ups: stuck home ${d('stuckHome')}, despawned ${d('stuckDespawn')}`);

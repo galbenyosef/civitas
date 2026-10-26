@@ -1054,4 +1054,16 @@ Rich: "motorways should be way faster, 2x-3x". A motorway tile is now driven at 
 
 The last row is the price: the old motorway never carried what was offered (cars waited to get on at its end), so the interchanges' street junctions never saw more than they could take; fast cars deliver more, and past about a third more than load 1 the slip roads and the street junction behind them lock, as the old model did at load 1.5 (18% crawling at 1.25). The few dead stops from speed are at a slip road's mouth, when a merger or an exit is in the box as a platoon arrives. In London (docs/demo.md), at 08:00 to 10:00 the motorways carry half a percent of the cars (the M4 and the A13 are on its edge and jammed at 0.13 tiles a tick); with the cost at 0.5 the avenues' count did not move beyond the run to run noise, so the route cost is the principled one (1 over the pace the probe measured, 2.3), not a lever on London. A* explores a third more nodes a search in a world with a motorway (87 to about 116 at 0.45 to 0.5), because `World.minRouteCost`, the distance estimate's scale, is the cheapest class: a follow-up could scale it per search.
 
-**Client.** The picker prints 250% speed. The cab's dial reads to 200 km/h (a motorway car is 130 to 165) and the engine's pitch range for cars and lorries is 5 tiles a second (a street 2.5, a motorway the top). `render/glide.ts` draws a car between ticks on a cubic from the last position to the next: at 1.4 tiles a tick a bend would be cut by up to half a tile, but the fast car has slowed to a turn's pace (0.3) before the slip road's bend and a motorway has none.
+**London, same save, 07:00 to 10:00 of the next day** (`mwlondon.ts`; the first column is main):
+
+| | main | this branch |
+| --- | --- | --- |
+| motorway cars on the road, mean a tick (standing) | 11.1 (6.9) | 14.6 (10.4) |
+| motorway mean pace, tiles a tick | 0.14 | 0.13 |
+| avenue cars on the road | 852 | 882 |
+| standing motorway car-ticks: behind a car / box ahead blocked / waiting for a gap | 1468 / 488 / 364 | 2718 / 525 / 191 |
+| A* nodes a search | 91 | 120 |
+
+The motorways were already jammed on main (62% of their cars standing): the queues are the street junctions where the M4 and the A13 end, and the share waiting for a gap at a slip's mouth fell. The avenue count moves with the chaos of a whole city (a different run of the same save differs by about as much).
+
+**Client.** The picker prints 250% speed. The cab's dial reads to 200 km/h (a motorway car is 130 to 165). The ride's engine keeps its old mapping up to 3.6 tiles a second (every street ride sounds as it did): above that a car's or lorry's ride speed goes past 1, to 1.6, so a motorway reads as faster than the top of a street (`KNEE` in `audio/fpv.ts`; the synthesis follows to 1.6). `render/glide.ts` draws a car between ticks on a cubic from one tick's position to the next. `loadtest/motorway.ts` draws exit and entry trips through it and measures the distance from the lane's own centre line: at most 0.07 tiles on the entry and the bends, 0.145 (under a lane's half width) where a car changes lane before an exit, against 0.066 for the same trips at the old pace.

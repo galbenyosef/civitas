@@ -18,10 +18,11 @@
  *    starts in time).
  */
 import {
-  TICKS_PER_HOUR, DRIVE_SPEED, Terrain, packTile, planInterchange, RoadCls, roadDragPath, ROAD_CLASS_DEFS, JUNCTION_CLASS_DEFS,
+  TICKS_PER_HOUR, TICK_MS, DRIVE_SPEED, Terrain, packTile, planInterchange, RoadCls, roadDragPath, ROAD_CLASS_DEFS, JUNCTION_CLASS_DEFS,
 } from '@msimcity/shared';
 import { World, emptyStats, type Mover } from '../world';
-import { Traffic } from '../sim/traffic';
+import { Traffic, pathPoint, strandOffset, dirBetween } from '../sim/traffic';
+import { glide, glideFrom, STRETCH, type Glider } from '../../../client/src/render/glide';
 import { findRoute } from '../pathfinding';
 import { layClass, mulberry32, obb } from './classbench';
 
@@ -241,6 +242,69 @@ for (const [label, k] of [['busy motorway (load 1)', Number(arg('load', '1'))], 
     ok(stopped >= 3, `a queue formed behind the standing car (${stopped} standing)`);
     ok(overlaps === 0, `a queue of motorway traffic never overlaps (${overlaps})`);
     ok(hardStops === 0, `every car joining the queue brakes in time (${hardStops} falls of more than half a tile a tick; worst ${worstDrop.toFixed(2)})`);
+  }
+}
+
+
+// ---- 4. ramps: the drawn path stays on the lane --------------------------------------------------------------------
+// The client draws a car between the server's positions (client render/glide.ts: a cubic between the tick's positions, 60
+// frames a second). At 1.4 tiles a tick that could cut the corner of a slip road. (Worst case measured: 0.145 tiles, where a car
+// changes lane before an exit; the bends and the entry stay within 0.07.) One car at a time through an exit, an
+// entry and the whole trip: the lane's own centre line (the geometry the server places a car by, strands included) against
+// the drawn positions.
+{
+  const w = trunk(RoadCls.Motorway), t = new Traffic(w);
+  const trips: [string, [number, number], [number, number]][] = [['exit', [-TRUNK, 10], [SPUR, TOP]], ['entry', [-SPUR, TOP], [TRUNK, 10]], ['exit west', [TRUNK, 9], [-SPUR, TOP]]];
+  for (const [name, from, to] of trips) {
+    let worst = 0, n = 0, over = 0;
+    for (let drv = 0; drv < 8; drv++) {
+      const f = findRoute(w, from[0], from[1], to[0], to[1], (x, y) => t.cost(x, y), 0.4, 40000);
+      if (!f) { ok(false, `ramps: a way for ${name}`); break; }
+      const id = 500 + drv, m = { id, x: f.path[0] + 0.5, y: f.path[1] + 0.5, path: [...f.path], pi: 0, ...w.moverDefaults(id) } as Mover;
+      w.tick = 0; t.beginTick(); if (t.enter(m) !== 'ok') throw new Error('cannot enter'); t.endTick();
+      const nodes = f.path.length / 2, S3: [number, number, number][] = [];
+      S3[m.pi] = [m.s0 ?? 0, m.s1 ?? 0, m.s2 ?? 0];
+      const pts: [number, number][] = [[m.x, m.y]];
+      for (let tick = 1; tick < 3000; tick++) {
+        w.tick = tick; t.beginTick();
+        const old: [number, number, number] = [m.s0 ?? 0, m.s1 ?? 0, m.s2 ?? 0], pi0 = m.pi;
+        const r = t.step(m);
+        t.endTick();
+        if (r === 'arrived') break;
+        const now: [number, number, number] = [m.s0 ?? 0, m.s1 ?? 0, m.s2 ?? 0];
+        if (m.pi === pi0 + 2) S3[pi0 + 1] = [old[1], old[2], now[1]];
+        S3[m.pi] = now;
+        pts.push([m.x, m.y]);
+      }
+      // the lane's centre line: lane pi runs from node pi-1 to node pi, the strands as the car held them
+      const line: [number, number][] = [], q: [number, number] = [0, 0];
+      for (let pi = 1; pi < nodes; pi++) {
+        const [ax, ay, bx, by] = [f.path[pi * 2 - 2], f.path[pi * 2 - 1], f.path[pi * 2], f.path[pi * 2 + 1]], d = dirBetween(ax, ay, bx, by);
+        const inD = pi >= 2 ? dirBetween(f.path[pi * 2 - 4], f.path[pi * 2 - 3], ax, ay) : d, nd = pi + 1 < nodes ? dirBetween(bx, by, f.path[pi * 2 + 2], f.path[pi * 2 + 3]) : d, [s0, s1, s2] = S3[pi] ?? [0, 0, 0];
+        for (let p = 0; p < 1; p += 0.02) {
+          if (p < 0.5) pathPoint(ax, ay, inD, d, 0.5 + p, strandOffset(s0), q, strandOffset(s1)); else pathPoint(bx, by, d, nd, p - 0.5, strandOffset(s1), q, strandOffset(s2));
+          line.push([q[0], q[1]]);
+        }
+      }
+      // draw it: a position every tick, 60 frames a second
+      const g: Glider = { x: pts[0][0], y: pts[0][1], px: pts[0][0], py: pts[0][1], tx: pts[0][0], ty: pts[0][1], gx: pts[0][0], gy: pts[0][1], m0x: 0, m0y: 0, m1x: 0, m1y: 0, vx: 0, vy: 0, g0: 0 };
+      const ms = TICK_MS * STRETCH, dtf = 1000 / 60;
+      for (let k = 1; k < pts.length; k++) {
+        g.px = g.tx; g.py = g.ty; g.tx = pts[k][0]; g.ty = pts[k][1]; glideFrom(g, ms, (k - 1) * TICK_MS);
+        for (let at = k * TICK_MS; at < (k + 1) * TICK_MS; at += dtf) {
+          glide(g, (at - k * TICK_MS) / ms, ms);
+          let best = Infinity;
+          for (let i = 0; i + 1 < line.length; i++) {
+            const [x0, y0] = line[i], dx = line[i + 1][0] - x0, dy = line[i + 1][1] - y0, l2 = dx * dx + dy * dy || 1, u = Math.max(0, Math.min(1, ((g.x - x0) * dx + (g.y - y0) * dy) / l2));
+            const dist = Math.hypot(g.x - (x0 + u * dx), g.y - (y0 + u * dy));
+            if (dist < best) best = dist;
+          }
+          n++; worst = Math.max(worst, best); if (best > 0.1) over++;
+        }
+      }
+    }
+    console.log(`\nramps, ${name}: ${n} drawn frames, furthest from the lane's centre line ${worst.toFixed(3)} tiles, ${over} frames over 0.1`);
+    ok(worst < 0.15, `ramps: the drawn ${name} stays within 0.15 tiles of the lane (${worst.toFixed(3)})`);
   }
 }
 
