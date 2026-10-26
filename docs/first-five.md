@@ -230,3 +230,13 @@ Tick cost: `loadtest/ab.ts --hour 8 --ticks 3000 --seed 1` on the same seeded ci
 - The camp as a campsite for visitors once the town has grown (start-from-zero B2's "visitors who stay").
 - A level-up flash when the first house finishes, and a sound when the settlers arrive (audio v1).
 - The moment's caption could name the street once streets have names.
+
+## First twenty minutes on a rich start
+
+With $18,000 (the frontier, docs/ranks.md section 3) the player can place a library, a police box, a fire post and a park
+while the handyman's two crews are still on the first houses. The camp stage (shared/goals.ts `campStage`, server
+sim/simulation.ts `seekSite`) puts a civic site after the lots for those crews until "A growing town" is done, unless the
+goals card is on that very building. "Somewhere to go" therefore sits between "First homes" and "Open the shops" in the
+chain now (15 goals in all, not counting the burial event), and the deficit hint waits until the bank covers under three
+days of running costs. Measured with bot F: "Open the shops" at minute 8 instead of 17, goals at most 6 minutes apart
+in the first 20 on 10 of 12 seeds (15 minutes before), no deficit hint. `loadtest/frontier20.ts` guards it.

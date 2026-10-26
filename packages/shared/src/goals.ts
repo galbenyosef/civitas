@@ -40,7 +40,10 @@ export interface GoalDef {
 /**
  * The chain, in order: one goal is active at a time and the next two are previewed. The first five goals fall in the
  * first three minutes (docs/first-five.md: plot, street, camp, homes, yard, each answered on screen within seconds);
- * then 12 / 50 / 250 residents at about 4 / 15 / 60 minutes. Rewards are modest (about $3,000 over the whole chain
+ * then 12 / 50 / 250 residents at about 4 / 15 / 60 minutes. "Somewhere to go" sits between the first homes and the
+ * shops (a park is cheap and needs no technology, and it breaks the wait while the builders do the shops), and the
+ * crews' camp stage (below) keeps the goals falling a few minutes apart through the first twenty (docs/ranks.md
+ * section 3). Rewards are modest (about $3,000 over the whole chain
  * against $10-15k of tax in the same two hours) and land in the stretches where cash runs thin.
  */
 export const GOALS: GoalDef[] = [
@@ -66,6 +69,9 @@ export const GOALS: GoalDef[] = [
   { id: 'res12', title: 'First homes', how: 'Watch the first houses finish and families move in: builders walk site to site and work their shift.',
     why: 'Twelve residents in proper homes (the camp aside) open Commercial zoning on the tech tree.',
     parts: [{ label: 'residents in homes', target: 12 }], reward: { tech: 'zon1' }, show: { focus: 'plot' } },
+  { id: 'leisure', title: 'Somewhere to go', how: 'Park (G): place one among your homes ($120, no technology needed).',
+    why: 'Bored residents are unhappy residents; a park nearby keeps them content.',
+    parts: [{ label: 'park or venue', target: 1 }], reward: { cash: 150 }, show: { tool: 'citypark', focus: 'plot' } },
   { id: 'shops', title: 'Open the shops', how: 'Commercial (5): zone a few lots near your homes.',
     why: 'Shops give your residents work close by, and their staff pay income tax to you rather than to the Commons.',
     parts: [{ label: 'commercial lots', target: 6 }, { label: 'shop jobs filled', target: 8 }], reward: { cash: 300 }, show: { tool: 'com', focus: 'plot' } },
@@ -78,9 +84,6 @@ export const GOALS: GoalDef[] = [
   { id: 'cover', title: 'Police and fire cover', how: 'Unlock Emergency services (T), then place a police box and a fire post: cheap, with few staff.',
     why: 'Covered homes grow faster and put up with higher taxes. Half their staff wages come from a regional grant.',
     parts: [{ label: 'police building', target: 1 }, { label: 'fire building', target: 1 }], reward: { cash: 200 }, show: { tool: 'policebox', focus: 'plot' } },
-  { id: 'leisure', title: 'Somewhere to go', how: 'Park (G): place one among your homes ($120, no technology needed).',
-    why: 'Bored residents are unhappy residents; a park nearby keeps them content.',
-    parts: [{ label: 'park or venue', target: 1 }], reward: { cash: 150 }, show: { tool: 'citypark', focus: 'plot' } },
   // adverts (docs/adverts.md): unlock Advertising, make a campaign, rent two frames. "Show me" opens the tech tree until it is
   // unlocked, then the Campaigns panel, and flies to the nearest free frame (client onboarding.ts)
   { id: 'adverts', title: 'Run your first campaign', how: 'Unlock Advertising (T), then open the ads chip: pick a theme and a claim, and rent two empty frames on shops, shelters or hoardings.',
@@ -100,7 +103,20 @@ export const GOALS: GoalDef[] = [
     why: 'A bus takes a dozen cars off a jammed street, and fares go to you.',
     parts: [{ label: 'bus line with 2+ stops', target: 1 }], reward: { cash: 400 }, show: { tool: 'busstop', panel: 'lines', focus: 'plot' } },
 ];
+/** The goal the card is on: the chain's first not done. */
+export const chainActive = (done: readonly GoalId[]): GoalId | null => GOALS.find((g) => !g.event && !done.includes(g.id))?.id ?? null;
 export const GOAL_BY_ID = new Map(GOALS.map((g) => [g.id, g]));
+
+/**
+ * The camp stage runs until "A growing town" is done (50 residents). In it a handyman's crews (the frontier's two
+ * instant builders; server sim/simulation.ts seekSite) work homes and shops before a civic site such as a library or a
+ * police box on the same land, unless the goals card is asking for that very building ("Somewhere to go" asks for a
+ * park, "Police and fire cover" for the two posts). The card then moves on at the pace of the lots, and what a rich
+ * start adds on the side waits its turn, instead of the library holding both crews while "Open the shops" stands still
+ * (docs/ranks.md section 3). A player who skipped the tutorial has no card and no camp stage; a yard's crews are never held.
+ */
+export const CAMP_STAGE_UNTIL: GoalId = 'res50';
+export const campStage = (done: readonly GoalId[], skipped?: boolean) => !skipped && !done.includes(CAMP_STAGE_UNTIL);
 /** Goals shown after the active one. */
 export const GOAL_PREVIEW = 2;
 
@@ -123,6 +139,15 @@ export interface GoalsDTO {
  * it. The server sends the ones only it can see (builders, the books, the jam, boredom, newcomers), the client raises the
  * rest (night, a refused build on an empty treasury); either way the client shows at most one per HINT_GAP ticks.
  */
+/**
+ * The deficit hint's words (server goals.ts sends it only when the treasury covers less than `DEFICIT_COVER_DAYS` days of
+ * running costs): `days` is how long the bank lasts at yesterday's pace, or null when that is not known.
+ */
+export const DEFICIT_COVER_DAYS = 3;
+export function deficitMsg(days: number | null): string {
+  const lasts = days === null ? '' : days < 1 ? ' At this pace the bank is empty within a day.' : ` At this pace the bank lasts about ${Math.floor(days)} day${Math.floor(days) === 1 ? '' : 's'}.`;
+  return `You are spending more than you earn, two days running: staff wages and upkeep come out of your treasury.${lasts} Raise the tax slider in a parcel, add homes, or hold off on services. Below zero you run on the ${OD}; ${ECONOMY_TUNING.adminAfterDays} midnights in a row below zero and the city goes into administration.`;
+}
 export type HintId = 'settlers' | 'builders' | 'buildersRoad' | 'deficit' | 'overdraft' | 'admin' | 'broke' | 'jam' | 'bored' | 'newcomers' | 'night' | 'fire' | 'power' | 'fault' | 'death' | 'burial';
 /** `panel` 'admin': the overdraft and administration panel (client finance.ts) */
 export interface HintDef { kind: 'tip' | 'alert'; msg: string; tool?: string; panel?: 'tech' | 'ledger' | 'lines' | 'admin' }
@@ -132,7 +157,7 @@ export const HINTS: Record<HintId, HintDef> = {
   settlers: { kind: 'tip', msg: 'Your first settlers have arrived' },
   builders: { kind: 'alert', tool: 'yard', msg: "Your lots are waiting: the Commons' builders serve the Commons first. Place a builders' yard ($300; your first opens at once) beside one of your roads." },
   buildersRoad: { kind: 'alert', msg: "Your lots are waiting and nobody has built on your land for a day: check that a road links your builders' yard to them." },
-  deficit: { kind: 'alert', panel: 'ledger', msg: `You are spending more than you earn, two days running: staff wages and upkeep come out of your treasury. Raise the tax slider in a parcel, add homes, or hold off on services. Below zero you run on the ${OD}; ${ECONOMY_TUNING.adminAfterDays} midnights in a row below zero and the city goes into administration.` },
+  deficit: { kind: 'alert', panel: 'ledger', msg: deficitMsg(null) },
   overdraft: { kind: 'alert', panel: 'admin', msg: `The treasury is below zero: you are on the ${OD}. ${ECONOMY_TUNING.adminAfterDays} midnights in a row below zero and the city goes into administration. Three levers: raise tax, sell empty land back, mothball services.` },
   admin: { kind: 'alert', panel: 'admin', msg: 'Your city is in administration: building, buying land, zoning, roads and research are stopped and the regional grant for staff wages is withdrawn until a midnight finds the treasury at zero or above. The recovery plan: raise tax, sell empty land back, mothball services.' },
   broke: { kind: 'alert', panel: 'ledger', msg: 'The treasury is nearly empty.' },

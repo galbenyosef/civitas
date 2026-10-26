@@ -144,14 +144,51 @@ $8,219. So early choices still spend real money (half the start is gone by the V
 street 0.0, camp 0.2, homes 0.4, the handyman 0.9, 12 residents 2.2. Nothing on the goals card or in the advisor asks
 the player to save up or wait for money: the money words are the yard's and park's prices, "Not enough money" on a
 tree node and the overdraft, administration and "nearly empty" hints (the last on a build refused for money), none of which bot F met at $18,000. What
-the money changes is order. Bot F can afford the fire post and the library at minute 3, and the library's building
-work holds the two handyman crews, so "Open the shops" (8 shop jobs filled) finishes at minute 17 instead of 8, and
-the chain then completes in a burst at minutes 17-18 (shops, a growing town, Masonry, cover, somewhere to go) with
-the Hamlet at about 19. The goals card and the rank card still show the next step all the while: f1's longest stretch
-without anything new in the first 30 minutes was 1.7 minutes, against 2.3 in f0. And "spending more than you earn,
-two days running" (the deficit hint) came up twice in f1, at minutes 13 and 21: the early services' wages run ahead
-of the taxes, as the "Balance the books" goal then teaches. The order is the player's choice here, which is the
-point. A player who wants shops first builds them first.
+the money changes is order. Bot F can afford the fire post and the library at minute 3, and before the first-twenty tuning (below) their
+building work held the two handyman crews, so "Open the shops" (8 shop jobs filled) finished at minute 17 instead of 8
+and the chain completed in a burst at minutes 17-18. The deficit hint also came up at minutes 13 and 21 with $11,000
+in the bank.
+
+**The first twenty minutes** (card b8c21649; `loadtest/frontier20.ts`, bot F in process, seeds 1-12 and a 180 minute
+run for the ranks). Three changes, none to the ladder:
+
+- **The camp stage** (shared/goals.ts `campStage`, sim/simulation.ts `seekSite`). Until "A growing town" is done, a
+  handyman's crews (only the instant crew of the frontier, not a yard's) work a civic site (library, police box, fire
+  post, park, a parking lot, anything that is not a home, a shop or a yard) two priority steps (80 tiles of travel)
+  after the lots, unless the goals card is on exactly that building: "Somewhere to go" asks for a park, "Police and
+  fire cover" for the two posts, and those go first. A yard is never held (it brings crews). A player who skipped
+  the tutorial has no card and no camp stage. It is a reordering, not a ban: with nothing else to build the crew takes
+  the civic site. The crew logic was the right place (a few lines in one function, and the goals card is only read);
+  the alternative of a note on the site was not needed.
+- **"Somewhere to go" moves up** to sit between "First homes" and "Open the shops". The park is $120 and needs no
+  technology, so the card has a quick answer in the stretch where the builders are on the shops, which otherwise is
+  5.8-8.3 minutes with nothing to tick. It is also the building the camp stage exempts, so it is up by minute 6.
+- **The deficit hint** (server goals.ts `advise`, shared `deficitMsg`). Still "two days running", and now only when the
+  treasury covers fewer than three days (`DEFICIT_COVER_DAYS`) of yesterday's running costs (the ledger's wages,
+  upkeep, interest, bills and the like, `outgoings`), and not in the first two game days of the record
+  (`GoalState.since`). The message says how long the bank lasts at yesterday's pace ("about 3 days", "empty within a
+  day"). `overdraft`, `admin` and `broke` are as they were.
+
+Bot F, frontier, seeds 1-12, minutes after joining (mean, range):
+
+| | Before (main 008b68d) | After |
+| --- | --- | --- |
+| Open the shops | 17.5 (17.0-17.9) | 8.4 (8.0-11.0) |
+| the five goals that followed (shops, a growing town, Masonry, cover, a park) | within 0.7 min of each other | shops 8.4, a growing town 8.5-13.7, Masonry 11.9-16.9, cover 12.7-17.2 |
+| worst gap between two goals in the first 20 min | 14.8-15.9 | 3.8-8.4; 10 of 12 seeds at 6.0 or less (seed 1: 5.8) |
+| deficit hints heard in the first 60 min | 15 across the 12 seeds in the first 30 min (minute 13.7 or 21.7, bank $11,000+) | none in 60 min |
+| Hamlet | 19.7 (18.2-24.0) | 19.4 (18.2-23.0) |
+| Village | 42.9 (40.9-44.2) | 42.8 (36.0-49.4) |
+| Town | 88.7 (75.4-138.9) | 84.0 (75.4-114.5) |
+| City (11 of 12 reach it in three hours, both) | 124.0 (106.9-179.0) | 119.5 (100.7-138.4) |
+| treasury low over three hours, mean of the 12 (lowest) | $6,688 ($5,505) | $6,275 ($3,764) |
+
+The ranks stay within 15% of before. The lowest low, $3,764 at minute 48 in seed 9, is the old late-Village case
+(its Village came at 49.4, section 3 Money): money runs short just before the grant. Seed 1, the one `ranks.ts` plays,
+is $6,395 (before $7,162). Seed 5 gets no City in three hours after, seed 8 before, as each did at the margin.
+What is left in the gaps: the chain still waits on the builders' day. Between minute 8 and 16 the ten people the
+second yard hires sit at home until the next 07:00, and goals fall in clumps (about 2, 6-8, 12-17). Starting a later yard's crew the moment it is hired gives the town twice the builders at once and a Hamlet at
+minute 10, so it would need the ladder retuned; it is left as a follow-up (section 6).
 
 The WebSocket bot (f0, f1: one run each, so the spread applies): before, on main at $5,000, 17.3 / 48.6 / 83.3 / 105.9
 with a low of $72 at minute 49.3 (its hourly sample); after, at $18,000 with the final targets, 18.3 / 42.0 / 83.0 / 146.3
@@ -197,8 +234,14 @@ City, while the next residents mark was far off) and 7.4 in f0 (from 172.6), aga
   the Commons (ranks, no ring), a sandbox (none), a rank reached in administration, the growth-pause nudges. Since the
   cash floor: a frontier is measured with its own targets (the Commons' Village needs leave it a Hamlet), the Commons
   with the ladder as written, and **the frontier cash floor**: bot F (botf.ts, seed 1) plays a frontier's first three
-  hours on the real simulation, and its treasury's low must stay above $5,000 (`CASH_FLOOR`). Seed 1: $9,378 at
-  minute 32.3, ranks at 18.0 / 43.7 / 92.2 / 147.4.
+  hours on the real simulation, and its treasury's low must stay above $5,000 (`CASH_FLOOR`). Seed 1 now (with
+  the first-twenty tuning, utilities and the later sims): $6,395 at minute 30.7, ranks at 18.7 / 42.7 / 90.2 / 131.4.
+- `npx tsx packages/server/src/loadtest/frontier20.ts` (about 5 seconds): bot F's first 30 minutes on seeds 1-3 must
+  have goals at most 6 minutes apart through minute 20, "Open the shops" done by minute 10, and no deficit hint while
+  the bank is over $5,000; and the hint on its own (quiet in the first two game days, with $18,000 or three days of
+  costs in the bank, or after a day in the black; heard with less, saying how many days the bank lasts).
+  `SEEDS=1-12 [TABLE=1] [MINS=180]` prints the goals, hints, gaps and ranks of each seed, and with `TABLE=1` the
+  minute by minute treasury, which crews are on what, and the queue of sites.
 - `npm run typecheck` (with `local:check`), `buildings:check`, `demo:check` (the showcase's `ranks` stop and feature
   `settlement-ranks`) and `finance:check` pass after merging main (Audit #3 fires).
 - Tick cost: `loadtest/ab.ts --hour 8 --ticks 3000 --seed 1` gives identical counts on main (aad4c0e) and this branch,
@@ -218,8 +261,13 @@ City, while the next residents mark was far off) and 7.4 in f0 (from 172.6), aga
   charter of their own; a second gate and charter would be the real answer.
 - A frontier has its own Village, Town and City targets, because a treasury that never runs short grows a town faster.
   If the Commons should ever have a floor too, its ladder would want the same treatment.
-- On a rich start the library at minute 3 holds the handyman's crews and delays the shops goal by about nine minutes.
-  The goals card could say that a big building waits its turn behind the lots, or the handyman could take small lots
-  first.
+- ~~On a rich start the library at minute 3 holds the handyman's crews and delays the shops goal by about nine minutes~~
+  (done: the camp stage, section 3). Left over: the second yard's ten hires sit at home until the next 07:00, so the
+  builders' day still sets the pace of the goals from minute 8 to 16. A later yard's crew starting on the day it opens
+  would fill it, but doubles the builders in that window (Hamlet at minute 10 in a trial), so the ladder's Hamlet and
+  Village needs would be retuned with it.
+- The power and traffic alerts repeat every game day while the cause stands (the "power" hint came up at minutes 17,
+  26, 34, 42 and 50 in a bot F run with substations going up); like the deficit hint they could keep quiet while the
+  town is already acting on them.
 - The spread run to run is still wide (City 114-174 minutes in the final twelve). Most of it comes from when the town
   fills its first jobs and when the Village's cover lands, not from money.

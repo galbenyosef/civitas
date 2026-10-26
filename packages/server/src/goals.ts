@@ -1,6 +1,6 @@
 import {
-  GOALS, HINTS, TECH_BY_ID, Zone, runningBalance, TICKS_PER_DAY, CAMP_KIND, familyOf, isLeisure, isHintId, rewardText, tileKey, isFuneralKind, isRestKind,
-  type GoalDef, type GoalId, type GoalsDTO, type HintId, type LedgerDTO, type ServerMsg,
+  GOALS, HINTS, DEFICIT_COVER_DAYS, deficitMsg, TECH_BY_ID, Zone, runningBalance, TICKS_PER_DAY, CAMP_KIND, familyOf, isLeisure, isHintId, rewardText, tileKey, isFuneralKind, isRestKind,
+  type GoalDef, type GoalId, type GoalsDTO, type HintId, type LedgerDTO, type LedgerCat, LEDGER_GROUP, type ServerMsg,
 } from '@msimcity/shared';
 import type { World, Player } from './world';
 
@@ -16,6 +16,8 @@ export interface GoalState {
   hintAt?: Partial<Record<HintId, number>>;
   /** the first-settlers moment has happened (docs/first-five.md; absent in older saves) */
   settlers?: boolean;
+  /** the game day the record began: the deficit hint keeps quiet for the first two days (absent in older saves) */
+  since?: number;
   /** road tiles already on the player's land when the record began (a frontier charter's country road): "Lay a street" counts the ones after */
   roadBase?: number;
   /** event goals an event has brought in (shared GoalDef.event: the burial goal after a town's first death), until done */
@@ -55,7 +57,7 @@ export class Onboarding {
       if (!s.done.includes('camp') && s.done.some((id) => GOALS.findIndex((g) => g.id === id) > CAMP_AT)) s.done.push('camp');
       return s;
     }
-    const s: GoalState = { done: [] };
+    const s: GoalState = { done: [], since: this.w.day };
     p.onboarding = s;
     const t = this.tally(p);
     if (t.roads) s.roadBase = t.roads;
@@ -221,14 +223,19 @@ export class Onboarding {
   /** Once a game hour per online player: the hints only the server can see. */
   advise(p: Player): ServerMsg[] {
     const s = this.state(p), out: ServerMsg[] = [];
-    const add = (id: HintId) => { const m = this.hint(p, id); if (m) out.push(m); };
+    const add = (id: HintId, msg?: string) => { const m = this.hint(p, id, msg); if (m) out.push(m); };
     // the books: two finished days in a row with running costs above taxes and fees
     const L = this.w.ledgerDTO(p);
     if (s.negDay !== L.day && Object.keys(L.yesterday).length) {
       s.negDay = L.day;
       s.negStreak = running(L.yesterday) < 0 ? (s.negStreak ?? 0) + 1 : 0;
     }
-    if ((s.negStreak ?? 0) >= 2) add('deficit');
+    if ((s.negStreak ?? 0) >= 2) {
+      // only when the bank is running low: it covers less than DEFICIT_COVER_DAYS days of the running costs (wages, upkeep,
+      // interest, bills), read from yesterday's ledger, and the record is past its first two game days
+      const cost = outgoings(L.yesterday), loss = -running(L.yesterday), early = s.since !== undefined && this.w.day - s.since < 2;
+      if (!early && cost > 0 && p.money < DEFICIT_COVER_DAYS * cost) add('deficit', deficitMsg(p.money > 0 && loss > 0 ? p.money / loss : null));
+    }
     if (p.progress.housed >= 30 && this.jam.length >= JAM_HOURS && this.jam.reduce((a, b) => a + b, 0) / this.jam.length > JAM_SHARE) add('jam');
     if (p.progress.housed >= 60 && this.tally(p).leisure === 0) add('bored');
     if ((this.powerHeld?.(p.id) ?? 0) > 0) add('power');
@@ -243,6 +250,8 @@ export class Onboarding {
   }
 }
 
-/** Taxes and fees less wages, upkeep and overdraft interest, for one day of a ledger. */
+/** What a day's running costs came to (wages, upkeep, interest, bills: the running lines that went out), as a positive sum. */
+export const outgoings = (r: LedgerDTO['today']) =>
+  (Object.keys(r) as LedgerCat[]).reduce((a, k) => a + (LEDGER_GROUP[k] === 'running' && (r[k] ?? 0) < 0 ? -(r[k] ?? 0) : 0), 0);
 /** A day's running balance, as the ledger shows it (shared LEDGER_GROUP). */
 export const running = (r: LedgerDTO['today']) => runningBalance(r);

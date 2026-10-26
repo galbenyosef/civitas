@@ -2,6 +2,7 @@ import {
   MOTORWAY_KIND,
   ruleLines, turnAllowed, TICKS_PER_DAY, TICKS_PER_HOUR, gameMin, MAX_LEVEL, WALK_SPEED, DRIVE_SPEED, pedestrianDeliveryOpen, auxClass, oneWayDir, carStepOk, SERVICE_RADIUS, TRAFFIC_TUNING as TT, signalWaitMax,
   DRIVE_MIN_TILES, CAR_FETCH_RADIUS, PARK_RADIUS, PARKING_FEE, KERB_CAP, FREIGHT_TRIPS_PER_LEVEL_PER_DAY, VISITORS_PER_100_PEAK_HOUR,
+  KIND_ID, campStage, chainActive,
   Zone, CitizenState, VehicleClass, VehicleKind, KIND_COUNT, KIND_ID_COUNT, KIND_NAMES, CIVIC_UPKEEP, CONSTRUCTION_FEE, MAX_BUILDERS_PER_SITE, CAMP_KIND,
   capacityOf, parkingOf, wageOf, upkeepOf, workOf, familyOf, isGrowableId, isCivicId, isServiceId, isParkingId,
   withLevel, withProgress, progressOf, isRoad, tileKey, parseKey, mod,
@@ -11,7 +12,7 @@ import {
   SERVICE_RADIUS_OF, SERVICE_STRENGTH_OF, WORK_RATE_OF, PATROL_RATE_OF,
   GROW_FORMS, topLevelOf, firstLevelOf, isMergedKind, venueCapacityOf, isMultiTile, placedFromAnchor, planStructure, packTile, terrainOf,
   zoneOf, isBuildable, underConstruction, isGatewayId, GATEWAY_OF, GATEWAY_WORDS, bridgeSpanAt, BRIDGE_STYLE_NAMES,
-  type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
+  type GoalId, type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
   buildingValue, LAND_PRICE_PER_TILE, ROAD_COST,
   eduDefaults, birthdayOf, yearGroup, STAGES, Study, EduResult, EDU_NURSERY, EDU_DROPPED, EDU_HOMEWARD, CITIZEN_STUDY, type CitizenEducation,
   SKILLS, wageMul, EduLevel, type EduFields, MOTIVE, type FocusInfo,
@@ -76,6 +77,8 @@ const MERGE_SITES_PER_PARCEL = 2;   // merges being built at once in one parcel:
 const BUILD_RATE = 50 / TPH;       // work units per builder per tick
 const FEE_PER_UNIT = CONSTRUCTION_FEE / 2;
 const PRIORITY_WEIGHT = 40;        // one priority step is worth this many tiles of extra travel
+/** A handyman's crew in the camp stage (shared campStage) works a civic site this many tiles of travel after the lots (two priority steps). */
+const CAMP_WAIT = 2 * PRIORITY_WEIGHT;
 const LEAD_SLACK = gameMin(5);
 const ROUTE_BUDGET = 40;           // A* searches per tick for re-routing
 const FREIGHT_FEE = 3, VISITOR_SPEND = 5;
@@ -2207,8 +2210,19 @@ export class Simulation {
   private seekSite(c: Citizen): boolean {
     const w = this.w;
     const fx = Math.floor(c.x), fy = Math.floor(c.y);
-    const siteScore = (s: { priority: number; assigned: number }) =>
-      s.priority <= -2 || s.assigned >= MAX_BUILDERS_PER_SITE ? null : s.priority * PRIORITY_WEIGHT - s.assigned * 3; // spread crews across equal-priority sites
+    // the camp stage (shared campStage, docs/ranks.md section 3): a handyman's two crews take homes and shops before a civic
+    // site on the same land, unless the goals card is asking for that very building; a yard is never made to wait
+    const camp = c.kind === KIND_ID.handyman ? this.campOwners() : null;
+    const waits = (s: { x: number; y: number; kind: number }) => {
+      const ask = camp!.get(w.parcelAt(s.x, s.y)?.owner ?? '');
+      if (ask === undefined) return false;
+      const f = familyOf(s.kind);
+      if (f === Zone.Residential || f === Zone.Commercial || f === Zone.Yard) return false;
+      return !((ask === 'leisure' && isLeisure(s.kind)) || (ask === 'cover' && (f === Zone.Police || f === Zone.Fire)));
+    };
+    const siteScore = (s: { x: number; y: number; kind: number; priority: number; assigned: number }) =>
+      s.priority <= -2 || s.assigned >= MAX_BUILDERS_PER_SITE ? null
+        : s.priority * PRIORITY_WEIGHT - s.assigned * 3 - (camp?.size && waits(s) ? CAMP_WAIT : 0); // spread crews across equal-priority sites
     // bounds for the search to stop early: the best score of any open site, and the best (score - distance)
     // any of them could reach, as road distance is never shorter than Manhattan distance
     let maxScore = -Infinity, maxTotal = -Infinity;
@@ -2231,6 +2245,18 @@ export class Simulation {
     c.site = key;
     c.state = S.ToSite;
     return true;
+  }
+
+  /** The owners still in the camp stage (shared campStage), each with the goal their card is on, read once a tick. */
+  private campAt = -1;
+  private campMap = new Map<string, GoalId | null>();
+  private campOwners(): ReadonlyMap<string, GoalId | null> {
+    const w = this.w;
+    if (this.campAt === w.tick) return this.campMap;
+    this.campAt = w.tick;
+    this.campMap.clear();
+    for (const p of w.players.values()) if (p.onboarding && campStage(p.onboarding.done, p.onboarding.skipped)) this.campMap.set(p.id, chainActive(p.onboarding.done));
+    return this.campMap;
   }
 
   private workSite(c: Citizen) {
