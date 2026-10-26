@@ -258,7 +258,7 @@ export class CarInterior {
 
     // speedometer in the middle of the dash, a little jitter on the needle at speed
     const gr = h * 0.098, gy = h * (bus ? 0.855 : 0.835);
-    const max = bus ? 100 : 160, kmh = clamp(this.kmh, 0, max);
+    const max = bus ? 100 : 200, kmh = clamp(this.kmh, 0, max); // a motorway runs a car at 130 to 165 (KMH_PER_TPS)
     const jit = Math.sin(now * 0.013 + r1 * 9) * 0.0035 * Math.min(1, kmh / 30);
     dialFace(c, cx, gy, gr, max, bus ? 20 : 40, bus ? 10 : 20, glow, h > 330);
     needle(c, cx, gy, gr, kmh / max + jit, '#ff6a3d');

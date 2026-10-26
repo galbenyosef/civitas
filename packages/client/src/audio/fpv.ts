@@ -24,6 +24,14 @@ const TICK_MS = 100;
 /** a speed in tiles a second that counts as full for each kind until a faster one is seen */
 const TOP: Record<RideKind, number> = { car: 3, truck: 3, bus: 2.5, train: 8, metro: 8, boat: 2, plane: 30, heli: 12 };
 
+/**
+ * A car or lorry's "full" adapts up to this many tiles a second and no further (a street's 2.8 is well under it, so a street
+ * ride is mapped exactly as before): above it the ride's speed goes past 1, to RIDE_OVER, so a motorway (5 to 7 tiles a second)
+ * is heard as faster than the top of a street, in pitch and level, instead of being the new full.
+ */
+const KNEE: Partial<Record<RideKind, number>> = { car: 3.6, truck: 3.6 };
+const RIDE_OVER = 1.6;
+
 export class FpvSound {
   private ride: Ride | null = null;
   private key = '';
@@ -64,12 +72,12 @@ export class FpvSound {
     // speed from position
     if (this.have) {
       const d = Math.hypot(r.x - this.px, r.z - this.pz);
-      if (d < 8) { this.sm += (d / dt - this.sm) * 0.35; if (this.sm > this.top) this.top = this.sm; } else this.sm = 0; // a jump is not speed
+      if (d < 8) { this.sm += (d / dt - this.sm) * 0.35; if (this.sm > this.top) this.top = Math.min(this.sm, KNEE[r.kind] ?? Infinity); } else this.sm = 0; // a jump is not speed
     }
     this.px = r.x; this.pz = r.z; this.have = true;
     this.top = Math.max(TOP[r.kind], this.top * (1 - dt * 0.004));
-    const s = Math.min(1, this.sm / this.top);
-    this.ride.set(s);
+    const over = this.sm / this.top, s = Math.min(1, over);
+    this.ride.set(KNEE[r.kind] ? Math.min(RIDE_OVER, over) : s);
     this.events(r, s, dt);
   }
 

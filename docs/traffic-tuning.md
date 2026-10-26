@@ -1027,3 +1027,43 @@ less time.
 roundels are a few hundred decals over 57 tiles), the same nine road meshes, and the junction signs' one merged mesh goes
 from 4,387 to 8,579 triangles (the HGV and 20 signs; no new draw call). Frame times at street zoom with and without the
 rules differ by less than the live scene moves from one pass to the next.
+
+## Motorway speed (UTD card e771510f, 2026-10-26)
+
+Rich: "motorways should be way faster, 2x-3x". A motorway tile is now driven at **2.5 times a street** (`speed` 2.5, `routeCost` 0.5 on both entries of the table: the road, id 4, and the interchange deck, id 7). The avenue stays at 1. The probes are `loadtest/motorway.ts` (a trunk with two diamond interchanges, 160 tiles; a busy motorway; a queue) and `loadtest/mwlondon.ts` (London from one save, per class).
+
+**What capped the speed.** `Traffic.step` moved a car across at most one tile edge a tick and put it into the next lane no further than 0.3 along it (where the next stop line is), dropping whatever was left of the move. A street car (0.56 tiles a tick at most) rarely had anything left. The old 1.25 motorway (0.55 to 0.7 tiles a tick) ran **0.61 then 0.39 tiles on alternate ticks: a street's pace**. Measured door to door on the 160-tile trunk, the old motorway took 403 ticks against the street's 405 (1.00x, the ramps counted). At 2.5 the loss would have been half the move, and a car at 1.4 tiles a tick crosses more than one edge.
+
+**What changed** (`sim/traffic.ts`; only a car whose free pace is over 0.7 tiles a tick, `FAST_PACE`, takes any of it, so streets, avenues and every world without a motorway run the single step they always did: `ab.ts` on the 2x2 and the Commons is identical, `perf:check` the same game):
+
+- **A second leg.** A fast car that crosses an edge goes on, from the lane it came into, with what it had left (`step` runs `leg` again, at most three times in all): the car ahead, the stop line and its entry rules, the body guard all apply in the new lane. A car crosses at most two edges a tick at 1.4 tiles; no tile is skipped and the box rules see it at each one. The tick's speed `v` is the distance really moved.
+- **Looking along the route** (`horizon`, up to 8 tiles, from the stopping distance): down to the pace of a slower road or a turn by its near edge, the nearest standing or crawling car in a lane ahead, a lane out of a tile with no room, and the junction box of a slip road's mouth (`boxCaution`: slow to arrive as it clears). Braking is the usual 0.2 a tick, so a car that used to see a queue one tile off now sees it from the 5 or 6 tiles it takes to stop.
+- **Following through a slip road's mouth** (`platoonFast`): on a motorway a car may go in behind a moving leader of the same approach within `platoonGap` times the class speed; holding it at the line stopped it dead from speed. A plain motorway tile admits as many as the following gap lets in (`laneRoom`), and a merger from a slip road waits for a gap scaled with the class speed (`slipGap`, 4 tiles at 2.5, the old 2 at 1.25).
+
+**Measured** (same trunk, same sixteen drivers, same demand; before is the code on main with the old table):
+
+| | before (1.25, cost 0.8) | after (2.5, cost 0.5) |
+| --- | --- | --- |
+| door to door, 160-tile trip, street 405 ticks | 403 ticks, 1.00x | 226 ticks, 1.79x |
+| busy motorway, 30 an hour each way (load 1): mean pace between the interchanges | 0.49 tiles a tick | 1.16 |
+| trips, give-ups, car-car overlaps in 3000 ticks | 3017, 1, 0 | 3299, 0, 0 |
+| falls in speed over 1 tile a tick (a dead stop from speed) | 0 | 120 of 468,000 fast car-ticks |
+| falls over half a tile a tick | 0 | 2,119 |
+| most tile edges crossed in a tick, longest step | 1, 0.73 | 2, 1.45 |
+| overloaded (load 2): trips, give-ups, share of car-ticks crawling | 3710, 3, 0.4% | 4892, 86, 63% |
+
+The last row is the price: the old motorway never carried what was offered (cars waited to get on at its end), so the interchanges' street junctions never saw more than they could take; fast cars deliver more, and past about a third more than load 1 the slip roads and the street junction behind them lock, as the old model did at load 1.5 (18% crawling at 1.25). The few dead stops from speed are at a slip road's mouth, when a merger or an exit is in the box as a platoon arrives. In London (docs/demo.md), at 08:00 to 10:00 the motorways carry half a percent of the cars (the M4 and the A13 are on its edge and jammed at 0.13 tiles a tick); with the cost at 0.5 the avenues' count did not move beyond the run to run noise, so the route cost is the principled one (1 over the pace the probe measured, 2.3), not a lever on London. A* explores a third more nodes a search in a world with a motorway (87 to about 116 at 0.45 to 0.5), because `World.minRouteCost`, the distance estimate's scale, is the cheapest class: a follow-up could scale it per search.
+
+**London, same save, 07:00 to 10:00 of the next day** (`mwlondon.ts`; the first column is main):
+
+| | main | this branch |
+| --- | --- | --- |
+| motorway cars on the road, mean a tick (standing) | 11.1 (6.9) | 14.6 (10.4) |
+| motorway mean pace, tiles a tick | 0.14 | 0.13 |
+| avenue cars on the road | 852 | 882 |
+| standing motorway car-ticks: behind a car / box ahead blocked / waiting for a gap | 1468 / 488 / 364 | 2718 / 525 / 191 |
+| A* nodes a search | 91 | 120 |
+
+The motorways were already jammed on main (62% of their cars standing): the queues are the street junctions where the M4 and the A13 end, and the share waiting for a gap at a slip's mouth fell. The avenue count moves with the chaos of a whole city (a different run of the same save differs by about as much).
+
+**Client.** The picker prints 250% speed. The cab's dial reads to 200 km/h (a motorway car is 130 to 165). The ride's engine keeps its old mapping up to 3.6 tiles a second (every street ride sounds as it did): above that a car's or lorry's ride speed goes past 1, to 1.6, so a motorway reads as faster than the top of a street (`KNEE` in `audio/fpv.ts`; the synthesis follows to 1.6). `render/glide.ts` draws a car between ticks on a cubic from one tick's position to the next. `loadtest/motorway.ts` draws exit and entry trips through it and measures the distance from the lane's own centre line: 0.062 tiles on the entry; on the two exits 0.145 and 0.126 at the worst frame, which sits where the car changes lane ten tiles before the slip, not at its bend (a lane change is a tile-long ease across 0.38 tiles that a 1.4-tile step cuts); 0.066 at most for the same trips at the old pace.

@@ -495,7 +495,7 @@ function synthRide(eng: AudioEngine, kind: RideKind, seed: number): Ride | null 
     return {
       out,
       set: (v) => {
-        const t = now(), s = clamp(v, 0, 1), f = lerp(p.f0, p.f1, Math.pow(s, 0.8));
+        const t = now(), s = clamp(v, 0, 1.6), f = lerp(p.f0, p.f1, Math.pow(s, 0.8)); // past 1: a motorway's pace (audio/fpv.ts KNEE)
         saw.frequency.setTargetAtTime(f, t, 0.12); sub.frequency.setTargetAtTime(f / 2, t, 0.12);
         lp.frequency.setTargetAtTime(lerp(p.lpMin, p.lpMax, s), t, 0.15);
         tl.frequency.setTargetAtTime(rate * (0.6 + 0.9 * s), t, 0.2);
