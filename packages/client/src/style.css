@@ -44,6 +44,13 @@ body.landing #c, body.landing #ui, body.landing #login { display: none; }
 #tools button .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--muted); }
 #tools button .cost { color: var(--muted); font-size: 11px; }
 #tools button.locked { opacity: 0.42; }
+.veiled { display: none !important; } /* progressive disclosure (reveal.ts) */
+#tools button.fresh { border-color: rgba(98,210,162,0.7); box-shadow: 0 0 0 1px rgba(98,210,162,0.35), 0 0 14px rgba(98,210,162,0.45); animation: freshTool 1.6s ease-in-out 6; }
+@keyframes freshTool { 0%, 100% { box-shadow: 0 0 0 1px rgba(98,210,162,0.35), 0 0 6px rgba(98,210,162,0.25); } 50% { box-shadow: 0 0 0 1px rgba(98,210,162,0.7), 0 0 18px rgba(98,210,162,0.6); } }
+@media (prefers-reduced-motion: reduce) { #tools button.fresh { animation: none; } }
+#tools button.showall { flex: none; width: 192px; margin-top: 6px; padding: 3px 9px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+#tools button.showall:hover { color: var(--fg); }
+#helpBtn { position: absolute; left: 12px; bottom: 10px; font-size: 11px; opacity: 0.8; }
 #tools button.locked span:nth-child(2)::after { content: ' 🔒'; font-size: 10px; }
 #tools button em.tier { font-style: normal; color: var(--muted); font-size: 11px; }
 
