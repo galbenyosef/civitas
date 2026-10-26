@@ -240,3 +240,22 @@ goals card is on that very building. "Somewhere to go" therefore sits between "F
 chain now (15 goals in all, not counting the burial event), and the deficit hint waits until the bank covers under three
 days of running costs. Measured with bot F: "Open the shops" at minute 8 instead of 17, goals at most 6 minutes apart
 in the first 20 on 10 of 12 seeds (15 minutes before), no deficit hint. `loadtest/frontier20.ts` guards it.
+
+## What a new player is shown: progressive disclosure
+
+Rich (2026-10-26): "now its time to make it fun ... I may have to go back a few steps in order to go forward". Played through
+the real UI on a fresh frontier (scratchpad fun1/play.mjs, Playwright), the arrival screen showed a Camp-rank player with
+nobody housed: 25 tool rows (15 of them locked, with prices up to $2,500), 14 top-bar chips, a world-stats line of nine
+zeros, a key help line of about 30 bindings, the goals card and a night hint. The leaders open with a handful of tools and
+unlock the rest at visible milestones, so `client/src/reveal.ts` does the same, client side only:
+
+| Stage | Who | Tool bar | Chips | Also |
+| --- | --- | --- | --- | --- |
+| camp | the Camp rank | locked tools and ladders hidden (not greyed), except the goals card's own tool; a group heading with nothing under it goes; a "show every tool" line at the bottom | underground, map, charts, lines, education, news, audio and perf hidden | the world-stats line hidden; the key help behind a "? controls" button |
+| hamlet | the Hamlet rank | locked tools greyed, as before | audio and perf hidden | everything else as before |
+| all | Village and up, a sandbox, a read-only showcase, `?dev`, or "show every tool" (localStorage `msimcity.reveal`) | as before | as before | |
+
+A tool that comes into view (a technology bought, a rank reached) glows for half a minute and a toast names it ("New tool:
+Commercial"); the step to Hamlet says what opened. The server allows exactly what it did; `scripts/reveal-check.ts` holds the
+stage rules. What is left to Rich: whether the Camp bar should also show the next locked tools as a "coming soon" row, and
+whether unlocks should follow ranks rather than the tree (UTD "Make it fun", the Needs Human card beside it).

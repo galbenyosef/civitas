@@ -52,6 +52,8 @@ import { Input, DEV_TOOLS, structureTool, type Rect, type ToolId } from './input
 import { UI } from './ui';
 import { ContextMenu } from './contextmenu';
 import { Onboarding } from './onboarding';
+import { Reveal, readPref, writePref } from './reveal';
+import { GOAL_BY_ID } from '@msimcity/shared';
 import { CameraMoment } from './moment';
 import { RanksUI } from './ranks';
 import { NewsUI, news } from './news';
@@ -338,6 +340,7 @@ net.on('welcome', (m) => {
   ui.setWho(me.name, me.color);
   ui.setMoney(me.money, me.ledger, me.fin);
   ui.setLocks(me.tech);
+  reveal.apply();
   policies.show(me);
   adPanel.show(me, onboarding.activeGoal === 'adverts');
   finance.show(me);
@@ -369,7 +372,7 @@ net.on('players', (m) => {
   lights.invalidate(); roads.invalidate();
   world.applyPlayers(m.players);
   onlineCount = m.players.filter((p) => p.online).length;
-  const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger, me.fin); ui.setLocks(me.tech); ui.showTech(me); policies.show(me); adPanel.show(me, onboarding.activeGoal === 'adverts'); finance.show(me); devPanel?.sync(!!me.devUnlimited); }
+  const me = world.myPlayer; if (me) { ui.setMoney(me.money, me.ledger, me.fin); ui.setLocks(me.tech); reveal.apply(); ui.showTech(me); policies.show(me); adPanel.show(me, onboarding.activeGoal === 'adverts'); finance.show(me); devPanel?.sync(!!me.devUnlimited); }
   world.parcelsDirty = true; refreshPanel(); mapMode.parcelsChanged();
 });
 net.on('citizens', (m) => citizens.update(m.c, performance.now()));
@@ -530,6 +533,15 @@ ui.onHint = (id) => onboarding.hint(id);
 const fireworks = new Fireworks(); scene.add(fireworks.group);
 const ranks = new RanksUI({ net, world, liveTick, fireworks, moment: (x, y, caption, o) => { if (!tour && !mapMode.on) moment.play(x, y, caption, o); } });
 scene.add(ranks.group);
+// progressive disclosure (reveal.ts): a Camp-rank town sees the tools it can use and the chips the first hour needs
+const reveal = new Reveal({
+  env: () => ({ rank: ranks.rank, sandbox: world.sandbox, spectate: world.spectate, dev: DEV_TOOLS, everything: readPref() }),
+  veilTools: (on, keep) => ui.veilLocked(on, keep), visibleTools: () => ui.visibleTools(), fresh: (id) => ui.freshTool(id),
+  goalTool: () => { const g = onboarding.activeGoal; return g ? (GOAL_BY_ID.get(g as never)?.show?.tool ?? null) : null; },
+  toast: (k, msg) => ui.toast(k, msg),
+});
+ui.onEverything = (all) => { writePref(all); reveal.apply(); };
+ranks.onChange = () => reveal.apply();
 // the news (news.ts, docs/media.md): the news chip and panel, the ticker of breaking stories, a media centre's channel
 new NewsUI({ net, world, liveTick, flyTo: (x, y) => flyTo(x, y), headline: (h) => buildings.adverts.setNewsHeadline(h) });
 // news helicopters (shared newsHelis.ts) and television (render/tv.ts, docs/media.md sections 6-8): the story log flies the

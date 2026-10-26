@@ -35,6 +35,10 @@ const KIND_ICON: Record<Milestone['kind'], string> = { rank: '★', goal: '✓',
 export class RanksUI {
   readonly group = new Group();
   private dto: RankDTO | null = null;
+  /** the player's rank index now (0 Camp), or null before the first rank message (reveal.ts) */
+  get rank(): number | null { return this.dto?.rank ?? null; }
+  /** called after every rank message (reveal.ts re-applies the stage) */
+  onChange: (() => void) | null = null;
   private chip: HTMLButtonElement;
   private card: HTMLDivElement;
   private ticker: HTMLDivElement;
@@ -98,6 +102,7 @@ export class RanksUI {
     if (m.up) this.celebrate(m.up);
     this.rings(m.rank.ring, m.rank.next);
     this.render();
+    this.onChange?.();
     this.pump();
   }
 

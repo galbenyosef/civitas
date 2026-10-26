@@ -345,6 +345,44 @@ export class UI {
       b.title = locked ? `Needs ${techFor(id)?.name ?? ''} (press T for the tech tree)` : TOOLS.find((t) => t.id === id)?.label ?? ''; // the full name when a long label is cut short
     }
   }
+  /**
+   * Progressive disclosure (reveal.ts): at the Camp rank locked tools and ladders are hidden rather than greyed, except the
+   * ids in `keep` (the goals card's own tool); a group heading with nothing left under it goes too. Returns the ids hidden.
+   */
+  veilLocked(on: boolean, keep: ReadonlySet<string>): string[] {
+    const tools = $('tools'), hidden: string[] = [];
+    for (const b of tools.querySelectorAll<HTMLButtonElement>('button[data-tool], button[data-ladder]')) {
+      const id = b.dataset.tool ?? b.dataset.ladder!;
+      const veil = on && b.classList.contains('locked') && !keep.has(id);
+      b.classList.toggle('veiled', veil);
+      if (veil) hidden.push(id);
+    }
+    for (const h of tools.querySelectorAll<HTMLElement>('.tgroup')) {
+      const g = h.dataset.group!;
+      const any = [...tools.querySelectorAll<HTMLElement>(`button[data-group="${g}"]`)].some((b) => !b.classList.contains('veiled') && !b.classList.contains('hiddenTool'));
+      h.classList.toggle('veiled', !any);
+    }
+    this.everythingLink(on);
+    return hidden;
+  }
+  /** the tool buttons in view now (reveal.ts: what has just come into view gets a glow) */
+  visibleTools(): { id: string; label: string }[] {
+    return [...$('tools').querySelectorAll<HTMLButtonElement>('button[data-tool], button[data-ladder]')].filter((b) => !b.classList.contains('veiled') && !b.classList.contains('locked'))
+      .map((b) => ({ id: b.dataset.tool ?? b.dataset.ladder!, label: b.querySelector('span:nth-child(2)')?.textContent?.replace(/\s*\(.*$/, '').trim() ?? '' }));
+  }
+  /** a tool that has just been unlocked glows for half a minute */
+  freshTool(id: string) {
+    const b = $('tools').querySelector<HTMLButtonElement>(`button[data-tool="${id}"], button[data-ladder="${id}"]`);
+    if (!b) return;
+    b.classList.add('fresh'); setTimeout(() => b.classList.remove('fresh'), 30000);
+  }
+  /** a line under the tool bar while tools are hidden: "show everything" (reveal.ts onEverything) */
+  onEverything: ((all: boolean) => void) | null = null;
+  private everythingLink(veiling: boolean) {
+    let a = $('tools').querySelector<HTMLButtonElement>('button.showall');
+    if (!a) { a = document.createElement('button'); a.className = 'showall'; a.textContent = 'show every tool'; a.title = 'Show the tools you have not unlocked yet, greyed, and every chip in the top bar (remembered on this browser)'; a.onclick = () => this.onEverything?.(true); $('tools').appendChild(a); }
+    a.classList.toggle('veiled', !veiling);
+  }
   setWho(name: string, color: number) { $('who').innerHTML = `<b style="color:#${color.toString(16).padStart(6, '0')}">${esc(name)}</b>`; }
   /** last ledger the server sent (it comes once a game hour, PlayerDTO.ledger) and whether its box is open */
   private ledger: LedgerDTO | null = null;
