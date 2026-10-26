@@ -64,7 +64,7 @@ void main() {
   float d = distance(cameraPosition, c);
   // each ring breathes at its own pace; a ring on the draft is larger, and the hovered one larger still
   float breath = 1.0 + 0.07 * sin(uTime * (1.2 + 0.9 * fract(seed * 5.0)) + seed * 40.0);
-  float R = max(aS.y, d * 0.016) * breath * (1.0 + 0.18 * draft + 0.22 * hov);
+  float R = max(aS.y, d * 0.022) * breath * (1.0 + 0.18 * draft + 0.22 * hov);
   float Q = R * 1.5; // the quad reaches past the ring for the glow and the spreading wave
   vec3 p = c + vec3(position.x * 2.0 * Q, 0.0, -position.y * 2.0 * Q);
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
@@ -104,7 +104,7 @@ void main() {
   vec3 c = vec3(aP.x, aP.y + aS.z + bob + uY, aP.z);
   float d = distance(cameraPosition, c);
   float grow = 1.0 + 0.08 * sin(uTime * (1.4 + fract(seed * 6.0)) + seed * 17.0) + 0.38 * hov;
-  float s = 0.42 * (1.0 + 0.2 * fract(seed * 11.0)) * clamp(d / 22.0, 1.0, 3.2) * grow;
+  float s = 0.58 * (1.0 + 0.2 * fract(seed * 11.0)) * clamp(d / 18.0, 1.0, 3.6) * grow;
   vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
   vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
   vec3 p = c + (right * position.x + up * (position.y + 0.5)) * s; // the point of the pin is at c

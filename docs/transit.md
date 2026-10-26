@@ -22,8 +22,8 @@ family 15 (`shared/src/buildings/transport.ts`, docs/sub-kinds.md). Technology: 
 3. **Lines** (top-bar **lines** chip). *New line*, then click your stops on the map in the order the bus should call,
    pick a number (1-999) and a colour, choose a loop or there and back, and set the buses you want. **Backspace** or a
    **right-click** on the map takes the last stop off (the *undo stop* button too). As you click, the server routes the
-   draft exactly as a save would (a `line` `preview` request, answered with `linePreview`, at most one per 100 ms per
-   client) and the editor draws it: the lap in the line's colour on the lanes the bus will use (a U where it turns
+   draft exactly as a save would (a `line` `preview` request, answered with `linePreview`, at most one per 300 ms per
+   draft from the client, 100 ms per client on the server) and the editor draws it: the lap in the line's colour on the lanes the bus will use (a U where it turns
    round, with a small white ring), each stop under a numbered badge, and in the panel the lap's length in tiles, a
    rough round trip in game minutes (the first timing estimate under "Buses on the road", a dwell at every call) and how
    many times it turns round (hover for where). When it cannot be driven the panel says which stop pair failed and why,
@@ -34,6 +34,33 @@ family 15 (`shared/src/buildings/transport.ts`, docs/sub-kinds.md). Technology: 
    the panel is open each line is drawn as a ribbon in its colour on the lane the buses use, with rings at its stops;
    the list shows status (running, no depot, no road from the depot, no drivers on shift, outside service hours), buses
    in service, riders and fares today, and each stop's boardings.
+
+   **Stops you can see.** While a line is being edited every stop of its mode on land you may use (all four modes
+   while a new line has no stop yet; then the mode of the first click) wears a soft ring on the ground and a small pin
+   floating over it, in the mode's colour (bus amber, rail blue, underground red, river bus teal). Both pulse slowly on a
+   phase and period of their own per stop (hashed from its tile), fade out with distance as the issue bubbles do
+   (`render/issues.ts`, past the name boards) and never shrink below a few per cent of the distance, so a whole route
+   in view still shows its stops. A stop already on the draft has a brighter, larger ring in the line's colour and its
+   number badge where the pin would be; the stop under the cursor glows, grows and ignores the fade. It is two instanced
+   draws over one set of per-stop attributes (`render/stopmarks.ts`), rebuilt when editing starts, when the stops on the
+   map change (`collectStops`, one pass over the loaded tile words) or when the draft's stops do, never per frame: the
+   pulse, bob, fade and hover are in the shaders. With no line being edited nothing is drawn.
+
+   **Errors that heal.** The editor routes the draft again whenever something under it changes, so a red leg clears
+   when the road that fixes it goes down (and appears when a road is lifted) without a click, and the panel's text
+   and amber or red marks follow. The client watches `ClientWorld.layoutVersion` (a tile's road bit, terrain or family,
+   an aux, sub or under byte changing: not a house growing a level) and `rulesVersion` (turn rules and signal crossings),
+   and asks 300 ms after the first change in a window; a stop click or undo asks after 120 ms. Either way no more than one
+   `preview` request goes out per 300 ms per draft (`PreviewGate`, `LineWatcher` in `client/src/linewatch.ts`): a road
+   drawn tile by tile for a second is three requests, and the last one is always after the last change. Answers carry the
+   client's request id, so one for the same draft revision replaces the last in place (the panel never flickers back to
+   "routing..."), one for an older revision is dropped, and the route block and Save button are patched rather than the
+   whole panel redrawn, so a field being typed in keeps focus. A chunk arriving as you pan rescans for stops but never
+   asks for a route (the server's world did not change). Saved lines: the server re-checks a broken line every 100
+   ticks and pushes its new status in `lineStats` within 50; the panel re-renders on both messages, and with the panel
+   open and a line not running the client also asks for `lines` after a road change (same 300 ms window), so a status the
+   server has already fixed is read at once. `client/scripts/lines-check.ts` runs the gate, the watcher and the stop set on a
+   fake clock.
 
 On the wire, every client gets a `lines` message with every line (routes included) when one changes, and between
 those a light `lineStats` message: which line each bus on the road runs (for its livery) as soon as that changes,
