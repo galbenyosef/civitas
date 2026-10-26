@@ -536,3 +536,9 @@ body.adpick canvas { cursor: copy; }
 #roadAsk button:hover, #roadAsk button:focus-visible { background: rgba(255,255,255,0.12); outline: none; }
 #roadAsk button.danger { border-color: rgba(255,107,107,0.5); color: #ffb3b3; }
 #roadChip .cls, .ruleChip .cls { font-weight: 600; }
+
+/* the canvas cursor follows the tool (client/src/cursors.ts): a bulldozer, a road mark, a crosshair, a pointing hand over something pickable */
+canvas.cur-select.cur-pick { cursor: pointer; }
+canvas.cur-build { cursor: crosshair; }
+canvas.cur-road { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M16 2v9M16 21v9M2 16h9M21 16h9' stroke='%23fff' stroke-width='4' stroke-linecap='round'/%3E%3Cpath d='M16 2v9M16 21v9M2 16h9M21 16h9' stroke='%23222' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='16' r='3' fill='none' stroke='%23fff' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='3' fill='none' stroke='%23222' stroke-width='1.3'/%3E%3Crect x='19' y='19' width='11' height='11' rx='1.5' fill='%234b5563' stroke='%23fff' stroke-width='1.3'/%3E%3Cpath d='M24.5 20.5v8' stroke='%23ffd84d' stroke-width='1.6' stroke-dasharray='2 1.5'/%3E%3C/svg%3E") 16 16, crosshair; }
+canvas.cur-bulldoze { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M2 7h5v18H2z' fill='%23d62828' stroke='%23fff' stroke-width='1.5' stroke-linejoin='round'/%3E%3Cpath d='M7 12h6M7 20h6' stroke='%23fff' stroke-width='2.5'/%3E%3Crect x='12' y='12' width='16' height='9' rx='1.5' fill='%23e63946' stroke='%23fff' stroke-width='1.5'/%3E%3Crect x='19' y='5.5' width='8' height='7.5' rx='1' fill='%23ff8d8d' stroke='%23fff' stroke-width='1.5'/%3E%3Crect x='11' y='21' width='19' height='6.5' rx='3.2' fill='%234a1c1c' stroke='%23fff' stroke-width='1.5'/%3E%3C/svg%3E") 4 16, crosshair; }

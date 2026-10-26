@@ -42,6 +42,9 @@ import { FootprintOverlay } from './render/footprint';
 import { Fpv, type CabEye } from './render/fpv';
 import { vehicleKey, trainPanelHtml, trainKmh, planePanelHtml, planeTipHtml, planeDoing, planeKnots, planeFeet, heliTipHtml, heliPanelHtml, heliDoing, heliTitle, heliKnots, type VehicleSel } from './vehicles';
 import { Buildings } from './render/buildings';
+import { variant, allVariants } from './render/models';
+import { columnHeights } from './pick';
+import { applyToolCursor, applyPickHint } from './cursors';
 import { Lighting } from './render/lighting';
 import { buildAtlas } from './render/atlas';
 import { buildingMaterial, groundMaterial as makeGroundMaterial, sceneUniforms } from './render/materials';
@@ -706,7 +709,7 @@ document.getElementById('mapBtn')?.addEventListener('click', () => mapMode.toggl
 // ---- input ------------------------------------------------------------------------------------
 const input = new Input(canvas, rig, {
   map: mapMode,
-  onToolChange: (t) => { ui.setTool(t); rectMesh.visible = false; updateStatus(); toolUnder(t); audio.ui('click'); },
+  onToolChange: (t) => { applyToolCursor(canvas.classList, t); pickHint = false; ui.setTool(t); rectMesh.visible = false; updateStatus(); toolUnder(t); audio.ui('click'); },
   ladderKey: (t) => ui.ladderKey(t), // 0, 8, 9, Y, P, G, V, B, L open their size picker on the size last used
   isWater: (x, y) => { const t = world.getTile(x, y); return t !== undefined && terrainOf(t) === Terrain.Water; }, // a road drag's end does not snap across water
   isRoad: (x, y) => { const t = world.getTile(x, y); return t !== undefined && isRoad(t); },
@@ -785,6 +788,11 @@ const input = new Input(canvas, rig, {
     else if (code === 'KeyT') { ui.toggleTech(); ui.showTech(world.myPlayer); policies.toggle(false); }
   },
 });
+
+// a click lands on the building under the cursor, roof included, not on the ground behind it (pick.ts); the Buildings
+// constructor above has compiled the designs, so their tallest sets how far down the ray is walked
+applyToolCursor(canvas.classList, input.tool); // the first cursor: the arrow of the select tool
+input.column = { heightAt: columnHeights(world, variant), maxH: Math.max(0, ...allVariants().map((v) => v.height)) * 1.06 };
 
 /** Select the building on a tile (its people panel), or only the parcel under it (the tax and name panel). */
 function selectTile(x: number, y: number, panel: 'building' | 'parcel') {
@@ -1236,30 +1244,35 @@ let tipTile: [number, number] | null = null;
 let tipAgent = 0;
 let mouse = { x: 0, y: 0 };
 canvas.addEventListener('pointermove', (e) => { mouse = { x: e.clientX, y: e.clientY }; if (tipTile || tipAgent || tipTrain || tipPlane || tipHeli !== null || tipBoat !== null) ui.moveTip(mouse.x, mouse.y); });
+/** the pointing-hand cursor over something a click would open (cursors.ts): set where the hover resolves, so it costs nothing per frame */
+let pickHint = false;
+function hintPickable(on: boolean) { if (on !== pickHint) { pickHint = on; applyPickHint(canvas.classList, input.tool, on); } }
 function hoverAt(tile: [number, number] | null) {
   if (ctxMenu.isOpen) return; // the right-click menu is up: no tooltips under it
   boats.hover = null;
   const bt = tile && input.tool === 'select' && !input.buyRect ? boats.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null; // boats: lowest of the vehicles
   if (bt === null && tipBoat !== null) { tipBoat = null; ui.hideTip(); }
   const id = tile && input.tool === 'select' && !input.buyRect ? citizens.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : 0;
-  if (id) { hoverAgent(id); return; }
+  if (id) { hintPickable(true); hoverAgent(id); return; }
   if (tipAgent) { tipAgent = 0; ui.hideTip(); }
   // an issue badge floating over a roof answers for its building (render/issues.ts)
   const badge = tile && input.tool === 'select' && !input.buyRect ? issuesView.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null;
-  if (badge) { hoverBadge(badge); return; }
+  if (badge) { hintPickable(true); hoverBadge(badge); return; }
   // trains (render/trains.ts): picked from the vehicles drawn last frame, answered by the server (sim/rail.ts)
   const tr = tile && input.tool === 'select' && !input.buyRect ? trains.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null;
-  if (tr) { hoverTrain(tr); return; }
+  if (tr) { hintPickable(true); hoverTrain(tr); return; }
   if (tipTrain) { tipTrain = null; trains.hover = null; clearInterval(tipRefresh); ui.hideTip(); }
   // planes: the tooltip is worked out here from the flight (vehicles.ts)
   const pl = tile && input.tool === 'select' && !input.buyRect ? planes.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null;
-  if (pl) { hoverPlane(pl); return; }
+  if (pl) { hintPickable(true); hoverPlane(pl); return; }
   if (tipPlane) { tipPlane = null; planes.hover = null; ui.hideTip(); }
   // helicopters (render/helicopters.ts): worked out here from the flight, like planes
   const hl = tile && input.tool === 'select' && !input.buyRect ? helis.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null;
-  if (hl !== null) { hoverHeli(hl); return; }
+  if (hl !== null) { hintPickable(true); hoverHeli(hl); return; }
   if (tipHeli !== null) { tipHeli = null; helis.hover = null; ui.hideTip(); }
-  if (bt !== null) { hoverBoat(bt); return; }
+  if (bt !== null) { hintPickable(true); hoverBoat(bt); return; }
+  const th = tile ? world.getTile(tile[0], tile[1]) : undefined;
+  hintPickable(th !== undefined && zoneOf(th) !== 0 && !isRoad(th)); // a building: a click opens it
   hoverTile(tile);
 }
 let tipBoat: number | null = null;

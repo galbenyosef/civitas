@@ -313,5 +313,114 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
   ok(asks === before && p.el.cls.has('hidden'), 'closed: the poll stops');
   Object.assign(globalThis, saved);
 }
+{ // picking by building column (pick.ts, camera.ts tileAt): a click on a tall building lands on the building, not on the ground behind it
+  const { columnHeights, pickColumn } = await import('../src/pick');
+  const { packTile, partAux, anchorAux, familyOf } = await import('@msimcity/shared');
+  const { Vector3 } = await import('three');
+  const rig = new CameraRig(1000 / 700);
+  rig.target.set(10.5, 0, 10.5); rig.yaw = 0; rig.pitch = 0.95; rig.dist = 22; // from the south, looking north
+  rig.update(); rig.camera.updateMatrixWorld();
+  const px = (x: number, y: number, z: number) => { const v = new Vector3(x, y, z).project(rig.camera); return [(v.x + 1) * 500, (1 - v.y) * 350] as const; };
+  // a 3-level building (3 high) on tile (10, 12), two tiles in front of the empty ground at (10, 10); the camera is to the south (+z)
+  const col = { heightAt: (x: number, y: number) => (x === 10 && y === 12 ? 3 : 0), maxH: 3.2 };
+  const at = (p: readonly [number, number], c: typeof col | null) => rig.tileAt(p[0], p[1], 1000, 700, c);
+  const wall = px(10.5, 2.5, 13.0); // the upper floors of the wall facing the camera
+  const plane = at(wall, null)!;
+  ok(plane[1] < 12, `the ground plane alone puts a click on the upper floors on the tile behind (${plane.join(',')}): the old bug`);
+  ok(at(wall, col)!.join() === '10,12', `a ray through the upper floors picks the building (${at(wall, col)!.join()})`);
+  const roof = px(10.5, 3.0, 12.5);
+  ok(at(roof, col)!.join() === '10,12', `a click on the roof picks the building (${at(roof, col)!.join()})`);
+  const above = px(10.5, 4.5, 12.5); // well over the roof: the sky side
+  ok(at(above, col)!.join() === at(above, null)!.join() && at(above, col)!.join() !== '10,12', `a ray well over the roof falls to the ground behind (${at(above, col)!.join()})`);
+  const edge = px(10.5, 3.06, 12.0); // a couple of pixels over the far roof edge: still the building
+  ok(at(edge, col)!.join() === '10,12', `a click a pixel or two over the roof edge still prefers the building (${at(edge, col)!.join()})`);
+  const bare = px(14.5, 0, 14.5);
+  ok(at(bare, col)!.join() === '14,14' && at(bare, null)!.join() === '14,14', `a ray onto bare ground picks the ground tile (${at(bare, col)!.join()})`);
+  const side = px(13.5, 0, 12.5); // beside the building on the ground, nothing in the way
+  ok(at(side, col)!.join() === '13,12', 'a ray beside the building, onto ground, is not captured by it');
+  const front = px(10.5, 0, 14.5); // ground in front of the building (nearer the camera)
+  ok(at(front, col)!.join() === '10,14', 'ground in front of the building is the ground tile');
+  const lo = new CameraRig(1000 / 700); lo.pitch = 0.3; lo.dist = 22; lo.update(); lo.camera.updateMatrixWorld();
+  ok(lo.tileAt(500, 0, 1000, 700, col) === null && lo.tileAt(500, 700, 1000, 700, col) !== null, 'above the horizon, no tile; below it, a tile');
+  ok(pickColumn(0, 10, 0, 0, 1, 0, col) === null && pickColumn(0, 10, 0, 1, 0, 0, col) === null, 'a ray that does not come down picks nothing');
+  // a tall tower far from the cursor's ground point is still hit by the walk (a skyscraper in front of a long view)
+  const tower = { heightAt: (x: number, y: number) => (x === 10 && y === 16 ? 9 : 0), maxH: 9.5 };
+  const hi = px(10.5, 6, 16.9);
+  ok(at(hi, tower)!.join() === '10,16', `a 9-tall tower is hit high on its wall (${at(hi, tower)!.join()}; the ground says ${at(hi, null)!.join()})`);
+
+  // heights from the world's tiles: single tiles, a multi-tile structure's part, a site rising, roads, bare land, unloaded
+  const tiles = new Map<string, number>(), aux = new Map<string, number>(), sub = new Map<string, number>();
+  const k = (x: number, y: number) => `${x},${y}`;
+  const kind = 2, depot = 16; // any family will do for a single tile (the fake variant ignores it); the bus depot is a 2×1 structure
+  tiles.set(k(0, 0), packTile(0, false, kind, 3));        // a built tile
+  tiles.set(k(2, 0), packTile(0, false, familyOf(depot), 2)); aux.set(k(2, 0), anchorAux(0)); sub.set(k(2, 0), depot); // a structure's anchor ...
+  tiles.set(k(3, 0), packTile(0, false, familyOf(depot), 2)); aux.set(k(3, 0), partAux(1, 0)); sub.set(k(3, 0), depot); // ... and its part tile east of it
+  tiles.set(k(5, 0), packTile(0, true, 0, 0));            // a road
+  tiles.set(k(6, 0), packTile(0, false, 0, 0));           // bare land
+  const world = { getTile: (x: number, y: number) => tiles.get(k(x, y)), auxAt: (x: number, y: number) => aux.get(k(x, y)) ?? 0, subAt: (x: number, y: number) => sub.get(k(x, y)) ?? 0 };
+  const seen: number[] = [];
+  const h = columnHeights(world, (kd, level, pick) => { seen.push(level); return { height: level * 0.5 + pick * 0 }; });
+  ok(h(0, 0) > 1.4 && h(0, 0) < 1.65, `a single tile's column is its design's height, a little jittered (${h(0, 0).toFixed(2)} for 1.5)`);
+  ok(h(5, 0) === 0 && h(6, 0) === 0 && h(40, 40) === 0, 'a road, bare land and an unloaded tile have no column');
+  ok(h(3, 0) === h(2, 0) && h(2, 0) === 1, `a part tile of a structure is the anchor's column, unscaled (${h(3, 0)}, ${h(2, 0)})`);
+  const seen2 = seen.length;
+  ok(seen2 > 0, 'the variant is asked only for built tiles');
+
+  { // Input: select and hover read the column; the road tool's drag reads the ground (a drag over a building must not hop to its roof)
+    const hovered: ([number, number] | null)[] = [], picked: [number, number][] = [];
+    const m = make((() => {}) as any, { onHover: (t: [number, number] | null) => hovered.push(t), onSelect: (x: number, y: number) => picked.push([x, y]), onRoad: () => {} });
+    m.rig.target.set(10.5, 0, 10.5); m.rig.yaw = 0; m.rig.pitch = 0.95; m.rig.dist = 22; m.rig.update(); m.rig.camera.updateMatrixWorld();
+    m.input.column = col;
+    const w = px(10.5, 2.5, 13.0);
+    const pd = (type: string, o: any = {}) => m.handlers.get(type)!({ type, button: 0, clientX: w[0], clientY: w[1], offsetX: w[0], offsetY: w[1], movementX: 0, movementY: 0, altKey: false, shiftKey: false, pointerId: 1, ...o });
+    pd('pointermove');
+    ok(hovered.at(-1)?.join() === '10,12', `hover over the upper floors reports the building's tile (${hovered.at(-1)?.join()})`);
+    pd('pointerdown'); pd('pointerup');
+    ok(picked.at(-1)?.join() === '10,12', `a select click there opens the building's tile (${picked.at(-1)?.join()})`);
+    m.input.setTool('road');
+    pd('pointerdown');
+    ok(m.input.roadPath?.[0].join() === plane.join(), `the road tool starts on the ground tile behind it, not the building (${m.input.roadPath?.[0].join()})`);
+    pd('pointermove', { offsetX: w[0] + 1, clientX: w[0] + 1 });
+    ok(m.input.roadPath!.at(-1)!.join() === plane.join() || m.input.roadPath!.at(-1)!.join() === rig.tileAt(w[0] + 1, w[1], 1000, 700, null)!.join(), `dragging the road over the building still reads ground tiles (${m.input.roadPath!.at(-1)!.join()})`);
+    pd('pointerup');
+  }
+}
+{ // the size picker's state (pickerstate.ts): a refresh that changes nothing redraws nothing, and a hovered card's text stays until the mouse leaves the cards
+  const { AboutState, pickerKey } = await import('../src/pickerstate');
+  const a = new AboutState();
+  ok(a.shown('park-small') === 'park-small', 'about box: nothing hovered, it describes the active tool');
+  a.enter('park-large');
+  ok(a.shown('park-small') === 'park-large', 'about box: a hovered card is described');
+  // the players message calls refresh() with nothing changed, over and over; the hovered card must keep its text through every one
+  let drawn = pickerKey('parks', 'park-small', [false, false, true], 3), redraws = 0;
+  for (let i = 0; i < 20; i++) { const k = pickerKey('parks', 'park-small', [false, false, true], 3); if (k !== drawn) { drawn = k; redraws++; } }
+  ok(redraws === 0 && a.shown('park-small') === 'park-large', 'twenty refreshes with nothing changed: no redraw, the hovered text stays');
+  ok(pickerKey('parks', 'park-small', [false, false, false], 3) !== drawn, 'a rung unlocking is a change: it redraws');
+  ok(pickerKey('parks', 'park-large', [false, false, true], 3) !== drawn, 'another active tool is a change: it redraws');
+  ok(a.shown('park-small') === 'park-large', 'a redraw does not reset the hovered text either');
+  a.enter('park-medium'); a.leave();
+  ok(a.shown('park-small') === 'park-small', 'the mouse leaves the cards: the box goes back to the active tool');
+}
+{ // the canvas cursor follows the tool (cursors.ts): one class on the canvas, set when the tool changes
+  const { toolCursor, applyToolCursor, applyPickHint } = await import('../src/cursors');
+  const cls = new Set<string>();
+  const cl = { add: (...c: string[]) => c.forEach((x) => cls.add(x)), remove: (...c: string[]) => c.forEach((x) => cls.delete(x)), toggle: (c: string, on?: boolean) => { const v = on ?? !cls.has(c); if (v) cls.add(c); else cls.delete(c); return v; } };
+  const now = () => [...cls].sort().join(' ');
+  applyToolCursor(cl, 'select');
+  ok(now() === 'cur-select', 'select: the arrow (cur-select)');
+  applyPickHint(cl, 'select', true);
+  ok(now() === 'cur-pick cur-select', 'select over a building, person or vehicle: the pointing hand');
+  applyToolCursor(cl, 'bulldoze');
+  ok(now() === 'cur-bulldoze', 'bulldoze: the bulldozer, and the pointing hand is gone');
+  applyPickHint(cl, 'bulldoze', true);
+  ok(now() === 'cur-bulldoze', 'the pointing hand never shows outside select mode');
+  ok(['road', 'rail', 'runway', 'pylons', 'cable', 'streetrule'].every((t) => toolCursor(t) === 'cur-road'), 'road, rail, runway, pylons, cable, street rules: the road mark');
+  ok(['buy', 'park', 'roundabout', 'residential', 'turnrule'].every((t) => toolCursor(t) === 'cur-build'), 'buy and the building tools: the crosshair');
+  // through the Input: its tool changes call onToolChange, which main.ts turns into the class
+  const seen: string[] = [];
+  const m = make(() => {}, { onToolChange: (t: string) => { applyToolCursor(cl, t); seen.push(now()); } });
+  m.input.setTool('bulldoze'); m.input.setTool('road'); m.input.setTool('select');
+  ok(seen.join(' | ') === 'cur-bulldoze | cur-road | cur-select', `Input tool changes set the class (${seen.join(' | ')})`);
+}
 console.log(fails ? `${fails} FAILED` : 'all passed');
 process.exit(fails ? 1 : 0);

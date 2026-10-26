@@ -1,4 +1,5 @@
 import { PerspectiveCamera, Vector3, Plane, Raycaster, Vector2 } from 'three';
+import { pickColumn, PICK_SLACK_PX, type ColumnPick } from './pick';
 
 const PITCH_MIN = 0.18, PITCH_MAX = 1.5, DIST_MIN = 6;
 /** the 3D view's furthest zoom; zooming out past it opens the world map (docs/world-map.md) */
@@ -86,6 +87,17 @@ export class CameraRig {
     this.ndc.set((px / w) * 2 - 1, -(py / h) * 2 + 1);
     this.ray.setFromCamera(this.ndc, this.camera);
     return this.ray.ray.intersectPlane(this.plane, out);
+  }
+  /**
+   * The tile under a screen position, by building column when `col` is given (pick.ts): the tile whose drawn building
+   * the ray meets first, else the ground tile it comes down to. Null over the sky.
+   */
+  tileAt(px: number, py: number, w: number, h: number, col: ColumnPick | null): [number, number] | null {
+    this.ndc.set((px / w) * 2 - 1, -(py / h) * 2 + 1);
+    this.ray.setFromCamera(this.ndc, this.camera);
+    const o = this.ray.ray.origin, d = this.ray.ray.direction;
+    const slack = (PICK_SLACK_PX * 2 * Math.tan((this.camera.fov * Math.PI) / 360)) / h; // world units per unit of distance
+    return pickColumn(o.x, o.y, o.z, d.x, d.y, d.z, col, slack);
   }
   resize(aspect: number) { this.camera.aspect = aspect; this.camera.updateProjectionMatrix(); }
 
