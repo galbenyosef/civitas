@@ -21,8 +21,8 @@ export interface RideNow {
 export interface FpvSources { riding(): RideNow | null }
 
 const TICK_MS = 100;
-/** a speed in tiles a second that counts as full for each kind until a faster one is seen */
-const TOP: Record<RideKind, number> = { car: 3, truck: 3, bus: 2.5, train: 8, metro: 8, boat: 2, plane: 30, heli: 12 };
+/** a speed in tiles a second that counts as full for each kind until a faster one is seen (a car on a motorway does 6 to 7: a street's 2.5 is half way up the engine's range, the motorway at the top) */
+const TOP: Record<RideKind, number> = { car: 5, truck: 5, bus: 2.5, train: 8, metro: 8, boat: 2, plane: 30, heli: 12 };
 
 export class FpvSound {
   private ride: Ride | null = null;

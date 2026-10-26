@@ -69,7 +69,7 @@ drawing in `client/src/render/roads.ts` and `roadGeo.ts`.
 | Street | one each way | 100% | 2 each way | all | $10 | $0.50 | none |
 | One-way street | two, one way | 100% | 4 | all | $12 | $0.50 | One-way streets (Transport 2, $350, 80 housed) |
 | Avenue | two each way, 2 tiles wide | 100% | 4 each way | all | $25 (two tiles a length) | $1 | Avenues (Transport 3, $1,000, 160 housed) |
-| Motorway | two each way, 2 tiles wide | 125% | 4 each way | no frontage; slip roads | $40 (two tiles a length) | $2 | Motorways (Transport 4, $2,500, 200 jobs) |
+| Motorway | two each way, 2 tiles wide | 250% | 4 each way | no frontage; slip roads | $40 (two tiles a length) | $2 | Motorways (Transport 4, $2,500, 200 jobs) |
 | Pedestrian street | none (paving) | 40% (service vehicles) | - | walkers, bikes, emergencies, deliveries before 10:00 and after 19:00 | $15 | $0.75 | Pedestrian streets (Culture 2, $500, 90 housed) |
 
 Unclaimed land adds the public premium ($10 a tile) to any class. Upgrading charges the difference; a downgrade is free
@@ -146,7 +146,7 @@ car going over the reservation may wait in the first carriageway for a gap in th
 the other way is in that box heading for its own (`Traffic.overMedian`: without it the two would wait for each other
 for ever). A car joining a motorway from a street gives way to motorway traffic within two tiles (`SLIP_GAP`), lights or
 none, and there are no signals on motorway tiles. The class sets the speed of the tile a car is on and the route cost
-(the avenue 0.9 of a street, the motorway 0.8, the lane 1.2); A* scales its distance estimate by the cheapest class in
+(the avenue 0.9 of a street, the motorway 0.5, the lane 1.2); A* scales its distance estimate by the cheapest class in
 the world (`World.minRouteCost`), so it stays exact. `Traffic.roadRank` is the class's rank (motorway 4, avenue 3,
 street and one-way 2, lane 1, pedestrian 0): with `TRAFFIC_TUNING.mainRoad` on, a bigger road's arms are the main road.
 

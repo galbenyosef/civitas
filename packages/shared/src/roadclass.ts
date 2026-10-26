@@ -70,7 +70,7 @@ export const ROAD_CLASS_DEFS: readonly RoadClassDef[] = [
     blurb: 'Two lanes going one way: drag the way the traffic should go. Pair two of them to carry a busy route.', howTo: 'Road (3), One-way street: drag in the direction of travel; drag again the other way to reverse it.' },
   { id: 3, name: 'avenue', title: 'Avenue', lanes: 2, oneWay: true, divided: true, speed: 1, routeCost: 0.9, capacity: 4, access: 'all', cost: 25, upkeep: 1, feature: 'avenues', rank: 3, colour: 0x8ccf6a,
     blurb: 'Two tiles wide: two lanes each way either side of a planted reservation. Twice a street\'s traffic, and cars turn across it only at junctions.', howTo: 'Road (3), Avenue: drag; the row you drag goes your way and its twin is laid on your left.' },
-  { id: 4, name: 'motorway', title: 'Motorway', lanes: 2, oneWay: true, divided: true, speed: 1.25, routeCost: 0.8, capacity: 4, access: 'noFrontage', cost: 40, upkeep: 2, feature: 'motorways', rank: 4, colour: 0x5f9be8,
+  { id: 4, name: 'motorway', title: 'Motorway', lanes: 2, oneWay: true, divided: true, speed: 2.5, routeCost: 0.5, capacity: 4, access: 'noFrontage', cost: 40, upkeep: 2, feature: 'motorways', rank: 4, colour: 0x5f9be8,
     blurb: 'Fast and two tiles wide, with no buildings on it: streets join it by slip roads, giving way, and never cross it.', howTo: 'Road (3), Motorway: drag from the motorway connection; streets that meet it become slip roads.' },
   { id: 5, name: 'pedestrian street', title: 'Pedestrian street', lanes: 1, oneWay: false, divided: false, speed: 0.4, routeCost: 1, capacity: 2, access: 'pedestrian', cost: 15, upkeep: 0.75, feature: 'pedestrianStreets', rank: 0, colour: 0xe8a0c8,
     blurb: 'Paving and bollards: walkers and bikes only, with emergency vehicles, and deliveries before 10:00 and after 19:00. Shops on it see the most passers-by.', howTo: 'Road (3), Pedestrian street: drag along a row of shops.' },
@@ -87,7 +87,7 @@ export const ROAD_CLASS_COUNT = ROAD_CLASS_DEFS.length;
 export const JUNCTION_CLASS_DEFS: readonly RoadClassDef[] = [
   { id: 6, name: 'roundabout', title: 'Roundabout', lanes: 2, oneWay: true, divided: false, speed: 1, routeCost: 0.9, capacity: 4, access: 'all', cost: 0, upkeep: 1, feature: 'roundabout', rank: 3, colour: 0x9fc86a,
     blurb: 'A two-lane ring round a planted island: the inner lane for cars going past the second exit.', howTo: 'Roundabout, click an avenue junction.' },
-  { id: 7, name: 'motorway', title: 'Motorway', lanes: 2, oneWay: true, divided: true, speed: 1.25, routeCost: 0.8, capacity: 4, access: 'noFrontage', cost: 0, upkeep: 2, feature: 'motorways', rank: 4, colour: 0x5f9be8,
+  { id: 7, name: 'motorway', title: 'Motorway', lanes: 2, oneWay: true, divided: true, speed: 2.5, routeCost: 0.5, capacity: 4, access: 'noFrontage', cost: 0, upkeep: 2, feature: 'motorways', rank: 4, colour: 0x5f9be8,
     blurb: 'A motorway under a street bridge.', howTo: 'Interchange, click where a street meets a motorway.' },
 ];
 /** A class the road tool may lay (the picker's six). */

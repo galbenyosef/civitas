@@ -88,8 +88,22 @@ const tileY = (t: number) => t - Math.floor(t / 65536) * 65536 - 0x8000;
 const NO_KERB = StreetRule.NoParking | StreetRule.BusLane;
 /** Fleet vehicle kinds (sim/mobile.ts FLEET_VKIND 32 + FleetKind) that may use a bus lane: taxis and private hire. */
 const BUS_LANE_TAXI = 33, BUS_LANE_HIRE = 34;
-/** How far back (lane progress, tiles) a car coming along a motorway makes one joining it by a slip road wait. */
+/**
+ * How far back (lane progress, tiles) a car coming along a motorway makes one joining it by a slip road wait, at the
+ * pace a motorway had before the cars were fast (1.25 a street's): the gap scales with the class's speed (slipGap), a
+ * car at 2.5 covers twice the road in the ticks a merger needs to clear the junction and get up to speed.
+ */
 const SLIP_GAP = 2;
+const SLIP_GAP_SPEED = 1.25;
+/**
+ * A car whose free pace (before turns) is more than this many tiles a tick (a street's is at most 0.56, a motorway's
+ * 0.55 to 1.4) is fast: it may cross more than one tile edge in a tick, so a step carries on into the next lane with
+ * what is left of its move (`step`), and it plans its speed along the route ahead (`horizon`), not just for the car
+ * in front of it. Streets, avenues and everything else run exactly the single step they always did.
+ */
+const FAST_PACE = 0.7;
+/** The furthest ahead (tiles) a fast car looks along its route: its stopping distance at the top pace is about 6. */
+const HORIZON_MAX = 8;
 /** what a level crossing adds to a road tile's cost for the router: the expected wait for the barriers */
 const CROSSING_DELAY = 1.5;
 /** what a bascule bridge's deck tile adds to a road tile's cost while it is lifting (shared/src/bridges.ts) */
@@ -995,6 +1009,9 @@ export class Traffic {
    * `extra` cars are already on their way in (the lane before, for boxClear).
    */
   private laneRoom(x: number, y: number, key: number, m: Mover, extra: Mover[] | null = null, strand = 0): boolean {
+    // a plain motorway tile admits as many as the following gap lets in: cars at 1.2 tiles a tick keep a headway longer than
+    // a tile, and a count or a length of lane that admits them one at a time stops the one behind dead from speed
+    if (this.w.anyRoadClass && isMotorwayAux(this.classAux(x, y)) && this.degreeOf(x, y) < 3) return true;
     const q = this.laneAt(key);
     if (!TT.laneByLength) {
       // two-wheelers (fleet.ts BIKE_CLASS) slip into the space a car leaves and take none of a car's: they do not count,
@@ -1598,7 +1615,8 @@ export class Traffic {
       // at a junction the car ahead in the exit lane must be out of the box before we go in behind it;
       // on plain road the following gap in step() is all that is needed, so cars can close up inside a tile
       const tail = leaderIn(nq, nq.length, isBike(m), m.s2 ?? 0);
-      if (tail && tail.prog < this.clearAt(tail) + MIN_GAP && !(TT.platoon && (TT.platoon === 1 || this.junction(bx, by).signal) && this.platoonBehind(m, tail, inD))) return false;
+      if (tail && tail.prog < this.clearAt(tail) + MIN_GAP && !(TT.platoon && (TT.platoon === 1 || this.junction(bx, by).signal) && this.platoonBehind(m, tail, inD))
+        && !(classes && this.platoonFast(m, tail, inD, ax, ay, bx, by))) return false;
     }
     // a mini-roundabout (R4) holds one car at a time: it needs no don't-block-the-box rule
     if (TT.boxClear && (deg >= 3 || TT.boxClear >= 2) && ja !== MINI_AUX && !this.roomBeyond(m, bx, by, outD, nq ?? null)) return false;
@@ -1622,7 +1640,7 @@ export class Traffic {
     // a slip road: from any other road onto a motorway, give way to the cars coming along it (roadclass.ts), lights or none
     if (this.w.anyRoadClass && !m.priority && !trapped && m.wait < TT.minorWaitMax * 3) {
       const cb = this.classAux(bx, by);
-      if (isMotorwayAux(cb) && !isMotorwayAux(this.classAux(ax, ay)) && !(isDeckClassAux(cb) && deckAxisStep(cb, DIRS[inD][0])) && this.mainComing(m, bx, by, inD, outD, isEW(auxDir(cb)) ? 1 : 0, SLIP_GAP)) return false;
+      if (isMotorwayAux(cb) && !isMotorwayAux(this.classAux(ax, ay)) && !(isDeckClassAux(cb) && deckAxisStep(cb, DIRS[inD][0])) && this.mainComing(m, bx, by, inD, outD, isEW(auxDir(cb)) ? 1 : 0, this.slipGap(cb))) return false;
     }
     // main-road priority without lights: from a side road, give way to cars coming along the main one
     if (TT.mainRoad && deg >= 3 && !signal && !ja && !m.priority && !trapped && m.wait < TT.minorWaitMax) {
@@ -1737,10 +1755,11 @@ export class Traffic {
    * movement through the box crosses m's (inD -> outD)?
    */
   private mainComing(m: Mover, bx: number, by: number, inD: number, outD: number, main: number, gap = TT.mainGap): boolean {
+    const reach = gap > 2 ? Math.ceil(gap) : 2; // lanes back to look along: two, more for a fast road's wider gap
     for (let d = 0; d < 4; d++) {
       if ((isEW(d) ? 1 : 0) !== main) continue;
       const ax = bx - DIRS[d][0], ay = by - DIRS[d][1];
-      for (let back = 0; back < 2; back++) {
+      for (let back = 0; back < reach; back++) {
         const q = this.laneQ(ax - back * DIRS[d][0], ay - back * DIRS[d][1], d);
         if (q) for (const c of q) {
           if (c === m || c.committed || c.wait >= 2) continue;
@@ -1762,6 +1781,18 @@ export class Traffic {
    */
   private platoonBehind(m: Mover, t: Mover, inD: number): boolean {
     return t.inDir === inD && (t.v ?? 0) >= TT.platoonV && 1 - m.prog + t.prog - (t.len + m.len) / 2 <= TT.platoonGap;
+  }
+  /**
+   * Platoons on a motorway: through a junction tile of it (a slip road's mouth; nobody crosses a motorway, and a merger
+   * has waited for the gap, `slipGap`), a car may follow one that went in by the same approach and is moving, within
+   * platoonGap tiles of its tail scaled with the road's speed: a car doing 1.2 tiles a tick closes on the leader that
+   * far in the tick the leader is still leaving the box, and holding it at the stop line stopped it dead from speed.
+   * The following gap and every other entry rule still apply.
+   */
+  private platoonFast(m: Mover, t: Mover, inD: number, ax: number, ay: number, bx: number, by: number): boolean {
+    const cb = this.classAux(bx, by);
+    if (!TT.platoon || !isMotorwayAux(cb) || !isMotorwayAux(this.classAux(ax, ay))) return false;
+    return t.inDir === inD && (t.v ?? 0) >= TT.platoonV && 1 - m.prog + t.prog - (t.len + m.len) / 2 <= TT.platoonGap * classDef(cb & 7).speed;
   }
   /**
    * The cars ahead of m in its own lane already committed into the lane heading outD after the next tile (they will
@@ -2000,6 +2031,81 @@ export class Traffic {
     return TT.accel * (1 + TT.accelVar * (2 * hash2(m.id, 0x5a17) - 1)) * (heavy ? TT.heavyAccel : 1);
   }
   /**
+   * A fast car's speed limit from what lies along its route (FAST_PACE): the fastest it may go this tick and still be
+   * down to the pace of each slower road, each turn and each queue ahead by the time it gets there, braking at
+   * TRAFFIC_TUNING.brake like a driver anywhere else. The rules in `leg` are exact for the tile ahead (the car in front
+   * in its lane or the tail of the next lane, the stop line); at 1.4 tiles a tick that is a fraction of the 6 tiles it
+   * takes to stop, and a car that only saw a queue one tile off would stop dead from speed. Looks at most HORIZON_MAX
+   * tiles, and no further than it could use at its present speed.
+   */
+  private horizon(m: Mover, v: number, dir: number, heavy: boolean): number {
+    const dec = TT.brake, n = m.path.length / 2, path = m.path, bike = isBike(m);
+    const reach = Math.min(HORIZON_MAX, Math.ceil((v * v) / (2 * dec) + v * TT.headway + 1.5));
+    const pace = DRIVE_SPEED * m.speedMul * (heavy ? 0.8 : 1);
+    let cap = Infinity, prev = dir, judged = false;
+    for (let j = m.pi; j < n && j - m.pi <= reach; j++) {
+      const x = path[j * 2], y = path[j * 2 + 1];
+      if (!this.isRoadAt(x, y)) break;
+      const ca = this.classAux(x, y);
+      const L = pace * (ca && !(isDeckClassAux(ca) && deckAxisStep(ca, DIRS[prev][0])) ? classDef(ca & 7).speed : 1);
+      // a slower road: down to its pace at its near edge
+      const dEdge = j - m.pi + 0.5 - m.prog;
+      if (dEdge > 0 && L < v) cap = Math.min(cap, safeSpeed(dEdge, L, dec));
+      if (j + 1 >= n) break;
+      const nd = dirBetween(x, y, path[j * 2 + 2], path[j * 2 + 3]);
+      // a junction tile of the road (a slip road's mouth): be at its stop line when the box is clear, not at speed when it is not
+      if (!judged && j >= m.pi && this.degreeOf(x, y) >= 3) {
+        judged = true;
+        const ds = j - m.pi + this.stopLine(m) - m.prog;
+        if (ds > 0.02) cap = Math.min(cap, this.boxCaution(m, v, x, y, prev, nd, ds, j === m.pi ? m.s1 ?? 0 : m.s2 ?? 0, m.s2 ?? 0));
+      }
+      // a turn here: down to its pace by 0.3 into the lane that comes into the tile (where leg() starts to slow a car)
+      if (nd !== prev) {
+        const vt = L * this.turnSlow(x, y) * (nd === OPP[prev] ? UTURN_SLOW : 1), dT = j - m.pi + 0.3 - m.prog;
+        if (dT > 0 && vt < v) cap = Math.min(cap, safeSpeed(dT, vt, dec));
+      }
+      // a lane out of this tile with no room for me: leg() will hold me at its stop line, so be able to stop there
+      {
+        const ds = j - m.pi + this.stopLine(m) - m.prog;
+        if (ds > 0.02 && !this.laneRoom(x, y, Traffic.laneKey(x, y, nd), m, null, m.s2 ?? 0)) return Math.min(cap, safeSpeed(ds, 0, dec));
+      }
+      // the nearest car standing or crawling in the lane out of this tile (the lane out of the next tile is the near rule's)
+      if (j > m.pi) {
+        const q = this.laneQ(x, y, nd);
+        const t = q && q.length ? leaderIn(q, q.length, bike, m.s2 ?? 0) : null;
+        if (t) {
+          const room = j - m.pi + 1 - m.prog + t.prog - (t.len + m.len) / 2 - MIN_GAP * m.gapMul;
+          return Math.min(cap, safeSpeed(room, t.v ?? 0, dec));
+        }
+      }
+      prev = nd;
+    }
+    return cap;
+  }
+  /**
+   * horizon(): the speed at which m, `ds` short of the stop line before junction tile (x, y) (in by inD, out by outD),
+   * gets there as the box clears: for each car in the box whose movement conflicts with m's, the time it needs to get
+   * its rear out (at its present pace) against the time m needs to arrive. A car that would arrive first is slowed to
+   * arrive just after; one for a box that will not clear in a few ticks is slowed to stop at the line.
+   */
+  private boxCaution(m: Mover, v: number, x: number, y: number, inD: number, outD: number, ds: number, si: number, so: number): number {
+    const dec = TT.brake, ta = ds / Math.max(v, 0.15);
+    let cap = Infinity;
+    for (let i = 0, n = this.inBox(x, y); i < n; i++) {
+      const om = this.boxM[i];
+      if (om === m || !conflictsS(inD, outD, si, so, this.boxIn[i], this.boxOut[i], this.boxSi[i], this.boxSo[i])) continue;
+      const out = om.lane === Traffic.laneKey(x, y, this.boxOut[i]);
+      const left = Math.max(0, (out ? 0 : 1 - om.prog) + this.clearAt(om) + MIN_GAP - (out ? om.prog : 0));
+      const tc = left / Math.max(om.v ?? 0, 0.15) + 0.5;
+      if (ta >= tc) continue;
+      cap = Math.min(cap, tc >= 3 ? safeSpeed(ds, 0, dec) : ds / tc);
+    }
+    return cap;
+  }
+  /** How far back a car coming along a motorway tile of class byte `ca` makes a merger from a slip road wait (SLIP_GAP, scaled with the class's speed). */
+  private slipGap(ca: number) { return Math.max(SLIP_GAP, (SLIP_GAP * classDef(ca & 7).speed) / SLIP_GAP_SPEED); }
+
+  /**
    * Look-ahead (TRAFFIC_TUNING.lookAhead): would m, `ds` short of its stop line and wanting to go at v, be let into
    * tile B on arrival? The entry rules as they stand now (2: only what will still be there; 3: only the lights and the
    * barriers), with the light as it will be when m gets there at that speed.
@@ -2035,8 +2141,29 @@ export class Traffic {
   /**
    * Advance a driver one tick. 'arrived' once the final node is reached (the
    * mover is then off the road), 'stuck' when it has waited past the limit.
+   *
+   * A move crosses at most one tile edge and comes into the next lane no further than 0.3 along it (where the stop line
+   * of the tile after is): whatever a fast car had left of its move was lost. Before the carry that capped the 1.25
+   * motorway at a street's pace (0.61 then 0.39 tiles on alternate ticks, an average of 0.5), and a car at 2.5 times a
+   * street's would have lost half its move. A fast car now goes on in a second leg with what the first had left, from
+   * the lane it came into, under every rule of a step there (the car ahead, the stop line and its entry rules, the
+   * body guard); one leg more is the most a car at 1.4 tiles a tick can use, and the loop would take a third.
    */
   step(m: Mover): 'moving' | 'arrived' | 'stuck' {
+    this.carry = 0;
+    let r = this.leg(m, Infinity, false), left = this.carry;
+    for (let k = 0; k < 3 && left > 0.005 && r === 'moving'; k++) {
+      const v1 = m.v ?? 0; // the move so far, what the next leg cannot use included
+      this.carry = 0;
+      r = this.leg(m, left, true);
+      m.v = r === 'arrived' ? 0 : v1 - left + (m.v ?? 0);
+      left = this.carry;
+    }
+    return r;
+  }
+  /** What the last leg could not use because it crossed an edge with more than 0.3 of its move left (only a fast car's). */
+  private carry = 0;
+  private leg(m: Mover, cap: number, again: boolean): 'moving' | 'arrived' | 'stuck' {
     const n = m.path.length / 2;
     if (m.lane < 0 || m.pi >= n) return 'arrived';
     const ax = m.path[(m.pi - 1) * 2], ay = m.path[(m.pi - 1) * 2 + 1];
@@ -2056,9 +2183,11 @@ export class Traffic {
       if (m.s2 && !last && edgeLanes(this.classAux(bx, by), this.classAux(m.path[(m.pi + 1) * 2], m.path[(m.pi + 1) * 2 + 1]), nextDir) < 2) m.s2 = 0;
     }
     if (this.kerbAt(ax, ay)) base *= 0.6;
+    if (cap < base) base = cap; // a second leg has only what the first left
     // a 20 zone (R5): every vehicle at ZONE20_SPEED on its tiles
     if (this.w.streetAny & StreetRule.Zone20 && this.w.streetAt(m.prog < 0.5 ? ax : bx, m.prog < 0.5 ? ay : by) & StreetRule.Zone20) base *= ZONE20_SPEED;
     const free = base; // before the turns: what the turn ahead is slowed from
+    const fast = free > FAST_PACE && this.w.anyRoadClass;
     // turns slow a car for each half; on a roundabout the ring's wide corners not at all, the turns on and off less
     if (nextDir !== dir && m.prog > 0.3) base *= this.turnSlow(bx, by);
     if (m.inDir !== dir && m.prog < 0.3) base *= this.turnSlow(ax, ay);
@@ -2115,6 +2244,8 @@ export class Traffic {
         const vt = free * this.turnSlow(bx, by) * (nextDir === OPP[dir] ? UTURN_SLOW : 1);
         want = Math.min(want, safeSpeed(0.3 - m.prog, vt, dec));
       }
+      // a fast car plans along the route: a queue, a slower road or a turn up to its stopping distance ahead
+      if (fast) want = Math.min(want, this.horizon(m, v, dir, heavy));
       // look ahead to the stop line: brake for it only when the next tile will not take me on arrival
       if (TT.lookAhead && !m.committed && stop > m.prog) {
         const ds = stop - m.prog, vs = safeSpeed(ds, 0, dec);
@@ -2153,6 +2284,7 @@ export class Traffic {
         q.splice(idx, 1); if (q.length === 0) this.dropLane(m.lane);
         this.push(Traffic.laneKey(bx, by, nextDir), m);
         m.inDir = dir; m.pi++; m.prog = Math.min(over, 0.3); m.committed = false; if (m.med) m.med = false;
+        if (fast && over > m.prog) this.carry = over - m.prog;
         if (this.w.anyRoadClass) { m.s0 = m.s1 ?? 0; m.s1 = m.s2 ?? 0; m.s2 = this.strandFor(m, m.pi, m.s1); }
         // a bus never comes into a lane already past its stop line before a junction: its nose would be in the box,
         // in the way of whatever turns there (a bus turning round sweeps the whole box: sim/busroute.ts)
@@ -2175,9 +2307,12 @@ export class Traffic {
     const rc = this.roadChunk(ax, ay), ri = localIndex(ax, ay);
     if (rc.presAt[ri] !== this.presStamp) { rc.presAt[ri] = this.presStamp; rc.pres[ri] = 0; rc.stop[ri] = 0; this.presKeys.push(tkey(ax, ay)); this.presRc.push(rc); this.presIdx.push(ri); }
     rc.pres[ri]++;
-    if (moved < base * 0.3) { rc.stop[ri]++; this.queued++; }
-    this.vehicles++; this.speedSum += Math.min(1, moved / (DRIVE_SPEED * m.speedMul));
-    if (moved < 0.02) { m.wait++; if (!m.dwell) m.stuck++; } else m.wait = 0; // a bus dwelling at a stop is not stuck
+    // the second leg of a fast car's move is the same car in the same tick: counted once, by the first
+    if (!again) {
+      if (moved < base * 0.3) { rc.stop[ri]++; this.queued++; }
+      this.vehicles++; this.speedSum += Math.min(1, moved / (DRIVE_SPEED * m.speedMul));
+      if (moved < 0.02) { m.wait++; if (!m.dwell) m.stuck++; } else m.wait = 0; // a bus dwelling at a stop is not stuck
+    }
     if (arrived) return 'arrived';
     return TT.stuckLimit > 0 && m.stuck > TT.stuckLimit ? 'stuck' : 'moving';
   }
