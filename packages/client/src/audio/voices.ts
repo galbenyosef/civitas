@@ -1,5 +1,5 @@
 import { hash2 } from '@msimcity/shared';
-import { toDb, type AudioEngine, type VoiceClass, type VoiceTag } from './engine';
+import { toDb, MAX_VOICES, HELD_RESERVE, type AudioEngine, type VoiceClass, type VoiceTag } from './engine';
 import { VOICES, type BusId } from './manifest';
 
 /**
@@ -254,7 +254,9 @@ function burst(eng: AudioEngine, dest: AudioNode, type: BiquadFilterType, freq: 
 
 export type EventId = 'bird' | 'owl' | 'bell' | 'bell-deep' | 'horn' | 'beep' | 'ui-click' | 'ui-place' | 'ui-refuse' | 'ui-undo' | 'fx-hiss' | 'fx-stopbell' | 'fx-chime' | 'fx-joint'
   | 'gust' | 'thunder' | 'footsteps' | 'siren' | 'siren-fire' | 'seagulls' | 'pigeons' | 'dog' | 'bell-peal' | 'bike-bell' | 'bin-lorry' | 'station-chime' | 'heli-over' | 'plane-over' | 'boat-horn' | 'fireworks' | 'hammer' | 'drill' | 'lawnmower'
-  | DistrictVoice | TourVoice;
+  | DistrictVoice | TourVoice | StreetVoice;
+/** the street-life one-shots (street.ts): a vehicle passing by class, a snatch of talk */
+export type StreetVoice = 'pass-car' | 'pass-lorry' | 'pass-moped' | 'pass-bike' | 'talk';
 /** the district events (manifest.ts, "the districts"): recordings only, fired by the ambience while a zone wins the soft-max */
 export type DistrictVoice = 'metal-clank' | 'reverse-beep' | 'steam-vent' | 'till' | 'busker' | 'music-door' | 'revolving-door' | 'lift-ding' | 'radio-window' | 'front-door' | 'kids-yard' | 'camera-shutter';
 /** the recording-only voices only the tour cues play (manifest.ts, "the tour cues") */
@@ -585,5 +587,85 @@ function synthRide(eng: AudioEngine, kind: RideKind, seed: number): Ride | null 
       saw.frequency.setTargetAtTime(p.f * (1 + 0.3 * s), t, 0.4); out.gain.setTargetAtTime(0.6 + 0.3 * s, t, 0.2);
     },
     stop: () => finish(eng, rack, out, 0.8),
+  };
+}
+
+// ---- street life (docs/audio.md "Street life"): a pass-by that moves across and bends in pitch, a loop that follows a vehicle -----------
+
+/** A pass-by: a one-shot whose pan moves from `pan` to `panTo` over the clip and whose pitch falls by `bend` either side of `bendAt` seconds in (Doppler). */
+export interface Pass extends Shot {
+  panTo: number;
+  /** the pitch bend, a fraction: the clip starts `bend` high and ends `bend` low */
+  bend: number;
+  /** seconds after the start at which the vehicle is nearest (the bend's middle) */
+  bendAt: number;
+  /** the class's pitch on top of the per-instance ±5% (a van is a car take lower) */
+  rate?: number;
+  /** seconds into the clip to start from (a vehicle already at its nearest skips the approach) */
+  offset?: number;
+}
+/** Play a pass-by: the seconds it sounds for, 0 when nothing did (muted, no context, the recording not decoded yet, the budget spent). Recording only. */
+export function playPass(eng: AudioEngine, id: string, o: Pass): number {
+  const c = eng.ctx, def = VOICES[id];
+  if (!c || !eng.ready || eng.muted || c.state !== 'running' || !def) return 0;
+  const buf = eng.sample(id, r(o.seed, 5));
+  if (!buf) return 0;
+  const rate = vary(1, 0.05, r(o.seed, 3)) * (o.rate ?? 1), level = (o.gain ?? 1) * (def.level ?? 1) * vary(1, 0.1, r(o.seed, 4));
+  const off = clamp(o.offset ?? 0, 0, Math.max(0, buf.duration - 0.5)), len = (buf.duration - off) / rate, delay = o.delay ?? 0;
+  if (!eng.take(len + delay, { id, cls: clsOf(id, o), bus: def.bus, why: o.why ?? '', db: toDb(level * eng.busGain(def.bus)), cents: 1200 * Math.log2(rate), take: eng.fileOf(id, buf) })) return 0;
+  const t0 = c.currentTime + delay, s = c.createBufferSource(); s.buffer = buf;
+  const b = clamp(o.bend, 0, 0.06), mid = clamp(o.bendAt, 0, len);
+  s.playbackRate.setValueAtTime(rate * (1 + b), t0);
+  s.playbackRate.setValueAtTime(rate * (1 + b), t0 + Math.max(0, mid - 0.6));
+  s.playbackRate.linearRampToValueAtTime(rate * (1 - b), t0 + Math.min(len, mid + 0.6));
+  const g = gainNode(c, level);
+  s.connect(g);
+  if (c.createStereoPanner) {
+    const p = c.createStereoPanner();
+    p.pan.setValueAtTime(clamp(o.pan ?? 0, -1, 1), t0); p.pan.linearRampToValueAtTime(clamp(o.panTo, -1, 1), t0 + len);
+    g.connect(p); p.connect(eng.buses[def.bus]);
+  } else g.connect(eng.buses[def.bus]);
+  s.start(t0, off);
+  return len + delay;
+}
+
+/** A loop that follows something moving: its level, pan and pitch set every tick (a siren on its vehicle). */
+export interface Loop { out: GainNode; info(): { take: string; cents: number }; set(gain: number, pan: number, rate: number, tc: number): void; stop(fade: number): void }
+/**
+ * A recording looped from its own point at its own rate (±3%), on a held voice, through its own panner: null when the recording has not
+ * decoded yet (it is asked for, and the caller tries again next tick), or when taking a voice would eat into the beds' and the ride's four.
+ */
+export function makeLoop(eng: AudioEngine, id: string, seed: number): Loop | null {
+  const c = eng.ctx, def = VOICES[id];
+  if (!c || !eng.ready || eng.muted || c.state !== 'running' || !def) return null;
+  const buf = eng.sample(id, r(seed, 6));
+  if (!buf || eng.active >= MAX_VOICES - HELD_RESERVE || !eng.take()) return null;
+  const base = vary(1, 0.03, r(seed, 3)), trim = (def.level ?? 1) * vary(1, 0.1, r(seed, 4));
+  const s = c.createBufferSource(); s.buffer = buf; s.loop = true; s.playbackRate.value = base;
+  const out = gainNode(c, 0);
+  s.connect(out);
+  const p = c.createStereoPanner ? c.createStereoPanner() : null;
+  if (p) { out.connect(p); p.connect(eng.buses[def.bus]); } else out.connect(eng.buses[def.bus]);
+  s.start(0, r(seed, 7) * buf.duration);
+  const take = eng.fileOf(id, buf);
+  let done = false;
+  return {
+    out,
+    info: () => ({ take, cents: 1200 * Math.log2(base) }),
+    set: (gain, pan, rate, tc) => {
+      if (done) return;
+      const t = c.currentTime;
+      out.gain.setTargetAtTime(gain * trim, t, tc);
+      p?.pan.setTargetAtTime(clamp(pan, -1, 1), t, tc);
+      s.playbackRate.setTargetAtTime(base * rate, t, tc);
+    },
+    stop: (fade) => {
+      if (done) return;
+      done = true;
+      const t = c.currentTime;
+      out.gain.cancelScheduledValues(t); out.gain.setTargetAtTime(0, t, fade / 4);
+      try { s.stop(t + fade + 0.2); } catch { /* already stopped */ }
+      setTimeout(() => { try { out.disconnect(); p?.disconnect(); } catch { /* gone */ } eng.give(); }, (fade + 0.3) * 1000);
+    },
   };
 }

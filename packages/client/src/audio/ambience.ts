@@ -1,6 +1,7 @@
 import { hash2, type AmbienceHint, Terrain, terrainOf, isRoad, zoneOf, familyOf, underConstruction, footprintOf, KIND_ID_COUNT, Zone } from '@msimcity/shared';
 import type { AudioEngine } from './engine';
 import { fire, makeBed, ringBell, type Bed, type BedId } from './voices';
+import { StreetLife, type StreetAgent } from './street';
 import { VOICES } from './manifest';
 
 /**
@@ -21,6 +22,8 @@ export interface AmbSources {
   tileAt(x: number, y: number): number | undefined;
   kindIdAt(x: number, y: number): number;
   agents(): Iterable<AgentLike>;
+  /** every agent drawn with its id, without allocating (Map.forEach): the street-life layer (street.ts) needs the id to hear one vehicle once; without it the scan reads agents() and the street is silent */
+  eachAgent?(f: (a: StreetAgent, id: number) => void): void;
   /** the nearest signal crossing within `r` tiles of (x, z) that holds the cars at red (render/signals.ts redPelicanNear) */
   pelican?(x: number, z: number, r: number): { x: number; z: number } | null;
   /** which city this is (the server it is connected to, or the demo): a district bed picks its recording by a hash of it, so a city always sounds like itself and two cities differ */
@@ -65,8 +68,9 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const smooth = (a: number, b: number, v: number) => { const t = clamp01((v - a) / (b - a)); return t * t * (3 - 2 * t); };
 
-/** how busy the city is at an hour, 0.25 at night to 1 by day */
-export const activityAt = (h: number) => (h < 5 ? 0.25 : h < 8 ? lerp(0.25, 1, (h - 5) / 3) : h < 21 ? 1 : lerp(1, 0.25, Math.min(1, (h - 21) / 3)));
+/** how busy the city is at an hour, 0.4 at night (after midnight and before 05:00) to 1 by day: a city is never silent */
+export const NIGHT_FLOOR = 0.4;
+export const activityAt = (h: number) => (h < 5 ? NIGHT_FLOOR : h < 8 ? lerp(NIGHT_FLOOR, 1, (h - 5) / 3) : h < 21 ? 1 : lerp(1, NIGHT_FLOOR, Math.min(1, (h - 21) / 3)));
 
 /** an hour as 08:05 (the audio readout's words) */
 export const hm = (h: number) => `${String(Math.floor(h) % 24).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`;
@@ -83,7 +87,7 @@ export function bedWhy(id: string, sc: Scan, dist: number, hour: number, level: 
   const zo = zonesOf(sc, lead), dz = zoneText(zo);
   let inputs: string;
   switch (id) {
-    case 'traffic': inputs = `cars near ${sc.cars}, roads ${pc(sc.road)} of tiles, zoom ${d}, hour ${t}; district: ${dz}`; break;
+    case 'traffic': inputs = `cars near ${sc.cars} (full from ${Math.round(carKnee(dist))}), roads ${pc(sc.road)} of tiles, zoom ${d}, hour ${t}; district: ${dz}`; break;
     case 'wind': inputs = `zoom ${d} (louder the higher the camera)`; break;
     case 'crowd': inputs = `walkers ${sc.walkers} (${peopleNear(sc, dist).toFixed(2)} of a crowd), zoom ${d}, hour ${t}; district: ${dz}`; break;
     case 'industry': inputs = `industry and power ${pc(sc.ind)} of tiles, zoom ${d}, hour ${t}; district: ${dz}`; break;
@@ -123,8 +127,12 @@ export function placeWhy(id: string, sc: Scan, dist: number, hour: number, lambd
   return `${w[id] ?? `zoom ${d}, hour ${t}`}; drawn at ${lambda.toFixed(3)} a second`;
 }
 
-/** Fill `out` from the tiles round (cx, cz) within `rad` tiles (a grid of at most 15 by 15 samples) and the agents drawn round it. */
-export function scanAround(src: AmbSources, cx: number, cz: number, dist: number, out: Scan): Scan {
+/**
+ * Fill `out` from the tiles round (cx, cz) within `rad` tiles (a grid of at most 15 by 15 samples) and the agents drawn round it. `visit`, when
+ * the source can hand over each agent with its id (eachAgent), is called for every agent in the same walk: the street-life layer's share of the
+ * pass (street.ts), so the agents are walked once a tick.
+ */
+export function scanAround(src: AmbSources, cx: number, cz: number, dist: number, out: Scan, visit?: (a: StreetAgent, id: number, dx: number, dz: number, d2: number) => void): Scan {
   const rad = Math.max(6, Math.min(24, dist * 0.5)), step = Math.max(1, Math.floor(rad / 7));
   let n = 0, res = 0, com = 0, off = 0, civic = 0, sites = 0, ind = 0, park = 0, water = 0, road = 0, bell = 0, deep = 0;
   const x0 = Math.floor(cx), z0 = Math.floor(cz);
@@ -159,9 +167,17 @@ export function scanAround(src: AmbSources, cx: number, cz: number, dist: number
   const rc = Math.max(25, Math.min(140, dist * 0.9)), rw = Math.max(15, Math.min(60, dist * 0.5));
   const rc2 = rc * rc, rw2 = rw * rw;
   let cars = 0, walkers = 0;
-  for (const a of src.agents()) {
-    const dx = a.rx - cx, dz = a.rz - cz, d2 = dx * dx + dz * dz;
-    if (a.car) { if (d2 < rc2) cars++; } else if (a.trav && d2 < rw2) walkers++;
+  if (visit && src.eachAgent) {
+    src.eachAgent((a, id) => {
+      const dx = a.rx - cx, dz = a.rz - cz, d2 = dx * dx + dz * dz;
+      if (a.car) { if (d2 < rc2) cars++; } else if (a.trav && d2 < rw2) walkers++;
+      visit(a, id, dx, dz, d2);
+    });
+  } else {
+    for (const a of src.agents()) {
+      const dx = a.rx - cx, dz = a.rz - cz, d2 = dx * dx + dz * dz;
+      if (a.car) { if (d2 < rc2) cars++; } else if (a.trav && d2 < rw2) walkers++;
+    }
   }
   out.cars = cars; out.walkers = walkers;
   return out;
@@ -229,11 +245,21 @@ export function zoneText(zo: Zoning): string {
 
 /** how much the cars of a street are heard, by district: a lorry yard and a shopping street are busy, a terrace is quiet */
 const TRAFFIC_BY: Record<Zn, number> = { ind: 0.85, com: 0.7, off: 0.8, civic: 0.55, res: 0.4 };
-/** how much a district's talk is heard on top of the walkers drawn: the shops and the squares are all talk, the yards and the terraces little */
-const CROWD_BY: Record<Zn, number> = { com: 0.7, civic: 0.7, off: 0.4, res: 0.15, ind: 0.05 };
+/**
+ * How much a district's talk is heard on top of the walkers drawn: the shops and the squares are all talk, the yards and the terraces little.
+ * Balanced with peopleNear's knee so a shopping street with 20 walkers in the circle sits at about half the bed's ceiling, a terrace with 5 at a tenth.
+ */
+const CROWD_BY: Record<Zn, number> = { com: 0.52, civic: 0.52, off: 0.35, res: 0.25, ind: 0.05 };
 const byZone = (zo: Zoning, t: Record<Zn, number>) => { let v = 0; for (const z of ZONES) v += zo.w[z] * t[z]; return v; };
-/** the walkers drawn near the camera as a density, per 15 tile circle (the scan's circle grows with the zoom), eased: 0 under a handful, 1 from about ninety */
-export const peopleNear = (s: Scan, dist: number) => { const rw = Math.max(15, Math.min(60, dist * 0.5)); return smooth(6, 90, s.walkers * (15 / rw) * (15 / rw)); };
+/** the walkers drawn near the camera per 15-tile circle (the scan's circle grows with the zoom, so the same count over a wider circle is fewer) */
+export const walkerDensity = (s: Scan, dist: number) => { const rw = Math.max(15, Math.min(60, dist * 0.5)); return s.walkers * (15 / rw) * (15 / rw); };
+/**
+ * The walkers drawn near the camera as a density eased into a crowd: 0 under three, 1 from twenty-five per 15-tile circle (a pavement of
+ * people, not a stadium). An ease-out (quick from the first few, settling at the top), so five walkers are already a little talk.
+ */
+export const peopleNear = (s: Scan, dist: number) => { const t = clamp01((walkerDensity(s, dist) - 3) / 22); return t * (2 - t); };
+/** the cars that make the traffic bed full: about 15 in the street-zoom circle (25 tiles), easing to the old 45 as the circle grows with the zoom, so a far view sounds as it did */
+export const carKnee = (dist: number) => lerp(15, 45, smooth(40, 140, dist));
 
 export interface Target { level: number; tone: number }
 export type Mix = Record<BedId, Target>;
@@ -274,7 +300,7 @@ export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: M
   const act = activityAt(hour);
   const near = (full: number, gone: number) => 1 - smooth(full, gone, dist); // 1 close in, 0 zoomed out
   const zo = zonesOf(s, lead, ZSCRATCH), pres = zo.presence;
-  const density = clamp01(s.cars / 45);
+  const density = clamp01(s.cars / carKnee(dist));
   // the cars are heard by the kind of street they are in (a terrace is quiet, a yard busy); open country takes them as they are
   out.traffic.level = (0.5 * Math.sqrt(density) + 0.1 * s.road) * lerp(0.45, 1, act) * lerp(1, 0.4, smooth(40, 400, dist)) * lerp(1, byZone(zo, TRAFFIC_BY), pres);
   out.traffic.tone = 0.2 + 0.7 * density;
@@ -396,7 +422,14 @@ export class Ambience {
   private lastBell = -1e9;
   private beepAt = 0;
 
-  constructor(private eng: AudioEngine, private src: AmbSources, private salt = (Math.random() * 1e9) | 0) {}
+  /** street life (street.ts): pass-bys, footsteps and talk, the sirens that follow their vehicles; fed by the scan's walk over the agents */
+  readonly street: StreetLife;
+  /** the ridden vehicle's key ('c123' a road vehicle), set by Audio from the first-person sound: its own pass-by and siren never fire */
+  ridden: () => string = () => '';
+
+  constructor(private eng: AudioEngine, private src: AmbSources, private salt = (Math.random() * 1e9) | 0) {
+    this.street = new StreetLife(eng, salt, (x, z) => { const t = src.tileAt(x, z); return t !== undefined && isRoad(t); });
+  }
 
   /** A tour stop's bias on the beds (client/src/audio/tourcue.ts): the beds it names are held at their share of their ceiling while it is shown; null gives them back to the scene. */
   setHint(h: AmbienceHint | null) { this.hint = h && Object.keys(h).length ? { ...h } : null; }
@@ -416,6 +449,8 @@ export class Ambience {
     fire(this.eng, 'fireworks', { why: `fireworks shell at ${Math.round(x)},${Math.round(z)}, ${Math.round(d)} tiles off, size ${size}`, seed: (this.rand() * 1e9) | 0, gain: far * Math.min(1, 0.5 + 0.2 * size), delay: Math.max(0, at) + 1.1 + Math.min(2, d / 150), pan: Math.max(-1, Math.min(1, (dx * cam.rightX + dz * cam.rightZ) / (12 + d * 0.3))) });
   }
 
+  /** the scan's per-agent hook into the street (bound once: no closure per tick) */
+  private visit = (a: StreetAgent, id: number, dx: number, dz: number, d2: number) => this.street.visit(a, id, dx, dz, d2);
   private rand() { return hash2(this.n++, this.salt); }
   private rate(lambda: number, dt: number) { return lambda > 0 && this.rand() < 1 - Math.exp(-lambda * dt); }
 
@@ -425,7 +460,7 @@ export class Ambience {
     const dt = Math.min(1, (now - this.at) / 1000);
     this.at = now;
     const eng = this.eng;
-    if (!eng.ready || eng.muted || !eng.ctx || eng.ctx.state !== 'running') return;
+    if (!eng.ready || eng.muted || !eng.ctx || eng.ctx.state !== 'running') { if (this.street.following) this.street.silence(eng.muted ? 'muted' : 'the sound is suspended'); return; }
     const t0 = performance.now();
     this.tick(dt, now);
     const ms = performance.now() - t0, s = this.stats;
@@ -445,7 +480,10 @@ export class Ambience {
         if (b) { this.beds[id] = b; this.born[id] = performance.now(); eng.log('start', 'bed', id, 'always on: the ambience started'); } else eng.log('skip', 'bed', id, 'no voice free');
       }
     }
-    const sc = scanAround(src, cam.x, cam.z, cam.dist, this.scan);
+    const rk = this.ridden(), street = this.street;
+    street.begin(cam, rk.startsWith('c') ? Number(rk.slice(1)) : -1, dt);
+    const s0 = performance.now();
+    const sc = scanAround(src, cam.x, cam.z, cam.dist, this.scan, this.visit);
     zonesOf(sc, this.lead, this.zoning); // the district, for the events and the readout; mixFor finds the same one for the beds
     const mix = applyHint(mixFor(sc, cam.dist, hour, cam.map, this.mix, this.rain, this.lead), this.hint, now, this.salt);
     const lead = this.lead; this.lead = this.zoning.win; // the winner leads the next tick a little (no flipping on a border)
@@ -463,6 +501,10 @@ export class Ambience {
       const k = id as BedId, tg = mix[k];
       this.beds[k]!.tune(tg.level, tg.tone, 0.5 + 0.7 * hash2(k.length, this.salt)); // each bed glides at its own pace: 1.5 to 3.6 s
     }
+    const s1 = performance.now();
+    street.end(now, dt, during(hour, 7, 22), walkerDensity(sc, cam.dist));
+    street.cost = performance.now() - s1; // the street's own end of the tick; its visits run inside the scan (s1 - s0 is scan and visits together)
+    street.scanCost = s1 - s0;
     if (cam.map) return;
     // events
     if (this.rate(birdRate(sc, hour, cam.dist, lead), dt)) {
@@ -470,9 +512,7 @@ export class Ambience {
       for (let i = 0; i < n; i++) fire(eng, 'bird', { why: `${chorus ? 'dawn chorus' : hour >= 19 ? 'dusk' : 'daytime'} ${hm(hour)}, parks ${pc(sc.park)}, homes ${pc(sc.res)}, green ${greenOf(sc, lead).toFixed(2)}; district: ${zoneText(this.zoning)}`, seed: (this.rand() * 1e9) | 0, delay: i * (0.15 + this.rand() * 0.5), gain: 0.5 + 0.5 * this.rand() });
     }
     if (this.rate(owlRate(sc, hour, cam.dist, lead), dt)) fire(eng, 'owl', { why: `night ${hm(hour)}, parks ${pc(sc.park)}, homes ${pc(sc.res)}`, seed: (this.rand() * 1e9) | 0, gain: 0.6 + 0.4 * this.rand() });
-    if (sc.cars > 5 && cam.dist < 90 && this.rate(0.006 * Math.min(1, sc.cars / 30) * lerp(0.4, 1, activityAt(hour)), dt)) {
-      fire(eng, 'horn', { why: `horn: ${sc.cars} cars near, zoom ${Math.round(cam.dist)}`, seed: (this.rand() * 1e9) | 0, gain: 0.4 + 0.6 * this.rand() * (1 - smooth(20, 90, cam.dist)) });
-    }
+    // (the horn is the street's now: one in 25 cars passing close honks, more at a junction; street.ts)
     this.places(sc, cam, hour, dt);
     // the hour: a bell, if one is in the view and it is a striking hour (every third, by day) and has not just rung
     const hf = Math.floor(hour);
@@ -504,9 +544,13 @@ export class Ambience {
     const close = (a: number, b: number) => 1 - smooth(a, b, d);
     const people = peopleNear(sc, d);
     go('gust', 0.045 * smooth(40, 260, d), 0.35 + 0.6 * smooth(60, 300, d));
-    go('footsteps', 0.12 * people * lerp(0.5, 1, byZone(zo, CROWD_BY)) * act * close(25, 50), 0.35 + 0.65 * this.rand());
-    go('siren', 0.004 * Math.min(1, sc.police) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d))); // a call from a station in the view: the hook for a real response vehicle
-    go('siren-fire', 0.003 * Math.min(1, sc.fire) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d)));
+    // (footsteps follow the walkers drawn within 8 tiles, one voice a side: street.ts)
+    // a station's call: a patrol never reports one (the sim sets no emergency flag on a patrol), so the police call stays; the fire engines
+    // carry their own sirens (street.ts), so the fire station's is a tenth of what it was, for a town that has a station and no call yet.
+    // Neither sounds while a vehicle's siren is being followed.
+    const quiet = this.street.following > 0 ? 0 : 1;
+    go('siren', quiet * 0.004 * Math.min(1, sc.police) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d)));
+    go('siren-fire', quiet * 0.0003 * Math.min(1, sc.fire) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d)));
     go('seagulls', 0.05 * Math.min(1, sc.water * 3) * day * (1 - smooth(100, 170, d)), 0.3 + 0.7 * this.rand());
     // the districts: each zone's events are heard while that zone wins the soft-max (zoneLevel is 0 where it is ducked), close in
     const zi = zoneLevel(zo, 'ind'), zc = zoneLevel(zo, 'com'), zf = zoneLevel(zo, 'off'), zr = zoneLevel(zo, 'res'), zv = zoneLevel(zo, 'civic');
@@ -560,5 +604,5 @@ export class Ambience {
   hourInfo(): { hour: number; source: string } { return { hour: this.hourNow, source: this.src.hourSource?.() ?? 'clock' }; }
 
   /** drop every bed (the context is going away, or the player left the world) */
-  dispose() { for (const id in this.beds) { this.beds[id as BedId]!.stop(); this.eng.log('stop', 'bed', id, 'the ambience was disposed'); } this.beds = {}; this.quiet = {}; this.made = false; }
+  dispose() { this.street.silence('the ambience was disposed'); for (const id in this.beds) { this.beds[id as BedId]!.stop(); this.eng.log('stop', 'bed', id, 'the ambience was disposed'); } this.beds = {}; this.quiet = {}; this.made = false; }
 }

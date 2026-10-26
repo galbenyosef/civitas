@@ -27,6 +27,12 @@ export interface VoiceQuery {
   level: number;
   /** an ffmpeg filter applied to an event at build time, for a clip that should sound heard through a wall or a window (a low-pass) */
   post?: string;
+  /** the Opus bitrate for this voice's files, kbps (default: the build's --kbps); the street-life clips ship at 32 */
+  kbps?: number;
+  /** a bed or loop whose source repeats (a siren's two-tone): the loop is cut to a whole number of these seconds, with a short cross-fade, so the pattern runs on with no seam */
+  period?: number;
+  /** an event that is a pass-by: cut the `maxSec` window round its loudest moment (this share of the window before it) instead of from its start, so the clip is the pass and not the approach */
+  peak?: number;
 }
 
 const NOISE = ['speech', 'voice', 'talking', 'music', 'song', 'vocal'];
@@ -141,6 +147,15 @@ export const VOICE_QUERIES: VoiceQuery[] = [
   ev('radio-window', ['radio playing in another room', 'radio from a window', 'distant radio', 'radio muffled', 'radio talk show', 'radio news', 'radio dj'], { must: ['radio', 'window', 'muffled', 'distant', 'room'], takes: 1, maxSec: 9, dur: [4, 40], level: 0.25, avoid: ['loop', 'sfx', 'synth', 'static', 'tuning', 'horror'], post: 'lowpass=f=3000,highpass=f=250' }),
   ev('front-door', ['front door close', 'door slam house', 'door shut', 'door closing', 'house door keys'], { must: ['door'], takes: 2, maxSec: 3, dur: [0.4, 8], level: 0.35, avoid: ['loop', 'music', 'sfx', 'synth', 'car', 'creak', 'horror', 'elevator', 'metal', 'garage'] }),
   ev('kids-yard', ['children playing outside', 'kids shouting playground', 'children laughing garden', 'kids playing street', 'children voices distance'], { must: ['children', 'kids', 'child', 'play'], takes: 1, maxSec: 8, dur: [3, 30], level: 0.3, avoid: ['loop', 'music', 'sfx', 'synth', 'song'] }),
+  // ---- street life (docs/audio.md "Street life"): a vehicle passing close to the camera, by class; a short talk snippet over a busy pavement; the sirens cut to loops that follow an emergency vehicle
+  ev('pass-car', ['car pass by', 'car passing', 'car drive by', 'car passby street'], { peak: 0.55, must: ['car', 'pass', 'drive by', 'driving by', 'passby'], takes: 3, maxSec: 3, dur: [1.5, 15], level: 0.4, kbps: 32, avoid: ['loop', 'horn', 'siren', 'interior', 'inside', 'race', 'racing', 'formula', 'rain', 'music', 'sfx', 'synth', 'crash', 'skid'] }),
+  ev('pass-lorry', ['truck pass by', 'lorry passing', 'truck passing diesel', 'bus truck drive by'], { peak: 0.55, must: ['truck', 'lorry', 'diesel', 'heavy'], takes: 2, maxSec: 3.5, dur: [2, 20], level: 0.4, kbps: 32, avoid: ['loop', 'horn', 'siren', 'interior', 'inside', 'music', 'sfx', 'synth', 'crash', 'reverse'] }),
+  ev('pass-moped', ['scooter pass by', 'moped passing', 'scooter passing', 'motorbike pass by'], { peak: 0.55, must: ['scooter', 'moped', 'vespa', 'motorbike', 'motorcycle'], takes: 2, maxSec: 3, dur: [1.5, 15], level: 0.4, kbps: 32, avoid: ['loop', 'horn', 'interior', 'race', 'racing', 'music', 'sfx', 'synth', 'start', 'idle', 'rev'] }),
+  ev('pass-bike', ['bicycle freewheel', 'bicycle passing', 'bike freewheel ticking', 'bicycle pass by'], { peak: 0.5, must: ['bicycle', 'bike', 'cycle', 'freewheel'], takes: 2, maxSec: 2.5, dur: [1, 15], level: 0.35, kbps: 32, avoid: ['loop', 'bell', 'motor', 'music', 'sfx', 'synth', 'crash', 'pump'] }),
+  ev('talk', ['people walking talking street', 'passers by talking', 'pedestrians chatter', 'walla short'], { must: ['people', 'talk', 'chatter', 'walla', 'pedestrian', 'passers', 'conversation', 'voices'], takes: 3, maxSec: 3, dur: [2, 30], level: 0.3, kbps: 32, avoid: ['loop', 'music', 'song', 'scream', 'laugh', 'sfx', 'synth', 'crowd cheer', 'radio'] }),
+  bed('siren-loop', ['police siren', 'uk siren', 'police car siren', 'siren'], { must: ['siren', 'police'], dur: [3, 40], level: 0.35, maxSec: 10, period: 4.64, kbps: 32, avoid: ['ambulance', 'american', 'us ', 'music', 'sfx'] }),
+  bed('siren-fire-loop', ['fire engine', 'fire truck siren', 'fire brigade', 'fire siren'], { must: ['siren', 'fire', 'engine', 'truck'], dur: [3, 40], level: 0.35, maxSec: 12, period: 5.805, kbps: 32 }),
+  bed('siren-ambulance-loop', ['ambulance siren', 'uk ambulance siren', 'ambulance'], { must: ['ambulance', 'siren'], dur: [3, 40], level: 0.35, maxSec: 8, period: 3.85, kbps: 32, avoid: ['american', 'us ', 'music', 'sfx'] }),
   // ---- civic events
   ev('camera-shutter', ['camera shutter', 'camera click', 'dslr shutter', 'photo camera shutter', 'camera flash click'], { must: ['camera', 'shutter', 'photo'], takes: 2, maxSec: 1.5, dur: [0.2, 4], level: 0.3, avoid: ['loop', 'music', 'sfx', 'synth', 'film', 'burst'] }),
 ];

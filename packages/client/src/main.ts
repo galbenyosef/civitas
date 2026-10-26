@@ -1582,6 +1582,7 @@ const audio = new Audio({
     tileAt: (x, y) => world.getTile(x, y),
     kindIdAt: (x, y) => world.kindIdAt(x, y),
     agents: () => citizens.agents.values(),
+    eachAgent: (f) => citizens.agents.forEach(f), // the street-life layer (audio/street.ts) hears each vehicle by its id, in the scan's own walk
     pelican: (x, z, r) => lights.redPelicanNear(x, z, r, liveTick()),
     city: () => (params.get('ws') ?? params.get('demo') ?? params.get('city') ?? location.host), // a district bed's take is a hash of it
   },

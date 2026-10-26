@@ -39,6 +39,7 @@ export class Audio {
     this.ambience = new Ambience(this.engine, hooks.ambience);
     this.fpv = new FpvSound(this.engine, hooks.fpv);
     this.tour = new TourCues(this.engine, this.ambience);
+    this.ambience.ridden = () => this.fpv.rideKey;
     try { this.tour.debug = new URLSearchParams(location.search).has('audiodebug'); } catch { /* no location */ }
     this.engine.arm(window, document);
     bindMuteKey(window, this.engine, (muted) => hooks.notice(muted ? 'Sound off' : 'Sound on'));
@@ -95,11 +96,12 @@ export class Audio {
     }
     const ride = this.fpv.state();
     if (ride) rows.push({ id: ride.id, cls: 'ride', bus: 'vehicles', db: toDb(ride.gain), cents: 1200 * Math.log2(0.8 + 0.5 * ride.speed), take: ride.take, age: now - ride.born, why: `riding ${ride.key}: a ${ride.kind} at ${Math.round(ride.speed * 100)}% of its top speed (pitch and level follow it); the ambience is down 6 dB` });
+    for (const s of this.ambience.street.sirenRows(now)) rows.push({ id: s.id, key: s.key, cls: 'event', bus: 'ambience', db: s.db, cents: s.cents, take: s.take, age: s.age, why: s.why });
     for (const s of e.shots) if (s.until > now) rows.push({ id: s.id, key: `${s.id}@${Math.round(s.at)}`, cls: s.cls, bus: s.bus, db: s.db ?? -Infinity, cents: s.cents ?? null, take: s.take ?? 'synth', age: now - s.at, left: (s.until - now) / 1000, why: s.why });
     const h = this.ambience.hourInfo();
     return {
       at: now, context: e.ctx ? (e.ctx.state as AudioState['context']) : 'not started', muted: e.muted, volume: e.volume, masterDb: toDb(e.gainFor()),
-      voices: e.active, cap: MAX_VOICES, loading: e.loading, ducks: e.duckLayers, hour: h.hour, hourSource: h.source, district: zoneText(this.ambience.zoning), stop: this.tour.shown, rows, journal: e.journal,
+      voices: e.active, cap: MAX_VOICES, loading: e.loading, ducks: e.duckLayers, hour: h.hour, hourSource: h.source, district: zoneText(this.ambience.zoning), street: this.ambience.street.text(now), stop: this.tour.shown, rows, journal: e.journal,
     };
   }
 

@@ -17,7 +17,7 @@ const args = process.argv.slice(2);
 const opt = (n: string, d = '') => { const i = args.indexOf(`--${n}`); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const DL = resolve(opt('dl', process.env.AUDIO_DL || 'freesound-downloads'));
 const ONLY = new Set(opt('only').split(',').filter(Boolean));
-const KBPS = Number(opt('kbps', '48'));
+const KBPS_ALL = Number(opt('kbps', '48'));
 const here = new URL('.', import.meta.url).pathname;
 const AUDIO = resolve(here, '../src/audio');
 const FILES = join(AUDIO, 'files');
@@ -45,8 +45,17 @@ function peakDb(input: string, filter: string): number {
 
 interface Out { voice: string; file: string; c: Candidate; cls: string; level: number; shipped: number; bytes: number; norm: string }
 
-function encode(voiceCls: 'bed' | 'ride' | 'event', src: string, out: string, maxSec: number, extra = ''): { shipped: number; norm: string } {
-  const srcDur = probeDur(src);
+/** the time of the loudest 50 ms in a file, seconds (a pass-by's moment of passing) */
+function loudestAt(input: string): number {
+  const raw = execFileSync('ffmpeg', ['-v', 'error', '-i', input, '-ac', '1', '-ar', '8000', '-f', 'f32le', '-'], { maxBuffer: 1 << 28 });
+  const x = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.length / 4)), w = 400;
+  let best = 0, at = 0;
+  for (let i = 0; i + w <= x.length; i += w) { let e = 0; for (let k = i; k < i + w; k++) e += x[k] * x[k]; if (e > best) { best = e; at = i; } }
+  return (at + w / 2) / 8000;
+}
+
+function encode(voiceCls: 'bed' | 'ride' | 'event', src: string, out: string, maxSec: number, extra = '', o: { kbps?: number; period?: number; peak?: number } = {}): { shipped: number; norm: string } {
+  const srcDur = probeDur(src), KBPS = o.kbps ?? KBPS_ALL;
   const target = TARGET[voiceCls];
   let pre: string, note: string;
   if (voiceCls === 'event') {
@@ -54,9 +63,11 @@ function encode(voiceCls: 'bed' | 'ride' | 'event', src: string, out: string, ma
     const trimmed = join(tmpdir(), `civitas-audio-${process.pid}-trim.wav`);
     run('ffmpeg', ['-y', '-v', 'error', '-i', src, '-af', `${SIL},areverse,${SIL},areverse,aformat=channel_layouts=mono,aresample=48000,highpass=f=40${extra ? `,${extra}` : ''}`, trimmed]);
     const td = probeDur(trimmed), len = Math.min(td, maxSec), capped = td > maxSec + 0.01;
-    const fadeOut = capped ? Math.min(0.35, len * 0.2) : Math.min(0.06, len * 0.2);
-    pre = `atrim=0:${len.toFixed(3)},asetpts=PTS-STARTPTS,`;
-    const post = `afade=t=in:d=0.01,afade=t=out:st=${(len - fadeOut).toFixed(3)}:d=${fadeOut.toFixed(3)}`;
+    // a pass-by: the window round its loudest moment, faded in as well as out (it is cut from the middle of a sound)
+    const from = o.peak !== undefined && capped ? Math.max(0, Math.min(td - len, loudestAt(trimmed) - o.peak * len)) : 0;
+    const fadeOut = capped ? Math.min(0.35, len * 0.2) : Math.min(0.06, len * 0.2), fadeIn = from > 0 ? Math.min(0.35, len * 0.2) : 0.01;
+    pre = `atrim=${from.toFixed(3)}:${(from + len).toFixed(3)},asetpts=PTS-STARTPTS,`;
+    const post = `afade=t=in:d=${fadeIn.toFixed(3)},afade=t=out:st=${(len - fadeOut).toFixed(3)}:d=${fadeOut.toFixed(3)}`;
     const m = measure(trimmed, pre, target);
     // a clip under about 0.4 s is too short for a loudness reading (-inf): set its peak to -3 dBFS instead
     const ln = Number.isFinite(Number(m.input_i)) && Number(m.input_i) > -60
@@ -64,20 +75,21 @@ function encode(voiceCls: 'bed' | 'ride' | 'event', src: string, out: string, ma
       : `volume=${(-3 - peakDb(trimmed, pre)).toFixed(2)}dB`;
     run('ffmpeg', ['-y', '-v', 'error', '-i', trimmed, '-af', `${pre}${ln},aresample=48000,${post}`, '-ac', '1', '-ar', '48000', '-c:a', 'libopus', '-b:a', `${KBPS}k`, '-application', 'audio', out]);
     rmSync(trimmed, { force: true });
-    note = `silence trimmed${extra ? `, ${extra}` : ''}${capped ? `, cut to ${len.toFixed(1)} s` : ''}, ${target} LUFS, fades 10 ms in / ${Math.round(fadeOut * 1000)} ms out`;
+    note = `silence trimmed${extra ? `, ${extra}` : ''}${capped ? `, cut to ${len.toFixed(1)} s${from > 0 ? ` from ${from.toFixed(1)} s (round its loudest moment: the pass)` : ''}` : ''}, ${target} LUFS, fades ${Math.round(fadeIn * 1000)} ms in / ${Math.round(fadeOut * 1000)} ms out`;
   } else {
     // a loop: L seconds from the middle of the source, its tail (LOOP_X s past L) cross-faded into its head
-    const x = Math.min(LOOP_X, Math.max(0.5, srcDur / 8));
-    const L = Math.max(4, Math.min(maxSec, srcDur - x - 0.2));
+    // a source that repeats (a siren) is cut to whole cycles with a short cross-fade: the tail past L is the same moment of the cycle as the head
+    const x = o.period ? 0.3 : Math.min(LOOP_X, Math.max(0.5, srcDur / 8));
+    const L = o.period ? o.period * Math.max(1, Math.floor(Math.min(maxSec, srcDur - x - 0.2) / o.period)) : Math.max(4, Math.min(maxSec, srcDur - x - 0.2));
     const off = Math.max(0, (srcDur - (L + x)) / 2);
-    const g = `atrim=${off.toFixed(3)}:${(off + L + x).toFixed(3)},asetpts=PTS-STARTPTS,aformat=channel_layouts=mono,aresample=48000,highpass=f=30,asplit[a][b];[a]atrim=0:${L.toFixed(3)},asetpts=PTS-STARTPTS[h];[b]atrim=${L.toFixed(3)}:${(L + x).toFixed(3)},asetpts=PTS-STARTPTS[t];[t][h]acrossfade=d=${x.toFixed(3)}:c1=qsin:c2=qsin`;
+    const g = `atrim=${off.toFixed(3)}:${(off + L + x).toFixed(3)},asetpts=PTS-STARTPTS,aformat=channel_layouts=mono,aresample=48000,highpass=f=30,${o.period ? 'dynaudnorm=f=250:g=15:p=0.9,' : ''}asplit[a][b];[a]atrim=0:${L.toFixed(3)},asetpts=PTS-STARTPTS[h];[b]atrim=${L.toFixed(3)}:${(L + x).toFixed(3)},asetpts=PTS-STARTPTS[t];[t][h]acrossfade=d=${x.toFixed(3)}:c1=qsin:c2=qsin`;
     const looped = join(tmpdir(), `civitas-audio-${process.pid}-loop.wav`);
     run('ffmpeg', ['-y', '-v', 'error', '-i', src, '-filter_complex', g, looped]);
     const m = measure(looped, '', target);
     const ln = `loudnorm=I=${target}:TP=-1.5:LRA=11:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
     run('ffmpeg', ['-y', '-v', 'error', '-i', looped, '-af', `${ln},aresample=48000`, '-ac', '1', '-ar', '48000', '-c:a', 'libopus', '-b:a', `${KBPS}k`, '-application', 'audio', out]);
     rmSync(looped, { force: true });
-    note = `a ${L.toFixed(1)} s loop from ${off.toFixed(0)} s in, ${x.toFixed(1)} s tail cross-faded into the head, ${target} LUFS`;
+    note = `a ${L.toFixed(1)} s loop${o.period ? ` (${Math.round(L / o.period)} cycle${Math.round(L / o.period) > 1 ? 's' : ''} of ${o.period} s, the level evened out so the recording's approach does not swell at each turn)` : ''} from ${off.toFixed(0)} s in, ${x.toFixed(1)} s tail cross-faded into the head, ${target} LUFS`;
   }
   return { shipped: probeDur(out), norm: `${note}; mono 48 kHz Opus ${KBPS} kbps` };
 }
@@ -99,7 +111,7 @@ function main() {
       const src = join(DL, v.id, `${c.id}.ogg`), file = `${v.id}${i ? `-${i + 1}` : ''}.opus`;
       if (!existsSync(src)) { console.log(`${v.id}: ${src} missing`); return; }
       try {
-        const r = encode(v.cls, src, join(FILES, file), v.maxSec, v.post);
+        const r = encode(v.cls, src, join(FILES, file), v.maxSec, v.post, { kbps: v.kbps, period: v.period, peak: v.peak });
         const bytes = statSync(join(FILES, file)).size;
         outs.push({ voice: v.id, file, c, cls: v.cls, level: v.level, shipped: Math.round(r.shipped * 10) / 10, bytes, norm: r.norm });
         console.log(`${file.padEnd(18)} ${r.shipped.toFixed(1).padStart(5)} s ${(bytes / 1024).toFixed(0).padStart(4)} KB  ${c.id} ${c.name.slice(0, 40)}`);

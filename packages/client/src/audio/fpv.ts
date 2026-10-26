@@ -45,6 +45,8 @@ export class FpvSound {
   constructor(private eng: AudioEngine, private src: FpvSources, private salt = (Math.random() * 1e9) | 0) {}
 
   get riding() { return this.ride !== null; }
+  /** the ridden vehicle's key ('c12' a road vehicle), '' when nothing is ridden: the street never fires its own pass-by or siren */
+  get rideKey() { return this.ride ? this.key : ''; }
   get speed() { return this.sm / this.top; }
   /** the ridden vehicle's sound now, for the audio readout: its kind and ride key, speed 0..1, the recording it plays and its level post-bus, dB-ready (linear) */
   state(): { id: string; kind: RideKind; key: string; speed: number; take: string; gain: number; born: number } | null {
