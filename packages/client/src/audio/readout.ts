@@ -51,6 +51,8 @@ export interface AudioState {
   hourSource: string;
   /** the district the ambience hears: "commercial 0.62 wins, industrial 0.21, residential 0.17; ducked" (zoneText); absent in a snapshot made before the soft-max */
   district?: string;
+  /** the street-life line (street.ts): "pass-bys 23 in the last minute (radius 12 tiles), sirens following 1, walkers close 6"; absent in a snapshot made before it */
+  street?: string;
   /** the tour stop shown now, '' when the tour is closed */
   stop: string;
   rows: VoiceRow[];
@@ -72,7 +74,7 @@ const esc = (t: string) => t.replace(/[&<>"]/g, (c) => (c === '&' ? '&amp;' : c 
 /** the header's facts as plain text: context, volume, mute, voices, decodes, ducks, hour */
 export function headerText(s: AudioState): string {
   const ducks = s.ducks.length ? s.ducks.map(([l, d]) => `${l} ${d.toFixed(0)} dB`).join(', ') : 'none';
-  return `context ${s.context} · volume ${Math.round(s.volume * 100)}% (master ${fmtDb(s.masterDb)})${s.muted ? ' · MUTED' : ''} · voices ${s.voices}/${s.cap} · decodes in flight ${s.loading} · ducks ${ducks} · hour ${hhmm(s.hour)} from the ${s.hourSource}${s.district ? ` · district ${s.district}` : ''}${s.stop ? ` · tour stop ${s.stop}` : ''}`;
+  return `context ${s.context} · volume ${Math.round(s.volume * 100)}% (master ${fmtDb(s.masterDb)})${s.muted ? ' · MUTED' : ''} · voices ${s.voices}/${s.cap} · decodes in flight ${s.loading} · ducks ${ducks} · hour ${hhmm(s.hour)} from the ${s.hourSource}${s.district ? ` · district ${s.district}` : ''}${s.street ? ` · street ${s.street}` : ''}${s.stop ? ` · tour stop ${s.stop}` : ''}`;
 }
 /** one voice as a line of text */
 export function rowText(r: VoiceRow): string {
@@ -97,7 +99,7 @@ const ageText = (r: VoiceRow) => (r.left !== undefined ? `${r.left.toFixed(1)} s
 export function headerHtml(s: AudioState): string {
   const ok = s.context === 'running' && !s.muted;
   const ducks = s.ducks.length ? s.ducks.map(([l, d]) => `${esc(l)} <b>${d.toFixed(0)}</b>`).join(', ') + ' dB' : 'none';
-  return `<div class="aro-head ${ok ? '' : 'warn'}"><span><i>context</i> <b>${s.context}</b></span><span><i>volume</i> <b>${Math.round(s.volume * 100)}%</b> <i>${fmtDb(s.masterDb)}</i>${s.muted ? ' <b class="aro-muted">muted</b>' : ''}</span><span><i>voices</i> <b>${s.voices}</b>/${s.cap}</span><span><i>decodes</i> <b>${s.loading}</b></span><span><i>ducks</i> ${ducks}</span><span><i>hour</i> <b>${hhmm(s.hour)}</b> <i>${esc(s.hourSource)}</i></span>${s.district ? `<span class="aro-district"><i>district</i> <b>${esc(s.district)}</b></span>` : ''}${s.stop ? `<span><i>tour stop</i> <b>${esc(s.stop)}</b></span>` : ''}</div>`;
+  return `<div class="aro-head ${ok ? '' : 'warn'}"><span><i>context</i> <b>${s.context}</b></span><span><i>volume</i> <b>${Math.round(s.volume * 100)}%</b> <i>${fmtDb(s.masterDb)}</i>${s.muted ? ' <b class="aro-muted">muted</b>' : ''}</span><span><i>voices</i> <b>${s.voices}</b>/${s.cap}</span><span><i>decodes</i> <b>${s.loading}</b></span><span><i>ducks</i> ${ducks}</span><span><i>hour</i> <b>${hhmm(s.hour)}</b> <i>${esc(s.hourSource)}</i></span>${s.district ? `<span class="aro-district"><i>district</i> <b>${esc(s.district)}</b></span>` : ''}${s.street ? `<span class="aro-street"><i>street</i> <b>${esc(s.street)}</b></span>` : ''}${s.stop ? `<span><i>tour stop</i> <b>${esc(s.stop)}</b></span>` : ''}</div>`;
 }
 const ago = (ms: number) => `-${ms < 10000 ? (ms / 1000).toFixed(1) : Math.round(ms / 1000)} s`;
 export function journalHtml(js: JournalRow[], now: number): string {

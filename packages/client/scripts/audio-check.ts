@@ -5,7 +5,9 @@ import { bindMuteKey } from '../src/audio/controls';
 import { VOICES, voiceFile } from '../src/audio/manifest';
 import { CLIPS } from '../src/audio/credits';
 import { fire, makeBed, makeRide, ringBell, BEDS, type EventId, type RideKind } from '../src/audio/voices';
-import { Ambience, mixFor, newMix, newScan, birdRate, owlRate, scanAround, zonesOf, zoneText, worksOf, peopleNear, greenOf, ZONES, ZONE_BED, type AmbSources, type Zn } from '../src/audio/ambience';
+import { Ambience, mixFor, newMix, newScan, birdRate, owlRate, scanAround, zonesOf, zoneText, worksOf, peopleNear, greenOf, ZONES, ZONE_BED, carKnee, activityAt, HINT_CEIL as CEILS, type AmbSources, type Zn } from '../src/audio/ambience';
+import { StreetLife, PassPicker, STREET, passRadius, passKindOf, sirenKindOf, sirenGain, panOf, approach, SIREN_VOICE, type StreetAgent } from '../src/audio/street';
+import { VehicleKind, VehicleClass, FleetKind } from '@msimcity/shared';
 import { packTile, withConstruction } from '@msimcity/shared';
 import { FpvSound, type RideNow } from '../src/audio/fpv';
 import { TourCues, DEFAULT_DUCK_DB } from '../src/audio/tourcue';
@@ -235,7 +237,8 @@ for (const mode of ['synthesised', 'recorded'] as const) {
   ok(bt > q + 0.2 && b.traffic.tone > a.traffic.tone, 'traffic gets louder and brighter with the cars drawn');
   const near = mixFor(busy, 30, 12, false).wind.level, far = mixFor(busy, 300, 12, false).wind.level;
   ok(far > near * 3, 'wind rises with the camera height');
-  ok(mixFor(busy, 40, 3, false).crowd.level < mixFor(busy, 40, 12, false).crowd.level * 0.4, 'the crowd murmur falls at night');
+  // the night floor rose from 0.25 to 0.4 (street life): the murmur at 03:00 is now 0.4 of noon's, so the bound moved from 0.4 to 0.45
+  ok(mixFor(busy, 40, 3, false).crowd.level < mixFor(busy, 40, 12, false).crowd.level * 0.45, 'the crowd murmur falls at night (to the 0.4 floor)');
   ok(mixFor(busy, 40, 12, true).crowd.level === 0 && mixFor(busy, 40, 12, true).wind.level <= 0.2, 'the map view keeps only a thin wind');
   const park = { ...newScan(), park: 0.4, res: 0.2 };
   ok(birdRate(park, 5.5, 40) > birdRate(park, 12, 40) * 2, 'the dawn chorus (04:30 to 07:00) is busier than midday');
@@ -284,7 +287,8 @@ for (const mode of ['synthesised', 'recorded'] as const) {
   // the beds that were everywhere now follow the district: crowd by the walkers drawn and the street they are in, traffic by the street
   const crowd = (sc: Sc) => mixFor(sc, 24, 12, false, newMix()).crowd.level;
   ok(crowd(street({ com: 0.18 })) > crowd(street({ ind: 0.18 })) * 4 && crowd(street({ com: 0.18, walkers: 0 })) < 0.02, 'the crowd murmur is the shops and squares and the walkers drawn: a yard with the same walkers is far quieter, no walkers is no murmur');
-  ok(peopleNear(street({ walkers: 60 }), 24) > peopleNear(street({ walkers: 60 }), 80) * 3, 'walkers count as a density: the same count over a wider circle is a thinner crowd');
+  // the crowd knee moved from 6..90 to 3..25 walkers per circle (street life): 60 walkers at zoom 80 are 8.4 a circle, 0.43 of a crowd, so the bound moved from 3x to 2x
+  ok(peopleNear(street({ walkers: 60 }), 24) > peopleNear(street({ walkers: 60 }), 80) * 2, 'walkers count as a density: the same count over a wider circle is a thinner crowd');
   const trafficOf = (sc: Sc) => mixFor(sc, 24, 12, false, newMix()).traffic.level;
   ok(trafficOf(street({ res: 0.18 })) < trafficOf(street({ ind: 0.18 })) * 0.7, 'a terrace is quieter than a lorry yard for the same cars');
   // birds: only with green, by day, with a dawn chorus; none in a yard, a shopping street or an office quarter, none at 02:00
@@ -500,6 +504,131 @@ for (const mode of ['synthesised', 'recorded'] as const) {
   ok(hs[0].capture === true && press({}) === true && toggled === 1, 'Shift+S toggles, in the capture phase, and the camera never sees it');
   ok(!press({ shiftKey: false }) && !press({ ctrlKey: true }) && !press({ metaKey: true }) && !press({ target: { tagName: 'INPUT' } }) && !press({ code: 'KeyM' }) && toggled === 1, 'S alone, Ctrl or Cmd+S, typing and other keys do not');
   press({ repeat: true }); ok(toggled === 1, 'key repeat does not flicker it');
+}
+
+// ---- street life (docs/audio.md "Street life"): pass-bys, walkers, sirens that follow their vehicles, the new knees ----------------------
+{
+  // the classes the ear tells apart
+  const car = (o: Partial<StreetAgent> = {}): StreetAgent => ({ rx: 0, rz: 0, car: true, trav: true, kind: 3, cls: VehicleClass.Sedan, fleet: 0, ...o });
+  ok(passKindOf(car()) === 'car' && passKindOf(car({ cls: VehicleClass.Bus })) === 'bus' && passKindOf(car({ cls: VehicleClass.Truck })) === 'lorry' && passKindOf(car({ cls: VehicleClass.Van })) === 'van'
+    && passKindOf(car({ fleet: FleetKind.Bicycle })) === 'bike' && passKindOf(car({ fleet: FleetKind.Moped })) === 'moped' && passKindOf(car({ fleet: FleetKind.Taxi })) === 'taxi' && passKindOf(car({ fleet: FleetKind.BinLorry })) === 'lorry' && passKindOf(car({ fleet: FleetKind.SchoolBus })) === 'bus',
+    'a vehicle is heard by its class: car, taxi, van, lorry, bus, moped, bicycle (the fleet kind first)');
+  ok(sirenKindOf(car({ emergency: true, kind: VehicleKind.Ambulance })) === 'ambulance' && sirenKindOf(car({ emergency: true, kind: VehicleKind.FireEngine })) === 'fire' && sirenKindOf(car({ emergency: true, kind: VehicleKind.Patrol })) === 'police' && sirenKindOf(car({ kind: VehicleKind.Ambulance })) === null,
+    'an emergency vehicle on a call has its siren; off a call it has none');
+  ok(passRadius(24) === 12 && passRadius(48) === 24 && passRadius(91) === 0 && passRadius(6) === STREET.passMinR, 'the pass-by radius: 12 tiles at street zoom, growing with the zoom, none above 90');
+  // the picker: nearest first, one start per crossing, one a second, six at once, re-armed past 2R
+  const pk = new PassPicker(), R = 12;
+  pk.begin(); pk.visit(1, 9, R, 2); pk.visit(2, 4, R, 2); pk.visit(3, 20, R, 2); pk.visit(4, 3, R, 0.1);
+  const first = pk.pick(1000);
+  ok(first === 2, `the nearest moving vehicle inside R fires first, a standing one not at all (picked ${first})`);
+  pk.fired(2, 1000, 3);
+  pk.begin(); pk.visit(1, 8, R, 2); pk.visit(2, 3, R, 2);
+  ok(pk.pick(1500) === null, 'no second start inside a second');
+  pk.begin(); pk.visit(1, 8, R, 2); pk.visit(2, 2, R, 2);
+  ok(pk.pick(2100) === 1, 'a vehicle that has fired does not fire again on the same crossing (the next nearest does)');
+  pk.fired(1, 2100, 3);
+  pk.begin(); pk.visit(2, 30, R, 2); pk.visit(1, 8, R, 2); pk.pick(3200);
+  pk.begin(); pk.visit(2, 5, R, 2); pk.visit(1, 8, R, 2);
+  ok(pk.pick(4300) === 2, 'leaving 2R re-arms it: the next crossing fires again');
+  const six = new PassPicker(); let t = 0, n = 0;
+  for (let i = 0; i < 12; i++) { six.begin(); for (let k = 0; k < 12; k++) six.visit(100 + k, 1 + k, R, 2); const p = six.pick(t); if (p !== null) { six.fired(p, t, 30); n++; } t += 1100; }
+  ok(n === STREET.passMax && six.sounding(t) === STREET.passMax, `at most ${STREET.passMax} pass-bys sound at once (${n} started over 12 s with 12 cars waiting)`);
+  const rate = new PassPicker(); let starts = 0;
+  for (let ms = 0; ms < 60000; ms += 250) { rate.begin(); for (let k = 0; k < 40; k++) rate.visit((ms / 250) * 40 + k, 3, R, 2); const p = rate.pick(ms); if (p !== null) { rate.fired(p, ms, 0.5); starts++; } }
+  ok(starts <= 60 && starts >= 55, `the budget holds a stream of cars to one start a second (${starts} in a minute)`);
+  // the geometry: closest approach, pan across, siren gain
+  const ap = approach(-10, 3, 2, 0);
+  ok(Math.abs(ap.t - 5) < 1e-9 && Math.abs(ap.d - 3) < 1e-9 && approach(5, 0, 2, 0).t === 0, 'closest approach: when and how near, and a vehicle going away is nearest now');
+  ok(panOf(-8, 0, 1, 0) < -0.5 && panOf(8, 0, 1, 0) > 0.5 && Math.abs(panOf(0, 8, 1, 0)) < 1e-9, 'the pan follows the side of the camera a vehicle is on');
+  ok(sirenGain(5) === 1 && sirenGain(10) === 1 && Math.abs(sirenGain(40) - 0.25) < 1e-9, 'a siren is full inside 10 tiles and falls as 1/d past it');
+
+  // the real layer against a fake engine with recordings: a street of cars, a ridden car, an ambulance on a call
+  const e = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: okFetch }); e.start(); await tick();
+  for (const id of ['pass-car', 'pass-lorry', 'pass-bike', 'pass-moped', 'bus-pass', 'footsteps', 'talk', 'bike-bell', 'siren-ambulance-loop', 'siren-fire-loop', 'siren-loop', 'horn']) e.sample(id);
+  await tick();
+  const st = new StreetLife(e, 5);
+  const cam = { x: 0, z: 0, dist: 24, map: false, rightX: 1, rightZ: 0 };
+  const agents = new Map<number, StreetAgent>();
+  for (let k = 0; k < 8; k++) agents.set(10 + k, { rx: -6 + k * 0.3, rz: 2 + k, car: true, trav: true, kind: 3, cls: 0, fleet: 0, vx: 0.002, vy: 0 });
+  agents.set(99, { rx: 0.5, rz: 0.5, car: true, trav: true, kind: 3, cls: 0, fleet: 0, vx: 0.002, vy: 0 }); // the ridden car, nearest of all
+  const amb = { rx: 41, rz: 0, car: true, trav: true, kind: VehicleKind.Ambulance, cls: VehicleClass.Van, fleet: 0, emergency: true, vx: -0.004, vy: 0 } as StreetAgent;
+  agents.set(77, amb);
+  const step = (now: number, ridden = 99) => { st.begin(cam, ridden, 0.25); agents.forEach((a, id) => { const dx = a.rx - cam.x, dz = a.rz - cam.z; st.visit(a, id, dx, dz, dx * dx + dz * dz); }); st.end(now, 0.25, 1, 5); };
+  step(1000);
+  const p1 = e.shots.find((x) => x.why.startsWith('pass-by'));
+  ok(!!p1 && !/#c99/.test(p1.why) && /#c10 /.test(p1.why), `the nearest car fires, never the ridden one (${p1?.why})`);
+  ok(!!p1 && /pass-by: car #c10 at \d+ tiles in [\d.]+ s, [\d.]+ tiles\/s, left to right/.test(p1.why), 'a pass-by says what, which vehicle, how near, how fast and which way');
+  ok(e.journal.some((j) => j.ev === 'start' && j.id === 'siren-ambulance-loop' && /siren: ambulance #c77 at 41 tiles/.test(j.why)) && st.following === 1, 'an ambulance on a call within 70 tiles starts its siren, and the journal says so');
+  let rows = st.sirenRows(2000);
+  ok(rows.length === 1 && /nearing/.test(rows[0].why) === false && rows[0].key === 'siren:77', 'the siren is a voice row of its own');
+  amb.rx = 20; step(1250); rows = st.sirenRows(2000);
+  ok(/siren: ambulance #c77 at 20 tiles, nearing/.test(rows[0].why) && rows[0].cents > 0, `nearing: louder and pitched up (${rows[0].why.slice(0, 80)}, ${rows[0].cents.toFixed(0)} cents)`);
+  const near = rows[0].db;
+  amb.rx = 5; amb.rz = -2; step(1500); rows = st.sirenRows(2000);
+  ok(rows[0].db > near && /pan -?0\.\d\d/.test(rows[0].why), 'nearer is louder, panned from its side');
+  amb.rx = 15; step(1750); rows = st.sirenRows(2000);
+  ok(/going away/.test(rows[0].why) && rows[0].cents < 0, 'going away: pitched down');
+  amb.emergency = false; step(2000);
+  ok(st.following === 0 && e.journal.some((j) => j.ev === 'stop' && j.id === 'siren-ambulance-loop' && /flag dropped/.test(j.why)), 'the flag dropping stops the siren with a fade, and says why');
+  amb.emergency = true; amb.rx = 50; step(6100); amb.rx = 60; step(6350);
+  ok(st.following === 1, 'a siren starts again when its vehicle is back on a call (no sooner than 4 s after the last siren started)');
+  amb.rx = 80; step(6600);
+  ok(st.following === 0 && e.journal.some((j) => j.ev === 'stop' && /left the 70-tile circle/.test(j.why)), 'a siren that leaves the circle stops');
+  amb.rx = 30; amb.vx = 0; step(11000); step(11250);
+  ok(st.following === 1, 'an ambulance on a call, standing, still sounds at first');
+  for (let ms = 11500; ms < 15000; ms += 250) step(ms);
+  ok(st.following === 0 && e.journal.some((j) => j.ev === 'stop' && /it arrived \(standing still 3 s/.test(j.why)), 'standing still 3 s it has arrived: the siren stops (the flag stays on)');
+  amb.rx = 25; amb.vx = -0.003; step(19500);
+  ok(st.following === 1, 'and moving off again it sounds again');
+  agents.delete(77);
+  for (let k = 0; k < 4; k++) agents.set(200 + k, { rx: 10 + k * 10, rz: 0, car: true, trav: true, kind: VehicleKind.FireEngine, cls: VehicleClass.Truck, fleet: 0, emergency: true });
+  let first3 = 0;
+  for (let ms = 24000; ms < 40000; ms += 250) { step(ms); if (ms === 24250) first3 = st.following; }
+  ok(first3 === 1 && st.following === STREET.sirenMax, `at most ${STREET.sirenMax} sirens at once, the nearest, one new one every 4 s at most (${first3} at first)`);
+  step(40250, -1); // no ride: car 99 may now fire
+  st.begin({ ...cam, map: true }, -1, 0.25); agents.forEach((a, id) => st.visit(a, id, a.rx, a.rz, a.rx * a.rx + a.rz * a.rz)); st.end(40500, 0.25, 1, 5);
+  ok(st.following === 0, 'the map view stops the sirens');
+  ok(/pass-bys \d+ in the last minute \(radius 0 tiles: zoomed out, none\), sirens following 0, walkers close 0/.test(st.text(40600)), `the readout's street line (${st.text(40600)})`);
+  // walkers: footsteps from the count close in, one voice a side (a fresh engine: the one above holds voices on real-time timers)
+  const ew = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: okFetch }); ew.start(); await tick(); ew.sample('footsteps'); ew.sample('talk'); await tick();
+  const w = new StreetLife(ew, 9);
+  const walkers = Array.from({ length: 6 }, (_, k) => ({ rx: -3 + k * 0.2, rz: 1, car: false, trav: true } as StreetAgent));
+  let steps = 0;
+  for (let ms = 10000; ms < 70000; ms += 250) {
+    w.begin(cam, -1, 0.25); walkers.forEach((a, k) => w.visit(a, 500 + k, a.rx, a.rz, a.rx * a.rx + a.rz * a.rz)); const before = ew.journal.length + (ew.journal.at(-1)?.n ?? 1); ew.active = 0; w.end(ms, 0.25, 1, 6); if (ew.journal.length + (ew.journal.at(-1)?.n ?? 1) !== before && ew.journal.at(-1)?.id === 'footsteps') steps++;
+  }
+  ok(steps >= 8 && steps <= 22 && w.walkersClose === 6, `six walkers on one side: footsteps steady, one voice at a time (${steps} in a minute)`);
+  const one = new StreetLife(ew, 11); let odd = 0;
+  for (let ms = 100000; ms < 400000; ms += 250) { one.begin(cam, -1, 0.25); one.visit({ rx: 2, rz: 1, car: false, trav: true }, 900, 2, 1, 5); ew.active = 0; const n0 = ew.shots.length, l0 = ew.shots.at(-1); one.end(ms, 0.25, 1, 1); if (ew.shots.length !== n0 || ew.shots.at(-1) !== l0) odd++; }
+  ok(odd >= 5 && odd < 40, `one walker: the odd step (${odd} in five minutes)`);
+  e.muted = true; const ms0 = e.shots.length, j0 = e.journal.length; step(400000, -1); ok(e.shots.length === ms0 && e.journal.length === j0, 'a muted engine starts nothing on the street');
+  e.muted = false;
+  // the cost: the street's visits and its end with 2,000 agents round the camera
+  const many = new Map<number, StreetAgent>();
+  for (let i = 0; i < 2000; i++) many.set(i, { rx: (i % 50) - 25 + 0.3, rz: Math.floor(i / 50) - 20 + 0.6, car: i % 3 === 0, trav: true, kind: 3, cls: i % 4, fleet: i % 7 === 0 ? FleetKind.Bicycle : 0, vx: 0.002, vy: 0.001, emergency: i === 600 });
+  const cityS: AmbSources = { hour: () => 12, camera: () => cam, tileAt: () => 0, kindIdAt: () => 0, agents: () => many.values(), eachAgent: (f) => many.forEach(f) };
+  const big = new StreetLife(e, 13), scn = newScan();
+  const vis = (a: StreetAgent, id: number, dx: number, dz: number, d2: number) => big.visit(a, id, dx, dz, d2);
+  const median = (f: () => void) => { const xs: number[] = []; for (let i = 0; i < 400; i++) { const t0 = performance.now(); f(); xs.push(performance.now() - t0); } return xs.sort((a, b) => a - b)[200]; };
+  let clock = 500000;
+  for (let i = 0; i < 50; i++) { big.begin(cam, -1, 0.25); scanAround(cityS, 0, 0, 24, scn, vis); big.end(clock += 250, 0.25, 1, 10); } // warm
+  // the street's own work: every agent handed to visit (the scan's walk does this in the real tick) and the end of the tick
+  const streetOnly = median(() => { big.begin(cam, -1, 0.25); many.forEach((a, id) => { const dx = a.rx - cam.x, dz = a.rz - cam.z; big.visit(a, id, dx, dz, dx * dx + dz * dz); }); big.end(clock += 250, 0.25, 1, 10); });
+  const withSt = median(() => { big.begin(cam, -1, 0.25); scanAround(cityS, 0, 0, 24, scn, vis); big.end(clock += 250, 0.25, 1, 10); });
+  const without = median(() => scanAround(cityS, 0, 0, 24, scn));
+  ok(streetOnly < 0.1, `the street costs ${streetOnly.toFixed(3)} ms a tick with 2,000 agents, walk included (under 0.1)`);
+  console.log(`     (street cost, medians of 400: the street alone with its own walk ${streetOnly.toFixed(4)} ms; the scan alone ${without.toFixed(4)} ms, the scan with the street ${withSt.toFixed(4)} ms)`);
+  // the knees
+  type Sc = ReturnType<typeof newScan>;
+  const stt = (o: Partial<Sc>): Sc => ({ ...newScan(), road: 0.3, ...o });
+  const tr = (sc: Sc, d = 24) => mixFor(sc, d, 12, false, newMix()).traffic.level / CEILS.traffic;
+  ok(tr(stt({ res: 0.18, cars: 10 })) >= 0.25 && tr(stt({ com: 0.18, cars: 10 })) >= 0.25, `10 cars on a street give the traffic bed a quarter of its ceiling or more (homes ${tr(stt({ res: 0.18, cars: 10 })).toFixed(2)}, shops ${tr(stt({ com: 0.18, cars: 10 })).toFixed(2)})`);
+  ok(carKnee(24) === 15 && carKnee(200) === 45, 'the traffic knee: 15 cars in the street-zoom circle, the old 45 from far off (so the far view is as it was)');
+  const cr = (sc: Sc) => mixFor(sc, 24, 12, false, newMix()).crowd.level / CEILS.crowd;
+  const shop20 = cr(stt({ com: 0.18, walkers: 20 })), terr5 = cr(stt({ res: 0.18, walkers: 5 }));
+  ok(shop20 > 0.4 && shop20 < 0.6 && terr5 > 0.05 && terr5 < 0.15, `the crowd knee: 20 walkers in a shopping street are about half the bed (${shop20.toFixed(2)}), 5 on a terrace about a tenth (${terr5.toFixed(2)})`);
+  ok(activityAt(2) === 0.4 && activityAt(12) === 1 && activityAt(6.5) > 0.4 && activityAt(6.5) < 1, 'the night floor is 0.4, the day 1, the shape between kept');
+  ok(VOICES['pass-car'].takes!.length === 3 && ['pass-lorry', 'pass-moped', 'pass-bike', 'talk', ...Object.values(SIREN_VOICE)].every((v) => (VOICES[v]?.takes?.length ?? 0) >= 1), 'every street-life voice has its recordings (three car takes)');
 }
 
 console.log(fails ? `\n${fails} FAILED` : '\naudio check passed');
