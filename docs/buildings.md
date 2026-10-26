@@ -502,3 +502,12 @@ A **landmark** is a recognisable real building: the Gherkin, the Shard, Big Ben.
 ## More than 16 kinds
 
 The tile stores the kind in 4 bits, and all sixteen values are taken. Past that, a kind is a **sub-kind**: it shares a family code with that family's base kind and has a kind id of its own from 16 to 255, stored in the per-chunk sub layer (one byte per tile, persisted and streamed like the aux layer). A tile with sub byte 0 is its family's base kind, and base kinds' ids equal their codes, so every existing tile keeps its meaning and no tile word changes. The compiled tables are indexed by kind id. The scheme, the API and why it beat packing into the aux byte or a server-side record are in `docs/sub-kinds.md`. The first sub-kind is the draft bus depot (id 16, family code 15 beside the airport terminal): `/viewer.html` shows it, and with `?dev` on a dev server the **Bus depot (3×2)** tool (key K) places it.
+
+## The wind turbine's rotor (card c3a3e2b3)
+
+The kit's `turbine` helper (`buildings/utilities.ts`) now builds only the tower: a foot, a tapered tower with a red band, a
+door, a service platform and an aviation light in the `beacon` class. The nacelle, hub and blades that used to be stepped
+boxes are drawn and turned by the client's rotor pass (`render/rotors.ts`, docs/utilities.md 4.5). Where a tower stands and
+how tall it is live in `shared/src/rotors.ts` (`TURBINE_TOWERS`), which the kit and the pass both read; the pass finds a
+turbine by its design key (`165:1:0`, `165:1:1`, `ROTOR_MOUNTS`), so a new turbine design adds its tower there.
+

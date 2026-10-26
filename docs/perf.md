@@ -391,3 +391,11 @@ the server, and which phase), the jitter finder in the browser (is it the client
 instead of on more monitoring: chunk rebuilds on the client and the evening `mobile` phase on the server. Revisit RUM
 when the showcase has a steady audience, and continuous profiling only if a regression ever escapes the baseline check
 and the dashboard both.
+
+## Rotors and night lights (cards c3a3e2b3 and f91d8841)
+
+The wind turbines' rotor pass costs a few matrix writes a turbine a frame (measured: 0.008 ms a frame mean for three turbines
+in view, 0.1 ms worst; nothing at all with none within 190 tiles). The street-lamp flicker fix changed shader arithmetic
+only (one `mscFlutter` in place of two sine products), so the frame cost is unchanged; the shadow camera now snaps to whole
+texels, which is a few vector operations a frame. How to hunt night flicker: docs/roads.md "Street lamps at night".
+
