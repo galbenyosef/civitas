@@ -315,8 +315,8 @@ function section(id: string, title: string, sub: string): HTMLElement {
 async function main() {
   const root = document.getElementById('landing') ?? document.body.appendChild(h('main', { id: 'landing' }));
   const ex = section('explore', 'Explore a city', 'Read-only maps, built and running. Fly over them, ride the buses and trains, follow a citizen home, take the guided tour.');
-  const pl = section('play', 'Play', 'The local game, on this device.');
-  const mp = section('multiplayer', 'Multiplayer', 'Public servers.');
+  const pl = section('play', 'Play', 'The local game: runs in this browser only, saved on this device, nothing sent anywhere.');
+  const mp = section('multiplayer', 'Multiplayer', 'Public servers: shared worlds, wiped and re-seeded often while the game is in development.');
   const foot = h('footer', {},
     h('span', {}, `civitas · build ${__BUILD__}`),
     h('a', { href: '/viewer.html' }, 'Building viewer'),
