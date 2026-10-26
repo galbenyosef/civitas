@@ -121,7 +121,7 @@ guesses the device: browsers cannot tell a smooth-scrolling mouse from a trackpa
 
 Shift+drag pans with any tool. The **scroll** setting in the help line (bottom left) makes plain scroll pan instead of
 zoom, trackpad style; pinch still zooms. A press that moves less than 5 pixels is a click, so a slightly shaky click
-still selects.
+still selects. A click, a hover and the ghost pick the building under the cursor, its upper floors and roof included, not the ground behind it (`client/src/pick.ts`: the ray is walked tile by tile from the camera and meets each building's drawn column); the road, rail, runway and street-rule drags still read the ground, so a drag across a building does not hop to its roof. Bridges, flyovers and rail decks pick as the ground.
 
 | Action | Input |
 | --- | --- |
