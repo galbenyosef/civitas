@@ -250,8 +250,8 @@ export class AudioEngine {
     return have?.length ? have[Math.min(have.length - 1, Math.floor(pick * have.length))] : null;
   }
   /** call `f` with a take as soon as the voice has one (now, if it already does); never when the files are missing */
-  whenSample(id: string, f: (b: AudioBuffer) => void) {
-    const b = this.sample(id, 0.5);
+  whenSample(id: string, f: (b: AudioBuffer) => void, pick = 0.5) {
+    const b = this.sample(id, pick);
     if (b) { f(b); return; }
     if (!VOICES[id]?.takes?.length) return;
     (this.waiting.get(id) ?? this.waiting.set(id, []).get(id)!).push(f);

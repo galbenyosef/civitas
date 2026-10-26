@@ -13,7 +13,7 @@ import type { DemoId } from './showcase';
  */
 
 /** the beds a stop may bias (the ambience mix's own: audio/ambience.ts) */
-export type TourBed = 'traffic' | 'wind' | 'crowd' | 'industry' | 'water' | 'market' | 'pub' | 'playground' | 'stadium' | 'fountain';
+export type TourBed = 'traffic' | 'wind' | 'crowd' | 'industry' | 'water' | 'market' | 'pub' | 'playground' | 'stadium' | 'fountain' | 'zone-ind' | 'zone-com' | 'zone-off' | 'zone-res' | 'zone-civic';
 /**
  * Each named bed is held at this share (0 to 1) of its own ceiling while the stop is shown, whatever the tiles round the camera
  * would say; a bed not named follows the scene as usual. 0 silences it (underground), 1 is as loud as that bed ever gets.

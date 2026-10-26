@@ -45,14 +45,14 @@ function peakDb(input: string, filter: string): number {
 
 interface Out { voice: string; file: string; c: Candidate; cls: string; level: number; shipped: number; bytes: number; norm: string }
 
-function encode(voiceCls: 'bed' | 'ride' | 'event', src: string, out: string, maxSec: number): { shipped: number; norm: string } {
+function encode(voiceCls: 'bed' | 'ride' | 'event', src: string, out: string, maxSec: number, extra = ''): { shipped: number; norm: string } {
   const srcDur = probeDur(src);
   const target = TARGET[voiceCls];
   let pre: string, note: string;
   if (voiceCls === 'event') {
     // silence off both ends, then at most maxSec
     const trimmed = join(tmpdir(), `civitas-audio-${process.pid}-trim.wav`);
-    run('ffmpeg', ['-y', '-v', 'error', '-i', src, '-af', `${SIL},areverse,${SIL},areverse,aformat=channel_layouts=mono,aresample=48000,highpass=f=40`, trimmed]);
+    run('ffmpeg', ['-y', '-v', 'error', '-i', src, '-af', `${SIL},areverse,${SIL},areverse,aformat=channel_layouts=mono,aresample=48000,highpass=f=40${extra ? `,${extra}` : ''}`, trimmed]);
     const td = probeDur(trimmed), len = Math.min(td, maxSec), capped = td > maxSec + 0.01;
     const fadeOut = capped ? Math.min(0.35, len * 0.2) : Math.min(0.06, len * 0.2);
     pre = `atrim=0:${len.toFixed(3)},asetpts=PTS-STARTPTS,`;
@@ -64,7 +64,7 @@ function encode(voiceCls: 'bed' | 'ride' | 'event', src: string, out: string, ma
       : `volume=${(-3 - peakDb(trimmed, pre)).toFixed(2)}dB`;
     run('ffmpeg', ['-y', '-v', 'error', '-i', trimmed, '-af', `${pre}${ln},aresample=48000,${post}`, '-ac', '1', '-ar', '48000', '-c:a', 'libopus', '-b:a', `${KBPS}k`, '-application', 'audio', out]);
     rmSync(trimmed, { force: true });
-    note = `silence trimmed${capped ? `, cut to ${len.toFixed(1)} s` : ''}, ${target} LUFS, fades 10 ms in / ${Math.round(fadeOut * 1000)} ms out`;
+    note = `silence trimmed${extra ? `, ${extra}` : ''}${capped ? `, cut to ${len.toFixed(1)} s` : ''}, ${target} LUFS, fades 10 ms in / ${Math.round(fadeOut * 1000)} ms out`;
   } else {
     // a loop: L seconds from the middle of the source, its tail (LOOP_X s past L) cross-faded into its head
     const x = Math.min(LOOP_X, Math.max(0.5, srcDur / 8));
@@ -99,7 +99,7 @@ function main() {
       const src = join(DL, v.id, `${c.id}.ogg`), file = `${v.id}${i ? `-${i + 1}` : ''}.opus`;
       if (!existsSync(src)) { console.log(`${v.id}: ${src} missing`); return; }
       try {
-        const r = encode(v.cls, src, join(FILES, file), v.maxSec);
+        const r = encode(v.cls, src, join(FILES, file), v.maxSec, v.post);
         const bytes = statSync(join(FILES, file)).size;
         outs.push({ voice: v.id, file, c, cls: v.cls, level: v.level, shipped: Math.round(r.shipped * 10) / 10, bytes, norm: r.norm });
         console.log(`${file.padEnd(18)} ${r.shipped.toFixed(1).padStart(5)} s ${(bytes / 1024).toFixed(0).padStart(4)} KB  ${c.id} ${c.name.slice(0, 40)}`);

@@ -84,20 +84,20 @@ function sampleBed(eng: AudioEngine, id: string, buf: AudioBuffer, seed: number,
 }
 
 /** every voice that is a bed: the five with a synthesised recipe, and the second pass's recordings */
-export type BedId = 'traffic' | 'wind' | 'crowd' | 'industry' | 'water' | 'rain-light' | 'rain-heavy' | 'market' | 'pub' | 'playground' | 'stadium' | 'fountain';
-export const BEDS: readonly BedId[] = ['traffic', 'wind', 'crowd', 'industry', 'water', 'rain-light', 'rain-heavy', 'market', 'pub', 'playground', 'stadium', 'fountain'];
+export type BedId = 'traffic' | 'wind' | 'crowd' | 'industry' | 'water' | 'rain-light' | 'rain-heavy' | 'market' | 'pub' | 'playground' | 'stadium' | 'fountain' | 'zone-ind' | 'zone-com' | 'zone-off' | 'zone-res' | 'zone-civic';
+export const BEDS: readonly BedId[] = ['traffic', 'wind', 'crowd', 'industry', 'water', 'rain-light', 'rain-heavy', 'market', 'pub', 'playground', 'stadium', 'fountain', 'zone-ind', 'zone-com', 'zone-off', 'zone-res', 'zone-civic'];
 
 /**
  * Make the bed for a manifest id; null when the voice budget is spent (or a recording-only voice has no file). A voice with a
  * recording plays it; one whose recording has not decoded yet plays its synthesis (a recording-only one stays silent) and
  * cross-fades to the recording over about two seconds when it arrives. Never decodes on the tick: that is the engine's job.
  */
-export function makeBed(eng: AudioEngine, id: BedId, seed: number): Bed | null {
+export function makeBed(eng: AudioEngine, id: BedId, seed: number, pick?: number): Bed | null {
   const def = VOICES[id], dest = eng.buses[def.bus];
   const hasTakes = !!def.takes?.length;
   if (def.synth === false && !hasTakes) return null;
   if (!eng.take()) return null;
-  const rec = eng.sample(id, r(seed, 6));
+  const rec = eng.sample(id, pick ?? r(seed, 6));
   eng.note('bed', id);
   if (rec) return sampleBed(eng, id, rec, seed, dest);
   let cur: Bed | null = def.synth === false ? null : synthBed(eng, id, seed, dest);
@@ -111,7 +111,7 @@ export function makeBed(eng: AudioEngine, id: BedId, seed: number): Bed | null {
     next.tune(last.lv, last.tone, 0.7);
     const old = cur; cur = next;
     old?.stop(); // fades out over 1.2 s and gives its voice back; the recording has taken another (or the one reserved above)
-  });
+  }, pick);
   return {
     get out() { return cur?.out ?? (null as unknown as GainNode); },
     info: () => cur?.info?.() ?? { take: 'synth', cents: null },
@@ -254,7 +254,9 @@ function burst(eng: AudioEngine, dest: AudioNode, type: BiquadFilterType, freq: 
 
 export type EventId = 'bird' | 'owl' | 'bell' | 'bell-deep' | 'horn' | 'beep' | 'ui-click' | 'ui-place' | 'ui-refuse' | 'ui-undo' | 'fx-hiss' | 'fx-stopbell' | 'fx-chime' | 'fx-joint'
   | 'gust' | 'thunder' | 'footsteps' | 'siren' | 'siren-fire' | 'seagulls' | 'pigeons' | 'dog' | 'bell-peal' | 'bike-bell' | 'bin-lorry' | 'station-chime' | 'heli-over' | 'plane-over' | 'boat-horn' | 'fireworks' | 'hammer' | 'drill' | 'lawnmower'
-  | TourVoice;
+  | DistrictVoice | TourVoice;
+/** the district events (manifest.ts, "the districts"): recordings only, fired by the ambience while a zone wins the soft-max */
+export type DistrictVoice = 'metal-clank' | 'reverse-beep' | 'steam-vent' | 'till' | 'busker' | 'music-door' | 'revolving-door' | 'lift-ding' | 'radio-window' | 'front-door' | 'kids-yard' | 'camera-shutter';
 /** the recording-only voices only the tour cues play (manifest.ts, "the tour cues") */
 export type TourVoice = 'big-ben' | 'bus-pass' | 'tube-arrive' | 'tube-gap' | 'train-pass' | 'boat-pass' | 'port' | 'crowd-roar' | 'whistle' | 'jet-takeoff' | 'shop-bell' | 'ducks' | 'applause' | 'orchestra' | 'siren-ambulance' | 'school-bell' | 'crows' | 'fox' | 'rigging' | 'bridge-bell' | 'parakeets';
 
