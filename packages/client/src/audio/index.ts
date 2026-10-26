@@ -1,5 +1,5 @@
 import { AudioEngine, MAX_VOICES, toDb } from './engine';
-import { Ambience, type AmbSources } from './ambience';
+import { Ambience, zoneText, type AmbSources } from './ambience';
 import { FpvSound, type FpvSources } from './fpv';
 import { fire } from './voices';
 import { bindControls, bindMuteKey } from './controls';
@@ -99,7 +99,7 @@ export class Audio {
     const h = this.ambience.hourInfo();
     return {
       at: now, context: e.ctx ? (e.ctx.state as AudioState['context']) : 'not started', muted: e.muted, volume: e.volume, masterDb: toDb(e.gainFor()),
-      voices: e.active, cap: MAX_VOICES, loading: e.loading, ducks: e.duckLayers, hour: h.hour, hourSource: h.source, stop: this.tour.shown, rows, journal: e.journal,
+      voices: e.active, cap: MAX_VOICES, loading: e.loading, ducks: e.duckLayers, hour: h.hour, hourSource: h.source, district: zoneText(this.ambience.zoning), stop: this.tour.shown, rows, journal: e.journal,
     };
   }
 

@@ -25,6 +25,8 @@ export interface VoiceQuery {
   maxSec: number;
   /** playback level of the recording (the bus gains do the rest); the loudness target is per class */
   level: number;
+  /** an ffmpeg filter applied to an event at build time, for a clip that should sound heard through a wall or a window (a low-pass) */
+  post?: string;
 }
 
 const NOISE = ['speech', 'voice', 'talking', 'music', 'song', 'vocal'];
@@ -118,4 +120,27 @@ export const VOICE_QUERIES: VoiceQuery[] = [
   ev('bridge-bell', ['bridge warning bell', 'bridge bell', 'level crossing bell', 'railway crossing bell'], { must: ['bell', 'bridge', 'crossing', 'warning'], takes: 2, maxSec: 5, dur: [2, 30], level: 0.35 }),
   ev('parakeets', ['parakeet', 'parakeets', 'ring necked parakeet', 'parrot squawk'], { must: ['parakeet', 'parrot'], takes: 2, maxSec: 4, dur: [1, 20], level: 0.3 }),
   bed('flare-roar', ['furnace roar', 'industrial burner', 'blowtorch', 'steam roar', 'boiler room'], { must: ['burner', 'flare', 'furnace', 'roar', 'boiler', 'blowtorch', 'flame', 'steam'], avoid: [...NOISE, 'alarm', 'kitchen', 'stove', 'cooking', 'sfx', 'synth'], level: 0.4 }),
+  // ---- the district beds and events (docs/audio.md "Districts"): what makes an industrial estate, a shopping street, an office quarter, a residential street and a landmark square each recognisable with the eyes shut
+  bed('zone-ind', ['factory floor ambience', 'industrial estate ambience', 'workshop machinery ambience', 'warehouse ambience forklift', 'factory machinery'], { must: ['factory', 'industr', 'workshop', 'warehouse', 'machin', 'plant', 'forklift', 'estate'], avoid: [...NOISE, 'alarm', 'sfx', 'synth', 'horror', 'sci', 'drone'], level: 0.5, maxSec: 18, takes: 2 }),
+  bed('zone-com', ['shopping street ambience', 'high street ambience', 'cafe ambience', 'busy street shops ambience', 'pedestrian street'], { must: ['shop', 'street', 'cafe', 'café', 'market', 'mall', 'high street', 'pedestrian', 'town', 'city'], avoid: ['music', 'song', 'scream', 'sfx', 'synth', 'horror', 'traffic jam'], level: 0.5, maxSec: 18, takes: 2 }),
+  bed('zone-off', ['office ambience', 'office hvac', 'lobby ambience', 'air conditioning hum room', 'office building ambience'], { must: ['office', 'lobby', 'hvac', 'air condition', 'ventilation', 'room tone', 'building', 'ac '], avoid: [...NOISE, 'phone', 'sfx', 'synth', 'horror', 'alarm'], level: 0.45, maxSec: 18 }),
+  bed('zone-res', ['suburban ambience', 'residential street ambience', 'quiet neighbourhood ambience', 'suburb daytime ambience', 'village ambience'], { must: ['suburb', 'residential', 'neighbo', 'village', 'street', 'garden', 'town', 'quiet'], avoid: ['music', 'song', 'scream', 'sfx', 'synth', 'horror', 'traffic jam', 'siren'], level: 0.5, maxSec: 18, takes: 2 }),
+  bed('zone-civic', ['museum crowd ambience', 'plaza ambience', 'tourists square ambience', 'public square crowd', 'cathedral square ambience'], { must: ['museum', 'plaza', 'square', 'tourist', 'piazza', 'crowd', 'gallery', 'cathedral'], avoid: ['music', 'song', 'scream', 'sfx', 'synth', 'horror', 'laugh'], level: 0.5, maxSec: 18 }),
+  // ---- industrial events
+  ev('metal-clank', ['metal clank', 'metal impact', 'steel hit', 'metal bang workshop', 'anvil'], { must: ['metal', 'steel', 'clank', 'clang', 'anvil', 'iron', 'bang'], takes: 2, maxSec: 3, dur: [0.4, 8], level: 0.4 }),
+  ev('reverse-beep', ['reversing beeper', 'reversing alarm', 'truck reversing beep', 'vehicle backing up alarm', 'backup beeper', 'reverse alarm lorry', 'beep beep beep truck', 'forklift beep'], { must: ['revers', 'back', 'beep', 'truck', 'lorry', 'forklift'], takes: 1, maxSec: 5, dur: [1.5, 30], level: 0.3, avoid: ['music', 'sfx', 'synth', 'smoke', 'fire'], must: ['revers', 'back', 'beep', 'truck', 'lorry', 'forklift', 'alarm', 'warning'] }),
+  ev('steam-vent', ['steam release', 'steam vent', 'steam hiss', 'industrial steam', 'pressure release valve'], { must: ['steam', 'vent', 'valve', 'pressure', 'hiss', 'release'], takes: 2, maxSec: 5, dur: [1.5, 12], level: 0.4 }),
+  // ---- commercial events
+  ev('till', ['cash register', 'till drawer', 'cash register ka-ching', 'shop till'], { must: ['register', 'till', 'cash', 'ching', 'drawer'], takes: 2, maxSec: 3, dur: [0.5, 8], level: 0.35 }),
+  ev('busker', ['busker guitar', 'street musician', 'busker', 'street performer guitar', 'busking'], { must: ['busk', 'street', 'guitar', 'musician', 'performer', 'violin', 'sax'], takes: 2, maxSec: 9, dur: [4, 40], level: 0.3, avoid: ['loop', 'synth', 'sfx', 'processed', 'midi'] }),
+  ev('music-door', ['music from a shop', 'music from a doorway', 'muffled music', 'music through wall', 'shop music', 'music from a bar', 'club music outside', 'music from open window', 'radio music neighbour', 'distant music street'], { must: ['muffled', 'shop', 'door', 'wall', 'store', 'club', 'distant', 'radio', 'speaker', 'through'], takes: 1, maxSec: 9, dur: [4, 40], level: 0.25, avoid: ['loop', 'sfx', 'synth', 'midi'], post: 'lowpass=f=2600,lowpass=f=2600' }),
+  // ---- office events
+  ev('revolving-door', ['revolving door', 'rotating door', 'revolving door sound', 'glass door automatic', 'hotel entrance revolving', 'automatic door opening', 'sliding door office', 'door lobby'], { must: ['revolv', 'rotating', 'door', 'lobby', 'automatic', 'sliding'], takes: 1, maxSec: 5, dur: [1.5, 20], level: 0.35 }),
+  ev('lift-ding', ['elevator ding', 'lift arrival ding', 'elevator bell', 'elevator door'], { must: ['elevator', 'lift', 'ding', 'bell'], takes: 1, maxSec: 3, dur: [0.5, 8], level: 0.3 }),
+  // ---- residential events
+  ev('radio-window', ['radio playing in another room', 'radio from a window', 'distant radio', 'radio muffled', 'radio talk show', 'radio news', 'radio dj'], { must: ['radio', 'window', 'muffled', 'distant', 'room'], takes: 1, maxSec: 9, dur: [4, 40], level: 0.25, avoid: ['loop', 'sfx', 'synth', 'static', 'tuning', 'horror'], post: 'lowpass=f=3000,highpass=f=250' }),
+  ev('front-door', ['front door close', 'door slam house', 'door shut', 'door closing', 'house door keys'], { must: ['door'], takes: 2, maxSec: 3, dur: [0.4, 8], level: 0.35, avoid: ['loop', 'music', 'sfx', 'synth', 'car', 'creak', 'horror', 'elevator', 'metal', 'garage'] }),
+  ev('kids-yard', ['children playing outside', 'kids shouting playground', 'children laughing garden', 'kids playing street', 'children voices distance'], { must: ['children', 'kids', 'child', 'play'], takes: 1, maxSec: 8, dur: [3, 30], level: 0.3, avoid: ['loop', 'music', 'sfx', 'synth', 'song'] }),
+  // ---- civic events
+  ev('camera-shutter', ['camera shutter', 'camera click', 'dslr shutter', 'photo camera shutter', 'camera flash click'], { must: ['camera', 'shutter', 'photo'], takes: 2, maxSec: 1.5, dur: [0.2, 4], level: 0.3, avoid: ['loop', 'music', 'sfx', 'synth', 'film', 'burst'] }),
 ];

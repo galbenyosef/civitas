@@ -1564,6 +1564,7 @@ const audio = new Audio({
     kindIdAt: (x, y) => world.kindIdAt(x, y),
     agents: () => citizens.agents.values(),
     pelican: (x, z, r) => lights.redPelicanNear(x, z, r, liveTick()),
+    city: () => (params.get('ws') ?? params.get('demo') ?? params.get('city') ?? location.host), // a district bed's take is a hash of it
   },
   fpv: { riding: rideNow },
   notice: (t) => ui.notice(t),

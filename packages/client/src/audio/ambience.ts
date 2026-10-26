@@ -1,4 +1,4 @@
-import { hash2, type AmbienceHint, Terrain, terrainOf, isRoad, zoneOf, familyOf, Zone } from '@msimcity/shared';
+import { hash2, type AmbienceHint, Terrain, terrainOf, isRoad, zoneOf, familyOf, underConstruction, Zone } from '@msimcity/shared';
 import type { AudioEngine } from './engine';
 import { fire, makeBed, ringBell, type Bed, type BedId } from './voices';
 import { VOICES } from './manifest';
@@ -23,21 +23,31 @@ export interface AmbSources {
   agents(): Iterable<AgentLike>;
   /** the nearest signal crossing within `r` tiles of (x, z) that holds the cars at red (render/signals.ts redPelicanNear) */
   pelican?(x: number, z: number, r: number): { x: number; z: number } | null;
+  /** which city this is (the server it is connected to, or the demo): a district bed picks its recording by a hash of it, so a city always sounds like itself and two cities differ */
+  city?(): string;
 }
 
 /** what the tile scan found round the camera, as shares of the tiles sampled (0..1) */
 export interface Scan {
+  /** homes, shops and offices together (`off` says how much of it is offices), industry and power, parks and gardens, water and roads: shares of the tiles sampled (0..1) */
   res: number; com: number; ind: number; park: number; water: number; road: number; bell: number; bellDeep: number; cars: number; walkers: number;
+  /** the share of tiles that are offices (a part of `com`), and the share that are civic, cultural, education, sport or landmark buildings (the district model, zonesOf) */
+  off: number; civic: number;
+  /** the tiles under construction in the sample (a count: the builders' digging needs one), */
+  sites: number;
   /** counts of the sampled tiles that are a school or nursery, a stadium, a fire station, a police station, a builders' depot, a fountain */
   school: number; stadium: number; fire: number; police: number; builders: number; fountain: number;
 }
-export const newScan = (): Scan => ({ res: 0, com: 0, ind: 0, park: 0, water: 0, road: 0, bell: 0, bellDeep: 0, cars: 0, walkers: 0, school: 0, stadium: 0, fire: 0, police: 0, builders: 0, fountain: 0 });
+export const newScan = (): Scan => ({ res: 0, com: 0, ind: 0, park: 0, water: 0, road: 0, bell: 0, bellDeep: 0, cars: 0, walkers: 0, off: 0, civic: 0, sites: 0, school: 0, stadium: 0, fire: 0, police: 0, builders: 0, fountain: 0 });
 
 /** kind ids that give a place its own sound (the second pass): which Scan count each raises */
 const SPOT_KIND = new Map<number, 'school' | 'stadium' | 'fire' | 'police' | 'builders' | 'fountain'>([
   [101, 'school'], [102, 'school'], [103, 'school'], [67, 'stadium'], [186, 'stadium'], [199, 'stadium'],
   [50, 'fire'], [51, 'fire'], [52, 'fire'], [46, 'police'], [47, 'police'], [48, 'police'], [49, 'police'], [54, 'builders'], [55, 'builders'], [144, 'fountain'],
 ]);
+
+/** the families that are civic, cultural, education, sport or landmark: police 5, fire 6, hospital 7, cinema 11, theatre 12, sport 13, library, school and landmark 14 */
+const CIVIC_FAMILY = new Set<number>([5, 6, 7, 11, 12, 13, 14]);
 
 /** kind ids that ring the hour: the churchyard (151) and the Houses of Parliament (96) */
 const BELL_KIND = 151, BELL_DEEP_KIND = 96;
@@ -61,17 +71,23 @@ const CEIL = (id: string) => (id === 'rain-light' ? 0.45 : id === 'rain-heavy' ?
  * In words, what a bed is being driven by (the audio readout): the numbers the 250 ms tick read, the share of the bed's ceiling it
  * is aiming at and the tour stop's hold on it, if any. Pure.
  */
-export function bedWhy(id: string, sc: Scan, dist: number, hour: number, level: number, hint: AmbienceHint | null, map: boolean, rain = 0): string {
+export function bedWhy(id: string, sc: Scan, dist: number, hour: number, level: number, hint: AmbienceHint | null, map: boolean, rain = 0, lead: Zn | null = null): string {
   const d = Math.round(dist), t = hm(hour);
+  const zo = zonesOf(sc, lead), dz = zoneText(zo);
   let inputs: string;
   switch (id) {
-    case 'traffic': inputs = `cars near ${sc.cars}, roads ${pc(sc.road)} of tiles, zoom ${d}, hour ${t}`; break;
+    case 'traffic': inputs = `cars near ${sc.cars}, roads ${pc(sc.road)} of tiles, zoom ${d}, hour ${t}; district: ${dz}`; break;
     case 'wind': inputs = `zoom ${d} (louder the higher the camera)`; break;
-    case 'crowd': inputs = `walkers ${sc.walkers}, shops and offices ${pc(sc.com)}, zoom ${d}, hour ${t}`; break;
-    case 'industry': inputs = `industry and power ${pc(sc.ind)} of tiles, zoom ${d}, hour ${t}`; break;
+    case 'crowd': inputs = `walkers ${sc.walkers} (${peopleNear(sc, dist).toFixed(2)} of a crowd), zoom ${d}, hour ${t}; district: ${dz}`; break;
+    case 'industry': inputs = `industry and power ${pc(sc.ind)} of tiles, zoom ${d}, hour ${t}; district: ${dz}`; break;
+    case 'zone-ind': case 'zone-com': case 'zone-off': case 'zone-res': case 'zone-civic': {
+      const z = ZONES.find((k) => ZONE_BED[k] === id)!;
+      inputs = `${dz}; ${ZONE_NAME[z]} weight ${zo.w[z].toFixed(2)}, built ${pc(zo.presence)} of presence, zoom ${d}, hour ${t}`;
+      break;
+    }
     case 'water': inputs = `water ${pc(sc.water)} of tiles, zoom ${d}`; break;
-    case 'market': inputs = `shops ${pc(sc.com)}, walkers ${sc.walkers}, hour ${t} (08:00 to 17:00)`; break;
-    case 'pub': inputs = `shops ${pc(sc.com)}, hour ${t} (16:30 to midnight)`; break;
+    case 'market': inputs = `shops ${pc(Math.max(0, sc.com - sc.off))}, walkers ${sc.walkers}, hour ${t} (08:00 to 17:00)`; break;
+    case 'pub': inputs = `shops ${pc(Math.max(0, sc.com - sc.off))}, hour ${t} (16:30 to midnight)`; break;
     case 'playground': inputs = `schools in view ${sc.school}, hour ${t} (08:45 to 15:30)`; break;
     case 'stadium': inputs = `stadiums in view ${sc.stadium}, hour ${t} (13:00 to 22:00)`; break;
     case 'fountain': inputs = `fountains in view ${sc.fountain}, zoom ${d}`; break;
@@ -83,14 +99,19 @@ export function bedWhy(id: string, sc: Scan, dist: number, hour: number, level: 
 }
 
 /** why a second-pass event fired, in words: the Poisson rate it was drawn at and the numbers behind it */
-export function placeWhy(id: string, sc: Scan, dist: number, hour: number, lambda: number): string {
-  const t = hm(hour), d = Math.round(dist);
+export function placeWhy(id: string, sc: Scan, dist: number, hour: number, lambda: number, lead: Zn | null = null): string {
+  const t = hm(hour), d = Math.round(dist), dz = zoneText(zonesOf(sc, lead));
   const w: Record<string, string> = {
-    gust: `high camera, zoom ${d}`, footsteps: `walkers ${sc.walkers} close in, hour ${t}`, siren: `police stations in view ${sc.police}`, 'siren-fire': `fire stations in view ${sc.fire}`,
-    seagulls: `water ${pc(sc.water)} of tiles, by day (${t})`, pigeons: `parks ${pc(sc.park)}, shops ${pc(sc.com)}, by day (${t})`, dog: `homes ${pc(sc.res)}, hour ${t}`,
-    'bike-bell': `walkers ${sc.walkers} on roads ${pc(sc.road)}, by day (${t})`, 'bin-lorry': `homes ${pc(sc.res)}, morning (${t})`, 'station-chime': `shops and offices ${pc(sc.com)}, by day (${t})`,
+    gust: `high camera, zoom ${d}`, footsteps: `walkers ${sc.walkers} close in (${peopleNear(sc, dist).toFixed(2)} of a crowd), hour ${t}`, siren: `police stations in view ${sc.police}`, 'siren-fire': `fire stations in view ${sc.fire}`,
+    seagulls: `water ${pc(sc.water)} of tiles, by day (${t})`, pigeons: `parks ${pc(sc.park)}, ${dz}, by day (${t})`, dog: `${dz}, hour ${t}`,
+    'bike-bell': `walkers ${sc.walkers} on roads ${pc(sc.road)}, by day (${t})`, 'bin-lorry': `${dz}, morning (${t})`, 'station-chime': `${dz}, by day (${t})`,
     'heli-over': `camera high, zoom ${d}, by day (${t})`, 'plane-over': `camera high, zoom ${d}, hour ${t}`, 'boat-horn': `water ${pc(sc.water)} of tiles, zoom ${d}`,
-    hammer: `builders' depots in view ${sc.builders}, working hours (${t})`, drill: `builders' depots in view ${sc.builders}, working hours (${t})`, lawnmower: `homes ${pc(sc.res)}, hour ${t}`, thunder: 'storm',
+    hammer: `sites under construction ${sc.sites}, builders' depots ${sc.builders}, working hours (${t})`, drill: `sites under construction ${sc.sites}, builders' depots ${sc.builders}, working hours (${t})`, lawnmower: `${dz}, hour ${t}`, thunder: 'storm',
+    'metal-clank': `${dz}, works hours (${t})`, 'reverse-beep': `${dz}, works hours (${t})`, 'steam-vent': `${dz}, hour ${t}`,
+    till: `${dz}, shop hours (${t})`, 'shop-bell': `${dz}, shop hours (${t})`, busker: `${dz}, walkers ${sc.walkers}, hour ${t}`, 'music-door': `${dz}, hour ${t}`,
+    'revolving-door': `${dz}, office hours (${t})`, 'lift-ding': `${dz}, office hours (${t})`,
+    'radio-window': `${dz}, hour ${t}`, 'front-door': `${dz}, hour ${t}`, 'kids-yard': `${dz}, hour ${t}`,
+    'camera-shutter': `${dz}, tourist hours (${t})`,
   };
   return `${w[id] ?? `zoom ${d}, hour ${t}`}; drawn at ${lambda.toFixed(3)} a second`;
 }
@@ -98,7 +119,7 @@ export function placeWhy(id: string, sc: Scan, dist: number, hour: number, lambd
 /** Fill `out` from the tiles round (cx, cz) within `rad` tiles (a grid of at most 15 by 15 samples) and the agents drawn round it. */
 export function scanAround(src: AmbSources, cx: number, cz: number, dist: number, out: Scan): Scan {
   const rad = Math.max(6, Math.min(24, dist * 0.5)), step = Math.max(1, Math.floor(rad / 7));
-  let n = 0, res = 0, com = 0, ind = 0, park = 0, water = 0, road = 0, bell = 0, deep = 0;
+  let n = 0, res = 0, com = 0, off = 0, civic = 0, sites = 0, ind = 0, park = 0, water = 0, road = 0, bell = 0, deep = 0;
   const x0 = Math.floor(cx), z0 = Math.floor(cz);
   out.school = out.stadium = out.fire = out.police = out.builders = out.fountain = 0;
   for (let dz = -rad; dz <= rad; dz += step) {
@@ -110,18 +131,21 @@ export function scanAround(src: AmbSources, cx: number, cz: number, dist: number
       if (isRoad(t)) { road++; continue; }
       const z4 = zoneOf(t);
       if (z4 === 0) continue;
+      if (underConstruction(t)) sites++;
       const id = src.kindIdAt(x, z), fam = familyOf(id);
       if (id === BELL_KIND) bell++; else if (id === BELL_DEEP_KIND) deep++;
       const spot = SPOT_KIND.get(id);
       if (spot) out[spot]++;
       if (fam === Zone.Residential) res++;
-      else if (fam === Zone.Commercial || fam === Zone.Office) com++;
+      else if (fam === Zone.Commercial) com++;
+      else if (fam === Zone.Office) { com++; off++; }
+      else if (CIVIC_FAMILY.has(fam)) civic++;
       else if (fam === Zone.Industrial || (id >= POWER_FIRST && id <= POWER_LAST)) ind++;
       else if (fam === 10) park++;
     }
   }
   const k = n ? 1 / n : 0;
-  out.res = res * k; out.com = com * k; out.ind = ind * k; out.park = park * k; out.water = water * k; out.road = road * k;
+  out.res = res * k; out.com = com * k; out.ind = ind * k; out.park = park * k; out.water = water * k; out.road = road * k; out.off = off * k; out.civic = civic * k; out.sites = sites;
   out.bell = bell; out.bellDeep = deep;
   // agents: cars within a radius that grows with the zoom, walkers within a smaller one
   const rc = Math.max(25, Math.min(140, dist * 0.9)), rw = Math.max(15, Math.min(60, dist * 0.5));
@@ -135,20 +159,90 @@ export function scanAround(src: AmbSources, cx: number, cz: number, dist: number
   return out;
 }
 
+// ---- the districts (docs/audio.md "Districts") ----------------------------------------------------------------------------
+
+/** the five kinds of street the ear can tell apart, in the order a dead heat is settled (shops win a tie) */
+export type Zn = 'com' | 'off' | 'ind' | 'civic' | 'res';
+export const ZONES: readonly Zn[] = ['com', 'off', 'ind', 'civic', 'res'];
+export const ZONE_NAME: Record<Zn, string> = { com: 'commercial', off: 'office', ind: 'industrial', civic: 'civic', res: 'residential' };
+/** the bed each district plays (its recorded signature) */
+export const ZONE_BED: Record<Zn, BedId> = { com: 'zone-com', off: 'zone-off', ind: 'zone-ind', civic: 'zone-civic', res: 'zone-res' };
+/**
+ * The soft-max's exponent and the lead's hysteresis. A zone's weight is its share to the power SOFT over the sum of them all, so the
+ * street is mostly one thing: 0.55 against 0.45 becomes 0.73 against 0.27, 0.6 against 0.4 becomes 0.88 against 0.12, and 0.9 against
+ * 0.1 is 1 against 0. The zone that led at the last tick counts LEAD times its share, so a street on the border does not flip.
+ */
+const SOFT = 5, LEAD = 1.25;
+/** a weight turned into how much of its bed is let through: nothing under 0.08, all of it from 0.6 */
+export const zoneGain = (w: number) => smooth(0.08, 0.6, w);
+
+export interface Zoning {
+  /** each zone's share of the built tiles sampled (they sum to 1; all 0 where nothing is built) */
+  share: Record<Zn, number>;
+  /** the soft-max weights (sum to 1) */
+  w: Record<Zn, number>;
+  /** the zone that wins, or null where nothing is built */
+  win: Zn | null;
+  /** 0 where nothing is built, 1 from a built share of about 12% of the tiles sampled (a street, not open country) */
+  presence: number;
+}
+export const newZoning = (): Zoning => ({ share: { com: 0, off: 0, ind: 0, civic: 0, res: 0 }, w: { com: 0, off: 0, ind: 0, civic: 0, res: 0 }, win: null, presence: 0 });
+
+/**
+ * Which district the camera is in, from the scan: the zone shares of the built tiles (offices apart from shops, civic apart from both),
+ * a soft-max over them for the weights, and the winner. `lead` is the zone that won last time (the hysteresis). Pure.
+ */
+export function zonesOf(s: Scan, lead: Zn | null = null, out: Zoning = newZoning()): Zoning {
+  const raw: Record<Zn, number> = { com: Math.max(0, s.com - s.off), off: s.off, ind: s.ind, civic: s.civic, res: s.res };
+  let total = 0;
+  for (const z of ZONES) total += raw[z];
+  out.presence = smooth(0.03, 0.12, total);
+  if (total <= 1e-9) { for (const z of ZONES) { out.share[z] = 0; out.w[z] = 0; } out.win = null; return out; }
+  let sum = 0, best: Zn = 'com', bestP = -1;
+  for (const z of ZONES) {
+    out.share[z] = raw[z] / total;
+    const p = Math.pow(out.share[z] * (z === lead ? LEAD : 1), SOFT);
+    out.w[z] = p; sum += p;
+    if (p > bestP + 1e-12) { bestP = p; best = z; }
+  }
+  for (const z of ZONES) out.w[z] /= sum;
+  out.win = best;
+  return out;
+}
+/** how much of its bed a district is given: its soft-max weight through the gain, and the presence (nothing built, nothing heard) */
+export const zoneLevel = (zo: Zoning, z: Zn) => zoneGain(zo.w[z]) * zo.presence;
+
+/** the readout's words: "commercial 0.62 wins, industrial 0.21, residential 0.17; ducked" */
+export function zoneText(zo: Zoning): string {
+  if (!zo.win) return 'nothing built in the view: no district bed';
+  const rest = ZONES.filter((z) => z !== zo.win && zo.share[z] >= 0.02).sort((a, b) => zo.share[b] - zo.share[a]).map((z) => `${ZONE_NAME[z]} ${zo.share[z].toFixed(2)}`);
+  return `${ZONE_NAME[zo.win]} ${zo.share[zo.win].toFixed(2)} wins${rest.length ? `, ${rest.join(', ')}; ducked` : ''}`;
+}
+
+/** how much the cars of a street are heard, by district: a lorry yard and a shopping street are busy, a terrace is quiet */
+const TRAFFIC_BY: Record<Zn, number> = { ind: 0.85, com: 0.7, off: 0.8, civic: 0.55, res: 0.4 };
+/** how much a district's talk is heard on top of the walkers drawn: the shops and the squares are all talk, the yards and the terraces little */
+const CROWD_BY: Record<Zn, number> = { com: 1, civic: 1, off: 0.55, res: 0.2, ind: 0.06 };
+const byZone = (zo: Zoning, t: Record<Zn, number>) => { let v = 0; for (const z of ZONES) v += zo.w[z] * t[z]; return v; };
+/** the walkers drawn near the camera as a density, per 15 tile circle (the scan's circle grows with the zoom), eased: 0 under a handful, 1 from about ninety */
+export const peopleNear = (s: Scan, dist: number) => { const rw = Math.max(15, Math.min(60, dist * 0.5)); return smooth(6, 90, s.walkers * (15 / rw) * (15 / rw)); };
+
 export interface Target { level: number; tone: number }
 export type Mix = Record<BedId, Target>;
 /** the five beds that always run (they have a synthesised recipe); the rest start when their level is wanted and stop after a while at zero */
 const ALWAYS: readonly BedId[] = ['traffic', 'wind', 'crowd', 'industry', 'water'];
+/** a string as a number in [0, 1), for choosing a take by city */
+const hashStr = (t: string) => { let h = 2166136261; for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 16777619); return (h >>> 0) / 4294967296; };
 export const newMix = (): Mix => {
   const m = {} as Mix;
-  for (const id of ['traffic', 'wind', 'crowd', 'industry', 'water', 'rain-light', 'rain-heavy', 'market', 'pub', 'playground', 'stadium', 'fountain'] as BedId[]) m[id] = { level: 0, tone: 0.5 };
+  for (const id of ['traffic', 'wind', 'crowd', 'industry', 'water', 'rain-light', 'rain-heavy', 'market', 'pub', 'playground', 'stadium', 'fountain', 'zone-ind', 'zone-com', 'zone-off', 'zone-res', 'zone-civic'] as BedId[]) m[id] = { level: 0, tone: 0.5 };
   return m;
 };
 /**
  * The most each bed is ever driven to by the scene (mixFor's own ceilings), so a tour stop's bias (shared/src/demo/tourSound.ts
  * AmbienceHint, 0 to 1) is a share of the bed's own range: 1 is as loud as that bed gets, 0.5 half of it.
  */
-export const HINT_CEIL: Record<keyof AmbienceHint, number> = { traffic: 0.6, wind: 0.57, crowd: 0.4, industry: 0.45, water: 0.4, market: 0.35, pub: 0.3, playground: 0.4, stadium: 0.5, fountain: 0.35 };
+export const HINT_CEIL: Record<keyof AmbienceHint, number> = { traffic: 0.6, wind: 0.57, crowd: 0.4, industry: 0.45, water: 0.4, market: 0.35, pub: 0.3, playground: 0.4, stadium: 0.5, fountain: 0.35, 'zone-ind': 0.6, 'zone-com': 0.6, 'zone-off': 0.45, 'zone-res': 0.5, 'zone-civic': 0.55 };
 /** Lay a tour stop's bias over a mix: each bed it names is held at its share of the bed's ceiling, with a slow breath of its own (the organic rule). Pure. */
 export function applyHint(mix: Mix, hint: AmbienceHint | null, now: number, salt = 0): Mix {
   if (!hint) return mix;
@@ -164,25 +258,42 @@ export function applyHint(mix: Mix, hint: AmbienceHint | null, now: number, salt
 /** a window of the day: 1 between `a` and `b` o'clock, easing over an hour at each end (a > b wraps midnight) */
 const during = (h: number, a: number, b: number) => (a <= b ? smooth(a - 0.5, a + 0.5, h) * (1 - smooth(b - 0.5, b + 0.5, h)) : Math.max(smooth(a - 0.5, a + 0.5, h), 1 - smooth(b - 0.5, b + 0.5, h)));
 
-/** The target level and tone of every bed for a scan, a camera distance and an hour. Pure, so a test can read it. */
-export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: Mix = newMix(), rain = 0): Mix {
+/**
+ * The target level and tone of every bed for a scan, a camera distance and an hour. Pure, so a test can read it. `lead` is the district
+ * that won the soft-max at the last tick (the Ambience keeps it): it counts a little more, so a street on the border does not flip.
+ */
+export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: Mix = newMix(), rain = 0, lead: Zn | null = null): Mix {
   const act = activityAt(hour);
   const near = (full: number, gone: number) => 1 - smooth(full, gone, dist); // 1 close in, 0 zoomed out
+  const zo = zonesOf(s, lead, ZSCRATCH), pres = zo.presence;
   const density = clamp01(s.cars / 45);
-  out.traffic.level = (0.5 * Math.sqrt(density) + 0.1 * s.road) * lerp(0.45, 1, act) * lerp(1, 0.4, smooth(40, 400, dist));
+  // the cars are heard by the kind of street they are in (a terrace is quiet, a yard busy); open country takes them as they are
+  out.traffic.level = (0.5 * Math.sqrt(density) + 0.1 * s.road) * lerp(0.45, 1, act) * lerp(1, 0.4, smooth(40, 400, dist)) * lerp(1, byZone(zo, TRAFFIC_BY), pres);
   out.traffic.tone = 0.2 + 0.7 * density;
   const h = smooth(20, 320, dist);
   out.wind.level = 0.07 + 0.5 * Math.pow(h, 0.8);
   out.wind.tone = h;
-  out.crowd.level = 0.4 * Math.sqrt(clamp01(s.walkers / 25)) * (0.55 + 0.9 * Math.min(0.5, s.com)) * act * near(60, 170);
+  // the talk of the street: the walkers drawn near (a density, not a count) by the kind of street they are in
+  out.crowd.level = 0.4 * Math.sqrt(peopleNear(s, dist)) * lerp(0.6, byZone(zo, CROWD_BY), pres) * act * near(60, 170);
   out.crowd.tone = 0.3 + 0.5 * act;
-  out.industry.level = 0.45 * Math.min(1, s.ind * 2.5) * lerp(0.6, 1, act) * near(120, 320);
+  // the synthesised hum under the works: only where industry wins
+  out.industry.level = 0.45 * Math.min(1, s.ind * 2.5) * zoneLevel(zo, 'ind') * lerp(0.6, 1, act) * near(120, 320);
   out.industry.tone = 0.3 + 0.5 * Math.min(1, s.ind * 2.5);
   out.water.level = 0.4 * Math.min(1, s.water * 3) * near(100, 330);
   out.water.tone = 0.3 + 0.5 * near(40, 200);
+  // the district beds: a recording each, the winner held near its ceiling and the others ducked (zoneLevel), by the hour of its street, close in
+  const close = near(45, 160);
+  const day = (a: number, b: number, floor: number) => floor + (1 - floor) * during(hour, a, b);
+  out['zone-ind'].level = HINT_CEIL['zone-ind'] * zoneLevel(zo, 'ind') * day(6.5, 18.5, 0.5) * close;
+  out['zone-com'].level = HINT_CEIL['zone-com'] * zoneLevel(zo, 'com') * day(8, 22, 0.35) * close;
+  out['zone-off'].level = HINT_CEIL['zone-off'] * zoneLevel(zo, 'off') * day(7.5, 19, 0.2) * close; // quieter after 19:00
+  out['zone-res'].level = HINT_CEIL['zone-res'] * zoneLevel(zo, 'res') * day(6.5, 22.5, 0.3) * close;
+  out['zone-civic'].level = HINT_CEIL['zone-civic'] * zoneLevel(zo, 'civic') * day(8.5, 20, 0.35) * close;
+  for (const z of ZONES) out[ZONE_BED[z]].tone = 0.5 + 0.3 * act;
   // the second pass: places with a bed of their own (recordings only; a bed with no file is never started)
-  out.market.level = 0.35 * smooth(0.1, 0.35, s.com) * Math.sqrt(clamp01(s.walkers / 15)) * during(hour, 8, 17) * near(45, 130);
-  out.pub.level = 0.3 * smooth(0.08, 0.3, s.com) * during(hour, 16.5, 24) * near(40, 110);
+  const shops = Math.max(0, s.com - s.off), people = peopleNear(s, dist);
+  out.market.level = 0.35 * smooth(0.1, 0.35, shops) * Math.sqrt(clamp01(s.walkers / 15)) * during(hour, 8, 17) * near(45, 130);
+  out.pub.level = 0.3 * smooth(0.08, 0.3, shops) * (0.7 + 0.3 * people) * during(hour, 16.5, 24) * near(40, 110);
   out.playground.level = 0.4 * Math.min(1, s.school) * during(hour, 8.75, 15.5) * near(30, 100);
   out.stadium.level = 0.5 * Math.min(1, s.stadium) * during(hour, 13, 22) * near(60, 180);
   out.fountain.level = 0.35 * Math.min(1, s.fountain) * near(25, 90);
@@ -193,23 +304,36 @@ export function mixFor(s: Scan, dist: number, hour: number, map: boolean, out: M
   if (map) { // zoomed out to the map: only the wind, thin
     out.traffic.level *= 0.1; out.crowd.level = 0; out.industry.level *= 0.1; out.water.level *= 0.2; out.wind.level = 0.2;
     out.market.level = out.pub.level = out.playground.level = out.stadium.level = out.fountain.level = 0;
+    for (const z of ZONES) out[ZONE_BED[z]].level = 0;
   }
   return out;
 }
+/** mixFor's own scratch for the zoning (the readout asks zonesOf for its own) */
+const ZSCRATCH = newZoning();
 
-/** events per second for the birds and owls, from the scan and the hour (0 when the camera is far off) */
-export function birdRate(s: Scan, hour: number, dist: number): number {
-  const green = Math.min(1, s.park * 3 + s.res * 1.2);
+/** the green of a place for birds: parks and gardens, and homes only where homes are what the street is (an office quarter has no garden) */
+export function greenOf(s: Scan, lead: Zn | null = null): number {
+  const zo = zonesOf(s, lead);
+  return clamp01(s.park * 3 + s.res * 1.1 * zoneLevel(zo, 'res'));
+}
+
+/**
+ * Events per second for the birds, from the scan and the hour (0 when the camera is far off). Only where there is green (a park, or a
+ * street of homes: `greenOf`) and only from dawn to dusk: a chorus from half past four to seven, a song by day, a few at dusk, none at night.
+ */
+export function birdRate(s: Scan, hour: number, dist: number, lead: Zn | null = null): number {
+  const green = greenOf(s, lead);
+  if (green < 0.04) return 0;
   const nearF = 1 - smooth(100, 220, dist);
   let base = 0;
-  if (hour >= 4.5 && hour < 7) base = 0.7 + 2.3 * green;            // the dawn chorus
-  else if (hour >= 7 && hour < 19) base = 0.05 + 0.5 * green;
-  else if (hour >= 19 && hour < 21) base = 0.2 * green;
-  return base * nearF * (green > 0.05 ? 1 : 0.3);
+  if (hour >= 4.5 && hour < 7) base = 0.35 + 2 * green;              // the dawn chorus
+  else if (hour >= 7 && hour < 19) base = 0.01 + 0.22 * green;       // the day
+  else if (hour >= 19 && hour < 20.5) base = 0.1 * green;            // dusk
+  return base * nearF;
 }
-export function owlRate(s: Scan, hour: number, dist: number): number {
+export function owlRate(s: Scan, hour: number, dist: number, lead: Zn | null = null): number {
   if (!(hour >= 21 || hour < 4.5)) return 0;
-  const green = Math.min(1, s.park * 3 + s.res * 0.8);
+  const green = Math.min(1, s.park * 3 + s.res * 0.8 * zoneLevel(zonesOf(s, lead), 'res'));
   return green < 0.1 ? 0 : 0.06 * green * (1 - smooth(80, 180, dist));
 }
 
@@ -234,6 +358,9 @@ export class Ambience {
   }
   readonly scan = newScan();
   readonly mix = newMix();
+  /** the district the last tick found (zonesOf): shares, soft-max weights, the winner. `lead` is the winner, handed back next tick as the hysteresis */
+  readonly zoning = newZoning();
+  private lead: Zn | null = null;
   private beds: Partial<Record<BedId, Bed>> = {};
   /** when each bed started (performance.now), for the audio readout */
   private born: Partial<Record<BedId, number>> = {};
@@ -303,11 +430,17 @@ export class Ambience {
       }
     }
     const sc = scanAround(src, cam.x, cam.z, cam.dist, this.scan);
-    const mix = applyHint(mixFor(sc, cam.dist, hour, cam.map, this.mix, this.rain), this.hint, now, this.salt);
+    zonesOf(sc, this.lead, this.zoning); // the district, for the events and the readout; mixFor finds the same one for the beds
+    const mix = applyHint(mixFor(sc, cam.dist, hour, cam.map, this.mix, this.rain, this.lead), this.hint, now, this.salt);
+    const lead = this.lead; this.lead = this.zoning.win; // the winner leads the next tick a little (no flipping on a border)
     for (const id of Object.keys(mix) as BedId[]) { // the optional beds (recordings only) start when wanted and stop after eight quiet seconds
       if (ALWAYS.includes(id)) continue;
       const lv = mix[id].level;
-      if (lv > 0.02 && !this.beds[id] && VOICES[id].takes?.length) { const b = makeBed(eng, id, hash2(this.n++, this.salt)); if (b) { this.beds[id] = b; this.born[id] = performance.now(); eng.log('start', 'bed', id, `wanted: ${bedWhy(id, sc, cam.dist, hour, lv, this.hint, cam.map, this.rain)}`); } }
+      if (lv > 0.02 && !this.beds[id] && VOICES[id].takes?.length) {
+        // a district bed's take is chosen by a hash of the city: a city always sounds like itself, and two cities differ
+        const b = makeBed(eng, id, hash2(this.n++, this.salt), id.startsWith('zone-') ? hashStr(`${src.city?.() ?? ''}|${id}`) : undefined);
+        if (b) { this.beds[id] = b; this.born[id] = performance.now(); eng.log('start', 'bed', id, `wanted: ${bedWhy(id, sc, cam.dist, hour, lv, this.hint, cam.map, this.rain, lead)}`); }
+      }
       if (lv < 0.004 && this.beds[id]) { const q = (this.quiet[id] ?? 0) + dt; this.quiet[id] = q; if (q > 8) { this.beds[id]!.stop(); delete this.beds[id]; this.quiet[id] = 0; eng.log('stop', 'bed', id, 'quiet for 8 s, voice given back'); } } else this.quiet[id] = 0;
     }
     for (const id in this.beds) {
@@ -316,11 +449,11 @@ export class Ambience {
     }
     if (cam.map) return;
     // events
-    if (this.rate(birdRate(sc, hour, cam.dist), dt)) {
+    if (this.rate(birdRate(sc, hour, cam.dist, lead), dt)) {
       const chorus = hour >= 4.5 && hour < 7, n = chorus ? 1 + Math.floor(this.rand() * 3) : 1;
-      for (let i = 0; i < n; i++) fire(eng, 'bird', { why: `${chorus ? 'dawn chorus' : 'daytime'} ${hm(hour)}, parks ${pc(sc.park)}, homes ${pc(sc.res)}`, seed: (this.rand() * 1e9) | 0, delay: i * (0.15 + this.rand() * 0.5), gain: 0.5 + 0.5 * this.rand() });
+      for (let i = 0; i < n; i++) fire(eng, 'bird', { why: `${chorus ? 'dawn chorus' : hour >= 19 ? 'dusk' : 'daytime'} ${hm(hour)}, parks ${pc(sc.park)}, homes ${pc(sc.res)}, green ${greenOf(sc, lead).toFixed(2)}; district: ${zoneText(this.zoning)}`, seed: (this.rand() * 1e9) | 0, delay: i * (0.15 + this.rand() * 0.5), gain: 0.5 + 0.5 * this.rand() });
     }
-    if (this.rate(owlRate(sc, hour, cam.dist), dt)) fire(eng, 'owl', { why: `night ${hm(hour)}, parks ${pc(sc.park)}, homes ${pc(sc.res)}`, seed: (this.rand() * 1e9) | 0, gain: 0.6 + 0.4 * this.rand() });
+    if (this.rate(owlRate(sc, hour, cam.dist, lead), dt)) fire(eng, 'owl', { why: `night ${hm(hour)}, parks ${pc(sc.park)}, homes ${pc(sc.res)}`, seed: (this.rand() * 1e9) | 0, gain: 0.6 + 0.4 * this.rand() });
     if (sc.cars > 5 && cam.dist < 90 && this.rate(0.006 * Math.min(1, sc.cars / 30) * lerp(0.4, 1, activityAt(hour)), dt)) {
       fire(eng, 'horn', { why: `horn: ${sc.cars} cars near, zoom ${Math.round(cam.dist)}`, seed: (this.rand() * 1e9) | 0, gain: 0.4 + 0.6 * this.rand() * (1 - smooth(20, 90, cam.dist)) });
     }
@@ -348,34 +481,64 @@ export class Ambience {
 
   /** the second pass's events: each a Poisson clock from the scan and the hour; no file, no sound (fire skips a recording-only voice that has none) */
   private places(sc: Scan, cam: ReturnType<AmbSources['camera']>, hour: number, dt: number) {
-    const eng = this.eng, d = cam.dist, day = during(hour, 6.5, 20), act = activityAt(hour);
+    const eng = this.eng, d = cam.dist, day = during(hour, 6.5, 20), act = activityAt(hour), zo = this.zoning, lead = this.lead;
     const go = (id: Parameters<typeof fire>[1], lambda: number, gain: number, pan?: number) => {
-      if (lambda > 0 && gain > 0.02 && VOICES[id].takes?.length && this.rate(lambda, dt)) fire(eng, id, { why: placeWhy(id, sc, d, hour, lambda), seed: (this.rand() * 1e9) | 0, gain, pan: pan ?? this.rand() * 1.6 - 0.8 });
+      if (lambda > 0 && gain > 0.02 && VOICES[id].takes?.length && this.rate(lambda, dt)) fire(eng, id, { why: placeWhy(id, sc, d, hour, lambda, lead), seed: (this.rand() * 1e9) | 0, gain, pan: pan ?? this.rand() * 1.6 - 0.8 });
     };
+    const close = (a: number, b: number) => 1 - smooth(a, b, d);
+    const people = peopleNear(sc, d);
     go('gust', 0.045 * smooth(40, 260, d), 0.35 + 0.6 * smooth(60, 300, d));
-    go('footsteps', 0.3 * clamp01(sc.walkers / 12) * act * (1 - smooth(25, 50, d)), 0.35 + 0.65 * this.rand());
+    go('footsteps', 0.3 * people * act * close(25, 50), 0.35 + 0.65 * this.rand());
     go('siren', 0.004 * Math.min(1, sc.police) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d))); // a call from a station in the view: the hook for a real response vehicle
     go('siren-fire', 0.003 * Math.min(1, sc.fire) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d)));
     go('seagulls', 0.05 * Math.min(1, sc.water * 3) * day * (1 - smooth(100, 170, d)), 0.3 + 0.7 * this.rand());
-    go('pigeons', 0.04 * clamp01(sc.park * 4 + sc.com) * day * (1 - smooth(60, 120, d)), 0.3 + 0.7 * this.rand());
-    go('dog', 0.02 * clamp01(sc.res * 2) * during(hour, 7, 21) * (1 - smooth(40, 100, d)), 0.3 + 0.7 * this.rand());
-    go('bike-bell', 0.012 * clamp01(sc.walkers / 8) * clamp01(sc.road * 4) * day * (1 - smooth(25, 55, d)), 0.4 + 0.6 * this.rand());
-    go('bin-lorry', 0.006 * clamp01(sc.res * 2) * during(hour, 6, 10) * (1 - smooth(40, 100, d)), 0.4 + 0.5 * this.rand());
-    go('station-chime', 0.008 * smooth(0.12, 0.4, sc.com) * day * (1 - smooth(30, 70, d)), 0.4 + 0.5 * this.rand());
+    // the districts: each zone's events are heard while that zone wins the soft-max (zoneLevel is 0 where it is ducked), close in
+    const zi = zoneLevel(zo, 'ind'), zc = zoneLevel(zo, 'com'), zf = zoneLevel(zo, 'off'), zr = zoneLevel(zo, 'res'), zv = zoneLevel(zo, 'civic');
+    go('pigeons', 0.04 * clamp01(sc.park * 4 + 0.6 * (zc + zv)) * day * (1 - smooth(60, 120, d)), 0.3 + 0.7 * this.rand());
+    go('dog', 0.02 * zr * during(hour, 7, 21) * close(40, 100), 0.3 + 0.7 * this.rand());
+    go('bike-bell', 0.012 * clamp01(sc.walkers / 8) * clamp01(sc.road * 4) * day * close(25, 55), 0.4 + 0.6 * this.rand());
+    go('bin-lorry', 0.006 * zr * during(hour, 6, 10) * close(40, 100), 0.4 + 0.5 * this.rand());
+    go('station-chime', 0.008 * Math.max(zc, zf) * day * close(30, 70), 0.4 + 0.5 * this.rand());
     go('heli-over', 0.004 * during(hour, 7, 20) * smooth(50, 120, d), 0.4 + 0.5 * this.rand());
     go('plane-over', 0.006 * during(hour, 6, 23) * smooth(70, 160, d), 0.4 + 0.5 * this.rand());
     go('boat-horn', 0.008 * clamp01(sc.water * 4) * (1 - smooth(80, 150, d)), 0.4 + 0.6 * this.rand());
-    const works = Math.min(1, sc.builders) * during(hour, 7.5, 17) * (1 - smooth(25, 80, d));
-    go('hammer', 0.12 * works, 0.4 + 0.6 * this.rand());
-    go('drill', 0.05 * works, 0.4 + 0.6 * this.rand());
-    go('lawnmower', 0.004 * clamp01(sc.res * 3) * during(hour, 10, 17) * (1 - smooth(30, 80, d)), 0.4 + 0.5 * this.rand());
+    // digging: only with a site under construction in the tiles sampled (a depot alone is a quiet yard), and a long gap between blows
+    const works = clamp01(sc.sites / 3 + 0.15 * Math.min(1, sc.builders)) * (sc.sites > 0 ? 1 : 0.4) * during(hour, 7.5, 17) * close(25, 80);
+    go('hammer', 0.035 * works, 0.4 + 0.6 * this.rand());
+    go('drill', 0.012 * works, 0.4 + 0.6 * this.rand());
+    go('lawnmower', 0.004 * zr * during(hour, 10, 17) * close(30, 80), 0.4 + 0.5 * this.rand());
+    // industry: metal, a reversing lorry, steam
+    const shift = during(hour, 6.5, 18.5);
+    go('metal-clank', 0.07 * zi * shift * close(40, 110), 0.35 + 0.65 * this.rand());
+    go('reverse-beep', 0.012 * zi * during(hour, 7, 17) * close(35, 90), 0.4 + 0.6 * this.rand());
+    go('steam-vent', 0.01 * zi * lerp(0.5, 1, shift) * close(40, 100), 0.4 + 0.6 * this.rand());
+    // shops: a till and the shop door, music from a doorway, and in the busiest streets a busker
+    const trade = during(hour, 8.5, 19.5);
+    go('till', 0.03 * zc * trade * close(30, 80), 0.4 + 0.6 * this.rand());
+    go('shop-bell', 0.025 * zc * trade * close(30, 80), 0.4 + 0.6 * this.rand());
+    go('music-door', 0.008 * zc * during(hour, 10, 24) * close(25, 70), 0.4 + 0.6 * this.rand());
+    go('busker', 0.006 * zc * people * during(hour, 10, 20.5) * close(25, 60), 0.5 + 0.5 * this.rand());
+    // offices: the lobby door and the lift
+    const office = during(hour, 7.5, 19);
+    go('revolving-door', 0.014 * zf * office * close(30, 80), 0.4 + 0.6 * this.rand());
+    go('lift-ding', 0.012 * zf * office * close(30, 80), 0.4 + 0.6 * this.rand());
+    // homes: a radio through a window, a front door, children
+    go('radio-window', 0.005 * zr * during(hour, 8, 22) * close(25, 70), 0.4 + 0.6 * this.rand());
+    go('front-door', 0.016 * zr * during(hour, 7, 22.5) * close(25, 70), 0.4 + 0.6 * this.rand());
+    go('kids-yard', 0.012 * zr * during(hour, 8, 19) * close(30, 80), 0.4 + 0.6 * this.rand());
+    // squares and landmarks: tourists' cameras, one to three shots
+    const lam = 0.04 * zv * during(hour, 9, 19.5) * close(30, 80);
+    if (lam > 0 && VOICES['camera-shutter'].takes?.length && this.rate(lam, dt)) {
+      const n = 1 + Math.floor(this.rand() * 3), pan = this.rand() * 1.6 - 0.8;
+      for (let i = 0; i < n; i++) fire(eng, 'camera-shutter', { why: placeWhy('camera-shutter', sc, d, hour, lam, lead), seed: (this.rand() * 1e9) | 0, gain: 0.4 + 0.6 * this.rand(), pan: pan + this.rand() * 0.3 - 0.15, delay: i * (0.25 + this.rand() * 0.7) });
+    }
     go('thunder', 0.02 * smooth(0.6, 0.9, this.rain), 0.5 + 0.5 * this.rand());
   }
 
   /** the beds sounding now, each with what drives it, in words (the audio readout; built only when it is open) */
   bedList(): { id: BedId; bed: Bed; level: number; why: string; born: number }[] {
     const sc = this.scan, c = this.camNow;
-    return (Object.keys(this.beds) as BedId[]).map((id) => ({ id, bed: this.beds[id]!, born: this.born[id] ?? 0, level: this.mix[id].level, why: bedWhy(id, sc, c.dist, this.hourNow, this.mix[id].level, this.hint, c.map, this.rain) }));
+    return (Object.keys(this.beds) as BedId[]).map((id) => ({ id, bed: this.beds[id]!, born: this.born[id] ?? 0, level: this.mix[id].level, why: bedWhy(id, sc, c.dist, this.hourNow, this.mix[id].level, this.hint, c.map, this.rain, this.lead) }));
   }
   /** the hour the beds and events use now and where it comes from */
   hourInfo(): { hour: number; source: string } { return { hour: this.hourNow, source: this.src.hourSource?.() ?? 'clock' }; }
