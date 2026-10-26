@@ -12,6 +12,8 @@ export interface ClientChunk { cx: number; cy: number; tiles: Uint16Array; parce
  * family, level, construction flag, progress or priority, a sub byte, a parcel id) and the underground (an under byte).
  */
 export const DIRTY_SHAPE = 1, DIRTY_BUILD = 2, DIRTY_UNDER = 4, DIRTY_ALL = 7;
+/** the tile word's terrain, road and family bits: what a change to the layout of roads and stops touches (ClientWorld.layoutVersion) */
+const LAYOUT_BITS = 0x7f;
 
 /**
  * What marks chunks dirty, counted by cause (docs/perf.md, "What the jitter is: chunk rebuilds"): `marks` are clean-to-dirty
@@ -53,6 +55,14 @@ export class ClientWorld {
   /** a sandbox (test city or demo, from the welcome): anyone may edit any parcel and buy land anywhere */
   sandbox = false;
   parcelsDirty = false;
+  /**
+   * Bumps whenever something a transit line depends on changed on the server: a tile's road bit, terrain or family (a road
+   * laid or lifted, a stop built or taken down), an aux, sub or under byte. Not a building growing a level, and not a chunk
+   * arriving (`chunksVersion` counts those: the client's view moved, not the world). The line editor watches both (lines.ts):
+   * the first routes its draft again, the two together refresh the stop markers.
+   */
+  layoutVersion = 0;
+  chunksVersion = 0;
   /** per chunk: congestion on roads (0-255) and cars parked in lots */
   traffic = new Map<string, Uint8Array>();
   trafficDirty = new Set<string>();
@@ -101,6 +111,7 @@ export class ClientWorld {
       under: under && under.length === N ? under : new Uint8Array(N), dirty: false, mask: 0,
     };
     const old = this.chunks.get(chunkKey(dto.cx, dto.cy));
+    this.chunksVersion++;
     if (old) this.dirtyStats.queue.delete(old);
     this.chunks.set(chunkKey(dto.cx, dto.cy), c);
     this.dirtyStats.mark(c, 'chunk', DIRTY_ALL);
@@ -110,7 +121,7 @@ export class ClientWorld {
   }
   dropChunk(key: string) {
     const c = this.chunks.get(key);
-    if (c) this.dirtyStats.queue.delete(c);
+    if (c) { this.dirtyStats.queue.delete(c); this.chunksVersion++; }
     this.chunks.delete(key); this.traffic.delete(key); this.kerb.delete(key);
     if (this.issues.delete(key)) this.issuesVersion++;
     if (this.overlay.delete(key)) this.overlayDirty.add(key);
@@ -203,6 +214,7 @@ export class ClientWorld {
       const st = this.dirtyStats; st.tiles.aux++;
       if (c.aux[li] === u[i + 2] && !this.legacyDirty) continue; // nothing to redraw
       if (c.aux[li] !== u[i + 2]) st.changed.aux++;
+      if (c.aux[li] !== u[i + 2]) this.layoutVersion++;
       c.aux[li] = u[i + 2];
       st.mark(c, 'aux', DIRTY_SHAPE | DIRTY_BUILD);
       // runway ends are drawn from the neighbours' bytes, so a change on a chunk edge redraws the chunk next door
@@ -221,6 +233,7 @@ export class ClientWorld {
       st.tiles.sub++;
       if (c.sub[li] === u[i + 2] && !this.legacyDirty) continue;
       if (c.sub[li] !== u[i + 2]) st.changed.sub++;
+      if (c.sub[li] !== u[i + 2]) this.layoutVersion++;
       c.sub[li] = u[i + 2];
       st.mark(c, 'sub', DIRTY_BUILD);
     }
@@ -235,6 +248,7 @@ export class ClientWorld {
       st.tiles.under++;
       if (c.under[li] === u[i + 2] && !this.legacyDirty) continue;
       if (c.under[li] !== u[i + 2]) st.changed.under++;
+      if (c.under[li] !== u[i + 2]) this.layoutVersion++;
       c.under[li] = u[i + 2];
       st.mark(c, 'under', DIRTY_UNDER);
     }
@@ -252,6 +266,7 @@ export class ClientWorld {
       if (was !== now || c.parcel[li] !== u[i + 3]) st.changed.tiles++;
       // the road bit or the terrain: kerbs, junctions and signs here and next door; anything else is the buildings only
       const shape = ((was ^ now) & 7) !== 0;
+      if (((was ^ now) & LAYOUT_BITS) !== 0) this.layoutVersion++; // the road bit, terrain or family (a stop or a station going up or coming down)
       c.tiles[li] = now; c.parcel[li] = u[i + 3]; st.mark(c, 'tiles', shape ? DIRTY_SHAPE | DIRTY_BUILD : DIRTY_BUILD);
       if (!shape && !this.legacyDirty) continue; // a building on an edge tile changes nothing drawn next door (buildings there face roads, not lots)
       const lx = li % CHUNK_SIZE, ly = Math.floor(li / CHUNK_SIZE);

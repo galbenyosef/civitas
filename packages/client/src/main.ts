@@ -875,6 +875,7 @@ const fpv = new Fpv({
   cab: () => cabEye(),
   indicator: (id) => { const s = citizens.indicatorOf(id); return s && citizens.indicatorLit(id) ? (s === 'hazard' ? 2 : s) : 0; },
   notify: (msg) => ui.toast('info', msg),
+  clock: () => liveTickF(), // a night out builds and wears off with the game's evening (render/nightout.ts)
   tunnel: { underAt: (x, y) => world.underAt(x, y), keep: () => [trains.under, citizens.under] }, // a tube cab ride draws these over its tunnel (render/tunnelRide.ts)
   onChange: (mode) => {
     ui.markFpv(mode);
@@ -1250,6 +1251,7 @@ canvas.addEventListener('pointermove', (e) => { mouse = { x: e.clientX, y: e.cli
 let pickHint = false;
 function hintPickable(on: boolean) { if (on !== pickHint) { pickHint = on; applyPickHint(canvas.classList, input.tool, on); } }
 function hoverAt(tile: [number, number] | null) {
+  lines.setHover(tile); // while a line is edited the stop under the cursor glows (render/stopmarks.ts)
   if (ctxMenu.isOpen) return; // the right-click menu is up: no tooltips under it
   boats.hover = null;
   const bt = tile && input.tool === 'select' && !input.buyRect ? boats.pick(mouse.x, mouse.y, rig.camera, canvas.clientWidth, canvas.clientHeight) : null; // boats: lowest of the vehicles
@@ -1446,6 +1448,7 @@ function frame(now: number) {
   gravesView.frame(liveTick(), now);
   perf.lap('world');
   citizens.frame(now, dt);
+  lines.stopMarks.setShown(fpv.mode !== 'full');
   lines.frame();
   if (routeView.active) routeView.frame(citizens.positionOf(selectedCitizen), now);
   lights.frame(liveTick(), signalled);

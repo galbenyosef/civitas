@@ -1,19 +1,22 @@
 import {
   PerspectiveCamera, OrthographicCamera, Color, Scene, Mesh, PlaneGeometry, ShaderMaterial, WebGLRenderTarget, HalfFloatType, LinearFilter,
-  Quaternion, Vector2, Vector3, type WebGLRenderer, type Fog, type Object3D, type Light,
+  Quaternion, Vector2, Vector3, Vector4, type WebGLRenderer, type Fog, type Object3D, type Light,
 } from 'three';
-import { hash2, tvOnAt, type CitizenInfo } from '@msimcity/shared';
+import { hash2, tvOnAt, TICKS_PER_HOUR, type CitizenInfo } from '@msimcity/shared';
 import type { CitizensView } from './citizens';
 import { Interior, placeOf, homeSeedOf, type Place } from './interiors';
 import { sceneUniforms } from './materials';
 import { Instruments, type AircraftCal } from './instruments';
 import { CarInterior, TrainCab, HelmCab, type CarFeed, type TrainCabFeed, type HelmFeed } from './vehicleInterior';
 import { TunnelRide, TUNNEL_BG, TUNNEL_FOG, type TunnelFeed } from './tunnelRide';
+import { NightOut, swimShape } from './nightout';
 
 export type FpvMode = 'off' | 'inset' | 'full';
 
 const INSET_FRAC = 0.32, INSET_MARGIN = 16;
 const FADE_SECONDS = 0.25;
+/** a night out in the full window is drawn into a target this much of the window's pixels across (the swim softens it anyway) */
+const FULL_SWIM_SCALE = 0.85;
 /** going in or out of a door, or between rooms, is a slower fade through black */
 const ROOM_FADE = 0.6;
 /** street-level fog: the world is a few tiles tall, so the horizon is much closer than from the overhead camera */
@@ -71,6 +74,8 @@ export interface FpvHooks {
    * over the tunnel (the tube trains, the crowds on the platforms).
    */
   tunnel?: { underAt(x: number, y: number): number; keep(): Object3D[] };
+  /** the game clock in ticks (fractional), for a night out's build-up and ease-off (render/nightout.ts); absent: the lighting hour */
+  clock?(): number;
 }
 
 /**
@@ -151,6 +156,11 @@ export class Fpv {
   private latest: CitizenInfo | null = null;
   private hold = false;
   private sky = new Color(0x9fc4e8);
+  // a night out (render/nightout.ts): the swim's strength as the view shows it (eased toward the evening's), and the evening so far
+  private night: NightOut | null = null;
+  swim = 0;
+  /** debug and screenshots: force the swim's strength (0..1) whoever is watched; null: from the evening */
+  swimDebug: number | null = null;
 
   constructor(private hooks: FpvHooks) {
     this.hud = document.createElement('div');
@@ -171,13 +181,35 @@ export class Fpv {
     this.hud.querySelector<HTMLElement>('#fpvSwap')!.onclick = () => this.toggleFull();
 
     this.blit = new Mesh(new PlaneGeometry(2, 2), new ShaderMaterial({
-      uniforms: { map: { value: null }, fade: { value: 1 }, sky: { value: new Color() } },
+      uniforms: {
+        map: { value: null }, fade: { value: 1 }, sky: { value: new Color() },
+        // the night out's swim: strength, wall-clock seconds, the citizen's period/phase/sway/double image, blur/ratio/mix, and the target's size
+        uSwim: { value: 0 }, uT: { value: 0 }, uS: { value: new Vector4(4, 0, 3, 4) }, uS2: { value: new Vector3(1.5, 0.7, 0.3) }, uRes: { value: new Vector2(1, 1) },
+      },
       vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       // Scene pixels are tone-mapped here (a render target is not), but the sky is a plain clear colour on screen, so
       // where the picture is empty (alpha 0) the sky colour goes straight out, exactly as in the overhead view.
       fragmentShader: `uniform sampler2D map; uniform float fade; uniform vec3 sky; varying vec2 vUv;
+        uniform float uSwim; uniform float uT; uniform vec4 uS; uniform vec3 uS2; uniform vec2 uRes;
         void main() {
-          vec4 s = texture2D(map, vUv);
+          vec4 s;
+          if (uSwim > 0.002) {
+            // A night out: the picture sways a few pixels on a slow period of the citizen's own, a second image drifts in
+            // and out beside it, and the whole softens a little. Sizes are pixels at 720p, scaled to the view.
+            float k = uRes.y / 720.0;
+            vec2 px = 1.0 / uRes;
+            float t = uT * 6.2831853 / uS.x + uS.y;
+            vec2 off = vec2(sin(t + vUv.y * 5.0) + 0.5 * sin(t * uS2.y * 1.7 + vUv.y * 11.0), cos(t * uS2.y + vUv.x * 4.0)) * uS.z * uSwim * k * px;
+            vec2 uv = vUv + off;
+            float b = uS2.x * uSwim * k;
+            vec2 r = px * b;
+            s = 0.4 * texture2D(map, uv)
+              + 0.15 * (texture2D(map, uv + vec2(r.x, r.y)) + texture2D(map, uv + vec2(-r.x, r.y)) + texture2D(map, uv + vec2(r.x, -r.y)) + texture2D(map, uv + vec2(-r.x, -r.y)));
+            // double vision: the second image slides from one side of the first to the other
+            float g = uS.w * uSwim * k * px.x * sin(t * 0.5 + 1.0);
+            vec4 ghost = texture2D(map, uv + vec2(g, 0.35 * g * uRes.x / uRes.y));
+            s = mix(s, ghost, uS2.z * uSwim);
+          } else s = texture2D(map, vUv);
           vec3 c = toneMapping(s.rgb / max(s.a, 1e-3));
           gl_FragColor = vec4(mix(sky, c, s.a) * fade, 1.0);
           #include <colorspace_fragment>
@@ -310,7 +342,8 @@ export class Fpv {
   update(now: number, dt: number, route: number[] | null) {
     this.avgMs += (dt * 1000 - this.avgMs) * 0.05;
     if (this.shown) { this.shown.update(now, dt, sceneUniforms.uHour.value, this.sky); return; }
-    if (this.mode === 'off') return;
+    if (this.mode === 'off') { this.swim = 0; return; }
+    this.swimStep(dt);
     this.level = clamp(this.level + (this.want && !this.hold ? 1 : -1) * dt / (this.room || this.hold ? ROOM_FADE : FADE_SECONDS), 0, 1);
     if (!this.want && this.level <= 0) {
       this.id = 0; this.info = null; this.cabKey = '';
@@ -380,6 +413,25 @@ export class Fpv {
     if (!this.carOn) this.car.hide();
     this.updateHud(now, eye?.speed ?? 0);
   }
+
+  /**
+   * A night out (render/nightout.ts): the swim's strength follows the evening read from the citizen's activity line, eased so
+   * a new inspect never steps it. Nothing in a cab, nor for a vehicle, nor for anyone indoors at the cinema (the rules say so).
+   */
+  private swimStep(dt: number) {
+    const info = this.info;
+    let target = 0;
+    if (!this.cabKey && info && info.id === this.id && info.role === 'citizen') {
+      if (this.night?.id !== this.id) this.night = new NightOut(this.id);
+      const hours = this.hooks.clock ? this.hooks.clock() / TICKS_PER_HOUR : sceneUniforms.uHour.value;
+      target = this.night.update(info.activity, hours, info.tripTotal ? clamp((info.tripDone ?? 0) / info.tripTotal, 0, 1) : undefined);
+    } else this.night = null;
+    if (this.swimDebug !== null) target = this.swimDebug;
+    this.swim += (target - this.swim) * (1 - Math.exp(-dt * 1.2));
+    if (target === 0 && this.swim < 0.003) this.swim = 0;
+  }
+  /** the swim is on (the HUD says so, the picture swims) */
+  get tipsy() { return this.swim > 0.06; }
 
   private follow(eye: NonNullable<ReturnType<CitizensView['eyeOf']>>, now: number, dt: number, route: number[] | null) {
     const id = this.id;
@@ -513,17 +565,19 @@ export class Fpv {
     const queued = i?.status === 'queued';
     const speed = i && i.mode === 'drive' && i.speedPct !== undefined ? `${Math.round(i.speedPct * 100)}% of free flow` : `${this.speed.toFixed(1)} tiles/s`;
     const room = this.room?.label ?? '';
-    const key = `${i?.name}|${i?.activity}|${i?.destination?.label}|${queued ? Math.round((i?.waitTicks ?? 0) * 0.6) : -1}|${Math.round(this.speed * 2)}|${speed}|${room}`;
+    const tipsy = this.tipsy;
+    const key = `${i?.name}|${i?.activity}|${i?.destination?.label}|${queued ? Math.round((i?.waitTicks ?? 0) * 0.6) : -1}|${Math.round(this.speed * 2)}|${speed}|${room}|${tipsy}`;
     if (key === this.hudKey && now - this.hudAt < 500) return;
     this.hudKey = key; this.hudAt = now;
     const name = this.hud.querySelector('.fname')!;
     name.textContent = i ? i.name : '…';
     let html = '';
-    if (i && this.room) html += `<div class="fact">${esc(i.activity)}</div><div class="fspd">${esc(room)}</div>`;
+    const tip = tipsy ? '<div class="ftipsy">a little tipsy</div>' : '';
+    if (i && this.room) html += `<div class="fact">${esc(i.activity)}</div><div class="fspd">${esc(room)}</div>${tip}`;
     else if (i) {
       html += `<div class="fact">${esc(i.activity)}${queued ? ` · <span class="bad">held up ${Math.round(i.waitTicks * 0.6)} min</span>` : ''}</div>`;
       if (i.destination) html += `<div class="fdest">to ${esc(i.destination.label)} <span>(${i.destination.x}, ${i.destination.y})</span></div>`;
-      html += `<div class="fspd">${speed}</div>`;
+      html += `<div class="fspd">${speed}</div>${tip}`;
     }
     this.body.innerHTML = html;
     void liveSpeed;
@@ -557,7 +611,10 @@ export class Fpv {
     if (this.mode === 'off' || !this.ready) { renderer.render(scene, overhead); this.fade.style.opacity = '0'; return; }
     this.layout();
     const t0 = performance.now();
-    if (this.mode === 'full') {
+    const full = this.mode === 'full';
+    // a night out swims the picture in the blit (render/nightout.ts), so the full window is drawn into a target too while it does
+    const swimming = this.swim > 0.004 && !this.cabKey;
+    if (full && !swimming) {
       const a = this.winW / this.winH;
       if (Math.abs(this.camera.aspect - a) > 1e-4) { this.camera.aspect = a; this.camera.updateProjectionMatrix(); }
       this.fade.style.opacity = String(1 - this.level);
@@ -567,12 +624,12 @@ export class Fpv {
       this.lastCost = performance.now() - t0;
       return;
     }
-    this.fade.style.opacity = '0';
-    renderer.render(scene, overhead);
+    const { x, y, w, h } = full ? { x: 0, y: 0, w: this.winW, h: this.winH } : this.rect;
+    if (full) this.fade.style.opacity = String(1 - this.level);
+    else { this.fade.style.opacity = '0'; renderer.render(scene, overhead); }
     // a slow frame: refresh the inset every other frame and re-blit the last picture in between
-    if (this.avgMs > 33) this.parity ^= 1; else this.parity = 0;
-    const { x, y, w, h } = this.rect;
-    const pr = renderer.getPixelRatio();
+    if (!full && this.avgMs > 33) this.parity ^= 1; else this.parity = 0;
+    const pr = renderer.getPixelRatio() * (full ? FULL_SWIM_SCALE : 1);
     const tag = `${w}x${h}@${pr}`;
     if (!this.rt || tag !== this.sizeTag) {
       this.rt?.dispose();
@@ -584,7 +641,7 @@ export class Fpv {
     const mat = this.blit.material as ShaderMaterial;
     if (this.parity === 0 && this.room) {
       this.room.setAspect(w / h);
-      renderer.shadowMap.autoUpdate = false;
+      if (!full) renderer.shadowMap.autoUpdate = false; // (the full window has had no overhead pass to refresh the sun's shadow map)
       renderer.setRenderTarget(this.rt);
       this.room.render(renderer);
       renderer.setRenderTarget(null);
@@ -592,7 +649,7 @@ export class Fpv {
       this.rendered++;
     } else if (this.parity === 0) {
       // the overhead pass has just refreshed the sun's shadow map, which is the same for both cameras
-      renderer.shadowMap.autoUpdate = false;
+      if (!full) renderer.shadowMap.autoUpdate = false; // (the full window has had no overhead pass to refresh the sun's shadow map)
       // leave the sky out of the target (clear to alpha 0); the blit paints it
       const bg = scene.background, alpha = renderer.getClearAlpha();
       if (bg instanceof Color) (mat.uniforms.sky.value as Color).copy(this.inTunnel ? this.clr.setHex(TUNNEL_BG) : bg);
@@ -605,14 +662,26 @@ export class Fpv {
       this.rendered++;
     } else this.skipped++;
     mat.uniforms.map.value = this.rt.texture;
-    mat.uniforms.fade.value = this.level;
+    mat.uniforms.fade.value = full ? 1 : this.level; // the full window fades by the overlay above it
+    this.swimUniforms(mat, swimming);
     renderer.setViewport(x, y, w, h);
-    renderer.setScissor(x, y, w, h);
-    renderer.setScissorTest(true);
+    if (!full) { renderer.setScissor(x, y, w, h); renderer.setScissorTest(true); }
     renderer.render(this.blitScene, this.blitCam);
-    renderer.setScissorTest(false);
+    if (!full) renderer.setScissorTest(false);
     renderer.setViewport(0, 0, this.winW, this.winH);
     this.lastCost = performance.now() - t0;
+  }
+
+  /** The blit's night-out uniforms: this citizen's swim at its strength now (all zero when sober). */
+  private swimUniforms(mat: ShaderMaterial, on: boolean) {
+    const u = mat.uniforms;
+    u.uSwim.value = on ? this.swim : 0;
+    if (!on) return;
+    const sh = this.night?.shape ?? swimShape(this.id);
+    u.uT.value = performance.now() / 1000;
+    (u.uS.value as Vector4).set(sh.period, sh.phase, sh.amp, sh.ghost);
+    (u.uS2.value as Vector3).set(sh.blur, sh.ratio, sh.mix);
+    (u.uRes.value as Vector2).set(this.rt!.width, this.rt!.height);
   }
 
   /** One street-level render of the scene, with the closer fog and the overhead-only helpers hidden. */
