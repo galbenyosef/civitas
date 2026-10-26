@@ -570,15 +570,25 @@ for (const mode of ['synthesised', 'recorded'] as const) {
   ok(/going away/.test(rows[0].why) && rows[0].cents < 0, 'going away: pitched down');
   amb.emergency = false; step(2000);
   ok(st.following === 0 && e.journal.some((j) => j.ev === 'stop' && j.id === 'siren-ambulance-loop' && /flag dropped/.test(j.why)), 'the flag dropping stops the siren with a fade, and says why');
-  amb.emergency = true; amb.rx = 50; step(2250); agents.delete(77); step(2500);
+  amb.emergency = true; amb.rx = 50; step(6100); amb.rx = 60; step(6350);
+  ok(st.following === 1, 'a siren starts again when its vehicle is back on a call (no sooner than 4 s after the last siren started)');
+  amb.rx = 80; step(6600);
   ok(st.following === 0 && e.journal.some((j) => j.ev === 'stop' && /left the 70-tile circle/.test(j.why)), 'a siren that leaves the circle stops');
+  amb.rx = 30; amb.vx = 0; step(11000); step(11250);
+  ok(st.following === 1, 'an ambulance on a call, standing, still sounds at first');
+  for (let ms = 11500; ms < 15000; ms += 250) step(ms);
+  ok(st.following === 0 && e.journal.some((j) => j.ev === 'stop' && /it arrived \(standing still 3 s/.test(j.why)), 'standing still 3 s it has arrived: the siren stops (the flag stays on)');
+  amb.rx = 25; amb.vx = -0.003; step(19500);
+  ok(st.following === 1, 'and moving off again it sounds again');
+  agents.delete(77);
   for (let k = 0; k < 4; k++) agents.set(200 + k, { rx: 10 + k * 10, rz: 0, car: true, trav: true, kind: VehicleKind.FireEngine, cls: VehicleClass.Truck, fleet: 0, emergency: true });
-  step(2750);
-  ok(st.following === STREET.sirenMax, `at most ${STREET.sirenMax} sirens at once, the nearest`);
-  step(3000, -1); // no ride: car 99 may now fire
-  st.begin({ ...cam, map: true }, -1, 0.25); agents.forEach((a, id) => st.visit(a, id, a.rx, a.rz, a.rx * a.rx + a.rz * a.rz)); st.end(3250, 0.25, 1, 5);
+  let first3 = 0;
+  for (let ms = 24000; ms < 40000; ms += 250) { step(ms); if (ms === 24250) first3 = st.following; }
+  ok(first3 === 1 && st.following === STREET.sirenMax, `at most ${STREET.sirenMax} sirens at once, the nearest, one new one every 4 s at most (${first3} at first)`);
+  step(40250, -1); // no ride: car 99 may now fire
+  st.begin({ ...cam, map: true }, -1, 0.25); agents.forEach((a, id) => st.visit(a, id, a.rx, a.rz, a.rx * a.rx + a.rz * a.rz)); st.end(40500, 0.25, 1, 5);
   ok(st.following === 0, 'the map view stops the sirens');
-  ok(/pass-bys \d+ in the last minute \(radius 0 tiles: zoomed out, none\), sirens following 0, walkers close 0/.test(st.text(3300)), `the readout's street line (${st.text(3300)})`);
+  ok(/pass-bys \d+ in the last minute \(radius 0 tiles: zoomed out, none\), sirens following 0, walkers close 0/.test(st.text(40600)), `the readout's street line (${st.text(40600)})`);
   // walkers: footsteps from the count close in, one voice a side (a fresh engine: the one above holds voices on real-time timers)
   const ew = new AudioEngine({ storage: mem(), create: fakeCtx, fetch: okFetch }); ew.start(); await tick(); ew.sample('footsteps'); ew.sample('talk'); await tick();
   const w = new StreetLife(ew, 9);
@@ -591,7 +601,7 @@ for (const mode of ['synthesised', 'recorded'] as const) {
   const one = new StreetLife(ew, 11); let odd = 0;
   for (let ms = 100000; ms < 400000; ms += 250) { one.begin(cam, -1, 0.25); one.visit({ rx: 2, rz: 1, car: false, trav: true }, 900, 2, 1, 5); ew.active = 0; const n0 = ew.shots.length, l0 = ew.shots.at(-1); one.end(ms, 0.25, 1, 1); if (ew.shots.length !== n0 || ew.shots.at(-1) !== l0) odd++; }
   ok(odd >= 5 && odd < 40, `one walker: the odd step (${odd} in five minutes)`);
-  e.muted = true; const ms0 = e.shots.length; step(400000, -1); ok(e.shots.length === ms0, 'a muted engine starts nothing on the street');
+  e.muted = true; const ms0 = e.shots.length, j0 = e.journal.length; step(400000, -1); ok(e.shots.length === ms0 && e.journal.length === j0, 'a muted engine starts nothing on the street');
   e.muted = false;
   // the cost: the street's visits and its end with 2,000 agents round the camera
   const many = new Map<number, StreetAgent>();
@@ -599,12 +609,15 @@ for (const mode of ['synthesised', 'recorded'] as const) {
   const cityS: AmbSources = { hour: () => 12, camera: () => cam, tileAt: () => 0, kindIdAt: () => 0, agents: () => many.values(), eachAgent: (f) => many.forEach(f) };
   const big = new StreetLife(e, 13), scn = newScan();
   const vis = (a: StreetAgent, id: number, dx: number, dz: number, d2: number) => big.visit(a, id, dx, dz, d2);
-  const median = (f: () => void) => { const xs: number[] = []; for (let i = 0; i < 60; i++) { const t0 = performance.now(); f(); xs.push(performance.now() - t0); } return xs.sort((a, b) => a - b)[30]; };
+  const median = (f: () => void) => { const xs: number[] = []; for (let i = 0; i < 400; i++) { const t0 = performance.now(); f(); xs.push(performance.now() - t0); } return xs.sort((a, b) => a - b)[200]; };
   let clock = 500000;
+  for (let i = 0; i < 50; i++) { big.begin(cam, -1, 0.25); scanAround(cityS, 0, 0, 24, scn, vis); big.end(clock += 250, 0.25, 1, 10); } // warm
+  // the street's own work: every agent handed to visit (the scan's walk does this in the real tick) and the end of the tick
+  const streetOnly = median(() => { big.begin(cam, -1, 0.25); many.forEach((a, id) => { const dx = a.rx - cam.x, dz = a.rz - cam.z; big.visit(a, id, dx, dz, dx * dx + dz * dz); }); big.end(clock += 250, 0.25, 1, 10); });
   const withSt = median(() => { big.begin(cam, -1, 0.25); scanAround(cityS, 0, 0, 24, scn, vis); big.end(clock += 250, 0.25, 1, 10); });
   const without = median(() => scanAround(cityS, 0, 0, 24, scn));
-  ok(withSt - without < 0.1, `the street costs ${(withSt - without).toFixed(3)} ms a tick with 2,000 agents (scan ${without.toFixed(3)} ms alone, ${withSt.toFixed(3)} ms with the street; under 0.1)`);
-  console.log(`     (street cost: scan alone ${without.toFixed(4)} ms, scan + street ${withSt.toFixed(4)} ms, the street ${(withSt - without).toFixed(4)} ms)`);
+  ok(streetOnly < 0.1, `the street costs ${streetOnly.toFixed(3)} ms a tick with 2,000 agents, walk included (under 0.1)`);
+  console.log(`     (street cost, medians of 400: the street alone with its own walk ${streetOnly.toFixed(4)} ms; the scan alone ${without.toFixed(4)} ms, the scan with the street ${withSt.toFixed(4)} ms)`);
   // the knees
   type Sc = ReturnType<typeof newScan>;
   const stt = (o: Partial<Sc>): Sc => ({ ...newScan(), road: 0.3, ...o });

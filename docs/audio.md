@@ -29,7 +29,7 @@ Which voices are recorded, and which are not:
 | Districts | metal clank, reversing beeper, steam vent, till, busker, music through a door, revolving door, lift ding, radio through a window, front door, children, camera shutter (and the shop bell, which was a tour cue) |
 | Still synthesised | the four interface clicks (pick, place, refuse, undo): short and tonal, and a synthesised tick is the right sound for them |
 
-What drives the second pass is in `manifest.ts` (the `driven` text of each row) and `ambience.ts` (`places`, and the `mixFor` windows). Two have no source in the game yet and wait on a hook: rain and thunder follow `Ambience.setWeather(rain)` (there is no weather system); a siren is a rare call from a police or fire station in the view until a response vehicle can report itself. Fireworks follow the fireworks system: `render/fireworks.ts` calls `onShell` for every shell and `Audio.firework` times the bang by distance.
+What drives the second pass is in `manifest.ts` (the `driven` text of each row) and `ambience.ts` (`places`, and the `mixFor` windows). Two have no source in the game yet and wait on a hook: rain and thunder follow `Ambience.setWeather(rain)` (there is no weather system); a fire engine or an ambulance on a call carries its own siren ("Street life" below); a police patrol never reports a call, so the police siren is still a rare call from a police station in the view. Fireworks follow the fireworks system: `render/fireworks.ts` calls `onShell` for every shell and `Audio.firework` times the bang by distance.
 
 ### How a recording is played
 
@@ -53,7 +53,7 @@ Files under 4 KB (a dog bark, a rail clack) are inlined by Vite as `data:` URLs 
 
 ### Budget
 
-8 MB for the whole set, 400 KB for any file (audio-check enforces both). Beds, rides and loops are mono 48 kHz Opus at 48 kbps, 14 to 18 s long; events are 0.2 to 14 s. The set is about 6.7 MB (3.4 MB before the tour cues, 5.4 MB before the districts). If it grows: drop `--kbps 32` on the build, or shorten a bed.
+8 MB for the whole set, 400 KB for any file (audio-check enforces both). Beds, rides and loops are mono 48 kHz Opus at 48 kbps, 14 to 18 s long; events are 0.2 to 14 s. The set is about 6.9 MB (3.4 MB before the tour cues, 5.4 MB before the districts, 6.7 MB before street life). A voice can carry its own bitrate (`kbps` in `audio-voices.ts`): the street-life clips ship at 32 kbps. If it grows: drop `--kbps 32` on the build, or shorten a bed.
 
 ### Re-running the fetch, and swapping a clip
 
@@ -220,3 +220,71 @@ Measured in Chrome on the Showcase and London:
 | Open, a second | two refreshes: 0.02 ms warm, about 0.3 ms cold |
 
 The panel reuses a row's elements while its voice sounds and sets only the text that changed, so a refresh does not parse HTML. `msc.audioReadout.cost` has the last refresh and the running mean.
+
+## Street life
+
+The cars, vans, lorries, buses, mopeds and bicycles the player can see are heard one by one as they pass, the walkers close in are footsteps and talk, and a fire engine or an ambulance on a call carries its siren with it. Client only: everything comes from what render/citizens.ts already draws (the agent's drawn position, its drawn velocity, its class, fleet kind and emergency flag); nothing in the simulation or the protocol changed. The code is `src/audio/street.ts`; every number below is a constant in its `STREET` table.
+
+### Why the city was quiet
+
+Measured on UAT before this work (Rich: "not hearing much at all. no cars, bikes, pedestrians, cycles, sirens etc etc"): nothing in normal play was tied to a vehicle or a walker that is drawn. The traffic bed was brown noise with a swell that needed 45 cars to be full, the crowd needed 90 walkers in a 15-tile circle (a few thousandths of a crowd on an ordinary street), the horn was a Poisson clock once in about three minutes and the sirens a station's call once in four, and the night curve took a third of each day to near silence. Measured here with the readout (dist 24, by day):
+
+| | before | after |
+|---|---|---|
+| London, Marble Arch (233 cars and 20 walkers in the circles) | 3.5 starts a minute, none a vehicle (pigeons, cameras, hammer, drill, footsteps); traffic -16.7 dB, crowd -29.8 dB | {{MA_AFTER}} |
+| Showcase, the homes round the communal garden (23, 52; 184 cars, 34 walkers) | 6.3 a minute (dog, kids, birds, gulls, a horn, footsteps); traffic -20.6 dB, crowd -37.4 dB | {{SC_AFTER}} |
+
+### Pass-bys
+
+- **The crossing rule.** Each tick the scan walks the agents once (`AmbSources.eachAgent`, a `Map.forEach` with the agent's id, no allocation) and hands every road vehicle to the street (`StreetLife.visit`). A vehicle is tracked while it is within 2R of the camera's ground point; inside R and moving faster than 0.3 tiles a second (a queue or a parked car does not pass) it is a candidate until it fires; it is re-armed only once it has left 2R (or is no longer drawn). R is 12 tiles at street zoom (24), scales with the zoom (half the camera distance, at least 6) and is nothing above a camera distance of 90 and in the map view. One start per crossing: a car crawling past is one pass-by, not one a tick.
+- **The budget.** At most one new pass-by a second and six sounding at once, the nearest candidate first (`PassPicker`, pure, driven by the checks). One-shots already leave the engine's last four voices to the beds and the ride, so a street of cars never takes the traffic bed's voice.
+- **Never the ridden vehicle.** The first-person sound's ride key (`c<id>`, `FpvSound.rideKey`) is handed to the street, and that agent is skipped entirely (no pass-by, no siren).
+- **The sound by class** (`passKindOf`: the fleet kind first, then the body class): a car (`pass-car`, three takes), a taxi (the car takes 6% lower), a van (14% lower, a little louder), a lorry, bin lorry, sweeper or fire engine (`pass-lorry`, diesel), a bus (`bus-pass`, the tour cue's clip), a delivery moped (`pass-moped`), a delivery bicycle (`pass-bike`, a freewheel, and the bicycle bell one time in four).
+- **Pan, Doppler, gain.** The closest approach is worked out from the drawn position and velocity (`approach`: when, and how near). The clip is lined up so its loudest moment (the build cuts each pass-by round its loudest 50 ms) meets the closest approach: a vehicle already at its nearest starts the clip part-way in, one still coming is delayed up to a second. A StereoPanner ramps from the vehicle's side now to its side at the end of the clip (the side is the position along the camera's right vector, as the crossing beep does), so a car crossing the view goes left to right. The pitch starts a little high and falls through the moment of passing to a little low: a bend of the speed over 60, 1% to 4% (half that for a vehicle already going away). The gain is 1 / (1 + nearest / 5 tiles), less from higher up (a quarter at the top of the range).
+- **Organic rule.** The seed is the vehicle's id hashed with a running count, so every crossing differs: the take, the pitch (±5% on top of the class), the level (±10%), the pan path (its own path), the bend (its own speed).
+- **The horn** is tied to the pass-bys: one in 25 cars, taxis or vans passing within 6 tiles honks (one in 10 on a junction tile, a road with three road neighbours), a moment after the pass starts. The standalone Poisson horn is gone.
+
+### Walkers
+
+- **Footsteps** count the walkers within 8 tiles on each side of the camera, one voice a side at a time: a Poisson clock of 0.04 a second plus 0.6 times a smoothstep from none to six walkers (one walker is the odd step, six are steady), louder for more and for a nearer one, fading out by camera distance 55. The old footsteps clock (a crowd density) is gone.
+- **Talk** (`talk`, three takes of passers-by talking): with fifteen or more walkers per 15-tile circle, by day (07:00 to 22:00), close in, one at a time.
+- **The crowd bed's knee** moved from 6..90 walkers per circle to 3..25 (`peopleNear`, an ease-out: quick from the first few, settling at 25), and `CROWD_BY` was rebalanced so a shopping street with 20 walkers sits at about half the bed's ceiling (0.51) and a terrace with 5 at about a tenth (0.10): shops and squares 0.52, offices 0.35, homes 0.25, yards 0.05.
+
+### Sirens that follow their vehicles
+
+- A FireEngine or Ambulance agent with the emergency flag (a call: `v.priority` on the server) within 70 tiles, at any zoom under the map, owns a looping siren (`siren-fire-loop`, `siren-ambulance-loop`; `siren-loop` for a patrol, should one ever carry the flag) that follows it: the gain is full within 10 tiles and 1/d past it (less from very high up), the pan from its side, the pitch up while it nears and down as it goes (the change of its distance a second over 50, within ±4%), all glided over 0.3 s on each 250 ms tick. Each vehicle's loop starts at its own point, at its own rate (±3%) and level (±10%).
+- At most three at once, the nearest; a siren already followed keeps its slot until another is a quarter nearer, and is let go 6 tiles past the circle, so it does not flap at the edges. A siren stops with a 1.5 s fade when the flag drops (the vehicle arrived, or is heading back), when it leaves the circle, when three nearer ones take the slots, in the map view, on a mute or when the tab is hidden. The loops take a held voice only while the one-shots' share is not spent (`makeLoop`), so the beds and the ride always keep their four.
+- **The station calls.** The sim never sets the emergency flag on a police patrol (patrols are routine: `emergency = job.vkind !== Patrol`), so the police station's Poisson call stays as it was, the only police siren there is. The fire engines carry their own, so the fire station's call is a tenth of its old rate (for a town with a fire station and no call yet). Neither sounds while a vehicle's siren is being followed.
+- The loops are cut from the source to whole cycles of the siren's pattern (`period` in `audio-voices.ts`, measured once: 4.64 s police, 5.805 s fire, 3.85 s ambulance) with a 0.3 s cross-fade, the level evened out so the recording's own approach does not swell at every turn.
+
+### The beds
+
+- **Traffic**: full from about 15 cars in the street-zoom circle (25 tiles), easing to the old 45 as the circle grows with the zoom (`carKnee`, 15 to 45 between camera distance 40 and 140), so 10 cars on a street are a quarter of the bed's ceiling or more (0.29 on a terrace, 0.51 on a shopping street) and the far view is unchanged (an A/B of `mixFor` at distance 200 by day against a38edde: no change at all, over 96 scans of five beds each).
+- **The night floor**: the city's activity is 0.4 after midnight and before 05:00 (it was 0.25), with the same shape between (up from 05:00 to 08:00, down from 21:00 to midnight).
+
+### The readout
+
+- Every start says why: `pass-by: car #c4120 at 6 tiles in 1.2 s, 1.8 tiles/s, left to right`, `bike bell: the bicycle #c311 passing 3 tiles off (one in four)`, `horn: the taxi #c87 passing 2 tiles off at a junction (one in 10)`, `footsteps: 6 walkers within 8 tiles on the left, the nearest 2 tiles off`, `talk: 22 walkers per 15-tile circle (15 or more), 9 within 8 tiles, by day`, `siren: ambulance #c77 at 41 tiles, on a call (the nearest 1 of 1 within 70)`, and each stop says why (`its call is over (the emergency flag dropped)`, `it left the 70-tile circle`, `three nearer sirens`).
+- A following siren is a voice row of its own while it sounds: `siren: ambulance #c77 at 23 tiles, nearing (2.4 tiles/s), gain 0.43 (1/d past 10 tiles), pan -0.31`.
+- The header has a **street** line: `pass-bys 23 in the last minute (radius 12 tiles), sirens following 1, walkers close 6`. `Audio.state()` gained `street` (optional, so an older snapshot still reads).
+
+### Clips and credits
+
+| voice | takes | from (Freesound, CC0) | shipped |
+|---|---|---|---|
+| `pass-car` | 3 | 233465 (a Smart car by), 176215 (a car pass-by), 128124 (a Renault passing) | 3.0 s each, 11 KB |
+| `pass-lorry` | 2 | 663368 (a passing truck), 583278 (an old truck pass-by) | 3.5 s, 13 to 14 KB |
+| `pass-moped` | 2 | 828204 (a small motorbike passing), 509522 (a scooter drive-by) | 3.0 s, 11 to 12 KB |
+| `pass-bike` | 2 | 185633 (a bicycle freewheeling), 458862 (a bicycle passing) | 2.5 s, 10 to 14 KB |
+| `talk` | 3 | 152810 (people talking in the street), 121786 (a street in Madrid), 867051 (a medium crowd walla) | 3.0 s, 11 to 12 KB |
+| `siren-loop` | 1 | 268809 (the police siren already shipped as `siren`) | 9.3 s loop, 37 KB |
+| `siren-fire-loop` | 1 | 315758 (a fire truck siren) | 11.6 s loop, 43 KB |
+| `siren-ambulance-loop` | 1 | 469363 (a distant ambulance siren) | 7.7 s loop, 30 KB |
+
+15 files, 0.25 MB at 32 kbps; the set is 6.93 MB of the 8 MB. Each has its row in `CREDITS.md` (voice, link, title, author, the query, what was done). The pass-bys are cut round their loudest moment (`peak` in `audio-voices.ts`: the window is 55% before it), faded in and out. Listen first to: the second talk take (a Madrid street, the language may show), the moped's second take (a scooter drive-by with a long tail), the van (a car take lowered 14%, not a van recording) and the ambulance loop (a distant recording, so its level is evened out).
+
+### Checks and cost
+
+`audio-check.ts`: the classes (`passKindOf`, `sirenKindOf`), the radius, the picker (the nearest moving vehicle first and never a standing one, no second start inside a second, no second start for a vehicle on the same crossing, re-armed past 2R, six at most at once, a stream of 40 cars a tick held to one start a second), the closest approach and the pan, the siren gain; the real layer against the fake engine (the nearest car fires and never the ridden one, the pass-by's why, an ambulance's siren starting, its row, nearing louder and pitched up, nearer louder and panned, going away pitched down, the flag dropping and leaving the circle stopping it, three at most, the map view stopping them, the street line), the walkers (six on a side are steady footsteps one voice at a time, one is the odd step), a muted engine starting nothing; the knees (10 cars a quarter of the traffic ceiling or more, 20 walkers in a shopping street about half the crowd, 5 on a terrace about a tenth, the far knee 45, the night floor 0.4) and every new voice having its recording. Two older bounds moved with the knees and say so in the check: the murmur at 03:00 is now 0.4 of noon's (the bound went from 0.4 to 0.45), and 60 walkers at zoom 80 are 0.43 of a crowd (the density bound went from 3x to 2x).
+
+**Cost**: {{COST}}

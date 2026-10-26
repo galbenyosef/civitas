@@ -483,7 +483,7 @@ export class Ambience {
     const rk = this.ridden(), street = this.street;
     street.begin(cam, rk.startsWith('c') ? Number(rk.slice(1)) : -1, dt);
     const s0 = performance.now();
-    const sc = scanAround(src, cam.x, cam.z, cam.dist, this.scan, this.visit);
+    const sc = scanAround(src, cam.x, cam.z, cam.dist, this.scan, street.off ? undefined : this.visit);
     zonesOf(sc, this.lead, this.zoning); // the district, for the events and the readout; mixFor finds the same one for the beds
     const mix = applyHint(mixFor(sc, cam.dist, hour, cam.map, this.mix, this.rain, this.lead), this.hint, now, this.salt);
     const lead = this.lead; this.lead = this.zoning.win; // the winner leads the next tick a little (no flipping on a border)
@@ -502,7 +502,7 @@ export class Ambience {
       this.beds[k]!.tune(tg.level, tg.tone, 0.5 + 0.7 * hash2(k.length, this.salt)); // each bed glides at its own pace: 1.5 to 3.6 s
     }
     const s1 = performance.now();
-    street.end(now, dt, during(hour, 7, 22), walkerDensity(sc, cam.dist));
+    if (!street.off) street.end(now, dt, during(hour, 7, 22), walkerDensity(sc, cam.dist));
     street.cost = performance.now() - s1; // the street's own end of the tick; its visits run inside the scan (s1 - s0 is scan and visits together)
     street.scanCost = s1 - s0;
     if (cam.map) return;

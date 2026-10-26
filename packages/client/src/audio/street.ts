@@ -43,7 +43,7 @@ export function passKindOf(a: StreetAgent): PassKind {
     case FleetKind.Hearse: return 'car';
   }
   if (a.cls === VehicleClass.Bus) return 'bus';
-  if (a.cls === VehicleClass.Truck || a.kind === VehicleKind.FireEngine) return 'lorry';
+  if (a.cls === VehicleClass.Truck) return 'lorry';
   if (a.cls === VehicleClass.Van) return 'van';
   return 'car';
 }
@@ -78,6 +78,12 @@ export const STREET = {
   passMinSpeed: 0.3,
   /** sirens: heard within this many tiles at any zoom under the map, at most three at once (the nearest), the gain falling as 1/d past the knee */
   sirenR: 70, sirenMax: 3, sirenKnee: 10,
+  /** a siren already followed keeps its slot until another is this much nearer (a share), and is let go this many tiles past the circle: no flapping at the edges */
+  sirenKeep: 0.75, sirenHold: 6,
+  /** a siren stops when its vehicle has stood still this long (it has arrived at the call, though the flag stays on until it heads back), and starts again only when it moves */
+  sirenArrive: 3, sirenStill: 0.25,
+  /** at most one new siren every this many ms (a busy fire district sends one engine after another) */
+  sirenGapMs: 4000,
   /** footsteps and talk: walkers within this many tiles */
   walkR: 8,
   /** a horn: one in this many close car pass-bys, one in `hornJunction` at a junction */
@@ -104,7 +110,7 @@ export const sirenGain = (d: number) => (d <= STREET.sirenKnee ? 1 : STREET.sire
  * (or is no longer drawn).
  */
 export class PassPicker {
-  private seen = new Map<number, { fired: boolean; at: number; x: number; z: number }>();
+  private seen = new Map<number, PassRec>();
   private cands: { id: number; d: number }[] = [];
   private tick = 0;
   /** when each pass-by sounding now ends (ms), and when the last started */
@@ -115,12 +121,13 @@ export class PassPicker {
   /** the record of a vehicle (its last position, for its speed), or undefined when it is not tracked */
   rec(id: number) { return this.seen.get(id); }
   /** a vehicle `d` tiles from the camera's ground point, moving at `speed` tiles a second, with the pass-by radius R */
-  visit(id: number, d: number, R: number, speed: number, x = 0, z = 0) {
-    if (R <= 0 || d >= 2 * R) { this.seen.delete(id); return; }
-    let r = this.seen.get(id);
-    if (!r) { r = { fired: false, at: this.tick, x, z }; this.seen.set(id, r); }
+  visit(id: number, d: number, R: number, speed: number, x = 0, z = 0, rec?: PassRec): PassRec | undefined {
+    if (R <= 0 || d >= 2 * R) { this.seen.delete(id); return undefined; }
+    let r = rec ?? this.seen.get(id);
+    if (!r) { r = { fired: false, at: this.tick, x, z, vx: 0, vz: 0, a: null }; this.seen.set(id, r); }
     r.at = this.tick; r.x = x; r.z = z;
     if (!r.fired && d < R && speed >= STREET.passMinSpeed) this.cands.push({ id, d });
+    return r;
   }
   /** forget vehicles no longer drawn; then the one to fire now (the nearest candidate) or null when the budget says wait */
   pick(now: number): number | null {
@@ -144,6 +151,9 @@ export class PassPicker {
   clear() { this.seen.clear(); this.until.length = 0; this.cands.length = 0; }
 }
 
+/** a vehicle the picker tracks: whether it has fired on this crossing, the tick it was last seen, where it was drawn, its velocity (tiles a second) and the agent */
+export interface PassRec { fired: boolean; at: number; x: number; z: number; vx: number; vz: number; a: StreetAgent | null }
+
 /** one siren following its vehicle */
 interface Follow { id: number; kind: SirenKind; loop: Loop; d: number; lastD: number; rate: number; gain: number; pan: number; born: number; why: string }
 
@@ -153,11 +163,14 @@ export interface StreetCam { x: number; z: number; dist: number; map: boolean; r
 export class StreetLife {
   readonly picker = new PassPicker();
   private follows = new Map<number, Follow>();
-  private sirenCands: { id: number; kind: SirenKind; d: number; x: number; z: number }[] = [];
-  private agentsById = new Map<number, StreetAgent>();
-  /** each candidate's velocity this tick, tiles a second (from the drawn glide, or from where it was a tick ago) */
-  private vel = new Map<number, { x: number; z: number }>();
-  /** the followed vehicles still drawn this tick (to tell a call ending from a vehicle leaving) */
+  /** when the last siren started (ms) */
+  private sirenAt = -1e9;
+  /** a switch for measuring (msc.audio.ambience.street.off = true): the scan then walks the agents without the street, and nothing on the street starts */
+  off = false;
+  private sirenCands: { id: number; kind: SirenKind; d: number; x: number; z: number; moving: boolean }[] = [];
+  /** emergency vehicles on a call that stood still (arrived): since when (ms), and whether their siren was stopped for it */
+  private still = new Map<number, { since: number; x: number; z: number; arrived: boolean }>();
+  /** the followed vehicles still drawn with their flag on this tick (an arrival, three nearer, or leaving the circle; a followed vehicle not here dropped its flag or vanished) */
   private followSeen = new Set<number>();
   /** walkers close in, each side of the camera, this tick */
   private walkL = 0; private walkR = 0; private walkNear = 1e9;
@@ -187,7 +200,7 @@ export class StreetLife {
     this.cam = cam; this.ridden = ridden; this.dt = dt;
     this.R = cam.map ? 0 : passRadius(cam.dist);
     this.picker.begin();
-    this.sirenCands.length = 0; this.agentsById.clear(); this.vel.clear(); this.followSeen.clear();
+    this.sirenCands.length = 0; this.followSeen.clear();
     this.walkL = this.walkR = 0; this.walkNear = 1e9;
   }
 
@@ -195,18 +208,23 @@ export class StreetLife {
   visit(a: StreetAgent, id: number, dx: number, dz: number, d2: number) {
     if (a.under || id === this.ridden) return;
     if (a.car) {
-      if (this.follows.size && this.follows.has(id)) this.followSeen.add(id);
-      const sk = a.emergency ? sirenKindOf(a) : null;
-      if (sk && d2 < STREET.sirenR * STREET.sirenR && !this.cam.map) { this.sirenCands.push({ id, kind: sk, d: Math.sqrt(d2), x: a.rx, z: a.rz }); this.agentsById.set(id, a); }
+      if (a.emergency) {
+        const held = this.follows.has(id), sk = sirenKindOf(a), sr = held ? STREET.sirenR + STREET.sirenHold : STREET.sirenR;
+        if (held) this.followSeen.add(id);
+        if (sk && d2 < sr * sr && !this.cam.map) {
+        const glide = a.vx !== undefined && a.vy !== undefined ? Math.hypot(a.vx, a.vy) * 1000 : -1;
+        this.sirenCands.push({ id, kind: sk, d: Math.sqrt(d2), x: a.rx, z: a.rz, moving: glide < 0 || glide >= STREET.sirenStill });
+        }
+      }
       const R = this.R;
       if (R > 0) {
-        if (d2 >= 4 * R * R) { if (this.picker.rec(id)) this.picker.visit(id, 2 * R, R, 0); return; }
+        if (d2 >= 4 * R * R) return; // not seen this tick: the picker forgets it (re-armed) when it picks
         const d = Math.sqrt(d2), r = this.picker.rec(id);
         let vx = 0, vz = 0;
         if (a.vx !== undefined && a.vy !== undefined && (a.vx !== 0 || a.vy !== 0)) { vx = a.vx * 1000; vz = a.vy * 1000; } else if (r && this.dt > 0) { vx = (a.rx - r.x) / this.dt; vz = (a.rz - r.z) / this.dt; }
         if (vx * vx + vz * vz > 400) vx = vz = 0; // a jump (a teleport, a reroute) is not speed
-        this.picker.visit(id, d, R, Math.hypot(vx, vz), a.rx, a.rz);
-        if (d < R) { this.agentsById.set(id, a); this.vel.set(id, { x: vx, z: vz }); }
+        const rec = this.picker.visit(id, d, R, Math.sqrt(vx * vx + vz * vz), a.rx, a.rz, r);
+        if (rec) { rec.vx = vx; rec.vz = vz; rec.a = a; }
       }
     } else if (a.trav && d2 < STREET.walkR * STREET.walkR) {
       if (dx * this.cam.rightX + dz * this.cam.rightZ < 0) this.walkL++; else this.walkR++;
@@ -249,10 +267,10 @@ export class StreetLife {
 
   /** fire the pass-by of vehicle `id` (the picker's choice) */
   private pass(id: number, now: number) {
-    const eng = this.eng, cam = this.cam, a = this.agentsById.get(id);
-    if (!a) { this.picker.fired(id, now, 0); return; }
+    const eng = this.eng, cam = this.cam, rec = this.picker.rec(id), a = rec?.a;
+    if (!rec || !a) { this.picker.fired(id, now, 0); return; }
     const kind = passKindOf(a), pv = PASS_VOICE[kind];
-    const px = a.rx - cam.x, pz = a.rz - cam.z, v = this.vel.get(id) ?? { x: 0, z: 0 }, vx = v.x, vz = v.z;
+    const px = a.rx - cam.x, pz = a.rz - cam.z, vx = rec.vx, vz = rec.vz;
     const speed = Math.hypot(vx, vz), ap = approach(px, pz, vx, vz);
     const seed = (hash2(id, this.salt + this.n++) * 1e9) | 0; // per vehicle and per crossing: take, pitch, level, pan path all differ
     const buf = eng.sample(pv.voice, hash2(seed, 5));
@@ -287,13 +305,22 @@ export class StreetLife {
   /** follow the nearest three emergency vehicles on a call with their sirens; stop the rest with a fade */
   private sirens(now: number, dt: number) {
     const eng = this.eng, cam = this.cam;
-    const want = this.sirenCands.sort((a, b) => a.d - b.d).slice(0, STREET.sirenMax);
+    // arrival: a vehicle standing still for a few seconds has reached its call (its flag stays on until it heads back): its siren stops, and starts again when it moves
+    for (const c of this.sirenCands) {
+      let st = this.still.get(c.id);
+      if (!st) { st = { since: now, x: c.x, z: c.z, arrived: false }; this.still.set(c.id, st); }
+      const moved = Math.hypot(c.x - st.x, c.z - st.z) > 0.5;
+      if (c.moving || moved) { st.since = now; st.x = c.x; st.z = c.z; st.arrived = false; } else if (now - st.since > STREET.sirenArrive * 1000) st.arrived = true;
+    }
+    if (this.still.size > 64) for (const [id] of this.still) if (!this.sirenCands.some((c) => c.id === id)) this.still.delete(id);
+    const rank = (c: { id: number; d: number }) => c.d * (this.follows.has(c.id) ? STREET.sirenKeep : 1);
+    const want = this.sirenCands.filter((c) => !this.still.get(c.id)?.arrived).sort((a, b) => rank(a) - rank(b)).slice(0, STREET.sirenMax);
     const keep = new Set(want.map((w) => w.id));
     for (const [id, f] of this.follows) {
       if (keep.has(id)) continue;
       const still = this.sirenCands.find((c) => c.id === id);
-      const reason = cam.map ? 'the map view' : still ? `three nearer sirens (it is ${still.d.toFixed(0)} tiles off)` : this.followSeen.has(id) ? 'its call is over (the emergency flag dropped)' : `it left the ${STREET.sirenR}-tile circle`;
-      f.loop.stop(1.5);
+      const reason = cam.map ? 'the map view' : !this.followSeen.has(id) ? (f.d < STREET.sirenR - 4 ? `its call is over at ${f.d.toFixed(0)} tiles (the emergency flag dropped, or it parked and is no longer drawn)` : `it left the ${STREET.sirenR}-tile circle`) : still && this.still.get(id)?.arrived ? `it arrived (standing still ${STREET.sirenArrive} s at ${still.d.toFixed(0)} tiles; the call goes on)` : still ? `three nearer sirens (it is ${still.d.toFixed(0)} tiles off)` : `it left the ${STREET.sirenR}-tile circle (and ${STREET.sirenHold} past it)`;
+      f.loop.stop(still && this.still.get(id)?.arrived ? 2.5 : 1.5);
       this.follows.delete(id);
       eng.log('stop', 'event', SIREN_VOICE[f.kind], `siren: ${f.kind} #c${id} stopped: ${reason}`);
     }
@@ -302,10 +329,12 @@ export class StreetLife {
       let f = this.follows.get(w.id);
       const px = w.x - cam.x, pz = w.z - cam.z;
       if (!f) {
+        if (now - this.sirenAt < STREET.sirenGapMs) continue;
         const voice = SIREN_VOICE[w.kind];
         const loop = makeLoop(eng, voice, (hash2(w.id, 0x51e) * 1e9) | 0);
         if (!loop) continue; // no recording yet, or no voice free: tried again next tick
         f = { id: w.id, kind: w.kind, loop, d: w.d, lastD: w.d, rate: 1, gain: 0, pan: 0, born: performance.now(), why: '' };
+        this.sirenAt = now;
         this.follows.set(w.id, f);
         eng.log('start', 'event', voice, `siren: ${w.kind} #c${w.id} at ${w.d.toFixed(0)} tiles, on a call (the nearest ${keep.size} of ${this.sirenCands.length} within ${STREET.sirenR})`);
       }
