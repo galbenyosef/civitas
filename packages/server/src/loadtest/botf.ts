@@ -41,6 +41,8 @@ class LocalBot {
   goals: any = null; rank: any = null;
   rankUps: { t: number; rank: number; grant: number }[] = [];
   done: { t: number; id: string }[] = [];
+  /** every advisor hint heard, with the game time */
+  hints: { t: number; id: string }[] = [];
   private onMsg: ((d: string) => void) | null = null;
   /** called after every game loop (the cash watch) */
   afterLoop = () => {};
@@ -81,7 +83,7 @@ class LocalBot {
       }
       case 'rank': this.rank = m.rank; if (m.up) this.rankUps.push({ t: this.day + this.dayFrac, ...m.up }); break;
       case 'goals': this.goals = m.goals; if (m.completed) this.done.push({ t: this.day + this.dayFrac, id: m.completed.id }); break;
-      case 'hint': { const o = { kind: 'hint:' + m.id, msg: m.msg ?? m.id }; this.toasts.push(o); this.pendingToasts.push(o); break; }
+      case 'hint': { this.hints.push({ t: this.day + this.dayFrac, id: m.id }); const o = { kind: 'hint:' + m.id, msg: m.msg ?? m.id }; this.toasts.push(o); this.pendingToasts.push(o); break; }
     }
   }
   tile(x: number, y: number): number | undefined {
@@ -118,24 +120,32 @@ export interface BotFResult {
   /** the treasury at each game hour */
   hourly: number[];
   residents: number;
+  /** goals done and advisor hints heard, with game minutes after joining (docs/ranks.md section 3, the first twenty minutes) */
+  goals: { min: number; id: string }[];
+  hints: { min: number; id: string }[];
 }
 
 /**
  * Join a fresh frontier world as its first player and play bot F for `minutes` (real minutes at 1×). `accept` is the
  * game's ConnSource hook (what createGame passed to `onConnection`); `log`, if given, hears each purchase and rank-up.
  */
-export async function playF(game: Game, accept: (c: Conn) => void, minutes = 180, log?: (min: number, what: string) => void, opts: { power?: boolean } = {}): Promise<BotFResult> {
-  return play(new LocalBot(game, accept, 'Gauntlet'), minutes, log, opts.power ?? true);
+export async function playF(game: Game, accept: (c: Conn) => void, minutes = 180, log?: (min: number, what: string) => void, opts: { power?: boolean; sample?: (min: number) => void } = {}): Promise<BotFResult> {
+  return play(new LocalBot(game, accept, 'Gauntlet'), minutes, log, opts.power ?? true, opts.sample);
 }
 
 /** `withPower` false: the bot as before utilities (no Electrification, no substations), the baseline loadtest/utilities-ranks.ts compares against */
-async function play(b: LocalBot, minutes: number, log?: (min: number, what: string) => void, withPower = true): Promise<BotFResult> {
+async function play(b: LocalBot, minutes: number, log?: (min: number, what: string) => void, withPower = true, sample?: (min: number) => void): Promise<BotFResult> {
   b.sub(-3, -3, 3, 3);
   await b.sleep(1500);
   const T0 = b.day + b.dayFrac;
   const low = { v: Infinity, at: 0 };
   const note = (what: string) => log?.(minOf(b.day + b.dayFrac - T0), `${what} ($${Math.round(b.money)})`);
-  b.afterLoop = () => { const m = b.money; if (m < low.v) { low.v = m; low.at = minOf(b.day + b.dayFrac - T0); } };
+  let sampled = -1;
+  b.afterLoop = () => {
+    const m = b.money, now = minOf(b.day + b.dayFrac - T0);
+    if (m < low.v) { low.v = m; low.at = now; }
+    if (sample && Math.floor(now) > sampled) { sampled = Math.floor(now); sample(sampled); }
+  };
   b.afterLoop();
 
   const mine = () => b.parcels.filter((p) => p.owner === b.you);
@@ -356,5 +366,8 @@ async function play(b: LocalBot, minutes: number, log?: (min: number, what: stri
   const ups: number[] = [];
   for (const u of b.rankUps) { ups[u.rank - 1] = minOf(u.t - T0); log?.(ups[u.rank - 1], `rank ${u.rank} +$${u.grant}`); }
   for (const g of b.done) log?.(minOf(g.t - T0), `goal ${g.id} done`);
-  return { ups, low: Math.round(low.v), lowAt: low.at, hourly, residents: b.me.progress.housed ?? 0 };
+  return {
+    ups, low: Math.round(low.v), lowAt: low.at, hourly, residents: b.me.progress.housed ?? 0,
+    goals: b.done.map((g) => ({ min: minOf(g.t - T0), id: g.id })), hints: b.hints.map((h) => ({ min: minOf(h.t - T0), id: h.id })),
+  };
 }
