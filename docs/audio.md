@@ -231,8 +231,8 @@ Measured on UAT before this work (Rich: "not hearing much at all. no cars, bikes
 
 | | before | after |
 |---|---|---|
-| London, Marble Arch (233 cars and 20 walkers in the circles) | 3.5 starts a minute, none a vehicle (pigeons, cameras, hammer, drill, footsteps); traffic -16.7 dB, crowd -29.8 dB | {{MA_AFTER}} |
-| Showcase, the homes round the communal garden (23, 52; 184 cars, 34 walkers) | 6.3 a minute (dog, kids, birds, gulls, a horn, footsteps); traffic -20.6 dB, crowd -37.4 dB | {{SC_AFTER}} |
+| London, Marble Arch (233 cars and 20 walkers in the circles) | 3.5 starts a minute, none a vehicle (pigeons, cameras, hammer, drill, footsteps); traffic -16.7 dB, crowd -29.8 dB | about 60 pass-bys a minute (car 53, bus 3.5, lorry 0.5) with 2.5 horns and a bike bell, footsteps 14.5, talk 3 (09:17 to 14:42); traffic -16.7 dB (the bed was already full with 233 cars), crowd -22.0 dB |
+| Showcase, the homes round the communal garden (23, 52; 184 cars, 34 walkers) | 6.3 a minute (dog, kids, birds, gulls, a horn, footsteps); traffic -20.6 dB, crowd -37.4 dB | 59 pass-bys a minute (car 58, bus 1), 3 horns, footsteps 19, talk 1.6, the dog, kids and birds as before, and 9 siren starts a minute from the fire and ambulance calls round it (11:15 to 16:43); traffic -20.6 dB, crowd -28.1 dB |
 
 ### Pass-bys
 
@@ -287,4 +287,6 @@ Measured on UAT before this work (Rich: "not hearing much at all. no cars, bikes
 
 `audio-check.ts`: the classes (`passKindOf`, `sirenKindOf`), the radius, the picker (the nearest moving vehicle first and never a standing one, no second start inside a second, no second start for a vehicle on the same crossing, re-armed past 2R, six at most at once, a stream of 40 cars a tick held to one start a second), the closest approach and the pan, the siren gain; the real layer against the fake engine (the nearest car fires and never the ridden one, the pass-by's why, an ambulance's siren starting, its row, nearing louder and pitched up, nearer louder and panned, going away pitched down, the flag dropping and leaving the circle stopping it, three at most, the map view stopping them, the street line), the walkers (six on a side are steady footsteps one voice at a time, one is the odd step), a muted engine starting nothing; the knees (10 cars a quarter of the traffic ceiling or more, 20 walkers in a shopping street about half the crowd, 5 on a terrace about a tenth, the far knee 45, the night floor 0.4) and every new voice having its recording. Two older bounds moved with the knees and say so in the check: the murmur at 03:00 is now 0.4 of noon's (the bound went from 0.4 to 0.45), and 60 walkers at zoom 80 are 0.43 of a crowd (the density bound went from 3x to 2x).
 
-**Cost**: {{COST}}
+**Cost**: the street's visits and the end of its tick cost 0.073 ms with 2,000 agents in audio-check (a dense case: 667 cars within 24 tiles of the camera), walk included, and 0.088 ms with 3,347 real London agents in Chrome, of which 0.040 ms is the walk over the agents that the scan does anyway (0.053 ms scaled to 2,000). The readout's tick median stayed at 0.2 to 0.4 ms (Chrome's timer resolution is 0.1 ms). `msc.audio.ambience.street.off = true` switches the layer off for an A/B.
+
+A busy street saturates the pass-by budget (one a second): London's and the Showcase's streets carry 120 to 230 cars in the 25-tile circle by day. The sirens are frequent in both, because the sim sends many fire and ambulance calls; the arrival rule and the 4 s gap keep them from restarting every second.
