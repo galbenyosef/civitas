@@ -2,6 +2,9 @@ import { Group, Mesh, MeshBasicMaterial, RingGeometry, PlaneGeometry, BufferGeom
 import { isFreightYardKind, stopName, stopModeOf, hasFeature, techFor, sailPoints, TRANSIT, METRO, FERRY, TICKS_PER_DAY, TICKS_PER_HOUR, type MetroLineDTO, type FerryLineDTO, type RailRoute, type LineInfo, type StopInfo, type BusInfo, type StopRef, type ServerMsg, type TransitMode, type LinePreview } from '@msimcity/shared';
 import { Ribbon } from './render/route';
 import { METRO_Y } from './render/underground';
+import { StopMarks, type Mark } from './render/stopmarks';
+import { roofAnchor } from './render/issues';
+import { LineWatcher, StopSet, collectStops } from './linewatch';
 import type { NetClient } from './net';
 import type { ClientWorld } from './world';
 
@@ -12,7 +15,9 @@ import type { ClientWorld } from './world';
  * server routes the draft (a 'linePreview': sim/transit.ts plan, sim/busroute.ts) and the editor draws the road the
  * bus will take, the stops numbered in order, where it turns round, the lap's length and round trip, and anything
  * that stops it running: the leg that fails in red, the land a road would join it over, a better tile for a stop.
- * Saved lines are drawn as ribbons in their colours while the panel is open. The 'lines' message also carries which
+ * While a line is edited every stop of its mode wears a pulsing ring and pin (render/stopmarks.ts), and the draft is
+ * routed again whenever the roads, rules or stops under it change (linewatch.ts), so a red leg clears as the road that
+ * fixes it goes down. Saved lines are drawn as ribbons in their colours while the panel is open. The 'lines' message also carries which
  * line each bus on the road runs, for its livery (render/citizens.ts).
  */
 
@@ -74,10 +79,24 @@ export class LinesPanel {
   private failRibbon = new Ribbon(new MeshBasicMaterial({ color: FAIL, transparent: true, opacity: 0.85, depthWrite: false, side: DoubleSide, toneMapped: false }), RIBBON_Y + 0.006);
   /** numbered stop badges over the draft's stops */
   private badges: Sprite[] = [];
-  /** the draft's change counter, and the server's route for the draft (it may be one change behind while it answers) */
-  private seq = 0;
+  /**
+   * the draft's revision (bumped by every edit of its stops or shape), and the server's route for it. A request carries its own
+   * id, and `reqs` remembers which revision each one asked about: an answer for an older revision is dropped, while one for
+   * the same revision (the draft asked again because the world changed under it) replaces the last in place, so the panel
+   * does not blink to "routing…" each time a road goes down.
+   */
+  private rev = 0;
+  private reqId = 0; private accepted = 0;
+  private reqs = new Map<number, number>();
   private preview: LinePreview | null = null;
-  private previewTimer: ReturnType<typeof setTimeout> | undefined;
+  private previewRev = -1; private previewSig = '';
+  /** when to route the draft again, and when to look for stops again (linewatch.ts) */
+  private watcher: LineWatcher;
+  /** the stops the markers stand on, and the modes they were gathered for */
+  private stopSet = new StopSet();
+  private stopModes = '';
+  /** the stop markers: a ring and a pin on every stop of the draft's mode */
+  readonly stopMarks = new StopMarks();
   private el: HTMLDivElement;
   private chip: HTMLButtonElement;
   private dirty = true;
@@ -98,6 +117,7 @@ export class LinesPanel {
 
   constructor(private net: NetClient, private world: ClientWorld, private toast: (kind: 'info' | 'error', msg: string) => void, tick: () => number) {
     clock = tick;
+    this.watcher = new LineWatcher(world);
     this.chip = document.createElement('button');
     this.chip.className = 'chip'; this.chip.id = 'linesBtn'; this.chip.textContent = 'lines';
     this.chip.title = 'Bus lines: make a route from your stops, pick a number, colour and buses';
@@ -113,6 +133,7 @@ export class LinesPanel {
     this.group.add(this.editRibbon.mesh);
     this.failRibbon.mesh.renderOrder = 7;
     this.group.add(this.failRibbon.mesh);
+    this.group.add(this.stopMarks.group);
     this.net.on('linePreview', (m) => this.applyPreview(m.preview));
     // Backspace takes the last stop off the draft (unless typing in a field)
     window.addEventListener('keydown', (e) => {
@@ -134,7 +155,7 @@ export class LinesPanel {
     this.el.classList.toggle('hidden', !open);
     this.chip.classList.toggle('on', open);
     if (open) this.net.send({ t: 'lines' });
-    else this.draft = null;
+    else { this.draft = null; this.preview = null; this.watcher.drop(); }
     this.render(); this.dirty = true;
     this.syncUnder();
   }
@@ -144,7 +165,7 @@ export class LinesPanel {
     this.lines = m.lines;
     const colours = new Map(m.lines.map((l) => [l.id, l.colour]));
     this.onLivery(m.buses, colours);
-    if (m.saved && this.draft && (this.draft.id === undefined || this.draft.id === m.saved)) { this.draft = null; this.preview = null; } // saved: back to the list
+    if (m.saved && this.draft && (this.draft.id === undefined || this.draft.id === m.saved)) { this.draft = null; this.preview = null; this.watcher.drop(); } // saved: back to the list
     this.dirty = true;
     if (this.open && !this.draft) this.render();
   }
@@ -205,21 +226,77 @@ export class LinesPanel {
   }
   /** The draft's stops or shape changed: redraw, and ask the server to route it (shortly, so quick clicks ask once). */
   private changed() {
-    this.seq++;
+    this.rev++;
     this.render(); this.dirty = true;
-    clearTimeout(this.previewTimer);
     const d = this.draft;
-    if (!d || d.stops.length < 2) { this.preview = null; return; }
-    const seq = this.seq;
-    this.previewTimer = setTimeout(() => {
-      if (this.draft === d && this.seq === seq) this.net.send({ t: 'line', op: 'preview', seq, line: { id: d.id, loop: d.loop, stops: d.stops } });
-    }, 120);
+    if (!d) { this.watcher.drop(); return; }
+    // the first stop fixes the mode, and with it which stops are marked
+    if (this.stopModes !== this.modesKey(d)) this.refreshStops();
+    if (d.stops.length < 2) { this.preview = null; this.watcher.route.drop(); return; }
+    this.watcher.edited(performance.now());
   }
-  /** The server's route for the draft: drawn on the map, summed up in the panel. */
+  /** Ask the server to route the draft now (the gate said so): one request, tagged so its answer can be matched to the revision. */
+  private sendPreview() {
+    const d = this.draft;
+    if (!d || d.stops.length < 2) return;
+    const id = ++this.reqId;
+    this.reqs.set(id, this.rev);
+    for (const k of this.reqs.keys()) { if (this.reqs.size <= 24) break; this.reqs.delete(k); }
+    this.net.send({ t: 'line', op: 'preview', seq: id, line: { id: d.id, loop: d.loop, stops: d.stops } });
+  }
+  /** The server's route for the draft: drawn on the map, summed up in the panel (patched in place, so a field being typed in keeps its focus). */
   private applyPreview(p: LinePreview) {
-    if (!this.draft || p.seq !== this.seq) return;
-    this.preview = p;
-    this.render(); this.dirty = true;
+    const rev = this.reqs.get(p.seq);
+    if (!this.draft || rev === undefined || rev !== this.rev || p.seq < this.accepted) return;
+    this.accepted = p.seq;
+    for (const k of [...this.reqs.keys()]) if (k <= p.seq) this.reqs.delete(k);
+    const sig = JSON.stringify({ ...p, seq: 0 });
+    const same = this.previewRev === rev && sig === this.previewSig;
+    this.preview = p; this.previewRev = rev; this.previewSig = sig;
+    if (same) return; // the route is as it was: nothing to redraw
+    this.patchRoute(); this.dirty = true;
+  }
+  /** Redraw just the route block and the save button, after an answer. */
+  private patchRoute() {
+    const d = this.draft;
+    if (!this.open || !d) return;
+    const box = this.el.querySelector<HTMLElement>('.lrbox');
+    if (!box) { this.render(); return; }
+    box.innerHTML = this.routeHtml(d);
+    const save = this.el.querySelector<HTMLButtonElement>('[data-act="save"]');
+    if (save) { save.disabled = !this.canSave(d); save.textContent = this.saveLabel(d); }
+  }
+  private canSave(d: Draft) { return d.stops.length >= 2 && !this.current()?.problem?.fatal; }
+  private saveLabel(d: Draft) { return `save line${d.mode === 'metro' && this.current()?.cost ? ` · $${this.current()!.cost!.toLocaleString('en-GB')}` : ''}`; }
+
+  // ---- watching the world while a line is edited (linewatch.ts) ----------------------------------
+
+  private modesKey(d: Draft | null) { return d ? d.mode ?? 'all' : ''; }
+  /** Gather the stops to mark again (the draft's mode, or every mode while a new line has no stop); flags a rebuild if the set moved. */
+  private refreshStops() {
+    const d = this.draft;
+    this.stopModes = this.modesKey(d);
+    if (!d) { this.stopSet.clear(); return; }
+    const modes: TransitMode[] = d.mode ? [d.mode] : ['bus', 'rail', 'metro', 'ferry'];
+    const found = collectStops(this.world, modes);
+    if (this.stopSet.update(found)) this.dirty = true;
+  }
+  /**
+   * Once a frame while the panel is open. A change under the draft (a road laid or lifted, a turn rule, a stop built or taken
+   * down) asks to route it again, and to look for stops again, 300 ms on and at most once per 300 ms; with no draft, the list of
+   * lines is asked for on the same terms when one of them is not running, so a status the roads just fixed is read at once.
+   */
+  private watch(now: number) {
+    const a = this.watcher.step(now, { open: this.open, drafting: !!this.draft, routable: (this.draft?.stops.length ?? 0) >= 2, listStale: !this.draft && this.mine().some((l) => l.status !== 'running') });
+    if (a.preview) this.sendPreview();
+    if (a.lines) this.net.send({ t: 'lines' });
+    if (a.stops) this.refreshStops();
+  }
+  /** The tile under the cursor (null: none): the stop on it glows while a line is edited. */
+  setHover(tile: [number, number] | null) {
+    if (!this.draft || !tile) { this.stopMarks.setHover(null, null); return; }
+    const [x, y] = this.world.doorOf(tile[0], tile[1]);
+    this.stopMarks.setHover(x, y) || this.stopMarks.setHover(tile[0], tile[1]);
   }
 
   /** the lines this player may edit: their own, or every line in a sandbox */
@@ -236,6 +313,7 @@ export class LinesPanel {
     }
     this.onEdit();
     this.preview = null;
+    this.refreshStops();
     this.changed();
   }
 
@@ -252,7 +330,7 @@ export class LinesPanel {
       this.startDraft();
     } else if (act === 'edit') { const l = this.lines.find((x) => x.id === id); if (l) this.startDraft(l); }
     else if (act === 'delete') { if (confirm(`Delete line ${this.lines.find((x) => x.id === id)?.number}?`)) this.net.send({ t: 'line', op: 'delete', id }); }
-    else if (act === 'cancel') { this.draft = null; this.preview = null; this.render(); this.dirty = true; }
+    else if (act === 'cancel') { this.draft = null; this.preview = null; this.watcher.drop(); this.render(); this.dirty = true; }
     else if (act === 'save' && d) this.net.send({ t: 'line', op: 'save', line: { id: d.id, number: d.number, colour: d.colour, loop: d.loop, vehicles: d.vehicles, stops: d.stops, ...(d.mode === 'metro' || d.mode === 'ferry' ? { name: (d.name ?? '').trim() } : {}) } });
     else if (act === 'rm' && d) { d.stops.splice(id, 1); if (!d.stops.length && !d.id) d.mode = undefined; this.changed(); }
     else if (act === 'undo' && d) this.undoStop();
@@ -296,9 +374,9 @@ export class LinesPanel {
       <div class="lmode"><button class="chip${d.loop ? ' on' : ''}" data-act="mode" data-v="loop">loop ↺</button><button class="chip${d.loop ? '' : ' on'}" data-act="mode" data-v="back">there and back ⇄</button></div>
       <div class="lsect">Stops in order <span>${d.stops.length}</span></div>
       ${d.stops.length ? `<ol class="lstoplist">${d.stops.map((s, i) => `<li>${esc(this.nameOf(s.x, s.y))} <span class="lxy">(${s.x}, ${s.y})</span><button class="lrm" data-act="rm" data-id="${i}" title="remove">✕</button></li>`).join('')}</ol>` : ''}
-      ${this.routeHtml(d)}
+      <div class="lrbox">${this.routeHtml(d)}</div>
       <div class="lhint">${d.mode === 'ferry' ? `Click your ferry piers in the order the river buses should call: they sail the water between them, under every bridge, on water at least three tiles wide. One line calls at a pier. ${d.loop ? 'The last pier runs back round to the first.' : 'Boats call everywhere on the way back, and pass each other on the river.'}` : d.mode === 'metro' ? `Click your underground stations in the order trains should call. The tunnel is bored when you save: new tunnel in amber, crossovers ringed, the cost on the button. Lines share no tunnel except at crossovers, and every station needs its own platform. ${d.loop ? 'The last station runs back round to the first, one way.' : 'Trains run out in one bore and home in the other.'}` : d.mode === 'rail' ? `Click your rail stations in the order trains should call; consecutive stations must be joined by track, and no other line may use it. ${d.loop ? 'The track must lead from the last station back round to the first; the loop takes as many trains as fit.' : 'Trains reverse at the ends and call everywhere on the way back; one track runs one train.'}` : `Click your bus stops (or rail stations, for a rail line) on the map in the order the bus should call: the road between them fills in, the shortest way a bus can drive. ${d.loop ? 'The last stop runs back to the first.' : 'Buses call at every stop on the way back.'} Where a bus has to turn round it goes round a block or a roundabout, or turns at a dead end or a junction. Backspace or right-click takes the last stop off.`}</div>
-      <div class="lbtns"><button class="chip" data-act="undo" ${d.stops.length ? '' : 'disabled'}>undo stop</button><button class="chip" data-act="cancel">cancel</button><button class="chip on" data-act="save" ${d.stops.length >= 2 && !this.current()?.problem?.fatal ? '' : 'disabled'}>save line${d.mode === 'metro' && this.current()?.cost ? ` · $${this.current()!.cost!.toLocaleString('en-GB')}` : ''}</button></div>`;
+      <div class="lbtns"><button class="chip" data-act="undo" ${d.stops.length ? '' : 'disabled'}>undo stop</button><button class="chip" data-act="cancel">cancel</button><button class="chip on" data-act="save" ${this.canSave(d) ? '' : 'disabled'}>${this.saveLabel(d)}</button></div>`;
     }
     this.el.innerHTML = html;
     this.syncUnder();
@@ -310,7 +388,7 @@ export class LinesPanel {
   }
 
   /** The server's route for the draft as it is now, or null while it is still working it out. */
-  private current(): LinePreview | null { return this.preview && this.preview.seq === this.seq ? this.preview : null; }
+  private current(): LinePreview | null { return this.preview && this.previewRev === this.rev ? this.preview : null; }
   /** The draft's route in the panel: lap length, round trip, where it turns round, or what is wrong and how to fix it. */
   private routeHtml(d: Draft): string {
     if (d.stops.length < 2) return '';
@@ -333,6 +411,7 @@ export class LinesPanel {
 
   /** Rebuild the ribbons when something changed; keep the edit preview joined to the stops. */
   frame() {
+    this.watch(performance.now());
     if (!this.dirty) return;
     this.dirty = false;
     for (const r of this.ribbons) { this.group.remove(r.mesh); r.mesh.geometry.dispose(); (r.mesh.material as MeshBasicMaterial).dispose(); }
@@ -341,6 +420,7 @@ export class LinesPanel {
     this.ribbons = []; this.marks = []; this.badges = [];
     this.editRibbon.hide(); this.failRibbon.hide();
     this.yShift = 0;
+    if (!this.open || !this.draft) this.stopMarks.clear();
     if (!this.open) return;
     const mine = this.listed();
     mine.forEach((l, i) => {
@@ -387,8 +467,23 @@ export class LinesPanel {
           if (pr.suggest) this.mark({ x: pr.suggest[0], y: pr.suggest[1] }, SUGGEST);
         }
       }
-      d.stops.forEach((s, i) => { this.mark(s, d.colour); this.badge(s, i + 1, d.colour); });
+      d.stops.forEach((s, i) => { this.badge(s, i + 1, d.colour); });
+      this.stopMarks.set(this.marksFor(d, metro), metro, this.yShift);
     }
+  }
+  /** The stop markers for the draft: every stop of its mode on land you may use, the draft's own in its colour. */
+  private marksFor(d: Draft, under: boolean): Mark[] {
+    const w = this.world, onDraft = new Set(d.stops.map((s) => `${s.x},${s.y}`)), out: Mark[] = [];
+    const add = (x: number, y: number, mode: TransitMode) => {
+      const st = w.structureAt(x, y);
+      const radius = st ? Math.max(st.w, st.h) / 2 + 0.3 : 0.5;
+      const top = under ? 0.7 : roofAnchor(w, x, y, 0)[1] + 0.3;
+      out.push({ x, y, mode, cx: st ? st.ax + st.w / 2 : undefined, cz: st ? st.ay + st.h / 2 : undefined, radius, top, colour: onDraft.has(`${x},${y}`) ? d.colour : undefined });
+      onDraft.delete(`${x},${y}`);
+    };
+    for (const f of this.stopSet.stops) add(f.x, f.y, f.mode);
+    for (const k of onDraft) { const [x, y] = k.split(',').map(Number); add(x, y, d.mode ?? 'bus'); } // a draft stop that is not on land you can use, or whose building is gone
+    return out;
   }
   /** A tile marked in a colour (land to lay a road over, a stop to move). */
   private square(x: number, y: number, colour: number) {

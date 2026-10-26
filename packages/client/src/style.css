@@ -317,6 +317,7 @@ body.landing #c, body.landing #ui, body.landing #login { display: none; }
 #fpv .fbody { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 9px 7px; background: linear-gradient(transparent, rgba(0,0,0,0.6)); pointer-events: none; line-height: 1.45; }
 #fpv .fdest span { opacity: 0.65; }
 #fpv .fspd { opacity: 0.8; }
+#fpv .ftipsy { opacity: 0.85; font-style: italic; color: #f4c46b; }
 #fpv .bad { color: #ff9a8f !important; }
 #fpv .fhint, #fpv .ffade { display: none; }
 #fpv.inset { right: 16px; bottom: 16px; width: var(--iw); height: var(--ih); border: 1px solid rgba(255,255,255,0.35); border-radius: 8px; overflow: hidden;
