@@ -248,8 +248,8 @@ for (const [label, k] of [['busy motorway (load 1)', Number(arg('load', '1'))], 
 
 // ---- 4. ramps: the drawn path stays on the lane --------------------------------------------------------------------
 // The client draws a car between the server's positions (client render/glide.ts: a cubic between the tick's positions, 60
-// frames a second). At 1.4 tiles a tick that could cut the corner of a slip road. (Worst case measured: 0.145 tiles, where a car
-// changes lane before an exit; the bends and the entry stay within 0.07.) One car at a time through an exit, an
+// frames a second). At 1.4 tiles a tick that could cut the corner of a slip road. (Worst case measured: 0.145 tiles, at the lane change
+// before an exit; the entry 0.062.) One car at a time through an exit, an
 // entry and the whole trip: the lane's own centre line (the geometry the server places a car by, strands included) against
 // the drawn positions.
 {
