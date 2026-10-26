@@ -1,4 +1,5 @@
 import { isJunctionTool } from './junctiontools';
+import type { ColumnPick } from './pick';
 import { MAX_PARCEL_EDGE, MANIFEST, KIND_TOOLS, KIND_ID, isMultiTile, trackDragPath, roadDragPath, snapRoadEnd, type KindToolId, type RoadShape } from '@msimcity/shared';
 import type { CameraRig } from './camera';
 import { Vector3 } from 'three';
@@ -6,6 +7,8 @@ import { pinchFactor, readScrollMode, writeScrollMode, scrollZoom, wheelPixels, 
 
 /** how far a press may travel before it is a drag (a pan) rather than a click */
 const CLICK_SLOP = 5;
+/** tools that drag a path or a line over the ground: they pick the ground tile, never a building's column (pick.ts) */
+const GROUND_TOOLS = new Set<string>(['road', 'rail', 'pylons', 'cable', 'runway', 'streetrule']);
 /** Safari's trackpad pinch/rotate (GestureEvent is not in lib.dom) */
 interface GestureLike extends UIEvent { scale: number; rotation: number; clientX: number; clientY: number }
 
@@ -181,10 +184,18 @@ export class Input {
     const fx = hit.x - t[0] - 0.5, fy = hit.z - t[1] - 0.5;
     return Math.abs(fy) > Math.abs(fx);
   }
-  tileAt(px: number, py: number): [number, number] | null {
-    const hit = this.rig.groundAt(px, py, this.canvas.clientWidth, this.canvas.clientHeight, this.tmp);
-    return hit ? [Math.floor(hit.x), Math.floor(hit.z)] : null;
+  /** the building columns a click can land on (main.ts hands them in from the drawn heights; pick.ts) */
+  column: ColumnPick | null = null;
+  /**
+   * The tile under a canvas point: the tile of the building the cursor is over (its drawn column, roof included), else
+   * the ground it comes down to. `ground` skips the columns for the tools that lay out a path or a line over the
+   * ground, where a drag across a building must keep reading ground tiles rather than hop to a roof.
+   */
+  tileAt(px: number, py: number, ground = false): [number, number] | null {
+    return this.rig.tileAt(px, py, this.canvas.clientWidth, this.canvas.clientHeight, ground ? null : this.column);
   }
+  /** whether the active tool reads the ground tile under the cursor, not the building's: the drags that lay out roads, tracks, runways and street rules */
+  private get groundTool() { return GROUND_TOOLS.has(this.tool); }
 
   /** Continuous keyboard camera movement; call once per frame. */
   update(dt: number) {
@@ -250,7 +261,7 @@ export class Input {
     if (e.button === 2) { this.panning = true; this.rightDown = { x: e.clientX, y: e.clientY, moved: false }; return; }
     if (e.button === 0 && e.shiftKey) { this.panning = true; return; }
     if (e.button !== 0) return;
-    const tile = this.tileAt(e.offsetX, e.offsetY);
+    const tile = this.tileAt(e.offsetX, e.offsetY, this.groundTool);
     if (!tile) return;
     if (this.tool === 'select') { this.selectDown = { x: e.clientX, y: e.clientY, px: e.offsetX, py: e.offsetY, moved: false }; return; }
     if (this.tool === 'buy') { this.buyStart = tile; this.buyRect = { x: tile[0], y: tile[1], w: 1, h: 1 }; return; }
@@ -281,7 +292,7 @@ export class Input {
       this.rig.panPixels(e.movementX, e.movementY, this.canvas.clientHeight);
       return;
     }
-    const tile = this.tileAt(e.offsetX, e.offsetY);
+    const tile = this.tileAt(e.offsetX, e.offsetY, this.groundTool);
     if (tile && this.runwayStart) {
       // before the hover callback, so the status line judges the line as it now stands
       const [sx, sy] = this.runwayStart;

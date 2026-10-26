@@ -42,6 +42,8 @@ import { FootprintOverlay } from './render/footprint';
 import { Fpv, type CabEye } from './render/fpv';
 import { vehicleKey, trainPanelHtml, trainKmh, planePanelHtml, planeTipHtml, planeDoing, planeKnots, planeFeet, heliTipHtml, heliPanelHtml, heliDoing, heliTitle, heliKnots, type VehicleSel } from './vehicles';
 import { Buildings } from './render/buildings';
+import { variant, allVariants } from './render/models';
+import { columnHeights } from './pick';
 import { Lighting } from './render/lighting';
 import { buildAtlas } from './render/atlas';
 import { buildingMaterial, groundMaterial as makeGroundMaterial, sceneUniforms } from './render/materials';
@@ -785,6 +787,10 @@ const input = new Input(canvas, rig, {
     else if (code === 'KeyT') { ui.toggleTech(); ui.showTech(world.myPlayer); policies.toggle(false); }
   },
 });
+
+// a click lands on the building under the cursor, roof included, not on the ground behind it (pick.ts); the Buildings
+// constructor above has compiled the designs, so their tallest sets how far down the ray is walked
+input.column = { heightAt: columnHeights(world, variant), maxH: Math.max(0, ...allVariants().map((v) => v.height)) * 1.06 };
 
 /** Select the building on a tile (its people panel), or only the parcel under it (the tax and name panel). */
 function selectTile(x: number, y: number, panel: 'building' | 'parcel') {
