@@ -3,6 +3,7 @@ import { LADDERS, TRACK_NAMES, hasFeature, techFor, tierSummary, type KindManife
 import { buildModels, model } from './render/models';
 import { buildingMaterial, sceneUniforms } from './render/materials';
 import { DEV_TOOLS, TOOL_KINDS } from './input';
+import { AboutState, pickerKey } from './pickerstate';
 
 /**
  * Size picker (docs/buildings.md "Groups and tiers"): the tool bar shows each ladder once ('Health', 'Police', ...);
@@ -122,6 +123,10 @@ export class SizePicker {
   readonly el: HTMLDivElement;
   open: string | null = null;
   private active = '';
+  /** what the cards were last drawn from (pickerstate.ts): a refresh with the same key redraws nothing */
+  private drawn = '';
+  /** the card the mouse is over, whose text the about box keeps until the mouse leaves the cards */
+  private about = new AboutState();
   constructor(private host: PickerHost) {
     this.el = document.createElement('div');
     this.el.id = 'picker';
@@ -148,6 +153,7 @@ export class SizePicker {
     shootThumbs();
     this.open = group;
     this.active = activeTool;
+    this.about.leave();
     this.render(l);
     this.el.classList.remove('hidden');
     const bar = anchor.closest('#tools') as HTMLElement | null;
@@ -158,17 +164,27 @@ export class SizePicker {
   }
   close() {
     this.open = null;
+    this.drawn = '';
+    this.about.leave();
     this.el.classList.add('hidden');
   }
-  /** Re-render when the tool or the player's tech changes while open. */
+  /**
+   * Redraw when the tool or the player's tech changes while open. A refresh that changes nothing the cards show (the
+   * players message calls it every few seconds, through ui.setLocks) leaves the popover as it is, so the card under the
+   * mouse keeps its hover and the about box its text.
+   */
   refresh(activeTool?: string) {
     if (activeTool !== undefined) this.active = activeTool;
     const l = this.open ? ladderById(this.open) : undefined;
-    if (l) this.render(l);
+    if (l && this.keyOf(l) !== this.drawn) this.render(l);
   }
+  private keyOf(l: Ladder) { return pickerKey(l.group.id, this.active, l.tiers.map((k) => this.isLocked(k.tool!.id)), thumbs.size); }
+  /** the about box's markup for a rung */
+  private aboutHtml(k: KindManifest) { return `<b>${esc(k.tool!.label)}</b> ${esc(k.blurb ?? '')}<br><span>${esc(k.howTo ?? '')}</span>`; }
 
   private render(l: Ladder) {
     const g = l.group;
+    this.drawn = this.keyOf(l);
     const cards = l.tiers.map((k) => {
       const tool = k.tool!.id, locked = this.isLocked(tool), t = techFor(tool);
       const s = tierSummary(k);
@@ -181,15 +197,18 @@ export class SizePicker {
         <span class="tech">${locked ? `🔒 Needs ${need}` : t ? `✓ ${esc(t.name)}` : 'Available from the start'}</span>
       </button>`;
     }).join('');
-    const cur = l.tiers.find((k) => k.tool!.id === this.active) ?? l.tiers[0];
+    const cur = l.tiers.find((k) => k.tool!.id === this.about.shown(this.active)) ?? l.tiers.find((k) => k.tool!.id === this.active) ?? l.tiers[0];
     this.el.innerHTML = `<div class="ph"><b>${esc(g.label)}</b><span>${l.tiers.length} sizes · smallest first</span><button class="x" aria-label="Close">×</button></div>
       <div class="cards">${cards}</div>
-      <div class="about"><b>${esc(cur.tool!.label)}</b> ${esc(cur.blurb ?? '')}<br><span>${esc(cur.howTo ?? '')}</span></div>`;
+      <div class="about">${this.aboutHtml(cur)}</div>`;
     this.el.querySelector<HTMLButtonElement>('.x')!.onclick = () => this.close();
     const about = this.el.querySelector<HTMLDivElement>('.about')!;
+    // the about box follows the card the mouse is on, and goes back to the active size's text only when it leaves the cards
+    const active = l.tiers.find((k) => k.tool!.id === this.active) ?? l.tiers[0];
+    this.el.querySelector<HTMLDivElement>('.cards')!.onmouseleave = () => { this.about.leave(); about.innerHTML = this.aboutHtml(active); };
     this.el.querySelectorAll<HTMLButtonElement>('button.card').forEach((b) => {
       const k = l.tiers.find((x) => x.tool!.id === b.dataset.pick)!;
-      b.onmouseenter = () => { about.innerHTML = `<b>${esc(k.tool!.label)}</b> ${esc(k.blurb ?? '')}<br><span>${esc(k.howTo ?? '')}</span>`; };
+      b.onmouseenter = () => { this.about.enter(b.dataset.pick!); about.innerHTML = this.aboutHtml(k); };
       b.onclick = () => {
         const tool = b.dataset.pick!;
         if (this.isLocked(tool)) {

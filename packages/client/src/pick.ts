@@ -70,7 +70,7 @@ export interface ColumnWorld {
  * tile's hash picks (`variant`), scaled by the tile's own jitter for a single-tile building, unscaled for a multi-tile
  * structure (every tile of its footprint is the same column, read from the anchor), and the rising shell of a site
  * scaled by its progress. Roads, bare land and unloaded tiles are 0. Bridges, flyovers and rail decks are not columns
- * (docs/controls.md: they pick as the ground).
+ * (README Controls: they pick as the ground).
  */
 export function columnHeights(world: ColumnWorld, variant: (kind: number, level: number, pick: number) => { height: number } | undefined): (x: number, y: number) => number {
   return (x, y) => {

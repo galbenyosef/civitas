@@ -385,5 +385,21 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
     pd('pointerup');
   }
 }
+{ // the size picker's state (pickerstate.ts): a refresh that changes nothing redraws nothing, and a hovered card's text stays until the mouse leaves the cards
+  const { AboutState, pickerKey } = await import('../src/pickerstate');
+  const a = new AboutState();
+  ok(a.shown('park-small') === 'park-small', 'about box: nothing hovered, it describes the active tool');
+  a.enter('park-large');
+  ok(a.shown('park-small') === 'park-large', 'about box: a hovered card is described');
+  // the players message calls refresh() with nothing changed, over and over; the hovered card must keep its text through every one
+  let drawn = pickerKey('parks', 'park-small', [false, false, true], 3), redraws = 0;
+  for (let i = 0; i < 20; i++) { const k = pickerKey('parks', 'park-small', [false, false, true], 3); if (k !== drawn) { drawn = k; redraws++; } }
+  ok(redraws === 0 && a.shown('park-small') === 'park-large', 'twenty refreshes with nothing changed: no redraw, the hovered text stays');
+  ok(pickerKey('parks', 'park-small', [false, false, false], 3) !== drawn, 'a rung unlocking is a change: it redraws');
+  ok(pickerKey('parks', 'park-large', [false, false, true], 3) !== drawn, 'another active tool is a change: it redraws');
+  ok(a.shown('park-small') === 'park-large', 'a redraw does not reset the hovered text either');
+  a.enter('park-medium'); a.leave();
+  ok(a.shown('park-small') === 'park-small', 'the mouse leaves the cards: the box goes back to the active tool');
+}
 console.log(fails ? `${fails} FAILED` : 'all passed');
 process.exit(fails ? 1 : 0);
