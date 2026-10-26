@@ -238,6 +238,7 @@ const junctions = new JunctionView(world); junctions.legacySigns = LEGACY_CHUNKS
 const junctionTools = new JunctionTools(world); // the junction tools' ghost, cost and reasons (R4)
 // utilities (utilities.ts, docs/utilities.md): reach from the tiles, the hourly node states, blackouts, the power overlay, pylons
 const power = new PowerClient(world, (k) => views.get(k)); scene.add(power.group);
+buildings.rotors.output = (x, y) => power.plantOutput(x, y); buildings.rotors.told = () => power.hour >= 0; // the wind turbines turn while their plant generates (render/rotors.ts)
 const roadTool = new RoadTool(world, DEV_TOOLS); scene.add(roadTool.group); // the road drag's ghost, cost chip, spacing guide and question (roadtool.ts)
 // the Street rules tool's ghost over the street, its chip and the HGV ban's probe (streetrules.ts, R5)
 const streetRules = new StreetRuleTool(world, DEV_TOOLS, {
@@ -318,6 +319,7 @@ ui.roadClassChanged();
 
 net.onStatus = (ok) => { ui.setConn(ok); if (!ok) subscribed.clear(); };
 net.on('welcome', (m) => {
+  buildings.rotors.seed = m.seed;
   world.me = m.you;
   world.sandbox = !!m.sandbox;
   // a read-only showcase (SPECTATE): only looking; the tool bar, the tech chip, Reset demo and the menu's changes go (style.css body.spectate)
@@ -1426,6 +1428,7 @@ function frame(now: number) {
   issuesView.frame(now, rig.camera);
   firesView.group.visible = underground.level < 0.5;
   firesView.frame(liveTickF());
+  buildings.rotors.frame(liveTickF(), [rig.camera], underground.level < 0.5);
   gravesView.group.visible = underground.level < 0.5;
   gravesView.frame(liveTick(), now);
   perf.lap('world');

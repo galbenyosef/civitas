@@ -248,7 +248,7 @@ so a first substation can import at once.
 - **Blackouts at night:** a per-tile power map (`uPowMap`, the same wrapped 1,024² texture scheme as the data overlay)
   is read by the window shader and the street-lamp shader. In a cut, lamps go out and windows drop to a candle share:
   a few flicker warm and a few buildings (6%, by hash) are on generators, bright and steady. In a brownout lamps dim by
-  15% and some flicker. When power returns the area comes back block by block (4×4-tile blocks) over 20 to 60 s.
+  15%, steadily (a flicker read as a fault: playtest f91d8841), and a window dims with a slow breath. When power returns the area comes back block by block (4×4-tile blocks) over 20 to 60 s.
 - **Pylons and cable:** `client/src/utilities.ts` draws each overhead link's towers (each with its own lean and paint
   fade, a bird on some spans) and the sagging wires between them, red while the link is faulted. Buried links show as a
   dashed red line while a link tool or the power overlay is on. A link drag shows green or red tiles and its cost.

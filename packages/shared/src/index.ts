@@ -38,6 +38,7 @@ export * from './demo/tourSound';
 export * from './demo/london-kinds';
 export * from './demo/londonMap';
 export * from './helicopters';
+export * from './rotors';
 export * from './metro';
 export * from './fleet';
 export * from './history';

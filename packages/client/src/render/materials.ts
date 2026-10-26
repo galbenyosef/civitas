@@ -69,6 +69,23 @@ export const Win = { None: 0, Home: 1, Shop: 2, Office: 3, Civic: 4, Factory: 5,
 const HASH = /* glsl */ `float mscHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`;
 
 /**
+ * A failing lamp or tube (playtest f91d8841, "flickering lights on some streets": the old sputter was a hard strobe of 5% of
+ * the lamps at three flashes a second, for ever, and a lamp's pool and its lantern strobed out of step). It is steady nearly
+ * all of the time. Every 25 to 65 seconds, on a period and phase of its own per lamp, it stutters for about a second and a
+ * half: two or three soft dips down to 40%, eased in and out, never faster than two a second and never a hard step. `seed` is
+ * one number per lamp (mscLampSeed of its tile, so the pool on the road and the lantern agree), t is uTime.
+ */
+const FLUTTER = /* glsl */ `
+float mscLampSeed(vec2 tile) { return fract(sin(dot(tile, vec2(12.9898, 78.233))) * 43758.5453); }
+float mscFlutter(float seed, float t) {
+  float per = 25.0 + 40.0 * fract(seed * 7.13);
+  float u = fract(t / per + fract(seed * 3.77)) * per / 1.5;
+  if (u >= 1.0) return 1.0;
+  float dip = 0.5 + 0.5 * cos(u * (10.0 + 6.0 * fract(seed * 5.31)) + 3.14159);
+  return 1.0 - 0.6 * sin(u * 3.14159) * dip * dip;
+}`;
+
+/**
  * Sky colour for the hour, in linear space: the same recipe as Lighting.update (night, day, dusk glow,
  * blue hour), so the glass reflects what the sky is doing without a new uniform. Keep the two in step.
  */
@@ -119,6 +136,7 @@ varying vec3 vLocalN;
 varying vec2 vOrigin;
 varying vec3 vSky;
 ${HASH}
+${FLUTTER}
 ${POW_PARS}
 // coverage of [a, b] at x for a pixel footprint of half-width w (soft edge, so panes do not crawl)
 float mscBand(float x, float a, float b, float w) { return smoothstep(a - w, a + w, x) - smoothstep(b - w, b + w, x); }
@@ -497,19 +515,19 @@ if (vWin > 8.5) {
           vec2 lp = vec2(0.15 + 0.7 * h2, 0.15);
           lampK = mix(0.42, 0.22 + 0.6 * (1.0 - smoothstep(0.0, 0.9, distance(clamp(pu, 0.0, 1.0), lp))), nr);
         }
-        // a failing tube strobes now and then
-        if (cls > 2.5 && cls < 4.5 && h7 > 0.975) flick *= 0.35 + 0.65 * step(0.3, fract(sin(floor(uTime * 9.0) + h4 * 77.0) * 4375.5));
+        // a failing tube stutters now and then (mscFlutter: steady, a soft stutter every half minute or so)
+        if (cls > 2.5 && cls < 4.5 && h7 > 0.975) flick *= mscFlutter(h4 * 91.0 + h2, uTime);
         glow *= shade * lampK;
         float gain = lit * flick * (0.85 + 0.5 * h5) * min(1.0, uNight * 1.6) * 1.8 * litK * (litK < 0.99 ? 0.75 + 0.5 * clamp(pu.y, 0.0, 1.0) : 1.0);
         // power (client utilities.ts, docs/utilities.md 4.5): in a cut a candle burns in a few rooms (warm, flickering on its own
-        // phase) and the odd building runs a generator (bright and steady); a brownout dims the rest and makes them flicker
+        // phase) and the odd building runs a generator (bright and steady); a brownout dims the rest, steadily
         float pk = mscPowAt(floor(vOrigin));
         if (pk > 0.004) {
           float gen = step(mscHash(bseed + 4.4), 0.06);
           if (pk > 0.5) {
             gain *= gen + (1.0 - gen) * step(h3, 0.12) * (0.28 + 0.12 * sin(uTime * 8.0 + h4 * 40.0) + 0.06 * sin(uTime * 17.0 + h2 * 20.0));
             glow = mix(glow, vec3(1.0, 0.56, 0.22), 1.0 - gen);
-          } else gain *= 1.0 - pk * (0.75 + 0.25 * sin(uTime * 11.0 + h2 * 30.0));
+          } else gain *= 1.0 - pk * (0.8 + 0.1 * sin(uTime * 0.6 + h2 * 30.0)); // a steady dim with a slow breath, no flicker
         }
         totalEmissiveRadiance += glow * gain * pane;
         // an open shop lights its signboard a little
@@ -636,6 +654,7 @@ varying float vRoad;
 varying float vHeat;
 varying vec3 vWorldP;
 ${HASH}
+${FLUTTER}
 ${POW_PARS}
 // Light pool at p from the street lamp (if any) of tile \`tile\` (lampTexture: where it falls, when it comes on, its flags).
 vec3 mscLamp(vec2 tile, vec2 p) {
@@ -648,10 +667,10 @@ vec3 mscLamp(vec2 tile, vec2 p) {
   float dead = mod(f, 2.0), sput = mod(floor(f / 2.0), 2.0), led = mod(floor(f / 4.0), 2.0), bright = floor(f / 8.0) / 31.0;
   float on = smoothstep(L.r - 0.04, L.r + 0.04, uNight);
   if (dead > 0.5) on = 0.0;
-  else if (sput > 0.5) on *= 0.35 + 0.65 * step(0.2, sin(uTime * 19.0 + L.g * 50.0) * sin(uTime * 6.3 + L.b * 20.0)); // sputtering
-  float pl = mscPowAt(tile); // power (utilities.ts): out in a cut, dimmed and flickering in a brownout
+  else if (sput > 0.5) on *= mscFlutter(mscLampSeed(tile), uTime); // a failing lamp: steady, with a soft stutter now and then
+  float pl = mscPowAt(tile); // power (utilities.ts): out in a cut, a steady dim in a brownout (the lantern does the same)
   if (pl > 0.5) on = 0.0;
-  else if (pl > 0.004) on *= 1.0 - pl * (0.8 + 0.2 * sin(uTime * 12.0 + L.g * 30.0));
+  else if (pl > 0.004) on *= 1.0 - pl * 0.8;
   vec3 c = led > 0.5 ? vec3(0.88, 0.92, 1.0) : vec3(1.0, 0.78, 0.45);
   return c * pool * on * (0.75 + 0.6 * bright);
 }`;
@@ -765,16 +784,16 @@ export function lanternMaterial() {
       .replace('#include <common>', '#include <common>\nattribute vec4 aLamp;\nvarying vec4 vLamp;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLamp = aLamp;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uNight;\nuniform float uTime;\nvarying vec4 vLamp;\n' + POW_PARS)
+      .replace('#include <common>', '#include <common>\nuniform float uNight;\nuniform float uTime;\nvarying vec4 vLamp;\n' + FLUTTER + POW_PARS)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   {
     float f = vLamp.y;
     float dead = mod(f, 2.0), sput = mod(floor(f / 2.0), 2.0), led = mod(floor(f / 4.0), 2.0), bright = floor(f / 8.0) / 31.0;
     float on = smoothstep(vLamp.x - 0.04, vLamp.x + 0.04, uNight);
     if (dead > 0.5) on = 0.0;
-    else if (sput > 0.5) on *= 0.35 + 0.65 * step(0.2, sin(uTime * 19.0 + vLamp.z * 50.0) * sin(uTime * 6.3 + vLamp.w * 20.0));
+    else if (sput > 0.5) on *= mscFlutter(mscLampSeed(vLamp.zw), uTime); // the same lamp, the same stutter as its pool on the road
     float pl = mscPowAt(vLamp.zw);
-    if (pl > 0.5) on = 0.0; else if (pl > 0.004) on *= 1.0 - pl;
+    if (pl > 0.5) on = 0.0; else if (pl > 0.004) on *= 1.0 - pl * 0.8;
     vec3 c = led > 0.5 ? vec3(0.85, 0.9, 1.0) : vec3(1.0, 0.72, 0.38);
     totalEmissiveRadiance += c * on * (1.6 + 1.2 * bright);
   }`);

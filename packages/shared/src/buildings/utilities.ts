@@ -2,6 +2,7 @@ import type { KindDef, Op, Color } from './schema';
 import { Zone } from './codes';
 import { slab, van, tree, pine, fence, PAVING, ASPHALT } from './tierkit';
 import { repeat } from './helpers';
+import { TURBINE_TOWERS } from '../rotors';
 
 /**
  * Power (docs/utilities.md section 4): the electricity network's plants, nodes and depot, placed civic sub-kinds of the
@@ -78,25 +79,19 @@ const coolingTower = (x: number, z: number, h: number, r: number): Op[] => [
   ['lathe', x, 0.02, z, 0xc9c4ba, [r, 0, r * 0.82, h * 0.35, r * 0.62, h * 0.75, r * 0.66, h * 0.98, r * 0.66, h], { seg: 16 }],
   ['cyl', r * 0.6, r * 0.6, 0.02, x, h - 0.02, z, 0x6d6a65, 16], // the dark mouth
 ];
-/** A three-blade wind turbine of hub height h at (x, z), the rotor turned `turn` degrees (each tower stands at its own). */
-const turbine = (x: number, z: number, h: number, turn: number): Op[] => {
-  const blade = h * 0.42, t = (turn * Math.PI) / 180;
-  const ops: Op[] = [
-    ['cyl', 0.014, 0.03, h, x, 0.02, z, 'white', 8],
-    ['box', 0.05, 0.04, 0.09, x, h, z - 0.01, 'white'], // nacelle, facing the road
-    ['cyl', 0.016, 0.016, 0.02, x, h + 0.01, z + 0.045, 'silver', 8],
-  ];
-  // the blades: three in the rotor plane (x-y) at their angles, each a run of overlapping squares tapering to the tip
-  // (boxes stand square to the axes, so a slanting blade is built of steps, too small to see from the street)
-  for (let k = 0; k < 3; k++) {
-    const a = t + (k * 2 * Math.PI) / 3;
-    for (let s = 0; s < 8; s++) {
-      const r = 0.03 + (s + 0.5) * (blade / 8), w = 0.05 - s * 0.004;
-      ops.push(['box', w, w, 0.014, x + Math.cos(a) * r, h + 0.02 + Math.sin(a) * r - w / 2, z + 0.05, 'white']);
-    }
-  }
-  return ops;
-};
+/**
+ * A wind turbine's tower at (x, z), hub height h (shared/src/rotors.ts holds the two towers' numbers): a tapered tower
+ * on a collar with a door and a service platform, a red aviation light over where the nacelle turns. The nacelle, hub and
+ * three blades are the client's rotor pass (render/rotors.ts), which turns them, so none of them is built here.
+ */
+const turbine = (x: number, z: number, h: number): Op[] => [
+  ['cyl', 0.05, 0.056, 0.05, x, 0.02, z, 'stone', 12], // the foot
+  ['cyl', 0.013, 0.03, h - 0.05, x, 0.07, z, 'white', 12], // the tower, tapering to the top
+  ['cyl', 0.0238, 0.0238, 0.03, x, h * 0.5, z, 'red', 12], // a red band at the middle, as on the real ones
+  ['box', 0.022, 0.044, 0.008, x, 0.07, z + 0.03, 'dark'], // the door, on the road side
+  ['cyl', 0.022, 0.022, 0.008, x, h - 0.012, z, 'silver', 12], // the service platform under the nacelle
+  ['box', 0.016, 0.016, 0.016, x, h + 0.066, z, 'red', 'beacon'], // the aviation light, blinking on its own period
+];
 /** A row of solar panels tilted south (towards -z, the back), n panels along x from x0 spaced dx. */
 const panelRow = (x0: number, z: number, n: number, dx: number, w = 0.2, d = 0.16, color: Color = 0x23344f): Op[] =>
   repeat(n, (i): Op => ['taper', w, d, w, 0.02, 0.06, x0 + i * dx, 0.03, z, color, { shift: [0, d * 0.42] }]);
@@ -226,11 +221,11 @@ export const windTurbine: KindDef = {
   levels: [{
     capacity: 1, wage: 20, cost: 900, upkeep: 8, work: 160, parking: { surface: 1, underground: 1 },
     designs: [
-      { name: 'tall white tower on a grass pad, rotor at ten o\'clock', height: 1.6, ops: [
-        slab(1, 1, 0x7fae63), ['cyl', 0.1, 0.12, 0.03, 0, 0.02, -0.05, CONCRETE, 10], ...turbine(0, -0.05, 1.15, 20), cabinet(0.3, 0.3, 0.14)[0],
+      { name: 'tall white tower on a grass pad, its rotor turning on the client', height: 1.6, ops: [
+        slab(1, 1, 0x7fae63), ['cyl', 0.1, 0.12, 0.03, 0, 0.02, -0.05, CONCRETE, 10], ...turbine(TURBINE_TOWERS[0].x, TURBINE_TOWERS[0].z, TURBINE_TOWERS[0].h), cabinet(0.3, 0.3, 0.14)[0],
       ] },
-      { name: 'shorter tower beside its kiosk, rotor turned further', height: 1.4, ops: [
-        slab(1, 1, 0x7fae63), ['cyl', 0.09, 0.11, 0.03, -0.08, 0.02, -0.1, CONCRETE, 10], ...turbine(-0.08, -0.1, 0.98, 75), ...cabinet(0.28, 0.25, 0.16), ...pine(0.36, -0.36, 0.6),
+      { name: 'shorter tower beside its kiosk', height: 1.4, ops: [
+        slab(1, 1, 0x7fae63), ['cyl', 0.09, 0.11, 0.03, -0.08, 0.02, -0.1, CONCRETE, 10], ...turbine(TURBINE_TOWERS[1].x, TURBINE_TOWERS[1].z, TURBINE_TOWERS[1].h), ...cabinet(0.28, 0.25, 0.16), ...pine(0.36, -0.36, 0.6),
       ] },
     ],
   }],

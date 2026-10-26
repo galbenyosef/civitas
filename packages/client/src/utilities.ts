@@ -45,6 +45,8 @@ export class PowerClient {
   group = new Group();
   readonly field = new UtilityField();
   readonly env: UtilEnv;
+  /** each plant's output percent by tile key, from the last utilState */
+  private plants = new Map<number, number>();
   /** node state and load by door key, from the last utilState */
   readonly states = new Map<number, number>();
   readonly loads = new Map<number, number>();
@@ -124,8 +126,12 @@ export class PowerClient {
       if (was !== undefined && DARK[was] === 255 && DARK[s] !== 255) this.restore.set(key, now);
       this.states.set(key, s); this.loads.set(key, m.n[i + 3]);
     }
+    this.plants.clear();
+    if (m.p) for (let i = 0; i + 2 < m.p.length; i += 3) this.plants.set(utilKey(m.p[i], m.p[i + 1]), m.p[i + 2]);
     for (const k of this.world.chunks.keys()) this.texDirty.add(k);
   }
+  /** A power plant's output as a percent of its full rating at the last hourly solve, by its tile (undefined: not told yet or not a plant). */
+  plantOutput(x: number, y: number): number | undefined { return this.plants.get(utilKey(x, y)); }
   setLinks(m: Msg<'utilLinks'>) {
     this.links = m.links; this.down = new Set(m.down ?? []);
     this.drawLinks();

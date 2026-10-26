@@ -733,7 +733,7 @@ export type ServerMsg =
   /** a deceased person's panel (answer to inspectDeceased); null when nobody of that id is remembered */
   | { t: 'deceased'; id: number; info: DeceasedInfo | null }
   /** utilities (shared/src/utilities.ts): every node's state once a game hour and on a fault or repair, flat [x, y, UtilState, load %, ...] (doors); `h` the game hour */
-  | { t: 'utilState'; h: number; n: number[] }
+  | { t: 'utilState'; h: number; n: number[]; /** each power plant's output as a whole percent of its full rating, flat [x, y, percent, ...]: the wind turbine's rotor turns while it is above 0 (docs/utilities.md 4.5) */ p?: number[] }
   /** every trunk link (shared/src/utilities.ts UtilLinkDTO), on hello and whenever one is laid, taken down or faults */
   | { t: 'utilLinks'; links: UtilLinkDTO[]; /** link ids faulted now */ down?: number[] };
 

@@ -7,6 +7,7 @@ const HEMI_DAY_SKY = new Color(0xbfd9ff), HEMI_DAY_GROUND = new Color(0x5a6b45);
 // moonlit night floor: bright enough that empty land, roads and parcel edges read on a first view at night (Gauntlet 3)
 const HEMI_NIGHT_SKY = new Color(0x34467a), HEMI_NIGHT_GROUND = new Color(0x1c2233);
 
+const UP = new Vector3(0, 1, 0);
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 /**
@@ -23,6 +24,9 @@ export class Lighting {
   /** 0 = no shadows, 1 = 1024px, 2 = 2048px */
   quality = 2;
   private extent = -1;
+  private snapped = new Vector3();
+  private lr = new Vector3();
+  private lu = new Vector3();
   private tmp = new Color();
 
   constructor(scene: Scene) {
@@ -58,8 +62,17 @@ export class Lighting {
 
     const dir = elev >= 0 ? new Vector3(Math.cos(theta), Math.max(elev, 0.05), 0.45) : new Vector3(-Math.cos(theta), Math.max(-elev, 0.1), 0.45);
     dir.normalize();
-    this.sun.position.copy(target).addScaledVector(dir, 260);
-    this.sun.target.position.copy(target);
+    // the shadow camera moves in whole texels of its own map as the view pans (in the light's axes), so a shadow's edge stays
+    // on the same texels instead of crawling and shimmering over lit surfaces; the light's direction is unchanged
+    const texel = this.extent > 0 ? (2 * this.extent) / this.sun.shadow.mapSize.x : 0;
+    this.snapped.copy(target);
+    if (texel > 0) {
+      this.lr.crossVectors(UP, dir).normalize(); this.lu.crossVectors(dir, this.lr);
+      const a = this.snapped.dot(this.lr), b = this.snapped.dot(this.lu);
+      this.snapped.addScaledVector(this.lr, Math.round(a / texel) * texel - a).addScaledVector(this.lu, Math.round(b / texel) * texel - b);
+    }
+    this.sun.position.copy(this.snapped).addScaledVector(dir, 260);
+    this.sun.target.position.copy(this.snapped);
     this.sun.target.updateMatrixWorld();
 
     // sun fades out into the horizon and the moon fades in, so the light never pops when the direction flips
