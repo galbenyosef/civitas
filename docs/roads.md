@@ -453,3 +453,26 @@ The zones were balanced so the town grows as before. Six seeds, three game days 
 Fewer office lots, because offices on the new layout grew far faster (a 3×4 block of offices made 140-160 jobs in
 three days, against 40-64 from the old six blocks). The test cities (loadtest/cities.ts) keep the old grid, so load
 test results stay comparable.
+
+## Street lamps at night (card f91d8841)
+
+Every lamp is placed once per loaded chunk (`render/roads.ts` `placeLamps`, hashed from its tile, so a chunk rebuild changes
+nothing about a lamp) and its habits go into the lamp map: when it comes on, where its pool falls, and flags for **dead**
+(about 4%, never lit), **failing** (about 5%), LED-white or sodium-warm, and its brightness. The ground and road shader draws
+the pool from the map and the instanced lantern draws the head from the same bytes.
+
+- **A failing lamp is steady almost all the time.** Every 25 to 65 seconds, on a period and phase of its own, it stutters for
+  about a second and a half: two or three soft dips to 40%, eased in and out, never faster than two a second and never a hard
+  step (`mscFlutter` in `render/materials.ts`). The pool and the head both take their seed from the lamp's tile
+  (`mscLampSeed`), so they dip together. The old habit was a hard 35%/100% strobe at about three a second, for ever, on one
+  lamp in twenty, and the pool and head strobed out of step: "flickering lights on some streets". A failing office tube
+  in a window uses the same function.
+- **A brownout** dims lamps (and windows) steadily; nothing in the night lighting moves faster than a breath except a
+  failing lamp's rare stutter, the beacons, signs and screens that blink by design, and a candle in a cut.
+- **The shadow camera** snaps to whole texels of its own map in the light's axes (`render/lighting.ts`), so shadow edges stay
+  on the same texels as the view pans instead of crawling over lit surfaces.
+- To look for flicker: pin the hour (`?hour=22`), hide the moving things (`msc.citizens.group.visible = false`, `planes`,
+  `helis`, `boats`, `trains`), take 80 frames 20 ms apart and count a patch's crossings of its own mean; with the clock frozen
+  (the `uTime` uniform) nothing should still cross. `uTime` is wall-clock seconds from the page's load; a float32
+  argument stays smooth for days of uptime, so it is not wrapped (a wrap would make every sine jump).
+

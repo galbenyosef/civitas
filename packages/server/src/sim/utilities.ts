@@ -593,11 +593,12 @@ export class Utilities implements FleetService {
     }
     return info;
   }
-  /** `utilState`: flat [x, y, state, load, ...] for every node. */
+  /** `utilState`: flat [x, y, state, load, ...] for every node, and `p`, [x, y, percent of full output, ...] for every plant. */
   stateMsg() {
-    const n: number[] = [];
+    const n: number[] = [], p: number[] = [];
     for (const node of this.field.nodes) { const s = this.nodeState.get(node.key); n.push(node.x, node.y, s?.state ?? UtilState.Unpowered, s?.load ?? 0); }
-    return { t: 'utilState' as const, h: this.hour, n };
+    for (const [b, out] of this.plantOut) { const full = UTIL_SUPPLY_OF[b.id]; if (full > 0) p.push(b.x, b.y, Math.min(100, Math.round((100 * out) / full))); }
+    return p.length ? { t: 'utilState' as const, h: this.hour, n, p } : { t: 'utilState' as const, h: this.hour, n };
   }
   linksMsg() {
     const down = [...this.faults.values()].filter((f) => f.kind === 'link').map((f) => f.ref);

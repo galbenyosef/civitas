@@ -248,7 +248,25 @@ so a first substation can import at once.
 - **Blackouts at night:** a per-tile power map (`uPowMap`, the same wrapped 1,024² texture scheme as the data overlay)
   is read by the window shader and the street-lamp shader. In a cut, lamps go out and windows drop to a candle share:
   a few flicker warm and a few buildings (6%, by hash) are on generators, bright and steady. In a brownout lamps dim by
-  15% and some flicker. When power returns the area comes back block by block (4×4-tile blocks) over 20 to 60 s.
+  15%, steadily (a flicker read as a fault: playtest f91d8841), and a window dims with a slow breath. When power returns the area comes back block by block (4×4-tile blocks) over 20 to 60 s.
+- **The wind turbine's rotor** (card c3a3e2b3, `client/src/render/rotors.ts`, numbers in `shared/src/rotors.ts`). The kit builds
+  only the tower (a foot, a tapered white tower with a red band, a door on the road side, a service platform and a red
+  aviation light in the `beacon` class); the nacelle, hub and three blades are an instanced pass, two draw calls for every
+  turbine within 190 tiles (none, and the group hidden, when none is). The blades are thin extruded outlines, broad near the
+  root and narrowing to the tip with a trailing edge bowed out and twisted about 16 degrees from root to tip, on a hub with a
+  spinner. **What drives it:** a rotor turns while its plant is generating, at a speed the town's wind sets (`windAt`, the
+  same signal the plant's output follows, from the world seed in the welcome and the game tick, 0.45 to 2.1 rad/s) times its
+  own jitter of 0.9 to 1.1. Whether a plant generates is the additive `p` field of `utilState` (below). It winds up over about
+  six seconds and winds down linearly to a stop over ten (`rotorStep`), so a plant cut off, mothballed, unstaffed, out of any
+  network or with no demand to serve slows and stops; before the first `utilState` arrives every rotor turns on the wind alone.
+  The nacelle yaws to the wind's heading (`windYaw`: hashed from the seed, eased every twelve game hours) plus its own offset
+  of up to a quarter radian, following a change at its own pace (about 3 degrees a second at most). Per tower, from its tile:
+  a start angle, the speed jitter, the heading offset and the pace; the state is kept by tile, so a chunk rebuild that
+  places the tower again changes nothing and two rotors are never in step. `client/scripts/turbine-check.ts` runs the
+  rules on a fake clock.
+- **`utilState.p`** (additive, optional): `[x, y, percent, ...]` for every plant in a network, the share of its full rating
+  it was asked for at the last hourly solve (`plantOut / supply`, 0 to 100). A plant in no network is absent. Older clients
+  ignore it; nothing else reads it. Snapshot VERSION 8 is unchanged.
 - **Pylons and cable:** `client/src/utilities.ts` draws each overhead link's towers (each with its own lean and paint
   fade, a bird on some spans) and the sagging wires between them, red while the link is faulted. Buried links show as a
   dashed red line while a link tool or the power overlay is on. A link drag shows green or red tiles and its cost.

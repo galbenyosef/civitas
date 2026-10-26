@@ -4,6 +4,7 @@ import { buildModels, allVariants, buildFarModels } from './models';
 import { Signs, SIGN_MAX_DIST, signLabel, type SignInfo } from './signs';
 import { sceneUniforms } from './materials';
 import { AdvertsView, type AdHostItem } from './adverts';
+import { RotorsView } from './rotors';
 
 const MAX_INSTANCES = 60000;
 
@@ -78,6 +79,8 @@ export class Buildings {
   readonly signs = new Signs();
   /** posters on rented ad slots (render/adverts.ts): one instanced mesh for every loaded chunk */
   readonly adverts = new AdvertsView();
+  /** the wind turbines' nacelles and rotors, turning (render/rotors.ts): the kit builds only their towers */
+  readonly rotors = new RotorsView();
   private geomIds = new Map<string, number>();
   private farIds = new Map<string, number>();
   private perChunk = new Map<string, ChunkLod>();
@@ -115,6 +118,7 @@ export class Buildings {
     this.mesh.receiveShadow = true;
     this.mesh.add(this.signs.mesh);
     this.mesh.add(this.adverts.mesh);
+    this.mesh.add(this.rotors.group);
   }
 
   setChunk(key: string, items: Placement[]) {
@@ -152,6 +156,7 @@ export class Buildings {
       if (this.cams.length) this.lodChunk(key, c, true);
     }
     if (adItems.length) this.adverts.setChunk(key, adItems);
+    this.rotors.setChunk(key, items);
     // With per-object culling and sorting off, three only rebuilds its multi-draw
     // list when this flag is set, and addInstance/deleteInstance do not set it.
     (this.mesh as unknown as { _visibilityChanged: boolean })._visibilityChanged = true;
@@ -164,6 +169,7 @@ export class Buildings {
     const c = this.perChunk.get(key);
     this.signs.clear(key);
     this.adverts.clear(key);
+    this.rotors.clear(key);
     if (!c) return;
     for (const id of c.ids) this.mesh.deleteInstance(id);
     this.farCount -= c.nFar;
