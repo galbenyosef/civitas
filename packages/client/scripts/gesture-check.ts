@@ -401,5 +401,26 @@ const snap = (r: CameraRig) => ({ x: r.target.x, z: r.target.z, yaw: r.yaw, pitc
   a.enter('park-medium'); a.leave();
   ok(a.shown('park-small') === 'park-small', 'the mouse leaves the cards: the box goes back to the active tool');
 }
+{ // the canvas cursor follows the tool (cursors.ts): one class on the canvas, set when the tool changes
+  const { toolCursor, applyToolCursor, applyPickHint } = await import('../src/cursors');
+  const cls = new Set<string>();
+  const cl = { add: (...c: string[]) => c.forEach((x) => cls.add(x)), remove: (...c: string[]) => c.forEach((x) => cls.delete(x)), toggle: (c: string, on?: boolean) => { const v = on ?? !cls.has(c); if (v) cls.add(c); else cls.delete(c); return v; } };
+  const now = () => [...cls].sort().join(' ');
+  applyToolCursor(cl, 'select');
+  ok(now() === 'cur-select', 'select: the arrow (cur-select)');
+  applyPickHint(cl, 'select', true);
+  ok(now() === 'cur-pick cur-select', 'select over a building, person or vehicle: the pointing hand');
+  applyToolCursor(cl, 'bulldoze');
+  ok(now() === 'cur-bulldoze', 'bulldoze: the bulldozer, and the pointing hand is gone');
+  applyPickHint(cl, 'bulldoze', true);
+  ok(now() === 'cur-bulldoze', 'the pointing hand never shows outside select mode');
+  ok(['road', 'rail', 'runway', 'pylons', 'cable', 'streetrule'].every((t) => toolCursor(t) === 'cur-road'), 'road, rail, runway, pylons, cable, street rules: the road mark');
+  ok(['buy', 'park', 'roundabout', 'residential', 'turnrule'].every((t) => toolCursor(t) === 'cur-build'), 'buy and the building tools: the crosshair');
+  // through the Input: its tool changes call onToolChange, which main.ts turns into the class
+  const seen: string[] = [];
+  const m = make(() => {}, { onToolChange: (t: string) => { applyToolCursor(cl, t); seen.push(now()); } });
+  m.input.setTool('bulldoze'); m.input.setTool('road'); m.input.setTool('select');
+  ok(seen.join(' | ') === 'cur-bulldoze | cur-road | cur-select', `Input tool changes set the class (${seen.join(' | ')})`);
+}
 console.log(fails ? `${fails} FAILED` : 'all passed');
 process.exit(fails ? 1 : 0);
