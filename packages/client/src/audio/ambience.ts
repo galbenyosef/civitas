@@ -1,4 +1,4 @@
-import { hash2, type AmbienceHint, Terrain, terrainOf, isRoad, zoneOf, familyOf, underConstruction, Zone } from '@msimcity/shared';
+import { hash2, type AmbienceHint, Terrain, terrainOf, isRoad, zoneOf, familyOf, underConstruction, footprintOf, KIND_ID_COUNT, Zone } from '@msimcity/shared';
 import type { AudioEngine } from './engine';
 import { fire, makeBed, ringBell, type Bed, type BedId } from './voices';
 import { VOICES } from './manifest';
@@ -48,6 +48,13 @@ const SPOT_KIND = new Map<number, 'school' | 'stadium' | 'fire' | 'police' | 'bu
 
 /** the families that are civic, cultural, education, sport or landmark: police 5, fire 6, hospital 7, cinema 11, theatre 12, sport 13, library, school and landmark 14 */
 const CIVIC_FAMILY = new Set<number>([5, 6, 7, 11, 12, 13, 14]);
+
+/**
+ * What a tile of each kind counts for in the zone shares: one for a house, less for a tile of a big building, so a street reads by its
+ * buildings and not by the floor area of the biggest (a theatre or a landmark is a dozen tiles but one building). 1 over the root of its footprint.
+ */
+const TILE_W = new Float32Array(Math.max(256, KIND_ID_COUNT));
+for (let id = 0; id < TILE_W.length; id++) { const f = footprintOf(id); TILE_W[id] = 1 / Math.sqrt(Math.max(1, f.w * f.h)); }
 
 /** kind ids that ring the hour: the churchyard (151) and the Houses of Parliament (96) */
 const BELL_KIND = 151, BELL_DEEP_KIND = 96;
@@ -136,11 +143,12 @@ export function scanAround(src: AmbSources, cx: number, cz: number, dist: number
       if (id === BELL_KIND) bell++; else if (id === BELL_DEEP_KIND) deep++;
       const spot = SPOT_KIND.get(id);
       if (spot) out[spot]++;
-      if (fam === Zone.Residential) res++;
-      else if (fam === Zone.Commercial) com++;
-      else if (fam === Zone.Office) { com++; off++; }
-      else if (CIVIC_FAMILY.has(fam)) civic++;
-      else if (fam === Zone.Industrial || (id >= POWER_FIRST && id <= POWER_LAST)) ind++;
+      const wt = TILE_W[id] ?? 1;
+      if (fam === Zone.Residential) res += wt;
+      else if (fam === Zone.Commercial) com += wt;
+      else if (fam === Zone.Office) { com += wt; off += wt; }
+      else if (CIVIC_FAMILY.has(fam)) civic += wt;
+      else if (fam === Zone.Industrial || (id >= POWER_FIRST && id <= POWER_LAST)) ind += wt;
       else if (fam === 10) park++;
     }
   }
@@ -222,7 +230,7 @@ export function zoneText(zo: Zoning): string {
 /** how much the cars of a street are heard, by district: a lorry yard and a shopping street are busy, a terrace is quiet */
 const TRAFFIC_BY: Record<Zn, number> = { ind: 0.85, com: 0.7, off: 0.8, civic: 0.55, res: 0.4 };
 /** how much a district's talk is heard on top of the walkers drawn: the shops and the squares are all talk, the yards and the terraces little */
-const CROWD_BY: Record<Zn, number> = { com: 1, civic: 1, off: 0.55, res: 0.2, ind: 0.06 };
+const CROWD_BY: Record<Zn, number> = { com: 0.7, civic: 0.7, off: 0.4, res: 0.15, ind: 0.05 };
 const byZone = (zo: Zoning, t: Record<Zn, number>) => { let v = 0; for (const z of ZONES) v += zo.w[z] * t[z]; return v; };
 /** the walkers drawn near the camera as a density, per 15 tile circle (the scan's circle grows with the zoom), eased: 0 under a handful, 1 from about ninety */
 export const peopleNear = (s: Scan, dist: number) => { const rw = Math.max(15, Math.min(60, dist * 0.5)); return smooth(6, 90, s.walkers * (15 / rw) * (15 / rw)); };
@@ -318,12 +326,20 @@ export function greenOf(s: Scan, lead: Zn | null = null): number {
 }
 
 /**
+ * How much of the builders' noise there is, 0 to 1: a site under construction among the tiles sampled (`sites`), by working hours, close in.
+ * A builders' depot alone is a quiet yard (a few percent of it); with neither a site nor a depot it is nothing.
+ */
+export function worksOf(s: Scan, hour: number, dist: number): number {
+  return clamp01(s.sites / 3 + 0.15 * Math.min(1, s.builders)) * (s.sites > 0 ? 1 : 0.4) * during(hour, 7.5, 17) * (1 - smooth(25, 80, dist));
+}
+
+/**
  * Events per second for the birds, from the scan and the hour (0 when the camera is far off). Only where there is green (a park, or a
  * street of homes: `greenOf`) and only from dawn to dusk: a chorus from half past four to seven, a song by day, a few at dusk, none at night.
  */
 export function birdRate(s: Scan, hour: number, dist: number, lead: Zn | null = null): number {
   const green = greenOf(s, lead);
-  if (green < 0.04) return 0;
+  if (green < 0.07) return 0;
   const nearF = 1 - smooth(100, 220, dist);
   let base = 0;
   if (hour >= 4.5 && hour < 7) base = 0.35 + 2 * green;              // the dawn chorus
@@ -488,7 +504,7 @@ export class Ambience {
     const close = (a: number, b: number) => 1 - smooth(a, b, d);
     const people = peopleNear(sc, d);
     go('gust', 0.045 * smooth(40, 260, d), 0.35 + 0.6 * smooth(60, 300, d));
-    go('footsteps', 0.3 * people * act * close(25, 50), 0.35 + 0.65 * this.rand());
+    go('footsteps', 0.12 * people * lerp(0.5, 1, byZone(zo, CROWD_BY)) * act * close(25, 50), 0.35 + 0.65 * this.rand());
     go('siren', 0.004 * Math.min(1, sc.police) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d))); // a call from a station in the view: the hook for a real response vehicle
     go('siren-fire', 0.003 * Math.min(1, sc.fire) * (1 - smooth(60, 120, d)), 0.4 + 0.6 * (1 - smooth(30, 110, d)));
     go('seagulls', 0.05 * Math.min(1, sc.water * 3) * day * (1 - smooth(100, 170, d)), 0.3 + 0.7 * this.rand());
@@ -503,7 +519,7 @@ export class Ambience {
     go('plane-over', 0.006 * during(hour, 6, 23) * smooth(70, 160, d), 0.4 + 0.5 * this.rand());
     go('boat-horn', 0.008 * clamp01(sc.water * 4) * (1 - smooth(80, 150, d)), 0.4 + 0.6 * this.rand());
     // digging: only with a site under construction in the tiles sampled (a depot alone is a quiet yard), and a long gap between blows
-    const works = clamp01(sc.sites / 3 + 0.15 * Math.min(1, sc.builders)) * (sc.sites > 0 ? 1 : 0.4) * during(hour, 7.5, 17) * close(25, 80);
+    const works = worksOf(sc, hour, d);
     go('hammer', 0.035 * works, 0.4 + 0.6 * this.rand());
     go('drill', 0.012 * works, 0.4 + 0.6 * this.rand());
     go('lawnmower', 0.004 * zr * during(hour, 10, 17) * close(30, 80), 0.4 + 0.5 * this.rand());

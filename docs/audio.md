@@ -22,10 +22,11 @@ Which voices are recorded, and which are not:
 
 | | |
 |---|---|
-| Beds | traffic, wind, crowd, industry, water; rain (light, heavy), market, pub, playground, stadium, fountain |
+| Beds | traffic, wind, crowd, industry, water; rain (light, heavy), market, pub, playground, stadium, fountain; the five district beds (industrial, shops, offices, homes, civic) |
 | Rides (first person) | car, truck, bus, train, tube, boat, plane, helicopter |
 | Events | bird, owl, bell, deep bell, horn, crossing beep; door hiss, bus stop bell, door chime, rail joint |
 | Second pass | gust, thunder, footsteps, police siren, fire engine siren, seagulls, pigeons, dog, bell peal, bicycle bell, bin lorry, station chime, helicopter and plane overhead, boat horn, fireworks, hammer, drill, lawnmower |
+| Districts | metal clank, reversing beeper, steam vent, till, busker, music through a door, revolving door, lift ding, radio through a window, front door, children, camera shutter (and the shop bell, which was a tour cue) |
 | Still synthesised | the four interface clicks (pick, place, refuse, undo): short and tonal, and a synthesised tick is the right sound for them |
 
 What drives the second pass is in `manifest.ts` (the `driven` text of each row) and `ambience.ts` (`places`, and the `mixFor` windows). Two have no source in the game yet and wait on a hook: rain and thunder follow `Ambience.setWeather(rain)` (there is no weather system); a siren is a rare call from a police or fire station in the view until a response vehicle can report itself. Fireworks follow the fireworks system: `render/fireworks.ts` calls `onShell` for every shell and `Audio.firework` times the bang by distance.
@@ -52,7 +53,7 @@ Files under 4 KB (a dog bark, a rail clack) are inlined by Vite as `data:` URLs 
 
 ### Budget
 
-8 MB for the whole set, 400 KB for any file (audio-check enforces both). Beds, rides and loops are mono 48 kHz Opus at 48 kbps, 14 to 18 s long; events are 0.3 to 14 s. The set is about 5.4 MB (3.4 MB before the tour cues). If it grows: drop `--kbps 32` on the build, or shorten a bed.
+8 MB for the whole set, 400 KB for any file (audio-check enforces both). Beds, rides and loops are mono 48 kHz Opus at 48 kbps, 14 to 18 s long; events are 0.2 to 14 s. The set is about 6.7 MB (3.4 MB before the tour cues, 5.4 MB before the districts). If it grows: drop `--kbps 32` on the build, or shorten a bed.
 
 ### Re-running the fetch, and swapping a clip
 
@@ -78,6 +79,48 @@ A bed or ride is a loop: the file is cut so that the last moment flows into the 
 
 Nothing here was judged by ear. The clips picked by score alone with the narrowest margin over the runner-up, and the ones whose titles are the least certain, are listed in the notes for the pull request; start your listening pass there, and swap what is wrong.
 
+## Districts
+
+At street zoom an industrial estate, a shopping street, an office quarter, a residential street and a landmark square each have a sound of their own, and a mixed street sounds like the one thing most of it is. Client only. The model is in `ambience.ts` (`zonesOf`, `mixFor`, `places`); every number below is a constant there.
+
+### Why it was one sound everywhere
+
+Measured in London with the readout before this work (street zoom, 24): the traffic bed was at -12.3 dB and the wind at -29.9 dB in all five districts, the crowd bed between -17.8 and -21 dB, birds fired six to twelve times a minute in a lorry yard as in Oxford Street, and the only thing that moved was the industry hum (half its ceiling at Park Royal, nothing elsewhere). The causes: the zone shares were shares of all tiles sampled (roads and empty ground included, so no share passed about 0.2 and nothing was relative to anything), shops and offices were one number, traffic saturated at 45 cars and crowd at 25 walkers (a district has hundreds), the bird rate had a floor, and digging was keyed to a builders' depot in the window rather than to a site being built.
+
+### The model
+
+- **The scan** (`scanAround`) gains `off` (offices, a part of `com`), `civic` (police, fire, hospital, cinema, theatre, sport, library, school, museum and landmark families), `sites` (tiles under construction, a count). A tile counts for one over the root of its building's footprint, so a street reads by its buildings and not by the floor area of the biggest: a theatre is a dozen tiles and one building.
+- **`zonesOf`** turns the scan into five shares (shops, offices, industry, civic, homes) of the built tiles, the **soft-max** weights (a share to the power 5 over the sum of them all: 0.55 against 0.45 is 0.73 against 0.27, 0.6 against 0.4 is 0.88 against 0.12, 0.9 against 0.1 is 1 against 0), the winner, and `presence` (0 on open ground, 1 from a built share of about 12%). The zone that won at the last tick counts 1.25 times its share, so a street on a border does not flip back and forth; a dead heat is held by whoever led. Ties with no leader go to shops, offices, industry, civic, homes in that order.
+- **`zoneLevel`** is a weight through a smoothstep from 0.08 to 0.6 times the presence: the winner is held at its ceiling, a zone with under 0.08 of the weight is silent and its bed is stopped after eight quiet seconds (so a mixed street runs two district beds, not five, and the voice budget is untouched), and a runner-up is ducked in between.
+- **`mixFor`** gives each district bed its ceiling times `zoneLevel`, times the hour of its street, times a street-zoom fade (full to 45, gone by 160). It also moves the old beds: traffic is scaled by the kind of street (lorry yard 0.85, offices 0.8, shops 0.7, civic 0.55, homes 0.4), the crowd murmur follows the walkers drawn as a **density per 15-tile circle** (the scan's circle grows with the zoom, so the same count over a wider circle is a thinner crowd) and the kind of street (shops and squares 0.7, offices 0.4, homes 0.15, yards 0.05), the synthesised industry hum is held to industry winning, and the market and pub read shops (offices apart).
+- The **readout** shows the district in its header and in every bed's why: `commercial 0.62 wins, industrial 0.21, residential 0.17; ducked`, and for a district bed its weight and presence. Events say which district licensed them.
+
+### The signatures
+
+| District | Bed (hours) | Events (while it wins; hours) |
+|---|---|---|
+| Industrial | `zone-ind`: a factory floor and a warehouse yard (full 06:30 to 18:30, half at night), the synthesised hum under it | `metal-clank` (an anvil, a steel sheet), `reverse-beep` (a lorry backing), `steam-vent`; 07:00 to 17:00 for the beeper |
+| Shops | `zone-com`: a shopping street and cafe chatter (08:00 to 22:00, a third at night) | `till`, `shop-bell` (08:30 to 19:30), `music-door` (music through a doorway, 10:00 to midnight), `busker` (a saxophone, an accordion; only where the walkers are a crowd, 10:00 to 20:30); the market by day and the pub in the evening as before |
+| Offices | `zone-off`: an empty office, air handling and a lobby (07:30 to 19:00, **a fifth after 19:00**) | `revolving-door`, `lift-ding` (07:30 to 19:00) |
+| Homes | `zone-res`: a quiet street by day (a third at night) | the lawnmower, `dog`, `bin-lorry` as before, `radio-window` (08:00 to 22:00), `front-door` (07:00 to 22:30), `kids-yard` (08:00 to 19:00); birds louder here and in parks |
+| Civic, landmarks | `zone-civic`: a museum hall and a plaza murmuring (08:30 to 20:00) | `camera-shutter` (one to three clicks, 09:00 to 19:30), pigeons, the fountain, bells as before |
+
+Each district bed has one or two takes and the take is a hash of the city (`AmbSources.city`: the `?ws=`, `?demo=` or `?city=` of the page), so a city always sounds like itself and two cities differ; every other choice is per instance (the organic rule). Events vary their take, pitch, gain and pan as every event does, and each has its own rate and window.
+
+### The three that were everywhere
+
+- **Birds** (`birdRate`, `greenOf`): only where there is green, which is parks (3 per share) and homes only where homes are what the street is (a share through `zoneLevel`, so an office quarter or a lorry yard has no garden); none under 0.07 of green. A dawn chorus 04:30 to 07:00 (0.35 plus 2 per green), a song by day (0.01 plus 0.22 per green, one in ten seconds at the most), a few at dusk (19:00 to 20:30), none at night, none from far above.
+- **Digging** (`worksOf`): hammer and drill only with a site under construction among the tiles sampled (`sites`; a builders' depot alone is a few percent of it), by working hours, close in; the gap is long (a hammer about every 30 s, a drill about every 80 s at the most, from every 8 s and 20 s before).
+- **Talk**: the crowd bed and the footsteps follow the walkers drawn as a density and the kind of street, not the shop count; the market and the pub follow shops. A yard with a hundred walkers is nearly silent of talk, a shopping street with ten is not loud.
+
+### Sourcing
+
+17 new voices and 29 files, 1.29 MB (the set is now 6.7 MB of the 8 MB budget), all CC0 from Freesound, found and built by the pipeline above with a hand pick for each (`audio-picks.json`), each credited in `CREDITS.md`. Beds are 18 s loops; events 0.2 to 9 s. A voice can carry a `post` filter in `audio-voices.ts` that `audio-build.ts` applies to an event at build time: `music-door` and `radio-window` are low-passed to sound heard through a doorway or a window. The weakest matches, listen first: the revolving door (a revolving door's thud, and an automatic door as the second take), `music-door` (a shop's loudspeaker music in Florence), `radio-window` (muffled talking that reads as a radio), the residential bed's second take (a mid-day suburb recorded in Israel), the anvil and steel-sheet hits (cut to under half a second by the silence trim). The audition card on the board has every chosen take and its runner-ups.
+
+### Checks and cost
+
+`audio-check.ts` has pure `mixFor` tests: a street 90% industrial drives the industrial bed at least twice any other (and the same for homes, shops, offices and civic), a 54/46 street has one clear winner and a dead heat is held by the zone that led, a night office is quieter than its day (a fifth after 19:00), birds at 02:00 are silent and none sound in a yard, a shopping street or an office quarter, builders dig only at a site, the crowd follows walkers per area and the kind of street, `bedWhy` names the winner and the ducked zones, and the scan counts offices, civic tiles and sites. The district model costs about 5 microseconds on the 250 ms tick (a fake city, scan plus mix plus rates: 25 microseconds before, 30 after); the readout's measured tick is unchanged (median about 0.3 ms).
+
 ## Tour cues
 
 The London tour has its sound: as the camera arrives at a stop, the stop sounds like the place (Big Ben striking at Parliament, gulls and a boat horn on the river, a train arriving under Waterloo, a crowd at Wembley, quiet birds and ravens in a cemetery). Client only: nothing here touches the simulation or the protocol.
@@ -89,7 +132,7 @@ The London tour has its sound: as the camera arrives at a stop, the stop sounds 
 ```ts
 type TourSound = 'ambience' | {
   cues: { voice: string; at?: number; gain?: number; loop?: boolean }[];
-  ambience?: { traffic?, wind?, crowd?, industry?, water?, market?, pub?, playground?, stadium?, fountain?: number }; // 0..1
+  ambience?: { traffic?, wind?, crowd?, industry?, water?, market?, pub?, playground?, stadium?, fountain?, 'zone-ind'?, 'zone-com'?, 'zone-off'?, 'zone-res'?, 'zone-civic'?: number }; // 0..1
   duck?: number; // dB the beds dip while a cue sounds, default 4
 }
 ```
@@ -151,7 +194,7 @@ What is sounding now and why, in the style of the Shift+M perf readout (`src/aud
 
 | | |
 |---|---|
-| Header | the context (running, suspended when the tab is hidden, not started before the first gesture), the volume and the master gain it makes, MUTED, voices in use of the 24, recordings being fetched or decoded, the ducking layers (the tour's, the ridden vehicle's) with their dB, the hour the ambience uses and where it comes from (the clock, or the light a tour stop pinned), the tour stop shown |
+| Header | the context (running, suspended when the tab is hidden, not started before the first gesture), the volume and the master gain it makes, MUTED, voices in use of the 24, recordings being fetched or decoded, the ducking layers (the tour's, the ridden vehicle's) with their dB, the hour the ambience uses and where it comes from (the clock, or the light a tour stop pinned), the district the ambience hears ("commercial 0.62 wins, industrial 0.21, residential 0.17; ducked"), the tour stop shown |
 | A voice | its class (bed, event, ride, cue, ui), name, bus, level in dB after its bus (a one-shot: at its start), pitch offset in cents, which recording it plays (or `synth`), how long it has been up or how long it has left |
 | **Why** | a **bed**: the numbers the 250 ms tick read, the share of its ceiling it aims at, and the tour stop's hold on it if any ("cars near 212, roads 18% of tiles, zoom 24, hour 08:00 → 0.42 of its ceiling"). A **tour cue**: the stop, the cue's index and its moment ("tour stop parliament, cue 1 of 2, at +0.8 s"); a loop says it runs until the stop is left. A **ride**: the vehicle and its speed. An **event**: the trigger ("crossing red at 12,40, 6 tiles off", "horn: 31 cars near", "bus stop bell: pulling away after 4.1 s at a stop", "fireworks shell at x,z", "ui: place", the rate and inputs of the second pass's Poisson clocks) |
 | Log | the last 40 starts, stops and skipped starts (a cue silenced by a mute, a hidden tab or a full voice budget, with the reason), newest first, with the time ago; the same row repeated inside two seconds (rail joints, footsteps) is one row with a count. Each tour stop shown is a row. **Copy** puts the header, the voices and the log on the clipboard as text |

@@ -5,7 +5,8 @@ import { bindMuteKey } from '../src/audio/controls';
 import { VOICES, voiceFile } from '../src/audio/manifest';
 import { CLIPS } from '../src/audio/credits';
 import { fire, makeBed, makeRide, ringBell, BEDS, type EventId, type RideKind } from '../src/audio/voices';
-import { Ambience, mixFor, newMix, newScan, birdRate, owlRate, scanAround, type AmbSources } from '../src/audio/ambience';
+import { Ambience, mixFor, newMix, newScan, birdRate, owlRate, scanAround, zonesOf, zoneText, worksOf, peopleNear, greenOf, ZONES, ZONE_BED, type AmbSources, type Zn } from '../src/audio/ambience';
+import { packTile, withConstruction } from '@msimcity/shared';
 import { FpvSound, type RideNow } from '../src/audio/fpv';
 import { TourCues, DEFAULT_DUCK_DB } from '../src/audio/tourcue';
 import { applyHint, HINT_CEIL, bedWhy } from '../src/audio/ambience';
@@ -248,6 +249,72 @@ for (const mode of ['synthesised', 'recorded'] as const) {
   ok(lv(newScan(), 12, 40, 0)['rain-light'].level === 0 && lv(newScan(), 12, 40, 0.3)['rain-light'].level > 0.05 && lv(newScan(), 12, 40, 0.3)['rain-heavy'].level === 0 && lv(newScan(), 12, 40, 1)['rain-heavy'].level > 0.2 && lv(newScan(), 12, 40, 1)['rain-light'].level === 0, 'light rain then heavy rain follow the weather hook, and it is dry by default');
   ok(lv({ ...newScan(), fountain: 1 }, 12).fountain.level > 0.2 && lv({ ...newScan(), fountain: 1 }, 12, 300).fountain.level === 0, 'a fountain is heard close in');
   ok(owlRate(park, 23, 40) > 0 && owlRate(park, 12, 40) === 0 && owlRate(newScan(), 23, 40) === 0, 'owls call at night in parks and homes only');
+}
+
+// ---- the districts (docs/audio.md "Districts"): a soft-max over the zone shares gives a street one bed, the others duck ----
+{
+  type Sc = ReturnType<typeof newScan>;
+  const street = (o: Partial<Sc>): Sc => ({ ...newScan(), road: 0.3, cars: 60, walkers: 60, ...o });
+  const zb = ZONES.map((z) => ZONE_BED[z]);
+  const m = newMix();
+  const beds = (sc: Sc, hour = 12, dist = 24, lead: Zn | null = null) => { mixFor(sc, dist, hour, false, m, 0, lead); return Object.fromEntries(zb.map((b) => [b, m[b].level])) as Record<string, number>; };
+  const wins = (v: Record<string, number>, w: string, k = 2) => zb.filter((b) => b !== w).every((b) => v[w] >= k * v[b]) && v[w] > 0.2;
+  // a street that is 90% one thing: that bed at least twice any other, near its ceiling
+  const ind90 = beds(street({ ind: 0.18, res: 0.01, com: 0.01 })), res90 = beds(street({ res: 0.18, ind: 0.01, com: 0.01 }));
+  ok(wins(ind90, 'zone-ind'), `a street 90% industrial drives the industrial bed at least 2x any other (${zb.map((b) => `${b.slice(5)} ${ind90[b].toFixed(2)}`).join(', ')})`);
+  ok(wins(res90, 'zone-res'), `a street 90% residential drives the residential bed at least 2x any other (${zb.map((b) => `${b.slice(5)} ${res90[b].toFixed(2)}`).join(', ')})`);
+  ok(wins(beds(street({ com: 0.18, off: 0, res: 0.01, ind: 0.01 })), 'zone-com') && wins(beds(street({ com: 0.18, off: 0.18, res: 0.01 })), 'zone-off') && wins(beds(street({ civic: 0.18, res: 0.01, ind: 0.01 })), 'zone-civic'), 'shops, offices and civic streets each drive their own bed');
+  // a 50/50 street still has one clear winner (a 54/46 one, and a dead heat settled by whoever led last)
+  const mixed = beds(street({ com: 0.135, res: 0.115 }));
+  ok(wins(mixed, 'zone-com', 2), `a 54/46 street of shops and homes has one clear winner (shops ${mixed['zone-com'].toFixed(2)}, homes ${mixed['zone-res'].toFixed(2)})`);
+  const tie = street({ com: 0.12, res: 0.12 });
+  ok(wins(beds(tie, 12, 24, 'res'), 'zone-res', 2) && wins(beds(tie, 12, 24, 'com'), 'zone-com', 2), 'a dead heat is held by the zone that led at the last tick (no flipping on a border)');
+  // the weights are a soft-max over shares: they sum to 1, and nothing built is no district
+  const z = zonesOf(street({ com: 0.1, off: 0.04, ind: 0.05, civic: 0.03, res: 0.2 }));
+  ok(Math.abs(ZONES.reduce((a, k) => a + z.w[k], 0) - 1) < 1e-9 && Math.abs(ZONES.reduce((a, k) => a + z.share[k], 0) - 1) < 1e-9 && z.win === 'res', `shares and weights each sum to 1 (${zoneText(z)})`);
+  const open = beds(street({}));
+  ok(zb.every((b) => open[b] === 0) && zonesOf(street({})).win === null, 'open country with nothing built has no district bed');
+  ok(zb.every((b) => beds(street({ ind: 0.18 }), 12, 24)[b] >= 0) && zb.every((b) => { mixFor(street({ ind: 0.18 }), 24, 12, true, m); return m[b].level === 0; }), 'the map view silences the district beds');
+  ok(beds(street({ ind: 0.18 }), 12, 300)['zone-ind'] === 0, 'a district bed is a street-zoom sound: nothing from high above');
+  // the hour: a night office is quieter than its day, a quarter of it after 19:00 and less
+  const off = street({ com: 0.18, off: 0.18, res: 0.01 });
+  const offDay = beds(off, 12)['zone-off'], offNight = beds(off, 23)['zone-off'], offEve = beds(off, 20.5)['zone-off'];
+  ok(offNight < offDay * 0.3 && offEve < offDay * 0.4 && beds(off, 10)['zone-off'] > offDay * 0.95, `a night office scan is quieter than its day one (day ${offDay.toFixed(2)}, 20:30 ${offEve.toFixed(2)}, 23:00 ${offNight.toFixed(2)})`);
+  ok(beds(street({ res: 0.18 }), 3)['zone-res'] < beds(street({ res: 0.18 }), 12)['zone-res'] * 0.5 && beds(street({ ind: 0.18 }), 3)['zone-ind'] < beds(street({ ind: 0.18 }), 12)['zone-ind'], 'homes are quiet at night and the works run down');
+  // the beds that were everywhere now follow the district: crowd by the walkers drawn and the street they are in, traffic by the street
+  const crowd = (sc: Sc) => mixFor(sc, 24, 12, false, newMix()).crowd.level;
+  ok(crowd(street({ com: 0.18 })) > crowd(street({ ind: 0.18 })) * 4 && crowd(street({ com: 0.18, walkers: 0 })) < 0.02, 'the crowd murmur is the shops and squares and the walkers drawn: a yard with the same walkers is far quieter, no walkers is no murmur');
+  ok(peopleNear(street({ walkers: 60 }), 24) > peopleNear(street({ walkers: 60 }), 80) * 3, 'walkers count as a density: the same count over a wider circle is a thinner crowd');
+  const trafficOf = (sc: Sc) => mixFor(sc, 24, 12, false, newMix()).traffic.level;
+  ok(trafficOf(street({ res: 0.18 })) < trafficOf(street({ ind: 0.18 })) * 0.7, 'a terrace is quieter than a lorry yard for the same cars');
+  // birds: only with green, by day, with a dawn chorus; none in a yard, a shopping street or an office quarter, none at 02:00
+  const homes = street({ res: 0.2, park: 0.05 }), parkland = street({ park: 0.3, res: 0.05 });
+  ok(birdRate(homes, 2, 24) === 0 && birdRate(parkland, 2, 24) === 0 && birdRate(homes, 23.5, 24) === 0, 'birds at 02:00 are silent (and at 23:30)');
+  ok(birdRate(street({ ind: 0.2, res: 0.02 }), 12, 24) === 0 && birdRate(street({ com: 0.2, off: 0.1 }), 12, 24) === 0 && birdRate(street({ com: 0.2, off: 0.2, res: 0.03 }), 12, 24) === 0, 'no birds in an industrial yard, a shopping street or an office quarter');
+  ok(birdRate(homes, 12, 24) > 0 && birdRate(parkland, 12, 24) > birdRate(homes, 12, 24) && birdRate(homes, 5.5, 24) > birdRate(homes, 12, 24) * 4, 'birds follow homes and parks by day, louder in parks, with a dawn chorus');
+  ok(birdRate(homes, 12, 24) < 0.1 && birdRate(homes, 20.8, 24) === 0, 'a daytime bird is not a constant (under one a ten seconds) and the song is over after dusk');
+  ok(greenOf(street({ res: 0.2, ind: 0.002 }), null) > 0.1 && greenOf(street({ res: 0.03, com: 0.2 }), null) < 0.07, 'homes make green only where the street is homes');
+  // digging: only with a site under construction, by working hours, close in, and rarely
+  const site = street({ sites: 5, ind: 0.1 }), depot = street({ builders: 1, ind: 0.1 }), none = street({ ind: 0.1 });
+  ok(worksOf(site, 11, 24) > 0.8 && worksOf(none, 11, 24) === 0 && worksOf(depot, 11, 24) < worksOf(site, 11, 24) * 0.1, 'builders dig only where a site is under construction: a depot alone is a quiet yard, nothing at all is silence');
+  ok(worksOf(site, 22, 24) === 0 && worksOf(site, 11, 120) === 0, 'no digging at night or from far above');
+  // the scan: homes, shops, offices, industry, civic and sites from a fake city (kind ids 1 to 15 are the family bases)
+  const fam = (f: number, site = false) => { const t = packTile(0, false, f, 1); return site ? withConstruction(t, true) : t; };
+  const tiles = [fam(3), fam(4), fam(7), fam(2), fam(1), fam(12), fam(3, true)];
+  const city: AmbSources = { hour: () => 12, camera: () => ({ x: 0, z: 0, dist: 14, map: false, rightX: 1, rightZ: 0 }), tileAt: (x, y) => tiles[(Math.abs(x) + Math.abs(y)) % tiles.length], kindIdAt: (x, y) => { const t = tiles[(Math.abs(x) + Math.abs(y)) % tiles.length]; return (t >> 3) & 15; }, agents: () => [] };
+  const sc = scanAround(city, 0, 0, 14, newScan());
+  ok(sc.off > 0.1 && sc.civic > 0.2 && sc.ind > 0.2 && sc.com > sc.off && sc.res > 0.1 && sc.sites > 10, `the scan counts offices apart from shops, civic tiles and sites under construction (off ${sc.off.toFixed(2)}, civic ${sc.civic.toFixed(2)}, shops+offices ${sc.com.toFixed(2)}, sites ${sc.sites})`);
+  const slow = Math.max(...[1, 2, 3, 4, 5].map(() => { const t0 = performance.now(); for (let i = 0; i < 200; i++) { zonesOf(sc, 'ind'); mixFor(sc, 14, 12, false, m, 0, 'ind'); } return (performance.now() - t0) / 200; }));
+  ok(slow < 0.05, `the district model and the mix cost ${slow.toFixed(4)} ms a tick (under 0.05)`);
+  // the readout's words for the district bed, and for a bed that follows it
+  const why = (id: string) => bedWhy(id, street({ com: 0.14, ind: 0.04, res: 0.03 }), 24, 12, 0.2, null, false, 0, null);
+  ok(/commercial 0\.\d\d wins, industrial 0\.\d\d, residential 0\.\d\d; ducked/.test(why('zone-com')) && /commercial weight \d\.\d\d/.test(why('zone-com')) && /district: commercial/.test(why('crowd')) && /district: commercial/.test(why('traffic')), `bedWhy names the soft-max winner and the ducked zones (${why('zone-com').slice(0, 120)})`);
+  ok(/nothing built/.test(bedWhy('zone-res', street({}), 24, 12, 0, null, false)), 'bedWhy says when nothing is built');
+  // every district bed and event is a voice with a recording, wired to a manifest row
+  const events = ['metal-clank', 'reverse-beep', 'steam-vent', 'till', 'busker', 'music-door', 'revolving-door', 'lift-ding', 'radio-window', 'front-door', 'kids-yard', 'camera-shutter'];
+  ok(zb.every((b) => VOICES[b]?.kind === 'bed' && (VOICES[b].takes?.length ?? 0) >= 1) && events.every((e) => VOICES[e]?.kind === 'event' && (VOICES[e].takes?.length ?? 0) >= 1), 'the five district beds and twelve district events are manifest voices with recordings');
+  const hint = applyHint(newMix(), { 'zone-off': 1, 'zone-ind': 0 }, 0, 3);
+  ok(hint['zone-off'].level > 0.4 && hint['zone-ind'].level === 0, 'a tour stop can hold or silence a district bed');
 }
 
 // ---- the 250 ms tick, with no allocation hot spots: scan and tick against a fake city ---------------------------------
