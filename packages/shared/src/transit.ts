@@ -176,4 +176,7 @@ export interface BusInfo {
   /** game minutes behind the expected running time to the next stop (0 on time) */
   delayMin: number;
   state: string;
+  /** who is on board, with where each gets off (Transit.aboard): only on the selected bus's inspect, cut at 200 rows */
+  riders?: { id: number; name: string; activity: string; age?: number }[];
+  truncated?: boolean;
 }

@@ -483,6 +483,14 @@ export interface CitizenInfo {
   night?: { hours: number; drinks: boolean };
   /** a fishing harbour's crew member whose trawler is out (server sim/harbours.ts): "at sea on the Kittiwake" */
   atSea?: { boat: number; name: string };
+  /**
+   * On board a bus, train or tube train (server sim/transit.ts): the vehicle, so the first-person view can sit them in it
+   * (render/fpv.ts). `vehicle` is the bus's agent id, or the train's transit vehicle id; `line` the transit line (the rail and
+   * metro lines' ids are the client's train lines'), `train` the train's number on it; `load` the riders on board now and
+   * `next` the stop it calls at next (the next-stop display). The selected citizen's inspect only; absent while they wait at
+   * the stop or step aboard.
+   */
+  aboard?: { mode: 'bus' | 'rail' | 'metro'; vehicle: number; line: number; train?: number; load: number; next?: string };
 }
 
 /** Someone a citizen is connected to, for the panel (clickable). */

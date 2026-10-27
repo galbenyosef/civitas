@@ -182,6 +182,29 @@ who waits longer than max(60 ticks, 3 × the expected wait), or whose line stops
 The citizen panel says "waiting for the 7 at Reyes Corner" or "riding the 7 to Lindqvist Parade", and the route ribbon
 shows the ride legs as drive-width strips along the bus's road.
 
+### Riding along (first person)
+
+A followed citizen is not dropped when they board. The agent stream sends nothing for a rider on board (`sim.agents()` skips
+them and the flush sends one Home-state quad, so the client removes the agent), so the selected citizen's once-a-second
+inspect carries `aboard`: `{ mode: 'bus' | 'rail' | 'metro', vehicle, line, train?, load, next? }` from `Transit.aboardOf`
+(on board and past the boarding step, the same moment the stream drops them). When the street has lost them and the
+inspect sits them in a vehicle, the first-person view fades through black into a seat of it, and fades back to the street
+once the inspect stops saying so and the stream has them again (`client/src/render/passenger.ts`, `handStep`). The view
+waits five seconds, not three, for a citizen whose trip rides, since boarding takes up to a second to show. In a bus the
+seat is one to four rows behind the middle doors, left or right of the aisle by hash; the bus is drawn on the selection
+layer for the ride so the eye sees its interior (`render/passengerInterior.ts`), not its body: side windows and the
+windscreen show the street, the seats ahead are in the line's moquette, people sit in them from the load, the next stop
+and the stopping sign are on the display at the front. The selected bus's panel lists its riders (`BusInfo.riders`, as a
+train's roster, cut at 200), and picking one sits the view with them. The ride sound is the bus's (ride key `c<bus>`), so
+its own pass-by never plays.
+
+What a ride costs (2026-10-27, the Showcase, 1280x577 at dpr 2, five alternations against the same bus's driver view): the
+view's own work (update, the eye's render, the interior, the blit) is 0.87 ms a frame in the inset against the driver
+view's 0.96, and 1.31 ms against 1.40 in the full window; the interior's canvases take 0.005 to 0.01 ms (they repaint only
+on a change of size, bus or load). The overhead pass the inset draws as well is the same in both (5.30 and 5.38 ms) and
+drifts by 2 to 3 ms over a minute with what the overhead camera sees, so it is left out of the comparison. Drawing the
+ridden bus as the selection (layer 1) costs nothing measurable: 3.43 against 3.37 ms over five interleaved runs.
+
 ## Other modes
 
 `Transit` is mode-agnostic. A mode registers a `ModeService` (`stopProblem`, `route`, `waitAt`, `rideTicks`, `headway`,

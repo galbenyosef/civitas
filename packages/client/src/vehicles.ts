@@ -11,7 +11,8 @@ import { news } from './news';
  * containers come from the server (an `inspectTrain` with `full`, only for the selected train); a plane's passengers are
  * generated from its flight.
  */
-export type VehicleSel = { kind: 'train'; line: number; train: number } | { kind: 'plane'; airport: number; flight: number } | { kind: 'heli'; flight: number } | { kind: 'boat'; id: number };
+/** a plane may carry the seat picked from its manifest (`seat` '12C', `who` the passenger): the first-person view is the cabin from it */
+export type VehicleSel = { kind: 'train'; line: number; train: number } | { kind: 'plane'; airport: number; flight: number; seat?: string; who?: string } | { kind: 'heli'; flight: number } | { kind: 'boat'; id: number };
 export const vehicleKey = (v: VehicleSel) => (v.kind === 'train' ? `t${v.line}:${v.train}` : v.kind === 'plane' ? `p${v.airport}:${v.flight}` : v.kind === 'boat' ? `b${v.id}` : `h${v.flight}`);
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
@@ -100,7 +101,7 @@ export function planeTipHtml(s: FlightState, m: FlightManifest): string {
 }
 
 /** The selected plane's panel: what it is doing and everyone on board. */
-export function planePanelHtml(s: FlightState, m: FlightManifest, gate: number, knots: number): string {
+export function planePanelHtml(s: FlightState, m: FlightManifest, gate: number, knots: number, seat?: string): string {
   const a = flightAboard(m, s.phase, s.progress);
   let html = `<h3>${planeTitle(s, m)}</h3><div class="sub">${esc(planeDoing(s, m))}</div>`;
   html += row('Aircraft', `${TYPE_LABEL[s.type]} · ${m.seats} seats`);
@@ -112,13 +113,14 @@ export function planePanelHtml(s: FlightState, m: FlightManifest, gate: number, 
   html += row(a.leg === 'in' ? 'Passengers in' : 'Passengers out', `${a.count} / ${m.seats}`) + bar(a.count, m.seats);
   html += `<div class="sect">Crew (${m.crew.length})</div>${crewRows(m.crew)}`;
   html += `<div class="sect">Passengers (${a.count}) · ${a.leg === 'in' ? 'visitors arriving' : 'travellers leaving'}</div>`;
+  if (a.count) html += `<div class="pempty">${seat ? `seat ${esc(seat)}: I or O for the view from it; click it again for the cockpit` : 'click a passenger for the view from their seat (I or O)'}</div>`;
   if (!a.count) html += `<div class="pempty">${s.phase === 'dwell' ? 'cabin empty while the plane is turned round' : 'nobody on board'}</div>`;
   else {
     const f = s.flight;
     const rows: string[] = [];
     for (let i = 0; i < a.count; i++) {
       const p = flightPassenger(f, a.leg, i);
-      rows.push(`<div class="person static"><span class="pname">${esc(p.name)}</span><span class="prel">seat ${p.seat}</span></div>`);
+      rows.push(`<div class="person${p.seat === seat ? ' sel' : ''}" data-seat="${p.seat}" data-who="${esc(p.name)}" title="the view from seat ${p.seat}"><span class="pname">${esc(p.name)}</span><span class="prel">seat ${p.seat}</span></div>`);
     }
     html += rows.join('');
   }

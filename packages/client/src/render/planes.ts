@@ -554,6 +554,18 @@ export class PlanesView {
     return { x: s.x + p.x, y: s.y + GROUND_LIFT + p.y, z: s.z + p.z, q };
   }
 
+  /**
+   * A cabin seat's eye (render/passenger.ts cabinSeat): the point (x, y, z) of the plane's own frame (+x the nose, +y up from the
+   * main gear, +z the right wing) where it is now, and the plane's orientation turned `yaw` to the right, into `pos` and `q`.
+   */
+  cabinOf(s: FlightState, x: number, y: number, z: number, yaw: number, pos: Vector3, q: Quaternion) {
+    q.setFromEuler(this.ce.set(s.bank, -s.heading, s.pitch, 'YZX'));
+    pos.set(x, y, z).applyQuaternion(q);
+    pos.x += s.x; pos.y += s.y + GROUND_LIFT; pos.z += s.z;
+    q.multiply(this.cq.setFromAxisAngle(this.cy, -yaw));
+  }
+  private ce = new Euler(); private cq = new Quaternion(); private cy = new Vector3(0, 1, 0);
+
   private draw(s: FlightState, dt: number, time: number, night: number, lift = 1) {
     const type = this.types[s.type];
     const i = type.n;

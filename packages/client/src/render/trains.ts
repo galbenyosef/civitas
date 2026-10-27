@@ -1,7 +1,7 @@
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { BoxGeometry, CylinderGeometry, Color, Group, IcosahedronGeometry, InstancedMesh, Matrix4, MeshBasicMaterial, Quaternion, Vector3, AdditiveBlending, type BufferGeometry, type Camera } from 'three';
 import {
-  CHUNK_SIZE, CAR_LEN, hash2, isRailAux, railMask, isRoad, railService, trainsAt, trainPoses, railPoint, metroBore, TICKS_PER_DAY,
+  CHUNK_SIZE, CAR_LEN, RAIL_VEHICLE_LEN, RAIL_VEHICLE_GAP, hash2, isRailAux, railMask, isRoad, railService, trainsAt, trainPoses, railPoint, metroBore, TICKS_PER_DAY,
   type RailLineDTO, type RailService, type TrainState, type VehiclePose,
 } from '@msimcity/shared';
 import type { ClientChunk } from '../world';
@@ -408,7 +408,7 @@ export class TrainsView {
     // a metro train runs in the bore to the left of its direction of travel, and crosses over in the middle of its dwell at a terminus
     const off = metro ? metroBore(svc, st) * BORE_OFF : 0, base = metro ? TUBE_TOP : RAIL_TOP, cap = metro ? MAX_TUBE : MAX_VEHICLES;
     const pickable = !metro || this.level > USE_LEVEL;
-    const riders = metro && this.level > USE_LEVEL ? (this.loads.get(dto.id)?.[st.train] ?? 0) / Math.max(1, n) : 0;
+    const riders = metro && this.level > USE_LEVEL && !mine(this.ridden) ? (this.loads.get(dto.id)?.[st.train] ?? 0) / Math.max(1, n) : 0;
     for (const v of poses) {
       const ty = this.types[v.kind];
       const i = ty.n;
@@ -543,6 +543,37 @@ export class TrainsView {
     if (svc.metro && this.underAt) { const cd = crossoverDip(this.underAt(Math.floor(x), Math.floor(z)), x, z, h); dy = -cd.drop; pitch = Math.atan(cd.slope); }
     return { x, y: (svc.metro ? TUBE_TOP : RAIL_TOP) + 0.165 + dy, z, h, st, s: st.s + dir * (svc.length / 2 + 0.012), dir, off, pitch };
   }
+  /**
+   * One vehicle of a train as drawn last frame, for a passenger's seat (render/passenger.ts): its middle at rail height (in its
+   * bore for a tube car, down a crossover's dip), the heading of the track (+x of its frame, towards the train's front), the
+   * crossover's pitch, the arclength of its middle, the way the train runs and its bore offset. Reuses `out` and its own arrays.
+   */
+  carOf(line: number, train: number, car: number, out: CarPose): CarPose | null {
+    const svc = this.serviceOf(line);
+    if (!svc) return null;
+    // the state drawn this frame (a tube train is drawn only while a ride or the underground view has the trains up)
+    let st: TrainState | null = null;
+    const drawn = this.drawn.get(line) ?? trainsAt(svc, this.lastTick, this.carStates);
+    for (let i = 0; i < drawn.length; i++) if (drawn[i].train === train) { st = drawn[i]; break; }
+    if (!st) return null;
+    const poses = trainPoses(svc, st, this.carPoses);
+    const v = poses[Math.min(car, poses.length - 1)];
+    const kinds = svc.consists[train] ?? svc.consists[0];
+    let s = st.s + svc.length / 2;
+    for (let j = 0; j < v.j; j++) s -= RAIL_VEHICLE_LEN[kinds[j]] + RAIL_VEHICLE_GAP;
+    s -= RAIL_VEHICLE_LEN[kinds[v.j]] / 2;
+    const off = svc.metro ? metroBore(svc, st) * BORE_OFF : 0;
+    out.x = v.x + Math.sin(v.h) * off; out.z = v.z - Math.cos(v.h) * off; out.h = v.h; out.pitch = 0;
+    out.y = svc.metro ? TUBE_TOP : RAIL_TOP;
+    if (svc.metro && this.underAt) { this.dipPose(v.x, v.z, v.h); out.y += this.dipY; out.pitch = this.dipPitch; }
+    out.s = s; out.dir = st.dir; out.off = off; out.st = st; out.metro = !!svc.metro; out.cars = poses.length;
+    return out;
+  }
+  private carStates: TrainState[] = []; private carPoses: VehiclePose[] = [];
+  /** riders seen at the windows (metroLoads) of a tube train: the one a passenger rides in is not drawn (their own car's window figures would be in their view) */
+  ridden: { line: number; train: number } | null = null;
+  /** riders on board a tube train as 'metroLoads' last said */
+  loadOf(line: number, train: number): number { return this.loads.get(line)?.[train] ?? 0; }
   /** The consist of a line's train (vehicle kinds, front first), for its tooltip. */
   consistOf(line: number, train: number): number[] | null { const svc = this.serviceOf(line); return svc ? svc.consists[train] ?? null : null; }
 
@@ -567,3 +598,6 @@ export class TrainsView {
   }
 }
 const UP = new Vector3(0, 1, 0), AXIS_Z = new Vector3(0, 0, 1);
+/** one vehicle of a train as drawn (TrainsView.carOf) */
+export interface CarPose { x: number; y: number; z: number; h: number; pitch: number; s: number; dir: 1 | -1; off: number; st: TrainState | null; metro: boolean; cars: number }
+export const carPose = (): CarPose => ({ x: 0, y: 0, z: 0, h: 0, pitch: 0, s: 0, dir: 1, off: 0, st: null, metro: false, cars: 0 });

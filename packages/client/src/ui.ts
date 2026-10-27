@@ -144,6 +144,8 @@ export interface UICallbacks {
   onFollow(id: number, on: boolean): void;
   onDeselectCitizen(): void;
   onSelectCitizen(id: number): void;
+  /** a plane's manifest row: the view from that seat (render/passenger.ts) */
+  onSelectSeat?(seat: string, who: string): void;
   /** the FPV buttons in the citizen panel: the inset or the whole window */
   onFpv(mode: 'inset' | 'full'): void;
   onCloseBuilding(): void;
@@ -931,13 +933,16 @@ export class UI {
     $('cFpv').onclick = () => this.cb.onFpv('inset');
     $('cFpvFull').onclick = () => this.cb.onFpv('full');
     panel.scrollTop = scroll;
-    // household members and friends are clickable: select that person instead
-    panel.onpointerdown = null;
+    // household members and friends are clickable: select that person instead; a bus's roster (rebuilt every second) on press
+    panel.onpointerdown = (e) => {
+      const row = (e.target as HTMLElement).closest<HTMLElement>('.roster [data-cid]');
+      if (row && e.button === 0) this.cb.onSelectCitizen(Number(row.dataset.cid));
+    };
     panel.onclick = (e) => {
       const dead = (e.target as HTMLElement).closest<HTMLElement>('[data-did]');
       if (dead) { this.onDeceased?.(Number(dead.dataset.did)); return; }
       const row = (e.target as HTMLElement).closest<HTMLElement>('[data-cid]');
-      if (row) this.cb.onSelectCitizen(Number(row.dataset.cid));
+      if (row && !row.closest('.roster')) this.cb.onSelectCitizen(Number(row.dataset.cid));
     };
     this.citizenPanelFor = info.id;
     this.vehiclePanelFor = '';
@@ -962,8 +967,10 @@ export class UI {
     // the roster is rebuilt every second while the train runs, so a rider is picked on press, not on a click a rebuild could swallow
     panel.onclick = null;
     panel.onpointerdown = (e) => {
-      const row = (e.target as HTMLElement).closest<HTMLElement>('[data-cid]');
-      if (row && e.button === 0) this.cb.onSelectCitizen(Number(row.dataset.cid));
+      if (e.button !== 0) return;
+      const t = e.target as HTMLElement, row = t.closest<HTMLElement>('[data-cid]'), seat = t.closest<HTMLElement>('[data-seat]');
+      if (row) this.cb.onSelectCitizen(Number(row.dataset.cid));
+      else if (seat) this.cb.onSelectSeat?.(seat.dataset.seat!, seat.dataset.who ?? '');
     };
     this.vehiclePanelFor = key;
     this.citizenPanelFor = 0;
