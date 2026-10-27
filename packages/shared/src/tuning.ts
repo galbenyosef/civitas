@@ -193,6 +193,18 @@ export const TRAFFIC_TUNING = {
   pedBehind: 0,
   /** With bodyGuard, ticks a pedestrian held on a crossing by a car's body waits before stepping back to the kerb (0: never). */
   pedRetreatAfter: 10,
+  /**
+   * With pedRetreatAfter, what a walker does after stepping back from a car body on a crossing (docs/traffic-tuning.md
+   * "Crossings: the wobble"): 0 steps forward again the next tick (the old rule: the car's guard still sees it and the
+   * walker steps back again, back and forth until the car goes); 1 holds there until the rest of the crossing ahead
+   * is clear of car bodies, stepping back again only after another pedRetreatAfter ticks; 2 walks on back to the kerb
+   * and starts again from there; 3 steps back at most once per crossing, then waits on the crossing for the body to move;
+   * 4 steps back at most once per crossing and holds there until the crossing ahead is clear, then goes on over and waits
+   * for any later body where it stands; 5 as 4, but while held it steps back again every pedRetreatAfter ticks (as far
+   * as the kerb, where it waits for the crossing to clear before the kerb's own rules), so it never walks forward into
+   * the same car twice.
+   */
+  pedRetreatHold: 0,
   /** With bodyGuard, ticks a pedestrian held by a car's body waits before walking on anyway (deadlock breaker; 0: never, the stuck rule frees them). */
   guardWaitMax: 0,
 
