@@ -1171,3 +1171,31 @@ it moves it is an ordinary walker again). 3+ reversals stayed at 0 everywhere. I
 It wins back about a quarter of the 08:00 give-ups (within noise) and costs 17:00 speed and London give-ups, so it
 stays off. The perf baseline (`packages/server/perf-baseline.json`) was rewritten for the shipped rule: with
 `pedRetreatOnce 0` perf:check matches the old baseline exactly.
+
+**Hearses in `loadtest/death.ts`** (2026-10-27). With `pedRetreatOnce` on, death.ts section 4 fails: hearses carried
+the coffin to 0 of 4 services (it wants 1). `death-set.ts` runs death.ts with `SET="k=v,..."`; `TRACE=1` adds
+`hearse-trace.ts`, which follows every hearse run and what held the head of the queue outside its garage.
+
+- **What is jammed.** The test town is a 1×1 Commons, 70% of its cars queued. The funeral director's door is at
+  −10,−7. Under every rule, three of the four service hearses never leave the garage in the 2.25 hours they have
+  (230 ticks with the box busy or the road tile outside full). The queues outside are headed by car bodies and
+  give-way or box rules at −11,−7, −7,−6 and −6,−6. With the old rule exactly one service in four gets its hearse,
+  on every one of seeds 1 to 6: the check sits at its edge.
+- **What the rule did.** In the run that decides seed 1 (the section 3 funeral), a walker standing back on the
+  crossing at −9,−6 headed the queue outside the garage for 55 of the hearse's 220 ticks. It stood in the car's path,
+  not just its margin. With the old rule that run's queue was headed only by signals and box rules, and the hearse got
+  out at 1.4 hours. `carPastHeld` does not free it (the walker is in the path).
+- **`pedClearWay`** (off). A walker standing back that a car's guard stops for steps further back toward the kerb,
+  always away, so it adds no reversal. It removes the held walker from the head of the queue. 3+ reversals stay 0.
+
+| | old rule | shipped | with pedClearWay |
+| --- | --- | --- | --- |
+| UAT copy: ticks lost, trips, give-ups (3 seeds) | 1.78, 3,649, 2,071 | 2.30, 3,556, 2,180 | 1.99, 3,596, 2,091 |
+| London: ticks lost, trips, give-ups (3 seeds) | 1.51, 54,443, 15,581 | 1.69, 54,405, 15,592 | 1.82, 54,289, 15,679 |
+| Commons 08:00 give-ups (12 seeds, paired against old) | 430 | +34 ± 18 | +22 ± 19 |
+| Commons 17:00 give-ups, speed | 252, 29.7% | −4 ± 11, +0.3 | +14 ± 8, −0.8 ± 0.5 |
+| death.ts seeds 1-6 passing 40/40; hearses carried | 5 (seed 4 fails the partner's day off); 1,1,1,1,1,1 | 4; 0,2,1,0,1,1 | 2; 1,0,1,1,1,1 |
+
+With it on, seed 1 fails earlier instead: the section 3 collection hearse gave up twice and sat 739 ticks at its
+garage behind car gridlock at −11,−7, with no walker involved. Other seeds fail a mourner or the estate on a
+shifted timeline. It stays off.

@@ -205,6 +205,11 @@ export const TRAFFIC_TUNING = {
    * its margin, so a car may nose past one beside its lane (never touching it); 0: with the margin, as any walker.
    */
   carPastHeld: 0,
+  /**
+   * With pedRetreatOnce, 1: a walker standing back on a crossing that a car's body guard stops for steps further back,
+   * toward the kerb (always away, never forward again), so it never holds up the car it is waiting for; 0: it stands.
+   */
+  pedClearWay: 0,
   /** With bodyGuard, ticks a pedestrian held by a car's body waits before walking on anyway (deadlock breaker; 0: never, the stuck rule frees them). */
   guardWaitMax: 0,
 
