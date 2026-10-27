@@ -467,6 +467,9 @@ export class CitizensView {
     for (let i = 0; i + 1 < pairs.length; i += 2) { const c = colours.get(pairs[i + 1]); if (c !== undefined) this.livery.set(pairs[i], c); }
   }
 
+  /** a bus's line colour, when the 'lines' message gave one (a passenger's moquette, render/passengerInterior.ts) */
+  liveryOf(id: number): number | undefined { return this.livery.get(id); }
+
   /** The agent nearest to a screen point, within `radius` pixels; 0 when none. */
   pick(px: number, py: number, camera: Camera, w: number, h: number, radius = 18): number {
     let best = 0, bestD = radius * radius;

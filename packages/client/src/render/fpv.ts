@@ -10,6 +10,11 @@ import { Instruments, type AircraftCal } from './instruments';
 import { CarInterior, TrainCab, HelmCab, type CarFeed, type TrainCabFeed, type HelmFeed } from './vehicleInterior';
 import { TunnelRide, TUNNEL_BG, TUNNEL_FOG, type TunnelFeed } from './tunnelRide';
 import { NightOut, swimShape } from './nightout';
+import { PassengerInterior, type PassengerFeed } from './passengerInterior';
+import { handover, handOut, handStep, aboardKey, LOST_WAIT, RIDE_WAIT, type HandIn } from './passenger';
+
+/** the vehicle an inspect sits a citizen in (CitizenInfo.aboard) */
+export type Aboard = NonNullable<CitizenInfo['aboard']>;
 
 export type FpvMode = 'off' | 'inset' | 'full';
 
@@ -55,6 +60,10 @@ export interface CabEye {
   helm?: HelmFeed;
   /** a tube train: ride through the tunnel instead of the street (render/tunnelRide.ts); the surface is not drawn */
   tunnel?: TunnelFeed;
+  /** a passenger's seat: draw the bus, carriage, tube car or plane cabin around the view (render/passengerInterior.ts) */
+  passenger?: PassengerFeed;
+  /** bumped whenever `label` or `lines` change (an eye built once and reused): the HUD is rewritten only then */
+  rev?: number;
 }
 
 export interface FpvHooks {
@@ -76,6 +85,13 @@ export interface FpvHooks {
   tunnel?: { underAt(x: number, y: number): number; keep(): Object3D[] };
   /** the game clock in ticks (fractional), for a night out's build-up and ease-off (render/nightout.ts); absent: the lighting hour */
   clock?(): number;
+  /**
+   * A passenger's seat in the vehicle the inspect sits them in (render/passenger.ts), posed from this frame's drawing, or null when
+   * the vehicle is not drawn here. The eye may be one object reused from call to call.
+   */
+  seat?(ab: Aboard, rider: number, info: CitizenInfo): CabEye | null;
+  /** the view sat down in a vehicle (or got up from one: null), so the renderer can keep that vehicle's own body out of the eye */
+  riding?(ab: Aboard | null): void;
 }
 
 /**
@@ -115,6 +131,14 @@ export class Fpv {
   private car: CarInterior;
   private train: TrainCab;
   private helm: HelmCab;
+  /** a passenger's bus, carriage, tube car or cabin: made on first use */
+  private pax: PassengerInterior | null = null;
+  /** the hand-over between the street follow and a seat (render/passenger.ts), and the vehicle of the seat on show */
+  private hand = handover();
+  private hout = handOut();
+  private hin: HandIn = { eye: false, aboard: '', found: false, foundShown: false, riding: false, level: 0, dt: 0 };
+  private seatAb: Aboard | null = null;
+  private hudRev = -1;
   /** the car interior was drawn this frame (otherwise it is hidden) */
   private carOn = false;
   private lastHeading = 0;
@@ -233,7 +257,7 @@ export class Fpv {
     const cab = this.hooks.cab();
     if (cab) {
       if (this.mode === 'off' || this.cabKey !== cab.key) { this.ready = false; this.lost = 0; this.info = null; if (this.mode === 'off') this.level = 0; }
-      this.cabKey = cab.key; this.id = 0; this.leaveRoom();
+      this.cabKey = cab.key; this.id = 0; this.leaveRoom(); this.leaveSeat();
       this.want = 1;
       this.setMode(mode);
       return;
@@ -244,7 +268,7 @@ export class Fpv {
     if (!this.viewable(id)) { this.hooks.notify('They are indoors, with nothing to see yet'); return; }
     if (this.mode === 'off' || this.id !== id) {
       this.ready = false; this.lost = 0; this.everTravelled = false; this.idleSince = 0; if (this.mode === 'off') this.level = 0;
-      this.leaveRoom(); this.info = this.latest?.id === id ? this.latest : null;
+      this.leaveRoom(); this.leaveSeat(); this.info = this.latest?.id === id ? this.latest : null;
     }
     this.id = id;
     this.want = 1;
@@ -286,7 +310,7 @@ export class Fpv {
     const cab = this.hooks.cab();
     if (cab) {
       if (cab.key === this.cabKey) return;
-      this.cabKey = cab.key; this.id = 0; this.info = null; this.ready = false; this.lost = 0; this.leaveRoom();
+      this.cabKey = cab.key; this.id = 0; this.info = null; this.ready = false; this.lost = 0; this.leaveRoom(); this.leaveSeat();
       this.level = Math.min(this.level, 0.2);
       return;
     }
@@ -297,7 +321,7 @@ export class Fpv {
     this.cabKey = '';
     this.id = id; this.ready = false; this.lost = 0; this.everTravelled = false; this.idleSince = 0;
     this.info = this.latest?.id === id ? this.latest : null;
-    this.leaveRoom();
+    this.leaveRoom(); this.leaveSeat();
     this.level = Math.min(this.level, 0.2);
   }
 
@@ -306,13 +330,19 @@ export class Fpv {
     if (info.id === this.id) { this.info = info; this.hudKey = ''; }
   }
 
-  /** on the street, or indoors somewhere with a room to show (or not inspected yet, so worth waiting for) */
+  /** on the street, aboard a bus or train, or indoors somewhere with a room to show (or not inspected yet, so worth waiting for) */
   private viewable(id: number) {
     if (this.hooks.citizens.eyeOf(id)) return true;
-    return this.latest?.id !== id || !!placeOf(this.latest, sceneUniforms.uHour.value);
+    return this.latest?.id !== id || !!this.latest.aboard || !!placeOf(this.latest, sceneUniforms.uHour.value);
   }
 
   private leaveRoom() { this.room?.dispose(); this.room = null; this.hold = false; }
+  /** back to the street follow: put the passenger's interior away and let the renderer draw their vehicle again */
+  private leaveSeat() {
+    if (this.seatAb) { this.seatAb = null; this.hooks.riding?.(null); }
+    this.hand.shown = 'street'; this.hand.key = ''; this.hand.lost = 0;
+    this.pax?.hide();
+  }
 
   private setMode(mode: FpvMode) {
     if (mode === this.mode) return;
@@ -320,7 +350,7 @@ export class Fpv {
     document.body.classList.toggle('fpv-full', mode === 'full');
     document.body.classList.toggle('fpv-on', mode !== 'off');
     this.hud.className = mode === 'off' ? 'hidden' : mode;
-    if (mode === 'off') { this.inst.hide(); this.car.hide(); this.train.hide(); this.helm.hide(); }
+    if (mode === 'off') { this.inst.hide(); this.car.hide(); this.train.hide(); this.helm.hide(); this.leaveSeat(); }
     const swap = this.hud.querySelector<HTMLElement>('#fpvSwap')!;
     swap.textContent = mode === 'full' ? '▣ inset' : '⤢ full';
     this.layout(true);
@@ -367,15 +397,18 @@ export class Fpv {
         this.car.hide();
         if (cab.interior) this.train.update(cab.interior, now, dt, this.viewW(), this.viewH(), this.level); else this.train.hide();
         if (cab.helm) this.helm.update(cab.helm, now, dt, this.viewW(), this.viewH(), this.level); else this.helm.hide();
+        if (cab.passenger) this.paxOf().update(cab.passenger, now, dt, this.viewW(), this.viewH(), this.level); else if (this.pax) this.pax.hide();
       }
       return;
     }
+    const eye = this.hooks.citizens.eyeOf(this.id);
+    // aboard a bus, a train or a tube train, or fading out of one: the passenger's seat (render/passenger.ts)
+    if ((this.info?.aboard || this.hand.shown === 'seat') && this.passenger(eye !== null, now, dt)) return;
     this.fogFar = FOG_FAR;
     this.tunnelFeed(null, now);
     this.inst.hide(); this.train.hide(); this.helm.hide();
     this.hud.classList.remove('inst');
     this.carOn = false;
-    const eye = this.hooks.citizens.eyeOf(this.id);
     const hour = sceneUniforms.uHour.value;
     if (eye && !eye.travelling) this.idleSince += dt; else this.idleSince = 0;
     // indoors once the street has lost them, or they have stood at the door a moment with the inspect saying they are in
@@ -408,11 +441,62 @@ export class Fpv {
       this.lost += dt;
       if (this.room) this.room.update(now, dt, hour, this.sky);
       else this.hold = this.lost > 0.35;
-      if (this.lost > (this.room ? 8 : 3)) this.end();
+      // boarding takes up to a second to show in the inspect: wait longer for someone whose trip rides
+      if (this.lost > (this.room ? 8 : this.info?.mode === 'ride' || this.info?.legKinds?.includes('ride') ? RIDE_WAIT : LOST_WAIT)) this.end();
     }
     if (!this.carOn) this.car.hide();
     this.updateHud(now, eye?.speed ?? 0);
   }
+
+  private paxOf() { return (this.pax ??= new PassengerInterior(this.hud, this.hud.firstElementChild)); }
+
+  /**
+   * A followed citizen aboard a bus, a train or a tube train (CitizenInfo.aboard): the hand-over (render/passenger.ts handStep) fades
+   * through black from the street into their seat, from one vehicle to the next, and back to the street once they are off. The seat is
+   * ridden like a cab (`ride`), through the tunnel for a tube car. False when this frame is the street follow's, which then runs as usual.
+   */
+  private passenger(eyeOn: boolean, now: number, dt: number): boolean {
+    const info = this.info, ab = info?.aboard, key = aboardKey(ab);
+    const want = ab && info && this.hooks.seat ? this.hooks.seat(ab, this.id, info) : null;
+    const h = this.hand;
+    if (ab && h.shown === 'seat' && h.key === key) this.seatAb = ab; // the same vehicle, its latest load and next stop
+    let shown = h.shown === 'seat' && h.key === key ? want : null;
+    // fading out of a seat the inspect no longer names: pose that one (the eye object may be the one just used)
+    if (h.shown === 'seat' && h.key !== key && this.seatAb && info && this.hooks.seat) shown = this.hooks.seat(this.seatAb, this.id, info);
+    const i = this.hin;
+    i.eye = eyeOn; i.aboard = key; i.found = want !== null; i.foundShown = shown !== null;
+    i.riding = info?.mode === 'ride' || !!info?.legKinds?.includes('ride'); i.level = this.level; i.dt = dt;
+    const o = handStep(h, i, this.hout);
+    if (o.end) this.end();
+    this.hold = o.hold;
+    if (o.switched) {
+      this.ready = false;
+      const next = o.draw === 'seat' && ab ? ab : null;
+      if (aboardKey(next ?? undefined) !== aboardKey(this.seatAb ?? undefined)) { this.seatAb = next; this.hooks.riding?.(next); }
+      if (o.draw === 'street') { this.pax?.hide(); this.everTravelled = false; this.idleSince = 0; return false; }
+      return true; // dark this frame; the seat is posed from the next
+    }
+    if (o.draw === 'street') return false;
+    // the seat, or (nothing to pose) the picture held while it fades
+    this.inst.hide(); this.car.hide(); this.train.hide(); this.helm.hide();
+    if (this.hud.classList.contains('inst')) this.hud.classList.remove('inst');
+    if (o.draw === 'seat' && shown) {
+      this.lost = 0;
+      this.ride(shown, now, dt);
+      this.tunnelFeed(shown, now);
+      this.cabHud(now, shown);
+      if (shown.passenger) { this.paxOf().update(shown.passenger, now, dt, this.viewW(), this.viewH(), this.level); this.paxDoors = shown.passenger.doors; }
+    }
+    return true;
+  }
+  /** the seat on show, for the ride's sound (main.ts): its vehicle's ride key, its kind, where the eye is and whether the doors are open */
+  get passengerRide(): { key: string; kind: 'bus' | 'train' | 'metro'; x: number; z: number; doors: boolean } | null {
+    const ab = this.seatAb;
+    if (this.mode === 'off' || this.hand.shown !== 'seat' || !ab) return null;
+    return { key: this.hand.key, kind: ab.mode === 'bus' ? 'bus' : ab.mode === 'rail' ? 'train' : 'metro', x: this.camera.position.x, z: this.camera.position.z, doors: this.paxDoors };
+  }
+  /** the doors of the seat's vehicle are open, as its feed last said */
+  private paxDoors = false;
 
   /**
    * A night out (render/nightout.ts): the swim's strength follows the evening read from the citizen's activity line, eased so
@@ -553,9 +637,15 @@ export class Fpv {
   }
 
   private cabHud(now: number, cab: CabEye) {
-    const key = `${cab.label}|${cab.lines.join('|')}`;
-    if (key === this.hudKey && now - this.hudAt < 500) return;
-    this.hudKey = key; this.hudAt = now;
+    if (cab.rev !== undefined) {
+      // an eye that says when its words change: nothing to build per frame
+      if (this.hudKey === 'rev' && cab.rev === this.hudRev) return;
+      this.hudKey = 'rev'; this.hudRev = cab.rev; this.hudAt = now;
+    } else {
+      const key = `${cab.label}|${cab.lines.join('|')}`;
+      if (key === this.hudKey && now - this.hudAt < 500) return;
+      this.hudKey = key; this.hudAt = now;
+    }
     this.hud.querySelector('.fname')!.textContent = cab.label;
     this.body.innerHTML = cab.lines.map((l, i) => `<div class="${i === 0 ? 'fact' : i === cab.lines.length - 1 ? 'fspd' : 'fdest'}">${esc(l)}</div>`).join('');
   }

@@ -40,6 +40,7 @@ import { LandmarkMotion } from './render/landmarks';
 import { UndergroundView } from './render/underground';
 import { FootprintOverlay } from './render/footprint';
 import { Fpv, type CabEye } from './render/fpv';
+import { SeatEyes } from './passengerSeat';
 import { vehicleKey, trainPanelHtml, trainKmh, planePanelHtml, planeTipHtml, planeDoing, planeKnots, planeFeet, heliTipHtml, heliPanelHtml, heliDoing, heliTitle, heliKnots, type VehicleSel } from './vehicles';
 import { Buildings } from './render/buildings';
 import { variant, allVariants } from './render/models';
@@ -297,6 +298,7 @@ const ui = new UI({
   onFollow: (_id, on) => setFollow(on),
   onDeselectCitizen: () => (selectedVehicle ? selectVehicle(null) : selectCitizen(0)),
   onSelectCitizen: (id) => selectCitizen(id),
+  onSelectSeat: (seatLabel, who) => selectSeat(seatLabel, who),
   onFpv: (mode) => { if (mode === 'inset') fpv.toggleInset(); else fpv.toggleFull(); },
   onCloseBuilding: () => closeBuilding(),
   onCloseParcel: () => closeParcel(),
@@ -889,11 +891,17 @@ const fpv = new Fpv({
   notify: (msg) => ui.toast('info', msg),
   clock: () => liveTickF(), // a night out builds and wears off with the game's evening (render/nightout.ts)
   tunnel: { underAt: (x, y) => world.underAt(x, y), keep: () => [trains.under, citizens.under] }, // a tube cab ride draws these over its tunnel (render/tunnelRide.ts)
+  // riding as a passenger (render/passenger.ts): the seat in the bus, carriage or tube car the inspect names, posed from this frame
+  seat: (ab, rider, info) => seatEyes.seat(ab, rider, info),
+  // the ridden bus is drawn as the selection (layer 1, which the eye skips) and the tube train's window figures are left out
+  riding: (ab) => { citizens.selected = ab?.mode === 'bus' ? ab.vehicle : selectedCitizen; trains.ridden = ab && ab.mode !== 'bus' ? { line: ab.line, train: ab.train ?? 0 } : null; },
   onChange: (mode) => {
     ui.markFpv(mode);
     if (mode === 'full') { input.hover = null; ui.hideTip(); rig.dist = Math.min(rig.dist, 30); }
   },
 });
+/** a passenger's eye (passengerSeat.ts): the bus, carriage, tube car or plane seat, from the pose drawn this frame */
+const seatEyes = new SeatEyes({ citizens, trains, planes, metroNames: (line) => metroMeta.get(line)?.names });
 function selectCitizen(id: number) {
   clearVehicle(); // a name picked from a train's roster replaces the train
   selectedCitizen = id;
@@ -995,7 +1003,7 @@ function showPlanePanel() {
   const hit = planes.stateOf(v.airport, v.flight);
   if (!hit) { selectVehicle(null); ui.toast('info', 'That plane has left'); return; }
   const m = manifestOf(v.airport, hit.s.flight);
-  ui.showVehicle(vehicleKey(v), planePanelHtml(hit.s, m, hit.s.gate, planeKnots(hit.s.type, planeSpeed(v.airport, v.flight))), following, fpv.mode);
+  ui.showVehicle(vehicleKey(v), planePanelHtml(hit.s, m, hit.s.gate, planeKnots(hit.s.type, planeSpeed(v.airport, v.flight)), v.seat), following, fpv.mode);
 }
 /** a helicopter's ground speed in tiles per tick, from where it is half a tick on */
 function heliSpeed(flight: number): number {
@@ -1054,6 +1062,8 @@ function cabEye(): CabEye | null {
   }
   const hit = planes.stateOf(v.airport, v.flight);
   if (!hit) return null;
+  // a seat picked from the manifest: the cabin from it (passengerSeat.ts), the words a couple of times a second
+  if (v.seat) return seatEyes.cabin(hit.s, manifestOf(v.airport, hit.s.flight), v.seat, v.who ?? '', cabinKey, cabinKnots);
   const m = manifestOf(v.airport, hit.s.flight), e = planes.cockpitOf(hit.s), kt = planeKnots(hit.s.type, planeSpeed(v.airport, v.flight));
   const outbound = hit.s.phase !== 'approach' && hit.s.phase !== 'flare' && hit.s.phase !== 'rollout' && hit.s.phase !== 'taxiIn' && !(hit.s.phase === 'dwell' && hit.s.progress < 0.5);
   return {
@@ -1062,6 +1072,19 @@ function cabEye(): CabEye | null {
     fogFar: 150, dip: hit.s.y > 0.3 ? 0.1 : 0.04, sway: hit.s.y > 0.05 ? 0.6 : 0.2, seed: hit.s.seed,
     instruments: { ktPerTile: planeKnots(hit.s.type, 1000) / 1000, ftPerTile: planeFeet(100) / 100, ticksPerSec: (1000 / TICK_MS) * clock.rate, tick: planes.lastTick, knots: kt, eyeAbove: e.y - hit.s.y },
   };
+}
+/** the selected plane seat's ride key (a new seat is a new ride) and its knots, for the cabin view */
+let cabinKey = '';
+const cabinKnots = () => { const v = selectedVehicle; if (v?.kind !== 'plane') return 0; const h = planes.stateOf(v.airport, v.flight); return h ? planeKnots(h.s.type, planeSpeed(v.airport, v.flight)) : 0; };
+/** A manifest row was clicked: sit in that seat (the cabin view from it), or (the same row again) go back to the cockpit. */
+function selectSeat(seatLabel: string, who: string) {
+  const v = selectedVehicle;
+  if (v?.kind !== 'plane') return;
+  const same = v.seat === seatLabel;
+  selectedVehicle = { kind: 'plane', airport: v.airport, flight: v.flight, ...(same ? {} : { seat: seatLabel, who }) };
+  cabinKey = same ? '' : `${vehicleKey(v)}#${seatLabel}`;
+  fpv.retarget();
+  showPlanePanel();
 }
 /** where the follow camera looks for the selected vehicle */
 function vehiclePos(): [number, number] | null {
@@ -1579,6 +1602,9 @@ const rideNow = (): RideNow | null => {
     const k = selectedVehicle.kind;
     return { key: c.key, kind: k === 'train' ? (c.tunnel ? 'metro' : 'train') : k, x: c.x, z: c.z, doors: c.interior?.doors };
   }
+  // a passenger's seat: the bus's, train's or tube train's ride, keyed as the vehicle so its own pass-by never plays
+  const pr = fpv.passengerRide;
+  if (pr) return { key: pr.key, kind: pr.kind, x: pr.x, z: pr.z, doors: pr.doors };
   const a = selectedCitizen ? citizens.agents.get(selectedCitizen) : undefined;
   if (!a || !a.car) return null; // on foot: the city's own sound
   return { key: `c${selectedCitizen}`, kind: a.cls === VehicleClass.Bus ? 'bus' : a.cls === VehicleClass.Truck ? 'truck' : 'car', x: a.rx, z: a.rz };

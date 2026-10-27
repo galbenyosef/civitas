@@ -480,10 +480,11 @@ export interface CitizenInfo {
   /**
    * On board a bus, train or tube train (server sim/transit.ts): the vehicle, so the first-person view can sit them in it
    * (render/fpv.ts). `vehicle` is the bus's agent id, or the train's transit vehicle id; `line` the transit line (the rail and
-   * metro lines' ids are the client's train lines'), `train` the train's number on it; `load` the riders on board now.
-   * The selected citizen's inspect only; absent while they wait at the stop or step aboard.
+   * metro lines' ids are the client's train lines'), `train` the train's number on it; `load` the riders on board now and
+   * `next` the stop it calls at next (the next-stop display). The selected citizen's inspect only; absent while they wait at
+   * the stop or step aboard.
    */
-  aboard?: { mode: 'bus' | 'rail' | 'metro'; vehicle: number; line: number; train?: number; load: number };
+  aboard?: { mode: 'bus' | 'rail' | 'metro'; vehicle: number; line: number; train?: number; load: number; next?: string };
 }
 
 /** Someone a citizen is connected to, for the panel (clickable). */

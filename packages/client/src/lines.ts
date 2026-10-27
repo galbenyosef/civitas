@@ -56,6 +56,12 @@ export function busHtml(b: BusInfo, row: (k: string, v: string | number) => stri
   html += row('On board', `${b.load} / ${b.capacity}`);
   html += `<div class="bar"><i style="width:${Math.min(100, (100 * b.load) / b.capacity)}%"></i></div>`;
   html += row('Running', b.delayMin > 1 ? `<span class="bad">${b.delayMin} min late</span>` : 'on time');
+  // the selected bus's roster (its own inspect only), names picked on press: the first-person view then rides with them
+  if (b.riders) {
+    html += `<div class="sect">Passengers (${b.load})</div><div class="roster">`;
+    html += b.riders.length ? b.riders.map((r) => `<div class="person" data-cid="${r.id}" title="click to select ${esc(r.name)}, I or O to ride with them"><span class="pname">${esc(r.name)}${r.age !== undefined ? ` <span class="page">${r.age}</span>` : ''}</span><span class="prel">${esc(r.activity)}</span></div>`).join('') : `<div class="pempty">nobody on board</div>`;
+    html += `</div>${b.truncated ? '<div class="pempty">Long lists are cut at 200 rows.</div>' : ''}`;
+  }
   return html;
 }
 

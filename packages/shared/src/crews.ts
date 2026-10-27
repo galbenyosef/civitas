@@ -130,8 +130,8 @@ export function flightManifest(f: Flight, arriving: number, departing: number): 
 
 /** Cabin crew by type: what the seats need, give or take one per flight (organic rule). */
 const CABIN: Record<PlaneType, [number, number]> = { turboprop: [2, 2], regional: [2, 3], narrowbody: [4, 5], widebody: [8, 10], jumbo: [11, 14], bizjet: [0, 1] };
-/** seats across a row */
-const ACROSS: Record<PlaneType, number> = { turboprop: 4, regional: 4, narrowbody: 6, widebody: 9, jumbo: 10, bizjet: 2 };
+/** seats across a row (letters A, B, … from the left window; the first-person cabin view sits a passenger by it, client render/passenger.ts) */
+export const ACROSS: Record<PlaneType, number> = { turboprop: 4, regional: 4, narrowbody: 6, widebody: 9, jumbo: 10, bizjet: 2 };
 /** Captain and first officer, then the cabin led by a purser (or a lone flight attendant), sometimes a trainee. */
 export function flightCrew(f: Flight): CrewMember[] {
   const k = flightKey(f);

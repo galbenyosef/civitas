@@ -12,9 +12,9 @@ import { hash2 } from '@msimcity/shared';
 
 const TAU = Math.PI * 2;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-const rgb = (n: number, f = 1) => `rgb(${Math.min(255, ((n >> 16) & 255) * f) | 0},${Math.min(255, ((n >> 8) & 255) * f) | 0},${Math.min(255, (n & 255) * f) | 0})`;
-const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
-const SANS = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+export const rgb = (n: number, f = 1) => `rgb(${Math.min(255, ((n >> 16) & 255) * f) | 0},${Math.min(255, ((n >> 8) & 255) * f) | 0},${Math.min(255, (n & 255) * f) | 0})`;
+export const MONO = 'ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+export const SANS = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
 /** one tile is about 13 m (a car is 0.34 tiles); the game's own tile-per-second speeds read in km/h through this */
 export const KMH_PER_TPS = 3.6 * 13 * 0.5;
@@ -25,8 +25,8 @@ const TRIM = [0xc8a14a, 0x9aa4ad, 0xc0392b, 0x2e86de, 0x4caf7a, 0xd9752b];
 const GLOW = ['#ffffff', '#ffd9a0', '#9fd8ff', '#9dffb8', '#ffb0a0'];
 const STICKERS = [0xe1b12c, 0x2e86de, 0xc0392b, 0x4caf7a, 0xffffff];
 
-/** The two canvases an interior draws on, sized to the FPV viewport. */
-class Layers {
+/** The two canvases an interior draws on, sized to the FPV viewport (also render/passengerInterior.ts). */
+export class Layers {
   readonly back = document.createElement('canvas');
   readonly front = document.createElement('canvas');
   readonly b: CanvasRenderingContext2D;
@@ -76,11 +76,11 @@ class Layers {
   }
 }
 
-function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+export function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   c.beginPath(); c.roundRect(x, y, w, h, r);
 }
 
-function vgrad(c: CanvasRenderingContext2D, y0: number, y1: number, a: string, b: string) {
+export function vgrad(c: CanvasRenderingContext2D, y0: number, y1: number, a: string, b: string) {
   const g = c.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, a); g.addColorStop(1, b); return g;
 }
 

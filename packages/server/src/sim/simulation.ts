@@ -532,7 +532,13 @@ export class Simulation {
       this.addRoute(info, c);
       // on board a bus, a train or a tube train: which one, so the first-person view can sit them in it (the selected citizen only)
       const ab = this.transit.aboardOf(c);
-      if (ab && ab.mode !== 'ferry') info.aboard = ab.mode === 'bus' ? { mode: 'bus', vehicle: ab.vehicle, line: ab.line, load: ab.load } : { mode: ab.mode, vehicle: ab.vehicle, line: ab.line, train: vehicleTrain(ab.vehicle), load: ab.load };
+      if (ab && ab.mode === 'bus') {
+        const bv = w.vehicles.get(ab.vehicle);
+        info.aboard = { mode: 'bus', vehicle: ab.vehicle, line: ab.line, load: ab.load, next: bv ? this.buses.describe(bv)?.bus?.nextStop : undefined };
+      } else if (ab && ab.mode !== 'ferry') {
+        const train = vehicleTrain(ab.vehicle), svc = this.transit.services.get(ab.mode) as { describeTrain?(line: number, train: number): { next?: string } | null } | undefined;
+        info.aboard = { mode: ab.mode, vehicle: ab.vehicle, line: ab.line, train, load: ab.load, next: svc?.describeTrain?.(ab.line, train)?.next };
+      }
     }
     info.life = this.describeLife(c);
     return info;
