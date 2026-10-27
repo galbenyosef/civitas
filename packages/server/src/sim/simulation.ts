@@ -12,7 +12,7 @@ import {
   SERVICE_RADIUS_OF, SERVICE_STRENGTH_OF, WORK_RATE_OF, PATROL_RATE_OF,
   GROW_FORMS, topLevelOf, firstLevelOf, isMergedKind, venueCapacityOf, isMultiTile, placedFromAnchor, planStructure, packTile, terrainOf,
   zoneOf, isBuildable, underConstruction, isGatewayId, GATEWAY_OF, GATEWAY_WORDS, bridgeSpanAt, BRIDGE_STYLE_NAMES,
-  type GoalId, type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type CitizenInfo, type CitizenLife, type PersonRef,
+  type GoalId, type BuildingInfo, type BuildingPeople, type PersonRow, type RoadInfo, type BusInfo, type CitizenInfo, type CitizenLife, type PersonRef,
   buildingValue, LAND_PRICE_PER_TILE, ROAD_COST,
   eduDefaults, birthdayOf, yearGroup, STAGES, Study, EduResult, EDU_NURSERY, EDU_DROPPED, EDU_HOMEWARD, CITIZEN_STUDY, type CitizenEducation,
   SKILLS, wageMul, EduLevel, type EduFields, MOTIVE, type FocusInfo,
@@ -29,6 +29,9 @@ import { PhaseStats, CI } from '../perf/phases';
 import { Traffic, crossMask, dirBetween, hypot } from './traffic';
 import { indicatorOf } from './indicators';
 import { Transit, BusService, isMechanic } from './transit';
+import { vehicleTrain } from './timetabled';
+/** rows of a bus's roster (a full bus is far fewer; this only cuts a pathological one), as a train's */
+const BUS_ROSTER_CAP = 200;
 import { Carpool, CARPOOL, householdShare, coworkerShare, friendShare, type Candidate } from './carpool';
 import { Gateways, MIG, type Gate } from './gateways';
 import { TrafficControl } from './control';
@@ -496,7 +499,7 @@ export class Simulation {
   describeCitizen(id: number, withRoute = false): CitizenInfo | null {
     const w = this.w;
     const v = w.vehicles.get(id);
-    if (v) { const vi = this.describeVehicle(v); if (withRoute) this.addRoute(vi, v); return vi; }
+    if (v) { const vi = this.describeVehicle(v); if (withRoute) { this.addRoute(vi, v); if (vi.bus) this.busRoster(vi.bus, v.id); } return vi; }
     const c = w.citizens.get(id);
     if (!c) return null;
     const parcelName = (x: number, y: number) => w.parcelAt(x, y)?.name;
@@ -525,9 +528,20 @@ export class Simulation {
     if (role) { info.occupation = FLEET_JOB[role.kind]; info.fleet = this.mobile.workerInfo(c); }
     if (c.leg?.hail) { info.taxi = this.taxis.taxiOf(c); info.mode = this.taxis.isAboard(c) ? 'drive' : 'none'; info.status = this.taxis.isAboard(c) ? 'moving' : 'idle'; }
     this.describeShare(c, info);
-    if (withRoute) this.addRoute(info, c);
+    if (withRoute) {
+      this.addRoute(info, c);
+      // on board a bus, a train or a tube train: which one, so the first-person view can sit them in it (the selected citizen only)
+      const ab = this.transit.aboardOf(c);
+      if (ab && ab.mode !== 'ferry') info.aboard = ab.mode === 'bus' ? { mode: 'bus', vehicle: ab.vehicle, line: ab.line, load: ab.load } : { mode: ab.mode, vehicle: ab.vehicle, line: ab.line, train: vehicleTrain(ab.vehicle), load: ab.load };
+    }
     info.life = this.describeLife(c);
     return info;
+  }
+  /** The selected bus's roster (as a train's): everyone on board and where each gets off, cut at 200 rows. */
+  private busRoster(bus: BusInfo, id: number) {
+    const aboard = this.transit.aboard(id), tick = this.w.tick;
+    bus.riders = aboard.slice(0, BUS_ROSTER_CAP).map(({ c, off }) => ({ id: c.id, name: nameFor(c.id, c.sn), activity: `to ${this.w.stopLabel(off.x, off.y)}`, age: Math.floor(ageOf(c, tick)) }));
+    if (aboard.length > BUS_ROSTER_CAP) bus.truncated = true;
   }
   /** Car sharing for the panels: a driver's occupants (driver first), or the car a passenger rides in or waits for. */
   private describeShare(c: Citizen, info: CitizenInfo) {

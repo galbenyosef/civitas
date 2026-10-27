@@ -674,6 +674,16 @@ export class Transit {
     if (r.phase === 'wait') return `waiting for ${name} at ${at(r.stop)}`;
     return this.w.tick < r.boardAt ? `boarding ${name} for ${at(r.off)}` : `riding ${name} to ${at(r.off)}`;
   }
+  /**
+   * The vehicle a rider sits in (on board, not still stepping aboard), its line and mode, and how many are on it: the selected
+   * citizen's `CitizenInfo.aboard`, so the first-person view can sit them in it (client render/fpv.ts). Null otherwise.
+   */
+  aboardOf(c: Citizen): { mode: TransitMode; vehicle: number; line: number; load: number } | null {
+    const r = this.riders.get(c.id);
+    if (!r || r.phase !== 'ride' || this.w.tick < r.boardAt) return null;
+    const l = this.lines.get(r.line);
+    return l ? { mode: l.mode, vehicle: r.vehicle, line: r.line, load: this.load(r.vehicle) } : null;
+  }
   /** On board (and not still stepping aboard at the stop). */
   isRiding(c: Citizen) { const r = this.riders.get(c.id); return !!r && r.phase === 'ride' && this.w.tick >= r.boardAt; }
   isWaiting(c: Citizen) { return this.riders.get(c.id)?.phase === 'wait'; }
