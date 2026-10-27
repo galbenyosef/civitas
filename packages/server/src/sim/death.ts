@@ -338,9 +338,11 @@ export class Death implements FleetService {
    * Does c stay home from this shift (Simulation.depart)? Close family on the day of the funeral, and a grieving worker
    * now and then (a hash of the id and the day): those are sick days.
    */
+  /** Is today c's funeral day off (close family of someone laid to rest today)? Pure: no sick day is taken. Simulation.shareToWork asks before offering a lift to work, as depart does before setting off. */
+  offToday(c: Citizen): boolean { return this.dayOff.get(c.id) === Math.floor(this.w.tick / DAY); }
   staysHome(c: Citizen): boolean {
     const day = Math.floor(this.w.tick / DAY);
-    if (this.dayOff.get(c.id) === day) return true;
+    if (this.offToday(c)) return true;
     const g = this.grief.get(c.id);
     if (!g || this.w.tick >= g[0] || hash2(c.id * 13 + day, 651) >= DEATH.griefSkip) return false;
     c.sickDays++; c.offSickDay = day;

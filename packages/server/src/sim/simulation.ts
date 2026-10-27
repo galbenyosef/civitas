@@ -2117,7 +2117,7 @@ export class Simulation {
     const w = this.w, now = w.tick;
     // pupils too: the school run (sim/schools.ts), dropped off at the school door
     const due = (p: Citizen) => p !== d && p.state === S.Home && (p.job || p.study > 0) && p.nextAt >= now && p.nextAt - now <= (p.study && !p.job ? this.schools.liftWindow(p) : CARPOOL.window) && !p.preStop
-      && !(p.cond & ACUTE) && p.health >= HEALTH.staysHomeBelow;
+      && !(p.cond & ACUTE) && p.health >= HEALTH.staysHomeBelow && !this.death.offToday(p); // a mourner's funeral day off holds for a lift too (sim/death.ts)
     const cands: Candidate[] = [];
     const share = householdShare(d.hh);
     for (const id of w.households.get(d.hh)?.ids ?? []) {
