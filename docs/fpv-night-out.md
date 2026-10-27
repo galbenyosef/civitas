@@ -49,8 +49,8 @@ the door). Someone who left at three hours or more is held back from clearing be
 ## The picture
 
 The blur is two small passes, so a 10 px blur does not cost dozens of taps for every pixel of the window: the scene target is
-boxed down to a quarter of its size across (about 2.5 px at 720p by itself), then a disc of up to twelve taps softens that
-small picture; the blit mixes the sharp and soft pictures by strength and reads the soft one with a tap or two (the second
+boxed down to half its size across for a light blur (below strength 0.3) and a quarter for a heavy one, then a disc of up to
+twelve taps (at least a texel wide, so the box's steps go) softens that small picture; the blit mixes the sharp and soft pictures by strength and reads the soft one with a tap or two (the second
 image too). The small inset skips the second pass and takes the disc in the blit. The full window's target is drawn at 0.85 of
 the window's pixels while the swim is light, 0.7 from strength 0.12 and 0.55 from 0.4 (back down 0.04 under those), which makes
 the scene cheaper as well.

@@ -142,7 +142,7 @@ export class Fpv {
   private blit: Mesh;
   private blitScene = new Scene();
   private blitCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  /** the swim's blur: the scene boxed down to a quarter of its size across (blurA), then softened there by a disc (blurB); see blurPasses */
+  /** the swim's blur: the scene boxed down to a half or a quarter of its size across (blurA), then softened there by a disc (blurB); see blurPasses */
   private blurA: WebGLRenderTarget | null = null;
   private blurB: WebGLRenderTarget | null = null;
   /** which of them the blit reads as the soft picture, and the radius (in its texels) still to take in the blit's own taps */
@@ -177,6 +177,8 @@ export class Fpv {
   private swimT = 0;
   /** which of FULL_SWIM_SCALES the full window's target is drawn at (0 sober) */
   private scaleTier = 0;
+  /** the swim's small blur targets are the scene's size over this (2 for a light blur, 4 for a heavy one) */
+  private blurDiv = 4;
   /** debug and screenshots: force the swim's strength (0..1) whoever is watched; null: from the evening */
   swimDebug: number | null = null;
 
@@ -234,7 +236,7 @@ export class Fpv {
             float lu = pow(0.5 + 0.5 * sin(t * 0.37 + 1.3), 5.0) * smoothstep(0.55, 1.0, uSwim);
             off += vec2(sin(t * 0.23 + 2.0), 0.6 * cos(t * 0.19)) * lu * 12.0 * k * px;
             vec2 uv = vUv + off;
-            float w = clamp(uS2.x * uSwim / 2.5, 0.0, 1.0);
+            float w = clamp(uS2.x * uSwim / 2.0, 0.0, 1.0);
             s = w < 1.0 ? mix(texture2D(map, uv), soft(uv), w) : soft(uv);
             // double vision: the second image slides from one side of the first to the other
             float g = uS.w * uSwim * k * px.x * sin(t * 0.5 + 1.0);
@@ -257,7 +259,7 @@ export class Fpv {
         void main() { vec2 d = uTexel; gl_FragColor = 0.25 * (texture2D(map, vUv + vec2(d.x, d.y)) + texture2D(map, vUv + vec2(-d.x, d.y)) + texture2D(map, vUv + vec2(d.x, -d.y)) + texture2D(map, vUv + vec2(-d.x, -d.y))); }`,
       depthTest: false, depthWrite: false,
     });
-    // the small picture softened by a disc of taps on a golden-angle spiral, radius uR in its own texels
+    // the small picture softened by a disc of taps on a golden-angle spiral, radius uR in its own texels (a texel or more: the box's steps go)
     this.passDisc = new ShaderMaterial({
       uniforms: { map: { value: null }, uTexel: { value: new Vector2(1, 1) }, uR: { value: 1 } }, vertexShader: passVs,
       fragmentShader: `uniform sampler2D map; uniform vec2 uTexel; uniform float uR; varying vec2 vUv;
@@ -749,14 +751,18 @@ export class Fpv {
   }
 
   /**
-   * The swim's blur, in two passes on small targets: the scene (`rt`) boxed down to a quarter of its size across (blurA, which
-   * alone is a blur of about 2.5 px at 720p), then, for a heavier blur, a disc of taps over that small picture (blurB). The final
+   * The swim's blur, in two passes on small targets: the scene (`rt`) boxed down to a half or a quarter of its size across (blurA),
+   * then a disc of taps over that small picture (blurB; the inset takes the disc in the blit instead). The final
    * blit mixes the sharp and soft pictures by strength, so a view that is blurred 10 px costs a few taps a pixel of the window
    * instead of three dozen. `fresh`: the scene was drawn this frame (else the last soft picture is reused).
    */
   private blurPasses(renderer: WebGLRenderer, fresh: boolean, full: boolean) {
     const rt = this.rt!;
-    const aw = Math.max(2, Math.ceil(rt.width / 4)), ah = Math.max(2, Math.ceil(rt.height / 4));
+    // the small picture is half the scene's size across while the blur is light (a blur of a couple of pixels), a quarter once heavy
+    if (this.blurDiv === 4 && this.swim < 0.3) this.blurDiv = 2;
+    else if (this.blurDiv === 2 && this.swim > 0.36) this.blurDiv = 4;
+    const div = this.blurDiv;
+    const aw = Math.max(2, Math.ceil(rt.width / div)), ah = Math.max(2, Math.ceil(rt.height / div));
     if (!this.blurA || this.blurA.width !== aw || this.blurA.height !== ah) {
       this.blurA?.dispose(); this.blurB?.dispose();
       const o = { type: HalfFloatType, minFilter: LinearFilter, magFilter: LinearFilter, depthBuffer: false } as const;
@@ -765,28 +771,26 @@ export class Fpv {
     }
     if (!fresh) return;
     const [A, B] = [this.blurA, this.blurB!];
-    // the blur wanted at 720p (the shader's own sum), less the 2.5 px the box already gives, in the small picture's texels
+    // the disc's radius in the small picture's texels: the blur wanted at 720p (the shader's own sum), at least a texel so the
+    // small picture's bilinear steps are smoothed away
     const sh = this.night?.shape ?? swimShape(this.id);
-    const wantPx = sh.blur * this.swim, texelsPerPx = rt.height / 720 / 4;
-    const radius = Math.max(0, wantPx - 2.5) * texelsPerPx;
+    const radius = Math.max(0.9, sh.blur * this.swim * (rt.height / 720 / div) * 0.85);
     this.passMesh.material = this.passDown;
     this.passDown.uniforms.map.value = rt.texture;
-    (this.passDown.uniforms.uTexel.value as Vector2).set(1 / rt.width, 1 / rt.height);
+    (this.passDown.uniforms.uTexel.value as Vector2).set(div / 4 / rt.width, div / 4 / rt.height);
     renderer.setRenderTarget(A);
     renderer.render(this.passScene, this.blitCam);
     this.soft = A; this.softR = 0;
-    if (radius > 0.35) {
-      if (full) {
-        // the window is many pixels: soften the small picture here, once, so the blit reads it with a tap or two
-        this.passMesh.material = this.passDisc;
-        this.passDisc.uniforms.map.value = A.texture;
-        (this.passDisc.uniforms.uTexel.value as Vector2).set(1 / aw, 1 / ah);
-        this.passDisc.uniforms.uR.value = radius;
-        renderer.setRenderTarget(B);
-        renderer.render(this.passScene, this.blitCam);
-        this.soft = B;
-      } else this.softR = radius; // the inset is few pixels: the blit takes the disc itself and saves a pass
-    }
+    if (full) {
+      // the window is many pixels: soften the small picture here, once, so the blit reads it with a tap or two
+      this.passMesh.material = this.passDisc;
+      this.passDisc.uniforms.map.value = A.texture;
+      (this.passDisc.uniforms.uTexel.value as Vector2).set(1 / aw, 1 / ah);
+      this.passDisc.uniforms.uR.value = radius;
+      renderer.setRenderTarget(B);
+      renderer.render(this.passScene, this.blitCam);
+      this.soft = B;
+    } else this.softR = radius; // the inset is few pixels: the blit takes the disc itself and saves a pass
     renderer.setRenderTarget(null);
   }
 
