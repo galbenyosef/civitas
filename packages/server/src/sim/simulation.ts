@@ -2517,9 +2517,9 @@ export class Simulation {
         // stepped back from a car body on this crossing: on again only once the way over is clear (docs/traffic-tuning.md
         // "Crossings: the wobble"); meanwhile hold (1, 4), step back again every pedRetreatAfter ticks (1, 5, 6) or keep
         // walking back to the kerb (2). 5 holds on the kerb too, before the kerb's own rules.
-        if (this.crossingClear(c, crossing)) { if (TT.pedRetreatHold >= 4) this.retreated.get(c)!.hold = false; else this.retreated.delete(c); }
+        if (this.crossingClear(c, crossing) || (TT.pedRetreatHold === 7 && c.wait >= TT.pedRetreatAfter)) { if (TT.pedRetreatHold >= 4) this.retreated.get(c)!.hold = false; else this.retreated.delete(c); }
         else {
-          const again = TT.pedRetreatHold === 2 || (TT.pedRetreatHold !== 4 && c.wait >= TT.pedRetreatAfter);
+          const again = TT.pedRetreatHold === 2 || (TT.pedRetreatHold !== 4 && TT.pedRetreatHold !== 7 && c.wait >= TT.pedRetreatAfter);
           if (again && this.retreatToKerb(c, crossing, xd)) return true;
           if (c.x !== pts[(c.pp - 1) * 2] || c.y !== pts[(c.pp - 1) * 2 + 1]) this.traffic.noteCrossing(crossing, crossMask(xd)); // still on the carriageway
           this.traffic.count('guardPed'); c.wait++; return true;
