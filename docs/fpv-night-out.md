@@ -55,15 +55,19 @@ image too). The small inset skips the second pass and takes the disc in the blit
 the window's pixels while the swim is light, 0.7 from strength 0.12 and 0.55 from 0.4 (back down 0.04 under those), which makes
 the scene cheaper as well.
 
-Measured with timer queries on the in-game frame (a Mac with a busy GPU, window 1381x707 at pixel ratio 2, a citizen at
-swimDebug 1, frames alternated blur on and off in blocks so the drift cancels): the blur's own cost over the same frame with
-the blur off.
+Measured with timer queries on the in-game frame (a Mac whose GPU other work was sharing, window 1381x707 at pixel ratio 2, a
+citizen forced to full strength with `msc.fpv.swimDebug = 1`, frames alternated with the blur on and off in blocks of 24 so the
+drift cancels, median of each block): the blur's own GPU cost over the same frame with the blur off.
 
-| | before (main's 5-tap shader) | after |
+| | before (main's 6-tap shader) | after (two small passes) |
 | --- | --- | --- |
-| full window, heaviest | +0.08 ms | +0.16 ms (worst run +0.33) |
-| inset, heaviest | about 0 (noise of 0.2) | about 0 (noise of 0.2) |
+| full window, heaviest | +0.08 ms (three runs, 0.04 to 0.14) | +0.04 ms (four runs, -0.18 to +0.23) |
+| inset, heaviest | about 0 (-0.24 to +0.05) | +0.13 ms (three runs, 0.07 to 0.17) |
 | sober | nothing (one tap, the `uSwim > 0.002` branch) | nothing |
+
+Both are far under the 0.4 ms budget; run to run the noise is of the same size as the cost. The full window also gets cheaper as
+a whole when drunk, since its scene target is drawn at 0.55 of the window instead of 0.85. A scene that has a few NaN pixels
+(some material's lighting) is why the first pass skips non-numbers: a plain box would have spread each into a black patch.
 
 `npx tsx packages/client/scripts/nightout-check.ts` is the rule check; `npx tsx packages/server/src/loadtest/nightout.ts`
 runs a test city for two days and checks the server side.

@@ -252,11 +252,28 @@ export class Fpv {
     this.blit.frustumCulled = false;
     this.blitScene.add(this.blit);
     const passVs = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
-    // scene -> a quarter size across: each of four taps is the average of 2x2 texels, so together they cover the whole 4x4 block
+    // scene -> a half or a quarter size across: the exact average of each block of texels. (A few pixels of the scene are NaN, from
+    // some material's lighting: alone that is a black dot, but a box would spread it into a black patch, so those are left out.)
     this.passDown = new ShaderMaterial({
-      uniforms: { map: { value: null }, uTexel: { value: new Vector2(1, 1) } }, vertexShader: passVs,
-      fragmentShader: `uniform sampler2D map; uniform vec2 uTexel; varying vec2 vUv;
-        void main() { vec2 d = uTexel; gl_FragColor = 0.25 * (texture2D(map, vUv + vec2(d.x, d.y)) + texture2D(map, vUv + vec2(-d.x, d.y)) + texture2D(map, vUv + vec2(d.x, -d.y)) + texture2D(map, vUv + vec2(-d.x, -d.y))); }`,
+      uniforms: { map: { value: null }, uSize: { value: new Vector2(1, 1) }, uDiv: { value: 4 } }, vertexShader: passVs,
+      fragmentShader: `uniform sampler2D map; uniform vec2 uSize; uniform float uDiv;
+        void main() {
+          int div = int(uDiv);
+          ivec2 base = ivec2(gl_FragCoord.xy) * div;
+          vec4 s = vec4(0.0); float n = 0.0;
+          for (int y = 0; y < 4; y++) {
+            if (y >= div) break;
+            for (int x = 0; x < 4; x++) {
+              if (x >= div) break;
+              ivec2 p = base + ivec2(x, y);
+              if (p.x >= int(uSize.x) || p.y >= int(uSize.y)) continue;
+              vec4 c = texelFetch(map, p, 0);
+              if (any(isnan(c)) || any(isinf(c))) continue;
+              s += c; n += 1.0;
+            }
+          }
+          gl_FragColor = s / max(n, 1.0);
+        }`,
       depthTest: false, depthWrite: false,
     });
     // the small picture softened by a disc of taps on a golden-angle spiral, radius uR in its own texels (a texel or more: the box's steps go)
@@ -777,7 +794,8 @@ export class Fpv {
     const radius = Math.max(0.9, sh.blur * this.swim * (rt.height / 720 / div) * 0.85);
     this.passMesh.material = this.passDown;
     this.passDown.uniforms.map.value = rt.texture;
-    (this.passDown.uniforms.uTexel.value as Vector2).set(div / 4 / rt.width, div / 4 / rt.height);
+    (this.passDown.uniforms.uSize.value as Vector2).set(rt.width, rt.height);
+    this.passDown.uniforms.uDiv.value = div;
     renderer.setRenderTarget(A);
     renderer.render(this.passScene, this.blitCam);
     this.soft = A; this.softR = 0;
