@@ -519,6 +519,8 @@ export class Simulation {
       if (c.parkedAt) { const [px, py] = parseKey(c.parkedAt); info.parked = { x: px, y: py, where: c.parkKerb ? 'at the kerb' : (w.buildings.get(c.parkedAt)?.zone === Zone.Parking ? 'in a parking lot' : 'at the building') }; }
       else if (!(c.leg?.drive)) info.parked = { x: c.hx, y: c.hy, where: 'at home' };
     }
+    const night = this.nightOf(c);
+    if (night) info.night = night;
     if (c.leg) { info.tripDone = Math.max(0, c.leg.drive ? c.pi - 1 : c.pi); info.tripTotal = c.path.length / 2 - 1; }
     if (c.leg && this.legTrack.get(c)?.tripAt === c.tripStart) { const rr = this.reroutesOf(c).trip; if (rr > 0) info.reroutes = rr; }
     const role = this.mobile.roleOf(c);
@@ -754,6 +756,19 @@ export class Simulation {
       return at(x, y, sp ? sp.title : this.hour < 16 ? 'café' : b && b.level >= 2 ? 'restaurant' : 'bar');
     }
     return undefined;
+  }
+  /**
+   * A night out for the first-person view (client render/nightout.ts): game hours at the venue so far (0 on the way there) and
+   * whether the drink flows. Only for an ordinary outing: not the doctor, school, a class or a funeral. `drinks` is a café,
+   * bar or restaurant visit begun from 16:00 to 04:00 (the hours the activity line calls "out at a bar"), not a coffee before
+   * a shift, and not a cinema, theatre, park, sports hall or library.
+   */
+  private nightOf(c: Citizen): CitizenInfo['night'] | undefined {
+    if (c.errand || (c.state !== S.ToVenue && c.state !== S.AtVenue)) return undefined;
+    const at = c.state === S.AtVenue, tick = this.w.tick;
+    const since = at ? Math.min(tick, c.venueSince ?? tick) : tick, h = (since % DAY) / TPH;
+    const drinks = !this.venueSpecOf(c) && c.venueThen !== S.ToWork && (h >= 16 || h < 4);
+    return { hours: at ? Math.round(((tick - since) / TPH) * 100) / 100 : 0, drinks };
   }
   /** The leisure place a citizen is visiting or heading to, if it is one (not a café, bar or the doctor). */
   private venueSpecOf(c: Citizen): LeisureSpec | undefined {
@@ -1656,7 +1671,7 @@ export class Simulation {
       parcel.stats.taxToday += tax;
       w.dirtyParcels.add(parcel.id);
     }
-    c.state = S.AtVenue;
+    c.state = S.AtVenue; c.venueSince = w.tick;
     if (spec) {
       let stay = (spec.stayMin + Math.random() * (spec.stayMax - spec.stayMin)) * TPH;
       if (event) stay = Math.max(stay, Math.floor(w.tick / DAY) * DAY + (eventStartAt(spec, b.x, b.y) + spec.stayMax) * TPH - w.tick); // stay for the whole show
