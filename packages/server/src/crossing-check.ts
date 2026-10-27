@@ -2,11 +2,11 @@
  * `npm run crossing:check` (docs/traffic-tuning.md "Crossings: the wobble"): one street, one car, one walker crossing
  * it from a door. The car stops with its body over the walker's line (held there, as a queue would hold it) and is let
  * go some ticks later; the walker comes out of the door before, as or after it stops. Under the rule as shipped
- * (TRAFFIC_TUNING.pedRetreatHold) the walker never goes back and forth on the crossing more than once (at most two
+ * (TRAFFIC_TUNING.pedRetreatOnce) the walker never goes back and forth on the crossing more than once (at most two
  * reversals: back, then on), never steps into the car's body, and is over within a few ticks of the car going. Under
- * the old rule (pedRetreatHold 0) the same scenes must still show the wobble, or the bench no longer builds it.
+ * the old rule (pedRetreatOnce 0) the same scenes must still show the wobble, or the bench no longer builds it.
  *
- *   npx tsx packages/server/src/crossing-check.ts [--verbose] [--mode N (another pedRetreatHold to check)]
+ *   npx tsx packages/server/src/crossing-check.ts [--verbose]
  */
 import { Terrain, TRAFFIC_TUNING, packTile } from '@msimcity/shared';
 import { World, type Mover, type Citizen } from './world';
@@ -78,27 +78,27 @@ const scenes: Scene[] = [];
 for (const dir of [1, -1] as const) for (const at of [0.3, 0.5, 0.7]) for (const hold of [15, 40, 90]) for (const walkAt of [0, 10, 25]) scenes.push({ dir, at, hold, walkAt });
 
 function run(mode: number) {
-  TRAFFIC_TUNING.pedRetreatHold = mode;
+  TRAFFIC_TUNING.pedRetreatOnce = mode;
   const res = scenes.map((sc) => ({ sc, o: play(sc) }));
   const wob = res.filter((r) => r.o.reversals >= 3).length;
   const maxRev = Math.max(...res.map((r) => r.o.reversals)), maxRet = Math.max(...res.map((r) => r.o.retreats));
   const notOver = res.filter((r) => r.o.over < 0).length;
   const late = Math.max(...res.map((r) => r.o.overAfterGo));
   const inside = res.reduce((a, r) => a + r.o.inside, 0);
-  console.log(`pedRetreatHold ${mode}: ${res.length} scenes, ${res.filter((r) => r.o.retreats > 0).length} with a step back, ${wob} with 3+ reversals (most ${maxRev}), most steps back ${maxRet}, not over ${notOver}, over at most ${late} ticks after the car went, ticks inside a car body ${inside}`);
+  console.log(`pedRetreatOnce ${mode}: ${res.length} scenes, ${res.filter((r) => r.o.retreats > 0).length} with a step back, ${wob} with 3+ reversals (most ${maxRev}), most steps back ${maxRet}, not over ${notOver}, over at most ${late} ticks after the car went, ticks inside a car body ${inside}`);
   if (verbose) for (const r of res) console.log(`  ${JSON.stringify(r.sc)} -> ${JSON.stringify(r.o)}`);
   return { res, wob, maxRev, notOver, late, inside };
 }
 
-const shipped = process.argv.includes('--mode') ? Number(process.argv[process.argv.indexOf('--mode') + 1]) : TRAFFIC_TUNING.pedRetreatHold;
+const shipped = TRAFFIC_TUNING.pedRetreatOnce;
 const old = run(0);
-ok(old.wob > 0, `the old rule (pedRetreatHold 0) wobbles in this bench: ${old.wob} scenes with 3+ reversals`);
+ok(old.wob > 0, `the old rule (pedRetreatOnce 0) wobbles in this bench: ${old.wob} scenes with 3+ reversals`);
 const now = run(shipped);
-ok(shipped !== 0, `the shipped rule is not the old one (pedRetreatHold ${shipped})`);
+ok(shipped !== 0, `the shipped rule is not the old one (pedRetreatOnce ${shipped})`);
 ok(now.maxRev <= 2, `under the shipped rule a walker reverses at most twice on the crossing (most ${now.maxRev})`);
 ok(now.notOver === 0, `every walker gets over (${now.notOver} did not)`);
 ok(now.late <= 30, `and within 30 ticks of the car going (at most ${now.late})`);
 ok(now.inside === 0, `no walker ever stands inside the car's body (${now.inside} ticks)`);
-TRAFFIC_TUNING.pedRetreatHold = shipped;
+TRAFFIC_TUNING.pedRetreatOnce = shipped;
 console.log(failed ? `${failed} FAILED` : 'all ok');
 process.exit(failed ? 1 : 0);
