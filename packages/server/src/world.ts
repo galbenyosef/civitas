@@ -180,6 +180,8 @@ export interface Citizen extends Mover, EduFields {
   site: string | null;                  // builders: tile key of the site they are assigned to
   venue: string | null;                 // café/bar/restaurant currently being visited
   venueUntil: number;
+  /** tick they sat down at the current venue (set on arrival, for a night out's hours: sim/simulation.ts nightOf); absent while travelling and after a load */
+  venueSince?: number;
   venueThen: number;                    // state to continue with after the venue (ToWork or ToHome)
   preStop: boolean;                     // planned café stop before the next shift
   // life (sim/life.ts): one step per game day per citizen, plus cheap counters where trips advance

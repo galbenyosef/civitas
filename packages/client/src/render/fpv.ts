@@ -9,7 +9,7 @@ import { sceneUniforms } from './materials';
 import { Instruments, type AircraftCal } from './instruments';
 import { CarInterior, TrainCab, HelmCab, type CarFeed, type TrainCabFeed, type HelmFeed } from './vehicleInterior';
 import { TunnelRide, TUNNEL_BG, TUNNEL_FOG, type TunnelFeed } from './tunnelRide';
-import { NightOut, swimShape } from './nightout';
+import { NightOut, swimShape, wordOf, type NightFeed } from './nightout';
 import { PassengerInterior, type PassengerFeed } from './passengerInterior';
 import { handover, handOut, handStep, aboardKey, LOST_WAIT, RIDE_WAIT, type HandIn } from './passenger';
 
@@ -20,8 +20,13 @@ export type FpvMode = 'off' | 'inset' | 'full';
 
 const INSET_FRAC = 0.32, INSET_MARGIN = 16;
 const FADE_SECONDS = 0.25;
-/** a night out in the full window is drawn into a target this much of the window's pixels across (the swim softens it anyway) */
-const FULL_SWIM_SCALE = 0.85;
+/**
+ * a night out in the full window is drawn into a target this much of the window's pixels across (the swim softens it anyway):
+ * smaller as the swim grows, which also makes the scene and the blur's first pass cheaper. Up at these strengths, back down 0.04 under them.
+ */
+const FULL_SWIM_SCALES = [0.85, 0.7, 0.55], FULL_SWIM_UP = [0.12, 0.4];
+/** the most taps the swim's second blur pass spends on a pixel of its small target (a quarter of the scene's size across) */
+const BLUR_TAPS = 12;
 /** going in or out of a door, or between rooms, is a slower fade through black */
 const ROOM_FADE = 0.6;
 /** street-level fog: the world is a few tiles tall, so the horizon is much closer than from the overhead camera */
@@ -161,6 +166,15 @@ export class Fpv {
   private blit: Mesh;
   private blitScene = new Scene();
   private blitCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  /** the swim's blur: the scene boxed down to a half or a quarter of its size across (blurA), then softened there by a disc (blurB); see blurPasses */
+  private blurA: WebGLRenderTarget | null = null;
+  private blurB: WebGLRenderTarget | null = null;
+  /** which of them the blit reads as the soft picture, and the radius (in its texels) still to take in the blit's own taps */
+  private soft: WebGLRenderTarget | null = null; private softR = 0;
+  private passScene = new Scene();
+  private passMesh!: Mesh;
+  private passDown!: ShaderMaterial;
+  private passDisc!: ShaderMaterial;
   private rect = { x: 0, y: 0, w: 0, h: 0 };
   private winW = 0; private winH = 0;
   private parity = 0;
@@ -183,6 +197,12 @@ export class Fpv {
   // a night out (render/nightout.ts): the swim's strength as the view shows it (eased toward the evening's), and the evening so far
   private night: NightOut | null = null;
   swim = 0;
+  /** the sway's phase in radians: it advances at a rate that slows as they get drunker, so it never jumps when the strength moves */
+  private swimT = 0;
+  /** which of FULL_SWIM_SCALES the full window's target is drawn at (0 sober) */
+  private scaleTier = 0;
+  /** the swim's small blur targets are the scene's size over this (2 for a light blur, 4 for a heavy one) */
+  private blurDiv = 4;
   /** debug and screenshots: force the swim's strength (0..1) whoever is watched; null: from the evening */
   swimDebug: number | null = null;
 
@@ -206,33 +226,46 @@ export class Fpv {
 
     this.blit = new Mesh(new PlaneGeometry(2, 2), new ShaderMaterial({
       uniforms: {
-        map: { value: null }, fade: { value: 1 }, sky: { value: new Color() },
-        // the night out's swim: strength, wall-clock seconds, the citizen's period/phase/sway/double image, blur/ratio/mix, and the target's size
-        uSwim: { value: 0 }, uT: { value: 0 }, uS: { value: new Vector4(4, 0, 3, 4) }, uS2: { value: new Vector3(1.5, 0.7, 0.3) }, uRes: { value: new Vector2(1, 1) },
+        map: { value: null }, mapB: { value: null }, uSoft: { value: new Vector3() }, fade: { value: 1 }, sky: { value: new Color() },
+        // the night out's swim: strength, the sway's phase (radians), the citizen's period (unused by the shader)/phase/sway/double image, blur/ratio/mix, and the target's size
+        uSwim: { value: 0 }, uT: { value: 0 }, uS: { value: new Vector4(4, 0, 8, 16) }, uS2: { value: new Vector3(9, 0.7, 0.4) }, uRes: { value: new Vector2(1, 1) },
       },
       vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       // Scene pixels are tone-mapped here (a render target is not), but the sky is a plain clear colour on screen, so
       // where the picture is empty (alpha 0) the sky colour goes straight out, exactly as in the overhead view.
-      fragmentShader: `uniform sampler2D map; uniform float fade; uniform vec3 sky; varying vec2 vUv;
+      fragmentShader: `uniform sampler2D map; uniform sampler2D mapB; uniform float fade; uniform vec3 sky; varying vec2 vUv;
         uniform float uSwim; uniform float uT; uniform vec4 uS; uniform vec3 uS2; uniform vec2 uRes;
+        uniform vec3 uSoft; // x: radius of a disc taken here over mapB, in its texels (0: mapB is soft already); yz: its texel
+        vec4 soft(vec2 uv) {
+          vec4 acc = texture2D(mapB, uv);
+          if (uSoft.x <= 0.0) return acc;
+          for (int i = 1; i <= 8; i++) {
+            float a = float(i) * 2.3999632;
+            acc += texture2D(mapB, uv + vec2(cos(a), sin(a)) * (sqrt(float(i) / 8.0) * uSoft.x) * uSoft.yz);
+          }
+          return acc / 9.0;
+        }
         void main() {
           vec4 s;
           if (uSwim > 0.002) {
-            // A night out: the picture sways a few pixels on a slow period of the citizen's own, a second image drifts in
-            // and out beside it, and the whole softens a little. Sizes are pixels at 720p, scaled to the view.
+            // A night out (render/nightout.ts): the picture sways on a slow rhythm of the citizen's own, a second image drifts
+            // from one side of the first to the other, and the whole softens, all of it growing with how long they have been out.
+            // Heavily drunk, the picture now and then lurches to one side and comes back. Sizes are pixels at 720p at full
+            // strength, scaled to the view and to the strength. The soft picture is the scene blurred in two small passes
+            // (blurPasses), so a heavy blur costs a few taps a pixel here, not a few dozen.
             float k = uRes.y / 720.0;
             vec2 px = 1.0 / uRes;
-            float t = uT * 6.2831853 / uS.x + uS.y;
+            float t = uT + uS.y;
             vec2 off = vec2(sin(t + vUv.y * 5.0) + 0.5 * sin(t * uS2.y * 1.7 + vUv.y * 11.0), cos(t * uS2.y + vUv.x * 4.0)) * uS.z * uSwim * k * px;
+            float lu = pow(0.5 + 0.5 * sin(t * 0.37 + 1.3), 5.0) * smoothstep(0.55, 1.0, uSwim);
+            off += vec2(sin(t * 0.23 + 2.0), 0.6 * cos(t * 0.19)) * lu * 12.0 * k * px;
             vec2 uv = vUv + off;
-            float b = uS2.x * uSwim * k;
-            vec2 r = px * b;
-            s = 0.4 * texture2D(map, uv)
-              + 0.15 * (texture2D(map, uv + vec2(r.x, r.y)) + texture2D(map, uv + vec2(-r.x, r.y)) + texture2D(map, uv + vec2(r.x, -r.y)) + texture2D(map, uv + vec2(-r.x, -r.y)));
+            float w = clamp(uS2.x * uSwim / 2.0, 0.0, 1.0);
+            s = w < 1.0 ? mix(texture2D(map, uv), soft(uv), w) : soft(uv);
             // double vision: the second image slides from one side of the first to the other
             float g = uS.w * uSwim * k * px.x * sin(t * 0.5 + 1.0);
-            vec4 ghost = texture2D(map, uv + vec2(g, 0.35 * g * uRes.x / uRes.y));
-            s = mix(s, ghost, uS2.z * uSwim);
+            vec2 gc = uv + vec2(g, 0.35 * g * uRes.x / uRes.y);
+            s = mix(s, w < 1.0 ? mix(texture2D(map, gc), soft(gc), w) : soft(gc), uS2.z * pow(uSwim, 0.75));
           } else s = texture2D(map, vUv);
           vec3 c = toneMapping(s.rgb / max(s.a, 1e-3));
           gl_FragColor = vec4(mix(sky, c, s.a) * fade, 1.0);
@@ -242,6 +275,54 @@ export class Fpv {
     }));
     this.blit.frustumCulled = false;
     this.blitScene.add(this.blit);
+    const passVs = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+    // scene -> a half or a quarter size across: the exact average of each block of texels. (A few pixels of the scene are NaN, from
+    // some material's lighting: alone that is a black dot, but a box would spread it into a black patch, so those are left out.)
+    this.passDown = new ShaderMaterial({
+      uniforms: { map: { value: null }, uSize: { value: new Vector2(1, 1) }, uDiv: { value: 4 } }, vertexShader: passVs,
+      fragmentShader: `uniform sampler2D map; uniform vec2 uSize; uniform float uDiv;
+        void main() {
+          int div = int(uDiv);
+          ivec2 base = ivec2(gl_FragCoord.xy) * div;
+          vec4 s = vec4(0.0); float n = 0.0;
+          for (int y = 0; y < 4; y++) {
+            if (y >= div) break;
+            for (int x = 0; x < 4; x++) {
+              if (x >= div) break;
+              ivec2 p = base + ivec2(x, y);
+              if (p.x >= int(uSize.x) || p.y >= int(uSize.y)) continue;
+              vec4 c = texelFetch(map, p, 0);
+              if (any(isnan(c)) || any(isinf(c))) continue;
+              s += c; n += 1.0;
+            }
+          }
+          gl_FragColor = s / max(n, 1.0);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+    // the small picture softened by a disc of taps on a golden-angle spiral, radius uR in its own texels (a texel or more: the box's steps go)
+    this.passDisc = new ShaderMaterial({
+      uniforms: { map: { value: null }, uTexel: { value: new Vector2(1, 1) }, uR: { value: 1 } }, vertexShader: passVs,
+      fragmentShader: `uniform sampler2D map; uniform vec2 uTexel; uniform float uR; varying vec2 vUv;
+        const int TAPS = ${BLUR_TAPS};
+        void main() {
+          vec4 acc = texture2D(map, vUv);
+          float wsum = 1.0;
+          float n = clamp(5.0 + uR * 2.0, 5.0, float(TAPS));
+          for (int i = 1; i <= TAPS; i++) {
+            float fi = float(i);
+            if (fi > n) break;
+            float a = fi * 2.3999632;
+            acc += texture2D(map, vUv + vec2(cos(a), sin(a)) * (sqrt(fi / n) * uR) * uTexel);
+            wsum += 1.0;
+          }
+          gl_FragColor = acc / wsum;
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+    this.passMesh = new Mesh(new PlaneGeometry(2, 2), this.passDown);
+    this.passMesh.frustumCulled = false;
+    this.passScene.add(this.passMesh);
 
     window.addEventListener('keydown', this.key);
   }
@@ -327,6 +408,7 @@ export class Fpv {
 
   setInfo(info: CitizenInfo) {
     this.latest = info;
+    this.latestFeed = info.night ? { ...info.night, at: this.hooks.clock ? this.hooks.clock() / TICKS_PER_HOUR : sceneUniforms.uHour.value } : undefined;
     if (info.id === this.id) { this.info = info; this.hudKey = ''; }
   }
 
@@ -522,12 +604,19 @@ export class Fpv {
     if (!this.cabKey && info && info.id === this.id && info.role === 'citizen') {
       if (this.night?.id !== this.id) this.night = new NightOut(this.id);
       const hours = this.hooks.clock ? this.hooks.clock() / TICKS_PER_HOUR : sceneUniforms.uHour.value;
-      target = this.night.update(info.activity, hours, info.tripTotal ? clamp((info.tripDone ?? 0) / info.tripTotal, 0, 1) : undefined);
+      // the server's exact hours at the venue (as of the inspect, once a second); the clock carries them on between
+      const feed = info === this.latest ? this.latestFeed : undefined;
+      target = this.night.update(info.activity, hours, info.tripTotal ? clamp((info.tripDone ?? 0) / info.tripTotal, 0, 1) : undefined, feed);
     } else this.night = null;
     if (this.swimDebug !== null) target = this.swimDebug;
     this.swim += (target - this.swim) * (1 - Math.exp(-dt * 1.2));
     if (target === 0 && this.swim < 0.003) this.swim = 0;
+    // the sway slows as they get drunker (a period of the citizen's own, up to 1.8 times longer at full strength)
+    const sh = this.night?.shape ?? swimShape(this.id);
+    this.swimT += dt * 6.2831853 / (sh.period * (1 + 0.8 * this.swim));
   }
+  /** the latest inspect's `night` with the game hour it came in at */
+  private latestFeed: NightFeed | undefined;
   /** the swim is on (the HUD says so, the picture swims) */
   get tipsy() { return this.swim > 0.06; }
 
@@ -670,13 +759,14 @@ export class Fpv {
     const speed = i && i.mode === 'drive' && i.speedPct !== undefined ? `${Math.round(i.speedPct * 100)}% of free flow` : `${this.speed.toFixed(1)} tiles/s`;
     const room = this.room?.label ?? '';
     const tipsy = this.tipsy;
-    const key = `${i?.name}|${i?.activity}|${i?.destination?.label}|${queued ? Math.round((i?.waitTicks ?? 0) * 0.6) : -1}|${Math.round(this.speed * 2)}|${speed}|${room}|${tipsy}`;
+    const word = tipsy ? wordOf(this.swim) : '';
+    const key = `${i?.name}|${i?.activity}|${i?.destination?.label}|${queued ? Math.round((i?.waitTicks ?? 0) * 0.6) : -1}|${Math.round(this.speed * 2)}|${speed}|${room}|${word}`;
     if (key === this.hudKey && now - this.hudAt < 500) return;
     this.hudKey = key; this.hudAt = now;
     const name = this.hud.querySelector('.fname')!;
     name.textContent = i ? i.name : '…';
     let html = '';
-    const tip = tipsy ? '<div class="ftipsy">a little tipsy</div>' : '';
+    const tip = tipsy ? `<div class="ftipsy${word === 'very drunk' ? ' heavy' : ''}">${word}</div>` : '';
     if (i && this.room) html += `<div class="fact">${esc(i.activity)}</div><div class="fspd">${esc(room)}</div>${tip}`;
     else if (i) {
       html += `<div class="fact">${esc(i.activity)}${queued ? ` · <span class="bad">held up ${Math.round(i.waitTicks * 0.6)} min</span>` : ''}</div>`;
@@ -739,7 +829,9 @@ export class Fpv {
     else { this.fade.style.opacity = '0'; renderer.render(scene, overhead); }
     // a slow frame: refresh the inset every other frame and re-blit the last picture in between
     if (!full && this.avgMs > 33) this.parity ^= 1; else this.parity = 0;
-    const pr = renderer.getPixelRatio() * (full ? FULL_SWIM_SCALE : 1);
+    if (this.swim > 0.004 && this.scaleTier < FULL_SWIM_UP.length && this.swim >= FULL_SWIM_UP[this.scaleTier]) this.scaleTier++;
+    else if (this.scaleTier > 0 && this.swim < FULL_SWIM_UP[this.scaleTier - 1] - 0.04) this.scaleTier--;
+    const pr = renderer.getPixelRatio() * (full ? FULL_SWIM_SCALES[this.scaleTier] : 1);
     const tag = `${w}x${h}@${pr}`;
     if (!this.rt || tag !== this.sizeTag) {
       this.rt?.dispose();
@@ -781,6 +873,9 @@ export class Fpv {
       this.rendered++;
     } else this.skipped++;
     mat.uniforms.map.value = this.rt.texture;
+    if (swimming) this.blurPasses(renderer, this.parity === 0, full);
+    mat.uniforms.mapB.value = swimming && this.soft ? this.soft.texture : this.rt.texture;
+    (mat.uniforms.uSoft.value as Vector3).set(swimming ? this.softR : 0, this.blurA ? 1 / this.blurA.width : 1, this.blurA ? 1 / this.blurA.height : 1);
     mat.uniforms.fade.value = full ? 1 : this.level; // the full window fades by the overlay above it
     this.swimUniforms(mat, swimming);
     renderer.setViewport(x, y, w, h);
@@ -791,13 +886,58 @@ export class Fpv {
     this.lastCost = performance.now() - t0;
   }
 
+  /**
+   * The swim's blur, in two passes on small targets: the scene (`rt`) boxed down to a half or a quarter of its size across (blurA),
+   * then a disc of taps over that small picture (blurB; the inset takes the disc in the blit instead). The final
+   * blit mixes the sharp and soft pictures by strength, so a view that is blurred 10 px costs a few taps a pixel of the window
+   * instead of three dozen. `fresh`: the scene was drawn this frame (else the last soft picture is reused).
+   */
+  private blurPasses(renderer: WebGLRenderer, fresh: boolean, full: boolean) {
+    const rt = this.rt!;
+    // the small picture is half the scene's size across while the blur is light (a blur of a couple of pixels), a quarter once heavy
+    if (this.blurDiv === 4 && this.swim < 0.3) this.blurDiv = 2;
+    else if (this.blurDiv === 2 && this.swim > 0.36) this.blurDiv = 4;
+    const div = this.blurDiv;
+    const aw = Math.max(2, Math.ceil(rt.width / div)), ah = Math.max(2, Math.ceil(rt.height / div));
+    if (!this.blurA || this.blurA.width !== aw || this.blurA.height !== ah) {
+      this.blurA?.dispose(); this.blurB?.dispose();
+      const o = { type: HalfFloatType, minFilter: LinearFilter, magFilter: LinearFilter, depthBuffer: false } as const;
+      this.blurA = new WebGLRenderTarget(aw, ah, o); this.blurB = new WebGLRenderTarget(aw, ah, o);
+      this.soft = this.blurA; fresh = true;
+    }
+    if (!fresh) return;
+    const [A, B] = [this.blurA, this.blurB!];
+    // the disc's radius in the small picture's texels: the blur wanted at 720p (the shader's own sum), at least a texel so the
+    // small picture's bilinear steps are smoothed away
+    const sh = this.night?.shape ?? swimShape(this.id);
+    const radius = Math.max(0.9, sh.blur * this.swim * (rt.height / 720 / div) * 0.85);
+    this.passMesh.material = this.passDown;
+    this.passDown.uniforms.map.value = rt.texture;
+    (this.passDown.uniforms.uSize.value as Vector2).set(rt.width, rt.height);
+    this.passDown.uniforms.uDiv.value = div;
+    renderer.setRenderTarget(A);
+    renderer.render(this.passScene, this.blitCam);
+    this.soft = A; this.softR = 0;
+    if (full) {
+      // the window is many pixels: soften the small picture here, once, so the blit reads it with a tap or two
+      this.passMesh.material = this.passDisc;
+      this.passDisc.uniforms.map.value = A.texture;
+      (this.passDisc.uniforms.uTexel.value as Vector2).set(1 / aw, 1 / ah);
+      this.passDisc.uniforms.uR.value = radius;
+      renderer.setRenderTarget(B);
+      renderer.render(this.passScene, this.blitCam);
+      this.soft = B;
+    } else this.softR = radius; // the inset is few pixels: the blit takes the disc itself and saves a pass
+    renderer.setRenderTarget(null);
+  }
+
   /** The blit's night-out uniforms: this citizen's swim at its strength now (all zero when sober). */
   private swimUniforms(mat: ShaderMaterial, on: boolean) {
     const u = mat.uniforms;
     u.uSwim.value = on ? this.swim : 0;
     if (!on) return;
     const sh = this.night?.shape ?? swimShape(this.id);
-    u.uT.value = performance.now() / 1000;
+    u.uT.value = this.swimT;
     (u.uS.value as Vector4).set(sh.period, sh.phase, sh.amp, sh.ghost);
     (u.uS2.value as Vector3).set(sh.blur, sh.ratio, sh.mix);
     (u.uRes.value as Vector2).set(this.rt!.width, this.rt!.height);

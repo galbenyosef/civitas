@@ -475,6 +475,12 @@ export interface CitizenInfo {
   fleet?: FleetInfo;
   /** a passenger in a taxi or waiting for one (sim/taxis.ts): the vehicle, so the panel can select it */
   taxi?: { vehicle: number; label: string };
+  /**
+   * A citizen on an ordinary outing to a café, bar, restaurant or leisure place (not the doctor, school or a funeral): game
+   * hours at the venue so far (0 on the way there) and whether the drink flows. Inspect only. The first-person view blurs
+   * with the hours (client render/nightout.ts); an older server sends none and the view reads the evening from `activity`.
+   */
+  night?: { hours: number; drinks: boolean };
   /** a fishing harbour's crew member whose trawler is out (server sim/harbours.ts): "at sea on the Kittiwake" */
   atSea?: { boat: number; name: string };
   /**
