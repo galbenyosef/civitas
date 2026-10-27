@@ -198,6 +198,13 @@ and the stopping sign are on the display at the front. The selected bus's panel 
 train's roster, cut at 200), and picking one sits the view with them. The ride sound is the bus's (ride key `c<bus>`), so
 its own pass-by never plays.
 
+What a ride costs (2026-10-27, the Showcase, 1280x577 at dpr 2, five alternations against the same bus's driver view): the
+view's own work (update, the eye's render, the interior, the blit) is 0.87 ms a frame in the inset against the driver
+view's 0.96, and 1.31 ms against 1.40 in the full window; the interior's canvases take 0.005 to 0.01 ms (they repaint only
+on a change of size, bus or load). The overhead pass the inset draws as well is the same in both (5.30 and 5.38 ms) and
+drifts by 2 to 3 ms over a minute with what the overhead camera sees, so it is left out of the comparison. Drawing the
+ridden bus as the selection (layer 1) costs nothing measurable: 3.43 against 3.37 ms over five interleaved runs.
+
 ## Other modes
 
 `Transit` is mode-agnostic. A mode registers a `ModeService` (`stopProblem`, `route`, `waitAt`, `rideTicks`, `headway`,
