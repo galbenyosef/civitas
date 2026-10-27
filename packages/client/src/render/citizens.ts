@@ -13,6 +13,8 @@ import { glide, glideFrom, STRETCH, type Glider } from './glide';
 interface Agent extends Glider {
   x: number; y: number; px: number; py: number; tx: number; ty: number; t: number;
   hx: number; hy: number;
+  /** a walker stepping back against its facing: how far in this run of steps (under BACKSTEP it keeps facing forward) */
+  back: number;
   state: number; drives: boolean; kind: number; cls: number; queued: boolean; emergency: boolean; last: number;
   /** LifeStage: children are drawn smaller, retirees bob more slowly (the server already walks them slower) */
   stage: number;
@@ -77,6 +79,12 @@ const BLINKER: Record<VType | 'bus', [number, number, number, number]> = {
 };
 const UP = new Vector3(0, 1, 0);
 const LERP_SECONDS = TICK_MS / 1000;
+/**
+ * A walker who steps back against its facing (off a crossing for a car: server sim/simulation.ts retreatToKerb) keeps
+ * facing forward until it has gone this far back, in tiles, so a short step back is drawn as one, not as a turn on the
+ * spot and back. A real U-turn turns after this much; a corner (a quarter turn) turns at once.
+ */
+const BACKSTEP = 0.5;
 /** ?glide=0 draws drivers the old way, straight lines at a constant speed from one server position to the next (an A/B control) */
 const GLIDE = typeof location === 'undefined' || new URLSearchParams(location.search).get('glide') !== '0';
 
@@ -271,12 +279,17 @@ export class CitizensView {
       const a = this.agents.get(id);
       const ind = drives ? citizenIndicator(f) : Indicator.None, rev = citizenReversing(f);
       const fleet = citizenFleet(f), loaded = fleetLoaded(f), working = fleetWorking(f);
-      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f), ind, rev, brake: 0, fleet, loaded, working, under: citizenUnder(f), study: citizenStudy(f), gx: x, gy: y, m0x: 0, m0y: 0, m1x: 0, m1y: 0, vx: 0, vy: 0, g0: now }); continue; }
+      if (!a) { this.agents.set(id, { x, y, px: x, py: y, tx: x, ty: y, t: 1, hx: 1, hy: 0, state, drives, kind, cls, queued, emergency, last: now, rx: x, rz: y, ang: 0, back: 0, stage, trav: false, car: false, gait: 0, pose: 0, bag: citizenBag(f), ind, rev, brake: 0, fleet, loaded, working, under: citizenUnder(f), study: citizenStudy(f), gx: x, gy: y, m0x: 0, m0y: 0, m1x: 0, m1y: 0, vx: 0, vy: 0, g0: now }); continue; }
       const dx = x - a.tx, dy = y - a.ty;
       // slowing hard since the last tick: the brake lights come on for a moment
       if (drives && (dx * dx + dy * dy) < 0.5 * ((a.tx - a.px) ** 2 + (a.ty - a.py) ** 2) && (a.tx - a.px) ** 2 + (a.ty - a.py) ** 2 > 1e-4) a.brake = now + 700;
       // facing the way it moves, except a bus backing up in a three-point turn (server sim/traffic.ts)
-      if (dx * dx + dy * dy > 1e-4) { const d = Math.hypot(dx, dy) * (rev ? -1 : 1); a.hx = dx / d; a.hy = dy / d; }
+      if (dx * dx + dy * dy > 1e-4) {
+        const d = Math.hypot(dx, dy);
+        // a walker's short step back (under BACKSTEP, against its facing): keep facing forward
+        if (!drives && d < BACKSTEP && dx * a.hx + dy * a.hy < -0.7 * d && a.back + d < BACKSTEP) a.back += d;
+        else { const s = rev ? -d : d; a.hx = dx / s; a.hy = dy / s; a.back = 0; }
+      } else a.back = 0; // standing: a later step back is a new one
       if (GLIDE && drives) { a.px = a.tx; a.py = a.ty; a.tx = x; a.ty = y; glideFrom(a, this.gapMs * STRETCH, this.frameAt || now); } else { a.px = a.x; a.py = a.y; a.tx = x; a.ty = y; }
       a.t = 0; a.state = state; a.drives = drives; a.kind = kind; a.cls = cls; a.queued = queued; a.emergency = emergency; a.last = now; a.stage = stage; a.study = citizenStudy(f); a.bag = citizenBag(f); a.ind = ind; a.rev = rev;
       a.fleet = fleet; a.loaded = loaded; a.working = working; a.under = citizenUnder(f);

@@ -2513,6 +2513,18 @@ export class Simulation {
       const tx = pts[c.pp * 2], ty = pts[c.pp * 2 + 1];
       const crossing = c.cross![c.pp];
       const xd = c.xdir?.[c.pp] ?? -1;
+      if (crossing && TT.pedRetreatHold && TT.pedRetreatHold !== 3 && this.backedOff(c, crossing, true)) {
+        // stepped back from a car body on this crossing: on again only once the way over is clear (docs/traffic-tuning.md
+        // "Crossings: the wobble"); meanwhile hold (1, 4), step back again every pedRetreatAfter ticks (1, 5, 6) or keep
+        // walking back to the kerb (2). 5 holds on the kerb too, before the kerb's own rules.
+        if (this.crossingClear(c, crossing)) { if (TT.pedRetreatHold >= 4) this.retreated.get(c)!.hold = false; else this.retreated.delete(c); }
+        else {
+          const again = TT.pedRetreatHold === 2 || (TT.pedRetreatHold !== 4 && c.wait >= TT.pedRetreatAfter);
+          if (again && this.retreatToKerb(c, crossing, xd)) return true;
+          if (c.x !== pts[(c.pp - 1) * 2] || c.y !== pts[(c.pp - 1) * 2 + 1]) this.traffic.noteCrossing(crossing, crossMask(xd)); // still on the carriageway
+          this.traffic.count('guardPed'); c.wait++; return true;
+        }
+      }
       if (crossing && !(c.cross![c.pp - 1] === crossing) && c.x === pts[(c.pp - 1) * 2] && c.y === pts[(c.pp - 1) * 2 + 1]) {
         // at the kerb, about to step out
         const [bx, by] = untkey(crossing);
@@ -2550,16 +2562,6 @@ export class Simulation {
         }
       }
       if (crossing) this.traffic.noteCrossing(crossing, crossMask(xd));
-      if (crossing && TT.pedRetreatHold && TT.pedRetreatHold !== 3 && this.backedOff(c, crossing, true)) {
-        // (5 holds on the kerb too: a walker back there waits for the crossing to clear, then the kerb's rules apply)
-        // stepped back from a car body on this crossing: on again only once the way over is clear (docs/traffic-tuning.md
-        // "Crossings: the wobble"); meanwhile hold (1, 4) or keep walking back to the kerb (2)
-        if (this.crossingClear(c, crossing)) { if (TT.pedRetreatHold >= 4) this.retreated.get(c)!.hold = false; else this.retreated.delete(c); }
-        else {
-          if ((TT.pedRetreatHold === 2 || ((TT.pedRetreatHold === 1 || TT.pedRetreatHold === 5) && c.wait >= TT.pedRetreatAfter)) && this.retreatToKerb(c, crossing, xd)) return true;
-          this.traffic.count('guardPed'); c.wait++; return true;
-        }
-      }
       if (c.x === pts[(c.pp - 1) * 2] && c.y === pts[(c.pp - 1) * 2 + 1] && this.traffic.barrierAhead(c.x, c.y, tx, ty)) { c.wait++; return true; } // a level crossing's barriers are down
       const dx = tx - c.x, dy = ty - c.y;
       const d = hypot(dx, dy);
