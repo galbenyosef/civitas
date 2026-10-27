@@ -2528,6 +2528,15 @@ export class Simulation {
       const tx = pts[c.pp * 2], ty = pts[c.pp * 2 + 1];
       const crossing = c.cross![c.pp];
       const xd = c.xdir?.[c.pp] ?? -1;
+      if (crossing && TT.pedRetreatOnce && this.backedOff(c, crossing, true)) {
+        // stepped back from a car body on this crossing: held there until the crossing ahead is clear, then on, and no
+        // second step back on this crossing (docs/traffic-tuning.md "Crossings: the wobble")
+        if (this.crossingClear(c, crossing)) this.retreated.get(c)!.hold = false;
+        else {
+          if (c.x !== pts[(c.pp - 1) * 2] || c.y !== pts[(c.pp - 1) * 2 + 1]) this.traffic.noteCrossing(crossing, crossMask(xd)); // still on the carriageway
+          this.traffic.count('guardPed'); c.wait++; return true;
+        }
+      }
       if (crossing && !(c.cross![c.pp - 1] === crossing) && c.x === pts[(c.pp - 1) * 2] && c.y === pts[(c.pp - 1) * 2 + 1]) {
         // at the kerb, about to step out
         const [bx, by] = untkey(crossing);
@@ -2572,7 +2581,7 @@ export class Simulation {
         // never step into a car's body (stepping out of one is always allowed); after guardWaitMax, walk on anyway
         const s = Math.min(1, remaining / d), nx = c.x + dx * s, ny = c.y + dy * s;
         if (this.traffic.carBodyAt(nx, ny) && !this.traffic.carBodyAt(c.x, c.y)) {
-          if (TT.pedRetreatAfter > 0 && crossing && c.wait >= TT.pedRetreatAfter && this.retreatToKerb(c, crossing, xd)) return true;
+          if (TT.pedRetreatAfter > 0 && crossing && c.wait >= TT.pedRetreatAfter && !(TT.pedRetreatOnce && this.backedOff(c, crossing, false)) && this.retreatToKerb(c, crossing, xd)) return true;
           if (TT.guardWaitMax <= 0 || c.wait < TT.guardWaitMax) { this.traffic.count('guardPed'); c.wait++; return true; }
           this.traffic.count('guardPedGaveUp');
         }
@@ -2613,8 +2622,22 @@ export class Simulation {
     c.x = nx; c.y = ny;
     if (s >= 1) { c.x = kx; c.y = ky; c.pp = i + 1; c.wait = 0; } // back on the kerb, facing the crossing again
     else this.traffic.noteCrossing(k, crossMask(xd)); // still on the carriageway
+    if (TT.pedRetreatOnce) {
+      // once per crossing of this walk, and held where it stepped back to (on the kerb, the kerb's own rules decide)
+      const r = this.retreated.get(c);
+      if (r) { r.k = k; r.pts = pts; r.hold = s < 1; } else this.retreated.set(c, { k, pts, hold: s < 1 });
+      if (s < 1) this.traffic.holdBack(c); // the car may nose past it (carPastHeld)
+      if (s < 1) c.wait = 0;
+    }
     this.traffic.count('pedRetreat');
     return true;
+  }
+  /** the crossing each walker last stepped back on (pedRetreatOnce): its tile key, the walk it was on, still held back there */
+  private retreated = new WeakMap<Citizen, { k: number; pts: number[]; hold: boolean }>();
+  /** has c already stepped back on crossing k of the walk it is on (and, with `holding`, not gone on since)? */
+  private backedOff(c: Citizen, k: number, holding: boolean): boolean {
+    const r = this.retreated.get(c);
+    return !!r && r.k === k && r.pts === c.pts && (!holding || r.hold);
   }
   /** Is the crossing from c's kerb (the points flagged with tile key k from c.pp on) clear of car bodies? */
   private crossingClear(c: Citizen, k: number): boolean {
