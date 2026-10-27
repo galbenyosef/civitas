@@ -180,7 +180,7 @@ export function worldFromSnapshot(snap: Snapshot): World | null {
     }
     // resume everyone at home with their car; mid-trip positions are not worth restoring
     c.state = 0; c.path = []; c.pi = 0; c.x = c.hx + 0.5; c.y = c.hy + 0.5;
-    c.site = null; c.venue = null; c.preStop = false;
+    c.site = null; c.venue = null; c.venueSince = undefined; c.preStop = false;
     // migrants (sim/gateways.ts): a newcomer is home now; a leaver sets off again for a gateway from home
     if (c.mig) { c.mig = c.mig === 1 ? 0 : 2; c.gx = undefined; c.gy = undefined; }
     c.legs = []; c.leg = null; c.parkedAt = null; c.parkKerb = false; c.lane = -1; c.wait = 0; c.stuck = 0; c.trail = [];
