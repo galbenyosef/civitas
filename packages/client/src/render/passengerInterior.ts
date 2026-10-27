@@ -321,7 +321,7 @@ export class PassengerInterior {
     // luggage racks over both rows of windows, the lights along the ceiling
     for (const z of [-1, 1]) {
       this.fill(c, qy(0.222, XB, XF, z * W, z * (W - 0.035)), 'rgba(170,175,182,0.85)', 'rgba(60,62,68,0.6)', 1.5);
-      if (hash2(vs, 80 + z) < 0.7) { const bx = (hash2(vs, 82 + z) - 0.5) * 0.5; this.fill(c, [bx, 0.222, z * (W - 0.003), bx + 0.05, 0.222, z * (W - 0.003), bx + 0.05, 0.236, z * (W - 0.01), bx, 0.236, z * (W - 0.01)], rgb(COATS[Math.floor(hash2(vs, 84 + z) * COATS.length)])); }
+      if (z === far && hash2(vs, 80 + z) < 0.7) { const bx = (hash2(vs, 82 + z) - 0.5) * 0.5; this.fill(c, [bx, 0.222, z * (W - 0.003), bx + 0.05, 0.222, z * (W - 0.003), bx + 0.05, 0.236, z * (W - 0.01), bx, 0.236, z * (W - 0.01)], rgb(COATS[Math.floor(hash2(vs, 84 + z) * COATS.length)])); }
     }
     this.fill(c, qy(Y1 - 0.0005, XB + 0.02, XF - 0.02, -0.008, 0.008), lit ? '#fffbea' : '#f5f4ef');
     // the seats: a bay of four with a table when the hash says so, else airline-style rows, all facing the way the seat does
@@ -334,14 +334,14 @@ export class PassengerInterior {
       if (faces === fwd) pers();
       this.fill(c, qy(0.175, Math.min(back, X), Math.max(back, X), z0, z1), rgb(0x2a2f3a, 1.2));
       this.fill(c, qx(faces === fwd ? back : X, 0.1, 0.175, z0, z1), moq, 'rgba(0,0,0,0.4)', 1.5);
-      this.fill(c, qx((faces === fwd ? back : X) - fwd * 0.0005, 0.16, 0.175, zm - 0.02, zm + 0.02), 'rgba(240,240,236,0.9)');
+      this.fill(c, qx((faces === fwd ? back : X) - fwd * 0.0005, 0.164, 0.174, zm - 0.014, zm + 0.014), 'rgba(240,240,236,0.9)');
       if (faces !== fwd) pers();
     };
     const half = (z: number) => (z < 0 ? [-W + 0.004, -0.014] : [0.014, W - 0.004]);
     const occ = (k: number) => hash2(Math.floor(vs * 1e4) + k, 87) < f.fill * 1.3 - 0.05;
     const rows: [number, number][] = []; // [x, faces]
     if (table) { rows.push([s.x + fwd * 0.19, fwd], [s.x + fwd * 0.12, -fwd]); }
-    else for (let k = 1; k <= 3; k++) rows.push([s.x + fwd * 0.075 * k, fwd]);
+    else for (let k = 1; k <= 3; k++) rows.push([s.x + fwd * (0.02 + 0.075 * k), fwd]);
     for (let i = rows.length - 1; i >= 0; i--) {
       const [X, faces] = rows[i];
       for (const z of [far, near]) { const [z0, z1] = half(z * 0.05); seatAt(X, z0, z1, faces, occ(i * 5 + z * 2 + 9), i * 17 + z * 3); }
