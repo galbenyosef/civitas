@@ -1150,3 +1150,24 @@ per crossing it walks. On the UAT copy (a small, jammed city: 73% of cars queued
 door-to-kerb crossing, one walker, 54 timings. It checks that the old rule still wobbles there, and that under the
 shipped rule a walker reverses at most twice, gets over within 30 ticks of the car going (6 at most) and never stands
 inside the car's body.
+
+**Letting a car nose past** (`carPastHeld`, off). One more shape was tried to win back the 08:00 cost. With it on, a
+car's body guard tests a walker standing where it stepped back to body to body, without the guard's margin, so a
+car may nose past one beside its lane but never touch it (`Traffic.holdBack` remembers where the walker stood; once
+it moves it is an ordinary walker again). 3+ reversals stayed at 0 everywhere. It does not pay for itself:
+
+| | old rule | shipped | with carPastHeld |
+| --- | --- | --- | --- |
+| Commons 08:00 give-ups (12 seeds, paired against old) | 430 | 464 (+34 ± 18) | 456 (+27 ± 16) |
+| Commons 08:00 speed % | 26.0 | 25.2 | 25.0 |
+| Commons 17:00 give-ups | 252 | 249 (−4 ± 11) | 260 (+8 ± 7) |
+| Commons 17:00 speed % | 29.7 | 30.0 | 28.8 (−1.3 ± 0.6 against shipped) |
+| Commons car–ped overlaps a tick, true / as drawn, 08:00 | 0.022 / 0.061 | 0.023 / 0.046 | 0.019 / 0.057 |
+| London give-ups (3 seeds) | 15,581 | 15,592 | 15,799 |
+| London ticks lost per crossing | 1.51 | 1.69 | 1.73 |
+| UAT copy give-ups, trips (3 seeds) | 2,071, 3,649 | 2,180, 3,556 | 2,117, 3,583 |
+| UAT copy ticks lost per crossing | 1.78 | 2.30 | 1.78 |
+
+It wins back about a quarter of the 08:00 give-ups (within noise) and costs 17:00 speed and London give-ups, so it
+stays off. The perf baseline (`packages/server/perf-baseline.json`) was rewritten for the shipped rule: with
+`pedRetreatOnce 0` perf:check matches the old baseline exactly.

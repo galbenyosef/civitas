@@ -567,6 +567,12 @@ export class Traffic {
     }
   }
   private carGrid = new TileLists();
+  /** walkers standing where they stepped back to on a crossing (sim/simulation.ts retreatToKerb), and where: carPastHeld */
+  private held = new WeakMap<Mover, number[]>();
+  /** a walker has stepped back on a crossing to (x, y) and stands there until the way over is clear */
+  holdBack(m: Mover) { const h = this.held.get(m); if (h) { h[0] = m.x; h[1] = m.y; } else this.held.set(m, [m.x, m.y]); }
+  /** is m standing where it stepped back to? (once it moves on it is a walker like any other) */
+  private heldBack(m: Mover): boolean { const h = this.held.get(m); return !!h && h[0] === m.x && h[1] === m.y; }
   endTick() {
     const tick = this.w.tick;
     for (let j = 0; j < this.presKeys.length; j++) {
@@ -1263,7 +1269,10 @@ export class Traffic {
         // behind the car's centre: ignored (pedBehind 0), or only a real touch counts (1: no margin, or a turning car's rear would freeze it next to people on the kerb)
         const ahead = ex * nhx + ey * nhy > 0;
         if (!ahead && !TT.pedBehind) continue;
-        peds[np++] = p.x; peds[np++] = p.y; peds[np++] = ahead ? GUARD_MARGIN : 0;
+        // a walker standing back on a crossing for a car (pedRetreatOnce, carPastHeld) is tested body to body, without the
+        // margin: a car may nose past one beside its lane, never touch it (docs/traffic-tuning.md "Crossings: the wobble")
+        const held = TT.carPastHeld && this.heldBack(p);
+        peds[np++] = p.x; peds[np++] = p.y; peds[np++] = ahead && !held ? GUARD_MARGIN : 0;
       }
     }
     this.gNp = np;

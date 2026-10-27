@@ -2611,6 +2611,7 @@ export class Simulation {
       // once per crossing of this walk, and held where it stepped back to (on the kerb, the kerb's own rules decide)
       const r = this.retreated.get(c);
       if (r) { r.k = k; r.pts = pts; r.hold = s < 1; } else this.retreated.set(c, { k, pts, hold: s < 1 });
+      if (s < 1) this.traffic.holdBack(c); // the car may nose past it (carPastHeld)
       if (s < 1) c.wait = 0;
     }
     this.traffic.count('pedRetreat');

@@ -200,6 +200,11 @@ export const TRAFFIC_TUNING = {
    * back and forth until the car got away: docs/traffic-tuning.md "Crossings: the wobble").
    */
   pedRetreatOnce: 1,
+  /**
+   * With pedRetreatOnce, 1: a car's body guard tests a walker standing where it stepped back to body to body, without
+   * its margin, so a car may nose past one beside its lane (never touching it); 0: with the margin, as any walker.
+   */
+  carPastHeld: 0,
   /** With bodyGuard, ticks a pedestrian held by a car's body waits before walking on anyway (deadlock breaker; 0: never, the stuck rule frees them). */
   guardWaitMax: 0,
 
