@@ -205,11 +205,12 @@ export class PassengerInterior {
     if (!P.pt(x, top - 0.012, z)) return;
     const k = P.F / P.d, hx = P.sx, hy = P.sy;
     const coat = rgb(COATS[Math.floor(hash2(seed, 3) * COATS.length)], 0.85 + 0.3 * hash2(seed, 4));
-    const sh = 0.03 * k, body = (standing ? 0.12 : 0.045) * k;
+    // shoulders about 45 cm across (a tile is 13 m), a head about 22 cm tall
+    const sh = (0.016 + 0.003 * hash2(seed, 9)) * k, body = (standing ? 0.12 : 0.045) * k;
     c.fillStyle = coat;
     c.beginPath(); c.moveTo(hx - sh, hy + 0.034 * k + body); c.lineTo(hx - sh, hy + 0.03 * k); c.quadraticCurveTo(hx - sh, hy + 0.012 * k, hx, hy + 0.012 * k);
     c.quadraticCurveTo(hx + sh, hy + 0.012 * k, hx + sh, hy + 0.03 * k); c.lineTo(hx + sh, hy + 0.034 * k + body); c.closePath(); c.fill();
-    const r = 0.0105 * k;
+    const r = 0.0088 * k;
     c.fillStyle = rgb(SKIN[Math.floor(hash2(seed, 5) * SKIN.length)]);
     c.beginPath(); c.ellipse(hx, hy, r * 0.85, r, 0, 0, TAU); c.fill();
     c.fillStyle = rgb(HAIR[Math.floor(hash2(seed, 6) * HAIR.length)]);
