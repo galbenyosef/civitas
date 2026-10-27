@@ -52,7 +52,8 @@ The blur is two small passes, so a 10 px blur does not cost dozens of taps for e
 boxed down to a quarter of its size across (about 2.5 px at 720p by itself), then a disc of up to twelve taps softens that
 small picture; the blit mixes the sharp and soft pictures by strength and reads the soft one with a tap or two (the second
 image too). The small inset skips the second pass and takes the disc in the blit. The full window's target is drawn at 0.85 of
-the window's pixels sober-ish, 0.7 from strength 0.12 and 0.55 from 0.4, which makes the scene cheaper as well.
+the window's pixels while the swim is light, 0.7 from strength 0.12 and 0.55 from 0.4 (back down 0.04 under those), which makes
+the scene cheaper as well.
 
 Measured with timer queries on the in-game frame (a Mac with a busy GPU, window 1381x707 at pixel ratio 2, a citizen at
 swimDebug 1, frames alternated blur on and off in blocks so the drift cancels): the blur's own cost over the same frame with

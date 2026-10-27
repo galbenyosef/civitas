@@ -93,6 +93,7 @@ ok(seenAny > 5, `hours grow while someone stays (${seenAny} visits watched growi
 
 // a save and load: everyone resumes at home, and venueSince does not ride along
 const back = worldFromSnapshot(JSON.parse(JSON.stringify(snapshotOf(w))));
+if (!back) throw new Error('the snapshot did not load');
 let stale = 0, away = 0;
 for (const c of back.citizens.values()) { if (c.venueSince !== undefined) stale++; if (c.state === S.AtVenue) away++; }
 ok(stale === 0 && away === 0, `a loaded world has nobody at a venue and no venueSince (${back.citizens.size} citizens)`);
