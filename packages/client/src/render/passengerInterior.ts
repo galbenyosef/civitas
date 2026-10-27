@@ -47,6 +47,8 @@ class Proj {
   private ex = 0; private ey = 0; private ez = 0; private fx = 1; private fz = 0; private cd = 1; private sd = 0;
   /** the last point projected: screen x, y and depth */
   sx = 0; sy = 0; d = 0;
+  /** the screen box of the last path */
+  x0 = 0; y0 = 0; x1 = 0; y1 = 0;
   private vx = new Float64Array(24); private vy = new Float64Array(24); private vz = new Float64Array(24);
   set(s: Seat, w: number, h: number) {
     this.w = w; this.h = h; this.F = h / 2 / Math.tan((FOV * Math.PI) / 360);
@@ -72,9 +74,11 @@ class Proj {
     for (let i = 0; i < n; i++) this.view(p[i * 3], p[i * 3 + 1], p[i * 3 + 2], i);
     c.beginPath();
     let m = 0;
+    this.x0 = this.y0 = Infinity; this.x1 = this.y1 = -Infinity;
     const put = (x: number, y: number, z: number) => {
       const sx = this.w / 2 + (x / z) * this.F, sy = this.h / 2 - (y / z) * this.F;
       if (m++) c.lineTo(sx, sy); else c.moveTo(sx, sy);
+      this.x0 = Math.min(this.x0, sx); this.x1 = Math.max(this.x1, sx); this.y0 = Math.min(this.y0, sy); this.y1 = Math.max(this.y1, sy);
     };
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n, a = this.vz[i] >= NEAR, b = this.vz[j] >= NEAR;
@@ -137,11 +141,27 @@ export class PassengerInterior {
     const c = this.L.b;
     c.clearRect(0, 0, w, h);
     c.save();
+    const k = this.cutBox; k[0] = k[1] = Infinity; k[2] = k[3] = -Infinity;
     if (f.kind === 'plane') this.cabin(c, f, w, h);
     else if (f.kind === 'bus') this.bus(c, f);
     else if (f.kind === 'rail') this.carriage(c, f);
     else this.tube(c, f);
     c.restore();
+    // the world is seen only through the cut-outs: when they are a small part of the view, the eye renders that box alone
+    const x0 = clamp(Math.floor(k[0]) - 2, 0, w), y0 = clamp(Math.floor(k[1]) - 2, 0, h), x1 = clamp(Math.ceil(k[2]) + 2, 0, w), y1 = clamp(Math.ceil(k[3]) + 2, 0, h);
+    const r = this.region;
+    if (x1 - x0 < 4 || y1 - y0 < 4 || (x1 - x0) * (y1 - y0) > 0.6 * w * h) r.on = false;
+    else { r.on = true; r.x = x0; r.y = y0; r.w = x1 - x0; r.h = y1 - y0; }
+  }
+  /** the cut-outs' box this paint (viewport pixels) */
+  private cutBox = [0, 0, 0, 0];
+  /**
+   * Where the world shows through the windows, in viewport pixels from the top left, when that is well under the whole view:
+   * render/fpv.ts then narrows the eye's frustum and viewport to it, so what only the cabin's walls would hide is not drawn at all.
+   */
+  readonly region = { on: false, x: 0, y: 0, w: 0, h: 0 };
+  private takeCut(x0: number, y0: number, x1: number, y1: number) {
+    const k = this.cutBox; k[0] = Math.min(k[0], x0); k[1] = Math.min(k[1], y0); k[2] = Math.max(k[2], x1); k[3] = Math.max(k[3], y1);
   }
 
   /** fill a polygon of the vehicle frame */
@@ -153,6 +173,7 @@ export class PassengerInterior {
   /** punch a window through the layer, so the world drawn behind shows; a dark rubber seal round it */
   private cut(c: CanvasRenderingContext2D, p: number[], seal = 'rgba(20,22,26,0.95)') {
     if (!this.P.path(c, p)) return;
+    this.takeCut(this.P.x0, this.P.y0, this.P.x1, this.P.y1);
     c.save(); c.globalCompositeOperation = 'destination-out'; c.fillStyle = '#000'; c.fill(); c.restore();
     c.strokeStyle = seal; c.lineWidth = Math.max(2, this.P.h * 0.008); c.stroke();
   }
@@ -470,6 +491,7 @@ export class PassengerInterior {
     c.fillStyle = '#05070a'; roundRect(c, sx + sw * 0.18, sy + h * 0.1, sw * 0.62, h * 0.22, h * 0.015); c.fill();
     // the front layer's parts in viewport pixels (it is not mirrored, so its words read the right way round)
     const real = (r: { x: number; y: number; w: number; h: number }) => (s.side < 0 ? { x: w - r.x - r.w, y: r.y, w: r.w, h: r.h } : r);
+    for (const r of [real(win), real(nw)]) this.takeCut(r.x, r.y, r.x + r.w, r.y + r.h);
     this.screen = real({ x: sx + sw * 0.2, y: sy + h * 0.11, w: sw * 0.58, h: h * 0.2 });
     this.sign = real({ x: w * 0.19, y: py + h * 0.005, w: w * 0.17, h: h * 0.04 });
     this.win = real(win);

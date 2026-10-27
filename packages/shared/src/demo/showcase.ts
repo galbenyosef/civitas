@@ -897,7 +897,7 @@ const SURFACE_CAPTIONS: Record<SurfaceTool, Caption> = {
   runway: {
     title: 'Runway',
     what: 'Six rows of runway, shoulders and taxiway behind an airport terminal. A finished terminal with an intact strip is an airport: planes fly a timetable worked out from the tiles alone, and every landing pays the owner a fee by type (business jet $16, turboprop $24, regional jet $32, narrow-body $40; on runways of 16 tiles or more a wide-body $72, and from 20 tiles a jumbo $90).',
-    how: `Pick Runway (U) and drag a straight line of ${RUNWAY_MIN} to ${RUNWAY_MAX} tiles, ${TERMINAL_ROW} rows behind the terminal's back row, along its whole width (a line up to 3 rows off snaps on). 16 tiles or more gives a flight an hour. Bulldozing any strip tile grounds the airport until it is repainted.`,
+    how: `Pick Runway (U) and drag a straight line of ${RUNWAY_MIN} to ${RUNWAY_MAX} tiles, ${TERMINAL_ROW} rows behind the terminal's back row, along its whole width (a line up to 3 rows off snaps on). 16 tiles or more gives a flight an hour. Bulldozing any strip tile grounds the airport until it is repainted. Click a plane for its crew and passengers: I or O rides in the cockpit, or click a passenger in the manifest for the cabin from their seat (the window, the wing outside over the wing rows, the seat-belt sign, the route on the screen ahead).`,
     facts: [['Tool', 'Runway (U), drag'], ['Footprint', '6 rows wide, 10-32 long'], ['Needs', 'a terminal in front, own dry land, no roads'], ['Technology', techLine('runway')], ['Cost', `${money(RUNWAY_COST)} a strip tile (${money(RUNWAY_COST * 6)} per tile of length)`]],
   },
   rail: {
@@ -1183,17 +1183,17 @@ const SPOT_CAPTIONS: Record<SpotKind, Caption> = {
 const LINE_CAPTIONS: Record<TransitMode | 'freight', Omit<Caption, 'title'>> = {
   bus: {
     what: 'A bus line: the owner\'s stops in calling order, run there and back (or as a loop) by buses from a depot, one bus per driver on shift, 05:30 to 00:30. Riders whose car is at home weigh it against walking and driving, wait at the stop and pay $2 a ride to the owner.',
-    how: 'Open the lines chip in the top bar, make a line, click your stops in order, pick loop or there and back and the buses wanted. Each stop needs a plain stretch of road beside it, not a junction; the depot\'s drivers must be able to reach the route.',
+    how: 'Open the lines chip in the top bar, make a line, click your stops in order, pick loop or there and back and the buses wanted. Each stop needs a plain stretch of road beside it, not a junction; the depot\'s drivers must be able to reach the route. Click a bus for its passengers, pick one (or follow someone who boards) and press I or O to ride along as a passenger, from a seat a few rows back.',
     facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('lines')], ['Fare', '$2 a ride, children free, retirees half']],
   },
   rail: {
     what: 'A passenger rail line between stations. Trains run a timetable that is a pure function of the line and its route, 05:00 to 01:00, 40 riders a carriage; a there-and-back line runs one train, a loop as many as fit.',
-    how: 'Lay track behind each platform and join it up, then open the lines panel and pick the stations in calling order. Consecutive stations must be joined by track a train can run without reversing.',
+    how: 'Lay track behind each platform and join it up, then open the lines panel and pick the stations in calling order. Consecutive stations must be joined by track a train can run without reversing. Click a train for its riders; pick one and press I or O to ride as a passenger in a carriage, at a window seat (or I or O on the train for the driver\'s cab).',
     facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('railstation')], ['Fare', '$2 a ride']],
   },
   metro: {
     what: `An underground line. Each station is a kiosk or a hall on the surface with a platform straight below it; the tunnel between them is bored when the line is saved, under roads, blocks and rivers alike. Trains of tube cars (${METRO.carRiders} riders a car, as many cars as the shortest platform has tiles) run rail's timetable, 05:00 to 01:00, out in one bore and back in the other, so a there-and-back line runs many trains, and they are never in traffic. Riders change to a bus or a train at any stop within a ${TRANSIT.transferWalk}-tile walk of the entrance. Press N for the underground view.`,
-    how: `Pick Underground station in the Transport group (Z and C turn the platform), put the entrances on your land beside a road, then open the lines panel and click them in calling order. The preview shows the new tunnel and its cost (${money(METRO.tunnelCost)} a tile, ${money(METRO.wetTunnelCost)} under water, ${money(METRO.crossoverCost)} more to cross another line); tunnel that already exists is free. Lines never share tunnel or a platform: they cross at right angles.`,
+    how: `Pick Underground station in the Transport group (Z and C turn the platform), put the entrances on your land beside a road, then open the lines panel and click them in calling order. The preview shows the new tunnel and its cost (${money(METRO.tunnelCost)} a tile, ${money(METRO.wetTunnelCost)} under water, ${money(METRO.crossoverCost)} more to cross another line); tunnel that already exists is free. Lines never share tunnel or a platform: they cross at right angles. To ride the tube as a passenger, click a train in the underground view (N), pick a rider and press I or O: a seat looking across the car as the bore wall and the platforms slide by the window opposite.`,
     facts: [['Tool', 'lines panel (top bar)'], ['Technology', techLine('metrostation')], ['Fare', '$2 a ride, children free, retirees half']],
   },
   ferry: {

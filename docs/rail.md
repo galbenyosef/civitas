@@ -221,6 +221,15 @@ Train vehicle ids for the registry are `2^30 + lineId × 16 + train`. Fares go t
 
 The registry's stop section sits beside it.
 
+### Riding as a passenger
+
+A citizen picked from a train's roster (or followed onto a train) is ridden with in the first person (docs/transit.md "Riding
+along"): a window seat in a carriage that carries riders (picked by hash, never the locomotive), facing the way the train
+runs and turned 35 degrees to the window, with the eye inside the carriage's middle window so the body hides nothing
+(`TrainsView.carOf` gives the carriage as drawn this frame). Through that window the world slides by; the far windows are
+glass, the seat back ahead or a table bay is in the line's moquette with people from the load, and the next-stop display and
+the door lamp are at the end of the carriage. A train that turns round at a terminus turns the seat with it (a blink).
+
 ## Selecting a train
 
 Clicking a locomotive, carriage or wagon selects the train (hovering brightens it) and opens its panel in the citizen panel's place, with the same **FPV**, **full**, **follow** and close buttons (`client/src/vehicles.ts`).

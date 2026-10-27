@@ -342,7 +342,21 @@ export class Fpv {
     if (this.seatAb) { this.seatAb = null; this.hooks.riding?.(null); }
     this.hand.shown = 'street'; this.hand.key = ''; this.hand.lost = 0;
     this.pax?.hide();
+    this.viewOffset(null);
   }
+  /**
+   * A passenger's eye renders only the box of the view its windows show (PassengerInterior.region): the camera's frustum is
+   * narrowed to it (a view offset), so culling and the building tiers skip what the cabin's walls hide, and render() keeps the
+   * viewport and scissor to it. Null: the whole view again.
+   */
+  private viewOffset(r: { on: boolean; x: number; y: number; w: number; h: number } | null) {
+    const o = this.vo, c = this.camera, vw = this.viewW(), vh = this.viewH();
+    if (!r?.on) { if (o.on) { o.on = false; c.clearViewOffset(); } return; }
+    if (o.on && o.x === r.x && o.y === r.y && o.w === r.w && o.h === r.h && o.vw === vw && o.vh === vh) return;
+    o.on = true; o.x = r.x; o.y = r.y; o.w = r.w; o.h = r.h; o.vw = vw; o.vh = vh; o.fresh = true;
+    c.setViewOffset(vw, vh, r.x, r.y, r.w, r.h);
+  }
+  private vo = { on: false, x: 0, y: 0, w: 0, h: 0, vw: 0, vh: 0, fresh: false };
 
   private setMode(mode: FpvMode) {
     if (mode === this.mode) return;
@@ -397,7 +411,7 @@ export class Fpv {
         this.car.hide();
         if (cab.interior) this.train.update(cab.interior, now, dt, this.viewW(), this.viewH(), this.level); else this.train.hide();
         if (cab.helm) this.helm.update(cab.helm, now, dt, this.viewW(), this.viewH(), this.level); else this.helm.hide();
-        if (cab.passenger) this.paxOf().update(cab.passenger, now, dt, this.viewW(), this.viewH(), this.level); else if (this.pax) this.pax.hide();
+        if (cab.passenger) { this.paxOf().update(cab.passenger, now, dt, this.viewW(), this.viewH(), this.level); this.viewOffset(this.pax!.region); } else if (this.pax) { this.pax.hide(); this.viewOffset(null); }
       }
       return;
     }
@@ -473,7 +487,7 @@ export class Fpv {
       this.ready = false;
       const next = o.draw === 'seat' && ab ? ab : null;
       if (aboardKey(next ?? undefined) !== aboardKey(this.seatAb ?? undefined)) { this.seatAb = next; this.hooks.riding?.(next); }
-      if (o.draw === 'street') { this.pax?.hide(); this.everTravelled = false; this.idleSince = 0; return false; }
+      if (o.draw === 'street') { this.pax?.hide(); this.viewOffset(null); this.everTravelled = false; this.idleSince = 0; return false; }
       return true; // dark this frame; the seat is posed from the next
     }
     if (o.draw === 'street') return false;
@@ -485,7 +499,7 @@ export class Fpv {
       this.ride(shown, now, dt);
       this.tunnelFeed(shown, now);
       this.cabHud(now, shown);
-      if (shown.passenger) { this.paxOf().update(shown.passenger, now, dt, this.viewW(), this.viewH(), this.level); this.paxDoors = shown.passenger.doors; }
+      if (shown.passenger) { this.paxOf().update(shown.passenger, now, dt, this.viewW(), this.viewH(), this.level); this.paxDoors = shown.passenger.doors; this.viewOffset(this.pax!.region); }
     }
     return true;
   }
@@ -709,7 +723,13 @@ export class Fpv {
       if (Math.abs(this.camera.aspect - a) > 1e-4) { this.camera.aspect = a; this.camera.updateProjectionMatrix(); }
       this.fade.style.opacity = String(1 - this.level);
       if (this.room) { this.room.setAspect(a); this.room.render(renderer); }
-      else this.street(renderer, scene, hide);
+      else if (this.vo.on) {
+        // the passenger's windows only (the cabin hides the rest)
+        const o = this.vo, gy = this.winH - o.y - o.h;
+        renderer.setViewport(o.x, gy, o.w, o.h); renderer.setScissor(o.x, gy, o.w, o.h); renderer.setScissorTest(true);
+        this.street(renderer, scene, hide);
+        renderer.setScissorTest(false); renderer.setViewport(0, 0, this.winW, this.winH);
+      } else this.street(renderer, scene, hide);
       this.rendered++;
       this.lastCost = performance.now() - t0;
       return;
@@ -726,6 +746,7 @@ export class Fpv {
       this.rt = new WebGLRenderTarget(Math.round(w * pr), Math.round(h * pr), { type: HalfFloatType, samples: 4, minFilter: LinearFilter, magFilter: LinearFilter });
       this.sizeTag = tag;
       this.parity = 0;
+      this.vo.fresh = true;
     }
     if (this.camera.aspect !== w / h) { this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
     const mat = this.blit.material as ShaderMaterial;
@@ -744,7 +765,15 @@ export class Fpv {
       const bg = scene.background, alpha = renderer.getClearAlpha();
       if (bg instanceof Color) (mat.uniforms.sky.value as Color).copy(this.inTunnel ? this.clr.setHex(TUNNEL_BG) : bg);
       scene.background = null; renderer.setClearAlpha(0);
-      renderer.setRenderTarget(this.rt);
+      const rt = this.rt;
+      if (this.vo.on) {
+        // a passenger's windows only: clear the whole target when the box changes, then draw inside the box
+        const o = this.vo, sx = rt.width / w, sy = rt.height / h;
+        if (o.fresh) { rt.scissorTest = false; rt.viewport.set(0, 0, rt.width, rt.height); renderer.setRenderTarget(rt); renderer.clear(); o.fresh = false; }
+        rt.viewport.set(Math.floor(o.x * sx), Math.floor((h - o.y - o.h) * sy), Math.ceil(o.w * sx), Math.ceil(o.h * sy));
+        rt.scissor.copy(rt.viewport); rt.scissorTest = true;
+      } else if (rt.scissorTest) { rt.scissorTest = false; rt.viewport.set(0, 0, rt.width, rt.height); }
+      renderer.setRenderTarget(rt);
       this.street(renderer, scene, hide);
       renderer.setRenderTarget(null);
       scene.background = bg; renderer.setClearAlpha(alpha);
