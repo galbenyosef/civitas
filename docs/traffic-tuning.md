@@ -1067,3 +1067,86 @@ The last row is the price: the old motorway never carried what was offered (cars
 The motorways were already jammed on main (62% of their cars standing): the queues are the street junctions where the M4 and the A13 end, and the share waiting for a gap at a slip's mouth fell. The avenue count moves with the chaos of a whole city (a different run of the same save differs by about as much).
 
 **Client.** The picker prints 250% speed. The cab's dial reads to 200 km/h (a motorway car is 130 to 165). The ride's engine keeps its old mapping up to 3.6 tiles a second (every street ride sounds as it did): above that a car's or lorry's ride speed goes past 1, to 1.6, so a motorway reads as faster than the top of a street (`KNEE` in `audio/fpv.ts`; the synthesis follows to 1.6). `render/glide.ts` draws a car between ticks on a cubic from one tick's position to the next. `loadtest/motorway.ts` draws exit and entry trips through it and measures the distance from the lane's own centre line: 0.062 tiles on the entry; on the two exits 0.145 and 0.126 at the worst frame, which sits where the car changes lane ten tiles before the slip, not at its bend (a lane change is a tile-long ease across 0.38 tiles that a 1.4-tile step cuts); 0.066 at most for the same trips at the old pace.
+
+## Crossings: the wobble (UTD card b1c45047, 2026-10-27)
+
+Rich: "pedestrians can get into a bit of a wobble when crossing the road sometimes, they go back and forth etc several
+times before continuing." The probe is `loadtest/wobble.ts`. It follows every walker over every crossing it walks (an
+*episode*, from the first step off the kerb to past the far kerb) and counts *reversals*: the walker's progress along
+the crossing changing sign between two ticks it moved. One clean step back and on again is two reversals, so the
+wobble Rich saw is **three or more**. It also counts retreats, ticks lost on the crossing, the worst crossings and a
+tick-by-tick trace, and prints the figures an A/B compares (`--load FILE --set k=v --seed N --trace N --json FILE`).
+
+**The loop.** A walker on a crossing whose next step would enter a car body waits there (`guardPed`). After
+`pedRetreatAfter` (10) ticks it steps back toward the kerb (`retreatToKerb`, one step), which lets the car it was holding
+up move. The car's guard reads both last tick's and this tick's walker positions. The next tick, the walker's forward
+step was clear, so it stepped forward again. Its own `wait` was never reset, so the first block afterwards sent it back
+at once. Back, forward, back: the car never saw two clear ticks in a row and the walker never got past it. Traced in
+London (walker #25967 at the signal at -91,-38): held at 0.46 of the crossing for 10 ticks while the car's wait climbed
+from 3 to 15, back to 0.26, forward to 0.46 the next tick, back again, over 4 reversals. In a scene where the car
+could not move at all the walker alternated every tick: 62 reversals in `crossing:check`'s bench. Three in four first
+retreats had a car **waiting**. The worst crossings were mid-block door-to-kerb crossings, then give-way, mini
+roundabout and signal arms. Pelicans had none.
+
+**The rule** (`TRAFFIC_TUNING.pedRetreatOnce: 1`; 0 is the old rule, kept for A/B). A walker still steps back once
+after `pedRetreatAfter` ticks. It then **stays where it stepped back to until the crossing ahead is clear of car
+bodies**, goes on, and does not step back again on that crossing (it waits where it stands for any later body). The
+memory is a `WeakMap` in `Simulation` keyed by the walk (`pts`), so nothing is saved and snapshot version stays 8.
+The client keeps a walker facing forward when it steps back against its facing by less than half a tile
+(`render/citizens.ts`, `BACKSTEP`). A step back is drawn as a step back, not as a turn on the spot. Corners and real
+U-turns turn as before.
+
+**Before and after** (one game day from the same save, three seeds each, means; London filled and saved by the probe,
+the UAT city a copy of a player's save):
+
+| | London old | London new | UAT old | UAT new |
+| --- | --- | --- | --- | --- |
+| crossing episodes | 64,591 | 64,647 | 3,575 | 3,543 |
+| reversals 0 / 1 / 2 / 3+ (seed 0) | 61,744 / 9 / 470 / 2,225 | 62,383 / 47 / 2,742 / 0 | 3,297 / 0 / 68 / 201 | 3,313 / 4 / 251 / 0 |
+| episodes with 3+ reversals | 3.49% | 0 | 5.29% | 0 |
+| walkers stepping back 2+ times on one crossing | 3.65% | 0 | 5.68% | 0 |
+| episodes with 2+ reversals (one clean step back counts) | 4.24% | 4.24% | 7.14% | 7.11% |
+| retreats a day | 31,940 | 2,783 | 2,053 | 254 |
+| ticks lost per episode | 1.51 | 1.69 | 1.78 | 2.30 |
+| trips completed | 54,443 | 54,405 | 3,649 | 3,556 |
+| mean trip, ticks | 114.6 | 116.0 | 159.2 | 158.9 |
+| vehicle speed, queued | 22.8%, 70.0% | 22.8%, 70.0% | 22.7%, 72.7% | 22.1%, 73.5% |
+| give-ups: home + removed + garage | 6,103 + 7,373 + 2,105 = 15,581 | 6,150 + 7,399 + 2,043 = 15,592 | 547 + 349 + 1,174 = 2,071 | 578 + 389 + 1,213 = 2,180 |
+| `carNosed`, `pedForced`, `guardCar` | 73,167, 64,325, 246,734 | 75,364, 61,705, 250,995 | 8,409, 6,414, 20,605 | 9,335, 6,268, 20,661 |
+
+Seed to seed (half the range of three): London trips ±96, give-ups home ±88, removed ±50; UAT trips ±44, removed
+±4, home ±49.
+
+**The Commons A/B** (`ab-matrix.ts`, 1,500 ticks, seeds 1 to 12, paired by seed, ± one standard error):
+
+| | 08:00 old | 08:00 new | 17:00 old | 17:00 new |
+| --- | --- | --- | --- | --- |
+| give-ups | 430 | 464 (+34 ± 18) | 252 | 249 (−4 ± 11) |
+| speed % | 26.0 | 25.2 (−0.7 ± 0.5) | 29.7 | 30.0 (+0.3 ± 0.6) |
+| driver commute, ticks | 103.3 | 112.2 (+8.9 ± 6.6) | 85.3 | 73.3 (−12.1 ± 12.4) |
+| car–ped overlaps a tick, as drawn | 0.061 | 0.046 (−0.015 ± 0.009) | 0.027 | 0.016 (−0.010 ± 0.005) |
+| `pedForced` | 4,033 | 3,268 (−765 ± 152) | 2,800 | 1,919 (−881 ± 173) |
+| retreats | 1,019 | 108 | 565 | 59 |
+
+**Shapes tried** (each was a value of a temporary knob; the code is in the branch history). Each was measured with the
+probe on London and the UAT copy (three seeds each) and on the Commons (twelve seeds):
+
+- *Go on at once after the one step back* (the smallest rule). No wobble, and the fewest ticks lost (London 1.40).
+  But on the Commons the walker went straight back beside the car it had backed away from: true car–walker overlaps
+  went up two-thirds (0.022 to 0.035 a tick at 08:00), and 17:00 give-ups rose by 11 ± 10.
+- *Hold for at most 10 ticks, then go on.* London ticks lost 1.43 and give-ups home flat, but vehicles removed
+  +2.5% (7,559 against 7,373 ± 50), and on the Commons 17:00 give-ups +7 ± 7.
+- *Hold until clear and step back again every 10 ticks* (as far as the kerb). 3+ reversals fell only to 1.30% in
+  London, with 2.58 ticks lost an episode.
+- *Walk on back to the kerb*, and the same with a hold on the kerb. Ticks lost 3 or more an episode on the UAT copy, and
+  trips fell.
+
+**The cost.** The old rule's back-and-forth also worked as a crude deadlock breaker: a walker jumped back out of the
+way of every car body it met. Every shape that ends the wobble gives that up. On the Commons at 08:00 all of them
+cost about 8% more give-ups (about two standard errors) and under a point of speed. At 17:00 the shipped rule is flat
+or better. In London total give-ups are flat. The mean London trip is 1.2% longer, and a walker loses 0.18 ticks more
+per crossing it walks. On the UAT copy (a small, jammed city: 73% of cars queued) give-ups are about 5% up.
+`crossing:check` (`npm run crossing:check`) builds the scene: one street, one car held with its body over a
+door-to-kerb crossing, one walker, 54 timings. It checks that the old rule still wobbles there, and that under the
+shipped rule a walker reverses at most twice, gets over within 30 ticks of the car going (6 at most) and never stands
+inside the car's body.
