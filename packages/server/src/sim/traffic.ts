@@ -570,9 +570,11 @@ export class Traffic {
   /** walkers standing where they stepped back to on a crossing (sim/simulation.ts retreatToKerb), and where: carPastHeld */
   private held = new WeakMap<Mover, number[]>();
   /** a walker has stepped back on a crossing to (x, y) and stands there until the way over is clear */
-  holdBack(m: Mover) { const h = this.held.get(m); if (h) { h[0] = m.x; h[1] = m.y; } else this.held.set(m, [m.x, m.y]); }
+  holdBack(m: Mover) { const h = this.held.get(m); if (h) { h[0] = m.x; h[1] = m.y; h[2] = -1; } else this.held.set(m, [m.x, m.y, -1]); }
   /** is m standing where it stepped back to? (once it moves on it is a walker like any other) */
   private heldBack(m: Mover): boolean { const h = this.held.get(m); return !!h && h[0] === m.x && h[1] === m.y; }
+  /** a walker standing back on a crossing stopped a car's guard this tick or the last (pedClearWay: it steps further back) */
+  inCarsWay(m: Mover): boolean { const h = this.held.get(m); return !!h && h[0] === m.x && h[1] === m.y && h[2] >= this.w.tick - 1; }
   endTick() {
     const tick = this.w.tick;
     for (let j = 0; j < this.presKeys.length; j++) {
@@ -1271,7 +1273,8 @@ export class Traffic {
         if (!ahead && !TT.pedBehind) continue;
         // a walker standing back on a crossing for a car (pedRetreatOnce, carPastHeld) is tested body to body, without the
         // margin: a car may nose past one beside its lane, never touch it (docs/traffic-tuning.md "Crossings: the wobble")
-        const held = TT.carPastHeld && this.heldBack(p);
+        const back = (TT.carPastHeld || TT.pedClearWay) && this.heldBack(p), held = TT.carPastHeld && back;
+        this.gPedM[np / 3] = back ? p : null; // who, when a walker standing back stops this car (pedClearWay)
         peds[np++] = p.x; peds[np++] = p.y; peds[np++] = ahead && !held ? GUARD_MARGIN : 0;
       }
     }
@@ -1321,6 +1324,7 @@ export class Traffic {
         for (let i = 0; i < np && !hit; i += 3) {
           const ex = peds[i] - c[0], ey = peds[i + 1] - c[1], pad = peds[i + 2] - GUARD_MARGIN;
           hit = Math.abs(ex * ux + ey * uy) < halfL + pad && Math.abs(-ex * uy + ey * ux) < halfW + pad;
+          if (hit && TT.pedClearWay && !this.predicting) { const pm = this.gPedM[i / 3]; if (pm) this.held.get(pm)![2] = this.w.tick; }
         }
         if (!hit && nc) {
           const me = this.gMe;
@@ -1333,6 +1337,8 @@ export class Traffic {
     return allowed;
   }
   private gPeds: number[] = [];
+  /** guardSweep's scratch: the walker behind each of gPeds when it is one standing back on a crossing (else null) */
+  private gPedM: (Mover | null)[] = [];
   /** scratch for TileLists.near */
   private nearL: Mover[][] = [];
   /** guardSweep's scratch: how many numbers of gPeds and bodies of gCars are this sweep's, m's body now and at a sweep point, path points */

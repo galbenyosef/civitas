@@ -2553,6 +2553,8 @@ export class Simulation {
         // second step back on this crossing (docs/traffic-tuning.md "Crossings: the wobble")
         if (this.crossingClear(c, crossing)) this.retreated.get(c)!.hold = false;
         else {
+          // in the way of a car (its guard stopped for this walker): a step further back, toward the kerb (pedClearWay)
+          if (TT.pedClearWay && this.traffic.inCarsWay(c) && this.retreatToKerb(c, crossing, xd)) return true;
           if (c.x !== pts[(c.pp - 1) * 2] || c.y !== pts[(c.pp - 1) * 2 + 1]) this.traffic.noteCrossing(crossing, crossMask(xd)); // still on the carriageway
           this.traffic.count('guardPed'); c.wait++; return true;
         }
